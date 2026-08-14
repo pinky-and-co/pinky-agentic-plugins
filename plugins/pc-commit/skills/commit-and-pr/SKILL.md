@@ -6,7 +6,7 @@ disable-model-invocation: true
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git remote:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(gh pr view:*), Bash(gh pr create:*), Bash(glab mr view:*), Bash(glab mr create:*), AskUserQuestion, Read, Agent
+allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git remote:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(gh pr view:*), Bash(gh pr create:*), Bash(glab mr view:*), Bash(glab mr create:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/resolve_policy.py:*), AskUserQuestion, Read, Agent
 ---
 
 # Commit + push + PR/MR
@@ -55,9 +55,8 @@ diff after — a real failure stops you here, propose nothing further for this r
    Bulk mode only (a child forked for a repo other than `${CLAUDE_PROJECT_DIR}`): this DCI value is
    stale (resolved once, for the parent's own directory, before any fork existed) — re-resolve with
    a real tool call instead: `Bash("${CLAUDE_PLUGIN_ROOT}/hooks/resolve_policy.py" branch_workflow --repo <your repo>)`.
-2. If currently on a permanent branch per that strategy, create a feature branch first
-   (`git checkout -b feature/<name>`) before committing (do this before Step 3, not after, if you
-   haven't committed yet — check branch state before you commit, not after).
+2. Apply `branch-workflow`'s Guard section, using the strategy resolved above — it decides whether
+   a feature branch is needed before you commit (do this before Step 3, not after).
 3. Push: `git push -u origin <branch>`.
 4. Check for an existing open PR/MR on this branch first — `gh pr view --json state,url` or
    `glab mr view --json` per the provider from Step 2. One already open → report its URL, stop, never

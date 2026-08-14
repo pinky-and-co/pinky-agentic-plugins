@@ -29,6 +29,26 @@ branch names or from CLAUDE.md prose.
 | **Release Branching** | `main` (+ `release/*` cut per version) | `main` or `develop` depending on variant | same as base | Fixed directly on the active `release/*` branch, then back-merged | `main` (or `develop` if paired with Git Flow) |
 | **Trunk-Based Development** | `main`/`trunk` only | `main` | `main`, very short-lived (hours, not days) | Directly on `main`, small enough not to need a separate path | `main` |
 
+## Guard — is a feature branch required before committing
+
+Any skill about to `git add`/`git commit` applies this before staging anything. This is the one
+enforcement point that actually has teeth: GitHub branch protection ("require PR before merge") is
+a paid feature on a private org repo, so server-side rejection of a direct push cannot be assumed —
+this guard is what stands in for it.
+
+1. `git branch --show-current` — the current branch.
+2. Is it one of the strategy's **permanent branches** (the table above, resolved strategy from
+   `.claude/policies.json` as in "Choosing a base branch" below)? If not — already on a topic
+   branch, nothing to do, proceed to commit.
+3. On a permanent branch — check every changed file (`git status --porcelain`) against the
+   non-guarded exemption: documentation (`*.md`, anything under `docs/`), CI/config files
+   (`.github/workflows/**`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, lockfiles),
+   and files a distribution mechanism owns outright (never hand-authored by this repo). **Every**
+   changed file must match — one code file mixed in loses the exemption for the whole change.
+4. All exempt → commit directly, no branch needed.
+5. Not all exempt → create and switch to a feature branch first (naming conventions above), THEN
+   commit — never commit on the permanent branch and branch off afterward.
+
 ## Choosing a base branch for a PR — decision order
 
 1. Use the strategy name the caller already resolved from `.claude/policies.json`

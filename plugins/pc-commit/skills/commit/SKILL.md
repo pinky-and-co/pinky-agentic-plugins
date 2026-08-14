@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), AskUserQuestion, Read, Agent
+allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), AskUserQuestion, Read, Agent
 ---
 
 # Commit — gitmoji convention
@@ -56,4 +56,6 @@ fi
   <changed files>` BEFORE staging (a reformat changes file contents; staging first would commit the
   pre-reformat version). Re-check `git diff HEAD` after — a hook FAILURE (not a reformat) stops you,
   report it, commit nothing.
-6. `git add <files> && git commit -m "<message>"`. Report `<emoji> <subject>` (+ file list).
+6. Apply the `branch-workflow` skill's Guard section before staging anything — it decides whether
+  a feature branch is needed first. Follow what it says, then `git add <files> && git commit -m
+  "<message>"`. Report `<emoji> <subject>` (+ file list) and the branch you committed on.
