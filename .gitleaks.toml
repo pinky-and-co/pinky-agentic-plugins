@@ -1,0 +1,14 @@
+# Distributed as-is to every onboarded repo's root (see setup/precommit.py distribute()).
+# gitleaks auto-discovers .gitleaks.toml in the scan root — no pre-commit-side wiring needed.
+[extend]
+useDefault = true
+
+[allowlist]
+# .secrets.baseline stores detect-secrets' accepted findings as SHA1 hashes (hashed_secret),
+# never the raw secret — that's the whole point of a baseline. A high-entropy hash next to a
+# "secret"-shaped key still trips gitleaks' generic-api-key heuristic the moment a repo's baseline
+# records its first real finding (empty result sets don't trigger it, which is why this went
+# unnoticed until pinky-studio).
+paths = [
+  '''\.secrets\.baseline''',
+]

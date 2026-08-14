@@ -1,0 +1,20 @@
+{
+  "name": "pinky-agentic-plugins",
+  "version": "0.1.0",
+  "description": "Public, generic Claude Code plugins — namespace pc (pinky & co).",
+  "owner": {
+    "name": "Pinky & Co"
+  },
+  "plugins": [
+    {
+      "name": "pc-commit",
+      "source": "./plugins/pc-commit",
+      "description": "Generic workspace mechanics: gitmoji commit, branch strategy, per-repo policy injection."
+    },
+    {
+      "name": "pc-snow",
+      "source": "./plugins/pc-snow",
+      "description": "Snowflake anti-training-bias knowledge (distilled, provenance tracked) — public."
+    }
+  ]
+}
