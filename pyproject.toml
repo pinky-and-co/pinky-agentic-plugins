@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pinky-agentic-plugins"
+# No install-time value: nobody `pip install`s a Claude Code plugin (`claude plugin install` does,
+# from marketplace.json — see pinky-workspace's own decision NOT to publish to PyPI, ADR-0065
+# decision 5, same reasoning). This pyproject.toml exists purely so setup.py's distribute() can
+# derive a Python version pin and generate a real ci.yml (mirrors pinky-workspace's own pyproject.toml
+# — same reason it isn't a src/ layout: scripts/hooks/ and plugins/*/hooks/ are read by path at
+# runtime, not imported as a package, same as pinky-workspace's core/ and providers/).
+version = "0.1.0"
+requires-python = ">=3.12"
+authors = [{ name = "Pinky & Co" }]
+
+[dependency-groups]
+# Just pytest: the pre-commit hooks (ruff/mypy/bandit/interrogate/darglint) are provisioned
+# hermetically by prek itself (language: python), not by this group — same split as
+# pinky-workspace's own dev group.
+dev = ["pytest"]
+
+# No package to build (see the `[project]` comment) — bypass-selection tells hatchling not to
+# error looking for one, so `pip install -e . --group dev` still succeeds (it only needs to land
+# pytest in the environment for the Tests step of ci.yml).
+[tool.hatch.build.targets.wheel]
+bypass-selection = true

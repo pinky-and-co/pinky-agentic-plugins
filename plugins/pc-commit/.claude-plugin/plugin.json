@@ -1,0 +1,9 @@
+{
+  "name": "pc-core",
+  "version": "0.1.0",
+  "description": "Generic workspace mechanics: gitmoji commit, branch strategy, per-repo policy injection.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"]
+}

@@ -1,0 +1,135 @@
+#!/bin/bash
+# =============================================================================
+# PRE-COMMIT HOOK — run-tests (2026-07-25 · JS 2026-07-31)
+# =============================================================================
+# Distributed from pinky-workspace/core/hooks/ — do not edit in place. Declared in
+# core/pre-commit/base.yaml (universal, `files: ^(src|tests)/`), NOT in the `python` extra.
+#
+# An earlier version of this header claimed the opposite ("extra `python` only … NOT in base.yaml —
+# that one … would declare a pytest hook on studio/assets/infra/workspace, four repos with no test
+# suite at all"). Both halves were false and the second one bit: **10 of the 13 repos carry a
+# tests/ dir**, studio included — so the `[ -d tests ]` guard below never fired for it,
+# and every studio commit touching src/ or tests/ was blocked (2026-07-25). Keep this header in
+# sync with base.yaml: a stale comment here is what justified the wrong placement in the first
+# place (see core/rules/base/verify-diagnosis.md — a written cause is a hypothesis).
+#
+# Why this hook exists separately from generate-docs: until now the ONLY execution of the test suite
+# at commit time was the one buried inside generate-docs to produce the coverage badge's data, and
+# its failure printed a warning on stderr then returned 0 — a commit touching src/ with a broken
+# suite passed pre-commit, the warning lost among ~20 other hooks' output. Separation of concerns:
+# generate-docs does docs (non-blocking, cosmetic output), run-tests guards quality (blocking).
+#
+# The two runs stay INDEPENDENT rather than sharing coverage data through a file. Measured
+# 2026-07-25: each suite takes 0-3s, so the double run costs ~3s at worst — far cheaper than the
+# risk of an inter-hook artifact going silently stale. That exact coupling (trusting a pre-existing
+# .coverage) is what froze pinky-connect's badge for six weeks; see the generate-docs header.
+#
+# ── JS suites (2026-07-31) ───────────────────────────────────────────────────
+# Ce hook ne savait faire que du pytest. Un repo dont les tests sont en JavaScript le voyait
+# afficher « Passed » sans avoir rien exécuté — un portier qui annonce vert sur du non-vérifié est
+# pire qu'un portier absent, exactement le raisonnement qui a fait remonter ce hook de l'extra
+# `python` vers la base le 2026-07-25. Découvert en cadrant les tests de PILOT (chantier 1001) :
+# ses calculs de marge sont en JS, donc sa future suite aurait été invisible du portier.
+#
+# Conséquence sur la structure : les suites sont DÉTECTÉES d'abord, les runners résolus ensuite.
+# L'ancienne version résolvait l'interpréteur Python en tout premier et sortait en 0 s'il manquait —
+# un repo purement JS sur une machine sans python3 n'aurait jamais atteint sa propre suite.
+# =============================================================================
+
+status=0
+
+# ── Suite Python ─────────────────────────────────────────────────────────────
+# Pas de dossier tests/ → rien à garder. Cible « template light » du chantier 0001 : un repo cloné
+# sans tests ne doit pas voir ses commits bloqués par un hook qui n'a rien à exécuter.
+if [ -d tests ]; then
+    # Interpréteur — résolu explicitement, jamais un `python` nu. Même échelle que generate-docs :
+    # le venv du projet d'abord (la suite a besoin des dépendances du repo, qu'un python3 système
+    # n'a pas), puis les recours système.
+    if [ -x .venv/bin/python ]; then PY=".venv/bin/python"                    # POSIX
+    elif [ -x .venv/Scripts/python.exe ]; then PY=".venv/Scripts/python.exe"  # Windows
+    elif command -v python3 > /dev/null 2>&1; then PY="python3"
+    elif command -v py > /dev/null 2>&1; then PY="py -3"
+    else PY=""
+    fi
+
+    if [ -z "$PY" ]; then
+        echo "⚠ run-tests: aucun interpréteur Python (.venv / python3 / py) — suite Python non exécutée" >&2
+    # pytest indisponible → on ne bloque pas. Ce garde devient indispensable depuis que le hook est
+    # déclaré dans base.yaml (2026-07-25) et non plus dans le seul extra `python` : un repo qui a un
+    # dossier tests/ mais pas les extras dev verrait `$PY -m pytest` sortir non-zéro (« No module
+    # named pytest ») et se retrouverait avec TOUS ses commits bloqués. Même posture permissive que
+    # le fallback genbadge de generate-docs — un outil de dev absent est une machine mal équipée,
+    # pas un test qui échoue.
+    elif ! $PY -c "import pytest" > /dev/null 2>&1; then
+        echo "⚠ run-tests: pytest non installé — suite Python non exécutée" >&2
+    else
+        # --no-cov appartient au plugin pytest-cov. Le passer là où le plugin est absent fait sortir
+        # pytest en ERREUR D'USAGE (drapeau inconnu), que ce hook lisait comme « la suite échoue » —
+        # donc TOUS les commits bloqués sur une machine équipée de pytest mais pas de pytest-cov.
+        # Défaut présent depuis l'introduction du drapeau (2026-07-25), révélé le 2026-07-31 par la
+        # CI du moteur, qui n'installe que `pytest pyyaml`.
+        #
+        # L'instrumentation coverage est le travail de generate-docs, pas le nôtre : ici on veut le
+        # verdict pass/fail le plus rapide possible. On désactive donc le plugin quand il est là, et
+        # on ne dit rien quand il ne l'est pas.
+        COV_FLAG=""
+        if $PY -c "import pytest_cov" > /dev/null 2>&1; then
+            COV_FLAG="--no-cov"
+        fi
+        # Pas de `-p no:cacheprovider` : les repos configurent déjà `cache_dir = ".cache/pytest"` en
+        # pyproject, donc rien ne salit l'arbre — et désactiver le plugin rend ce réglage inconnu,
+        # ce qui fait cracher un PytestConfigWarning à chaque commit (mesuré pinky-tools 2026-07-25).
+        $PY -m pytest -q $COV_FLAG
+        rc=$?
+        # 5 = « aucun test collecté ». Ce n'est pas un échec, c'est la même catégorie que « pytest
+        # non installé » : rien à exécuter. Le cas se produit dès qu'un repo a un dossier tests/ qui
+        # ne contient que des tests d'un AUTRE langage — exactement PILOT et son
+        # tests/engine.test.js (constaté 2026-07-31, ce hook bloquait alors 22 tests JS au vert).
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
+            status=1
+        fi
+    fi
+fi
+
+# ── Suite JavaScript ─────────────────────────────────────────────────────────
+# Deux signaux, dans cet ordre : un script `test` déclaré dans package.json l'emporte (le repo a dit
+# lui-même comment se tester — vitest, jest, autre), sinon la simple présence de fichiers *.test.js
+# suffit et on utilise le runner natif `node --test`. Le second cas ne demande NI package.json NI
+# npm install : c'est le rung « fonctionnalité native de la plateforme » de minimal-code.
+#
+# Ordre voulu : pinky-studio a un package.json SANS script `test`, il retombe donc sur la détection
+# par fichiers, n'en a pas, et reste un no-op. Aucun repo existant n'est perturbé.
+js_files=$(find . \( -name node_modules -o -name .git -o -name .venv \) -prune \
+    -o -type f \( -name '*.test.js' -o -name '*.test.mjs' -o -name '*.test.cjs' \) -print 2>/dev/null | head -1)
+
+# Le script `test` de package.json se lit avec node lui-même — pas de jq (absent des machines
+# vanilla), pas de grep sur du JSON (un `"test"` en valeur ou en commentaire ferait un faux positif).
+has_pkg_test=0
+if [ -f package.json ] && command -v node > /dev/null 2>&1; then
+    if node -e 'const s=(require("./package.json").scripts)||{};process.exit(s.test?0:1)' 2>/dev/null; then
+        has_pkg_test=1
+    fi
+fi
+
+if [ "$has_pkg_test" = 1 ] || [ -n "$js_files" ]; then
+    if ! command -v node > /dev/null 2>&1; then
+        echo "⚠ run-tests: node absent — suite JavaScript non exécutée" >&2
+    elif [ "$has_pkg_test" = 1 ]; then
+        if ! command -v npm > /dev/null 2>&1; then
+            echo "⚠ run-tests: package.json déclare un script test mais npm est absent — suite JavaScript non exécutée" >&2
+        elif ! npm test --silent; then
+            status=1
+        fi
+    # `node --test` sans argument découvre **/*.test.js et exclut node_modules de lui-même.
+    elif ! node --test; then
+        status=1
+    fi
+fi
+
+if [ "$status" -ne 0 ]; then
+    echo "" >&2
+    echo "✖ run-tests: la suite de tests échoue — commit bloqué." >&2
+    echo "  Corrige les tests, ou --no-verify si le WIP est délibéré." >&2
+fi
+
+exit "$status"

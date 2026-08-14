@@ -1,0 +1,9 @@
+{
+  "name": "pc-snow",
+  "version": "0.1.0",
+  "description": "Snowflake anti-training-bias knowledge — public.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"]
+}

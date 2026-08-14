@@ -1,0 +1,95 @@
+name: Hooks
+
+# Le filet côté serveur de TOUS les repos, sans exception (2026-08-09). Il ne visait que les non-libs
+# jusque-là — les libs faisaient tourner les hooks en première étape de leur ci.yml — mais ce partage
+# était fait par FICHIER et pas par SUJET, et il a coûté cher : le second job de ce workflow,
+# `pr-required-on-main`, est le seul garde-fou côté serveur contre un push direct sur `main`, et il
+# ne partait donc pas chez les libs. Mesuré le 2026-08-09 : 9 repos sans aucun garde, moteur compris,
+# aucune protection de branche GitHub nulle part (payante sur du privé, sur les deux orgs).
+#
+# Donc : ce fichier porte l'hygiène et la convention de branche, partout. `ci.yml` porte la
+# construction et les tests, là où il y a un paquet — et il ne lance plus les hooks. Un job, une
+# source. Sans lui, la seule protection serait le pre-commit LOCAL, qui saute dès qu'un `--no-verify`
+# passe ou qu'une machine n'a pas les hooks installés (constat 2026-07-25 : 5 repos dans ce cas, dont
+# le corpus privé qui n'avait aucune gouvernance du tout).
+#
+# Source unique : `.pre-commit-config.yaml`, lui-même distribué par setup.py et taillé par repo via
+# resolve_extras. Donc rien à choisir ici — pas de liste d'outils à maintenir en double, et le scan
+# de secrets (gitleaks + detect-secrets) suit automatiquement la config du repo.
+#
+# Ce workflow ALERTE, il ne bloque pas le push (contrairement à la push protection GitHub, qui est
+# un add-on payant sur le plan Team). Sur des repos privés à un seul committer, l'écart entre
+# « refusé » et « signalé en 30 s » est assumé — voir la card filet-secrets-cote-serveur-gaps-ci.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  hooks:
+    runs-on: ubuntu-latest
+    # Le GITHUB_TOKEN ne sert qu'au checkout. Explicite parce que le défaut `read` est un réglage
+    # d'org, invisible du fichier et modifiable sans toucher à ce repo.
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        # Version en dur, contrairement au ci.yml des libs qui la dérive de `requires-python` :
+        # ces repos n'ont pas de pyproject (c'est précisément le critère qui les envoie ici), il n'y
+        # a donc rien à dériver. 3.12 = le plancher du workspace (ADR-0028).
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run pre-commit hooks
+        uses: j178/prek-action@v2
+
+  # ── Filet « PR obligatoire sur main », version gratuite ────────────────────────────────────────
+  # La protection de branche de GitHub est réservée aux plans payants SUR LES REPOS PRIVÉS. Une org
+  # en plan Free n'a donc AUCUN garde-fou côté serveur : rien n'empêche un push direct sur `main`,
+  # et la convention de branche ne repose plus que sur les hooks locaux — qui sautent avec un
+  # `--no-verify` ou sur une machine où le socle n'est pas installé.
+  #
+  # Ce job ne bloque pas le push (il s'exécute après), il le rend ROUGE et visible. Même arbitrage
+  # que le job ci-dessus : à deux committers, l'écart entre « refusé » et « signalé en 30 s » est
+  # assumé. Il devient superflu — sans être nuisible — le jour où le repo passe sur un plan payant
+  # avec protection de branche : le garder évite d'avoir à se souvenir de le remettre en cas de
+  # rétrogradation.
+  #
+  # `main` UNIQUEMENT, jamais `develop` : la convention de branche autorise explicitement le commit
+  # direct sur `develop` pour les chemins non gardés (docs, ADR, config, CI). Étendre ce job à
+  # `develop` produirait du rouge sur un usage permis — et un contrôle qui crie au loup sur le
+  # chemin nominal est un contrôle qu'on apprend à ignorer.
+  pr-required-on-main:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      # Le test ne peut pas être « est-ce un commit de merge ? » : un squash-merge n'en produit pas.
+      # On demande donc à l'API si ce SHA est rattaché à une PR — le seul signal qui distingue de
+      # façon fiable une fusion d'un push direct, quelle que soit la stratégie de merge.
+      - name: Vérifier que le commit est passé par une pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          count=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq 'length')
+          if [ "$count" -eq 0 ]; then
+            echo "::error title=Push direct sur main::Ce commit n'est rattaché à aucune pull request."
+            echo ""
+            echo "  Convention (AGENT_BRANCH.md) : main ne reçoit que des merges de pull request."
+            echo "  Corriger : ouvrir une PR depuis une branche, et la fusionner."
+            echo ""
+            echo "  Ce job n'a pas empêché le push — la protection de branche GitHub est payante"
+            echo "  sur un repo privé. Il le signale."
+            exit 1
+          fi
+          echo "OK — commit rattaché à $count pull request(s)."

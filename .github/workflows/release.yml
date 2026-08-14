@@ -1,0 +1,46 @@
+name: Release
+
+# No existing template to adapt — every pinky-* lib's release.yml/publish.yml targets PyPI
+# (AGENT_BRANCH.md § Release workflow), and this repo has no package to publish there. The
+# publication target here is the plugin marketplace itself: for a `directory`-source marketplace
+# entry there is no registry to push to, `claude plugin install`/`update` read straight from the
+# repo — so "releasing" is tagging the version that plugin.json/marketplace.json already declare,
+# so a future `github`-source marketplace entry (or anyone pinning a version) has something to
+# point at. The version bump is the gate, same principle as the PyPI workflow's `.dev` guard: it
+# happens in the PR, this workflow only tags what's already been decided.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/*/.claude-plugin/plugin.json"
+      - ".claude-plugin/marketplace.json"
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read marketplace version and tag if new
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('.claude-plugin/marketplace.json')).get('version', ''))")
+          if [ -z "$version" ]; then
+            echo "No top-level 'version' key in marketplace.json yet — nothing to tag."
+            exit 0
+          fi
+          tag="v${version}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists — version wasn't bumped, nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release $tag"
+          git push origin "$tag"
