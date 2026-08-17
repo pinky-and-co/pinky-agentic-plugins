@@ -23,10 +23,13 @@ git -C "${CLAUDE_PROJECT_DIR}" rev-parse --is-inside-work-tree
 Standalone → `${CLAUDE_PROJECT_DIR}` is the target. Workspace layout → discover dirty repos via
 `rg --files -uu --max-depth 6 -g '**/.git/HEAD' "${CLAUDE_PROJECT_DIR}"` (grandparent dir of each
 hit, `git status --porcelain` to confirm dirty). No argument → ask (AskUserQuestion, options = dirty
-list). One repo named → single-repo. Several / `--all` → fork one child per dirty repo (`Agent`,
-`context: fork`, same skill); each child runs the rest of this skill for its own repo independently
-and reports one line when done — `<repo>: <emoji> <subject> — <PR/MR URL>`. No batch table to build
-first: nothing here needs a shared confirmation to wait for.
+list). One repo named → single-repo. Several / `--all` → spawn one child per dirty repo via the
+`Agent` tool (`subagent_type: "general-purpose"`, `model: "haiku"` — this skill already runs inside
+a fork, and a fork cannot spawn another fork). Prompt each child with: the repo's absolute path, the
+resolved absolute path of `${CLAUDE_PLUGIN_ROOT}` (a plain subagent doesn't inherit it — pass the
+literal value, not the variable), and "execute Steps 2 through 4 of this file for that repo". Each
+child runs independently and reports one line when done — `<repo>: <emoji> <subject> — <PR/MR
+URL>`. No batch table to build first: nothing here needs a shared confirmation to wait for.
 
 ## Step 2 — Provider detection (a fact, never a guess)
 
