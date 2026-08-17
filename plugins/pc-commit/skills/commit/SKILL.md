@@ -37,10 +37,12 @@ fi
 
   - No argument → ask which repo (AskUserQuestion, options = the dirty list). Zero dirty → say so, stop.
   - Argument names one repo → single-repo.
-  - Argument names several, or `--all` → bulk: fork one child per dirty repo (`Agent`, `context:
-    fork`, same skill). Each child runs this skill for its own repo and reports one line —
-    `<repo>: <emoji> <subject>` (or the real error, never swallowed). No batch table, no shared
-    confirmation to wait for — each child commits as soon as it's done analysing.
+  - Argument names several, or `--all` → bulk: spawn one child per dirty repo via the `Agent` tool
+    (`subagent_type: "general-purpose"`, `model: "haiku"` — this skill already runs inside a fork,
+    and a fork cannot spawn another fork). Prompt each child with the repo's absolute path and
+    "execute Step 2 of this file for that repo". Each child runs independently and reports one
+    line — `<repo>: <emoji> <subject>` (or the real error, never swallowed). No batch table, no
+    shared confirmation to wait for — each child commits as soon as it's done analysing.
 
 ## Step 2 — Commit
 
