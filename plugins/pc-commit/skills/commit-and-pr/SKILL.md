@@ -30,7 +30,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}"
 ```
 
 One repo named as argument → add `--repo <name>`. `--all` or no argument → the whole root.
-Output `NOTHING-TO-COMMIT` → say so and stop.
+Output `NOTHING-TO-COMMIT` → say so and stop. Output `NO-REPOS-FOUND` → **do not report
+success**: the root holds no git repo at all, so it is stale (a moved workspace is the usual
+cause). Say the root is wrong and stop; "nothing to commit" and "I looked in the wrong place"
+are not the same answer.
 
 The plan groups repos by **diff fingerprint**, and that grouping is the point: the common case for
 `--all` is one identical distribution landing on many repos, so N repos share one diff and need one

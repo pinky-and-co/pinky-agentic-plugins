@@ -52,5 +52,15 @@ dry="$("$SCRIPT" apply --root "$T" --messages "$T/m.tsv" --dry-run 2>&1)"
 check "dry-run ne committe rien"  "$(git -C "$T/bravo" log --oneline | wc -l | tr -d ' ')"     1
 check "groupe sans message → ⏭️"  "$(printf '%s' "$dry" | grep -c 'aucun message')"            1
 
+# Une racine sans aucun dépôt n'est pas un workspace propre : c'est une racine fausse.
+# Les confondre annonce "rien à faire" après avoir regardé au mauvais endroit — vu en vrai
+# juste après un déplacement de workspace, avec 11 repos sales laissés au sol.
+empty="$(mktemp -d)"
+out="$("$SCRIPT" plan --root "$empty" 2>&1)"; rc=$?
+rmdir "$empty"
+check "racine vide → NO-REPOS-FOUND" "$(printf '%s' "$out" | grep -c 'NO-REPOS-FOUND')" 1
+check "racine vide → exit non nul"   "$([ "$rc" -ne 0 ] && echo yes || echo no)"          yes
+check "jamais NOTHING-TO-COMMIT"     "$(printf '%s' "$out" | grep -c 'NOTHING-TO-COMMIT')" 0
+
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"

@@ -93,6 +93,7 @@ do_plan() {
     local root="$1" filter="$2"
     local -a repos=() fps=()
     local repo name fp
+    local scanned=0
 
     while IFS= read -r repo; do
         [ -n "$repo" ] || continue
@@ -100,6 +101,7 @@ do_plan() {
         case ",$EXCLUDED_DEFAULT," in *",$name,"*) continue ;; esac
         [ -z "$filter" ] || [ "$name" = "$filter" ] || continue
 
+        scanned=$((scanned + 1))
         resolve_noise "$repo" || true
         git -C "$repo" add -A 2>/dev/null || true
         git -C "$repo" diff --staged --quiet && continue
@@ -108,7 +110,14 @@ do_plan() {
         fps+=("$(fingerprint "$repo")")
     done < <(discover_repos "$root")
 
-    [ ${#repos[@]} -gt 0 ] || { echo "NOTHING-TO-COMMIT"; return 0; }
+    if [ "$scanned" -eq 0 ]; then
+        printf 'NO-REPOS-FOUND sous : %s\n' "$root"
+        printf 'Aucun dépôt git sous cette racine — elle est probablement périmée\n'
+        printf '(workspace déplacé ?). Vérifier --root avant de conclure quoi que ce soit.\n'
+        return 1
+    fi
+    [ ${#repos[@]} -gt 0 ] \
+        || { printf 'NOTHING-TO-COMMIT (%d repo(s) scanné(s), tous propres)\n' "$scanned"; return 0; }
 
     # Groupes = empreintes distinctes, dans l'ordre de première apparition.
     local -a seen=()
