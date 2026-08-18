@@ -1,11 +1,11 @@
 ---
 name: commit
-description: Commit the current changes using the gitmoji convention. Also invoked as a per-repo child during --all/bulk mode.
+description: Commit the current changes using the gitmoji convention. Bulk mode (--all) commits every dirty repo in one deterministic pass.
 argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), AskUserQuestion, Read, Agent
+allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh:*), AskUserQuestion, Read, Write
 ---
 
 # Commit — gitmoji convention
@@ -37,12 +37,23 @@ fi
 
   - No argument → ask which repo (AskUserQuestion, options = the dirty list). Zero dirty → say so, stop.
   - Argument names one repo → single-repo.
-  - Argument names several, or `--all` → bulk: spawn one child per dirty repo via the `Agent` tool
-    (`subagent_type: "general-purpose"`, `model: "haiku"` — this skill already runs inside a fork,
-    and a fork cannot spawn another fork). Prompt each child with the repo's absolute path and
-    "execute Step 2 of this file for that repo". Each child runs independently and reports one
-    line — `<repo>: <emoji> <subject>` (or the real error, never swallowed). No batch table, no
-    shared confirmation to wait for — each child commits as soon as it's done analysing.
+  - Argument names several, or `--all` → bulk: **do not spawn an agent per repo.** Hand the whole
+    lot to the script, which does every deterministic part in one sub-second pass:
+
+    ```
+    ${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
+    ${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh apply  --root "${CLAUDE_PROJECT_DIR}" \
+        --messages <file> --no-pr
+    ```
+
+    The plan groups repos by **diff fingerprint** — the common case for `--all` is one identical
+    distribution across many repos, so N repos share one diff and need one message. Write one
+    tab-separated `<fingerprint><TAB><message>` line per group (Step 2's convention still applies to
+    the wording), then apply. `--no-pr` because this skill stops at the commit; `commit-and-pr`
+    is the one that opens the PR/MR.
+
+    Pass the script's per-repo outcome through verbatim, keeping ✅ / ⚠️ / ⏭️ / ❌ distinct — ⚠️ means
+    committed but not pushed, and flattening it into ❌ would claim a loss that did not happen.
 
 ## Step 2 — Commit
 

@@ -1,12 +1,12 @@
 ---
 name: commit-and-pr
-description: Commit, push, and open a PR (GitHub) or MR (GitLab) — full flow, auto end-to-end. Also invoked as a per-repo child during --all/bulk mode.
+description: Commit, push, and open a PR (GitHub) or MR (GitLab) — full flow, auto end-to-end. Bulk mode (--all) handles every dirty repo in one deterministic pass.
 argument-hint: "<repository-to-commit> or --all"
 disable-model-invocation: true
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git remote:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(gh pr view:*), Bash(gh pr create:*), Bash(glab mr view:*), Bash(glab mr create:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/resolve_policy.py:*), AskUserQuestion, Read, Agent
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Write, AskUserQuestion
 ---
 
 # Commit + push + PR/MR
@@ -14,57 +14,68 @@ allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:
 Being invoked is the confirmation for the whole chain, commit through PR/MR — do not pause partway.
 The PR/MR itself is where review happens once it exists; there is nothing to gate before that.
 
-## Step 1 — Identify the target(s), same as `commit`
+## What you actually do here
+
+`scripts/bulk_commit.sh` owns everything deterministic: discovering dirty repos, resolving OS noise
+files into `.gitignore`, staging, grouping repos by diff fingerprint, resolving the branch policy,
+applying the branch guard, committing, pushing, opening the PR/MR, and reporting per-stage outcomes.
+
+You do the one thing it cannot: **write the commit messages**. Nothing else. In particular, do not
+spawn a subagent per repo — the script handles every repo in one pass, in under a second.
+
+## Step 1 — Plan
 
 ```
-git -C "${CLAUDE_PROJECT_DIR}" rev-parse --is-inside-work-tree
+${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}"
 ```
 
-Standalone → `${CLAUDE_PROJECT_DIR}` is the target. Workspace layout → discover dirty repos via
-`rg --files -uu --max-depth 6 -g '**/.git/HEAD' "${CLAUDE_PROJECT_DIR}"` (grandparent dir of each
-hit, `git status --porcelain` to confirm dirty). No argument → ask (AskUserQuestion, options = dirty
-list). One repo named → single-repo. Several / `--all` → spawn one child per dirty repo via the
-`Agent` tool (`subagent_type: "general-purpose"`, `model: "haiku"` — this skill already runs inside
-a fork, and a fork cannot spawn another fork). Prompt each child with: the repo's absolute path, the
-resolved absolute path of `${CLAUDE_PLUGIN_ROOT}` (a plain subagent doesn't inherit it — pass the
-literal value, not the variable), and "execute Steps 2 through 4 of this file for that repo". Each
-child runs independently and reports one line when done — `<repo>: <emoji> <subject> — <PR/MR
-URL>`. No batch table to build first: nothing here needs a shared confirmation to wait for.
+One repo named as argument → add `--repo <name>`. `--all` or no argument → the whole root.
+Output `NOTHING-TO-COMMIT` → say so and stop. Output `NO-REPOS-FOUND` → **do not report
+success**: the root holds no git repo at all, so it is stale (a moved workspace is the usual
+cause). Say the root is wrong and stop; "nothing to commit" and "I looked in the wrong place"
+are not the same answer.
 
-## Step 2 — Provider detection (a fact, never a guess)
+The plan groups repos by **diff fingerprint**, and that grouping is the point: the common case for
+`--all` is one identical distribution landing on many repos, so N repos share one diff and need one
+message. Twenty repos usually come back as two or three groups.
+
+Each group carries its fingerprint, the file list, the shared diff, and per repo the resolved branch
+strategy plus whether the guard requires a feature branch. A group whose fingerprint is
+`noise-gitignore` is already handled — it gets a fixed message, do not write one for it.
+
+## Step 2 — One message per GROUP, not per repo
+
+**Read** `references/commit-convention.md` — it is the source of truth for the emoji/type table;
+training-data gitmoji knowledge is not. Judge grouping and wording from the diff the group shows.
+
+Write one tab-separated line per group to a scratch file:
 
 ```
-git -C <repo> remote get-url origin
+<fingerprint><TAB><emoji> <type>: <subject>
 ```
 
-URL contains `gitlab` (`gitlab.com` or self-hosted) → GitLab, use `glab mr ...`. Otherwise →
-GitHub, use `gh pr ...`. This is read off the remote, never inferred from anything else.
+A message describes the change, so a shared diff legitimately yields one shared message — that is
+correct, not a shortcut.
 
-## Step 3 — Commit
+## Step 3 — Apply
 
-Same as `commit`: collect context (`status`/`diff HEAD`/`log --oneline -5`/`branch --show-current`),
-resolve noise files into `.gitignore` silently, **Read** `references/commit-convention.md` (source
-of truth for the emoji/type table — training data's generic gitmoji knowledge is not), trust your
-own judgment on grouping/wording, run `prek`/`pre-commit` before staging if present (re-check the
-diff after — a real failure stops you here, propose nothing further for this repo), then
-`git add && git commit`.
+```
+${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file>
+```
 
-## Step 4 — Branch + PR/MR
+Add `--dry-run` first if the plan looked surprising — it prints what each repo would get, touching
+nothing.
 
-1. Branch strategy for `${CLAUDE_PROJECT_DIR}`, resolved before you read this line — not a prose
-   instruction to follow, a value already looked up: `` !`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/resolve_policy.py" branch_workflow --repo "${CLAUDE_PROJECT_DIR}"` ``.
-   Empty output → no `.claude/policies.json` declared for this repo; don't guess — fall back to
-   `git merge-base` against likely candidates and flag the missing declaration in your report.
-   Bulk mode only (a child forked for a repo other than `${CLAUDE_PROJECT_DIR}`): this DCI value is
-   stale (resolved once, for the parent's own directory, before any fork existed) — re-resolve with
-   a real tool call instead: `Bash("${CLAUDE_PLUGIN_ROOT}/hooks/resolve_policy.py" branch_workflow --repo <your repo>)`.
-2. Apply `branch-workflow`'s Guard section, using the strategy resolved above — it decides whether
-   a feature branch is needed before you commit (do this before Step 3, not after).
-3. Push: `git push -u origin <branch>`.
-4. Check for an existing open PR/MR on this branch first — `gh pr view --json state,url` or
-   `glab mr view --json` per the provider from Step 2. One already open → report its URL, stop, never
-   open a second one.
-5. None exists → open one, base branch = the strategy resolved in Step 4.1, never hardcoded
-   `develop`/`main`. `gh pr create --base <base> --title "<title>" --body "<Summary + Test plan>"` or
-   `glab mr create --target-branch <base> --title "<title>" --description "..."`.
-6. Report the PR/MR URL.
+## Step 4 — Report what the script reported
+
+Pass its outcome through verbatim, per repo. The four states are distinct and must stay distinct:
+
+| State | Meaning |
+|---|---|
+| ✅ | committed, pushed, PR/MR handled |
+| ⚠️ | committed, push failed — the commit is there, nothing is lost |
+| ⏭️ | no message matched this group's fingerprint |
+| ❌ | branch or commit failed — changes remain staged, nothing is lost |
+
+Never flatten ⚠️ into ❌, and never report ✅ for a repo the script did not mark ✅. A bulk run that
+claims success while leaving work on the floor is worse than one that fails loudly.
