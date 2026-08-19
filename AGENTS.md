@@ -30,9 +30,10 @@ lives in `.claude/policies.json`, this is orientation only.
 - A profile-resolved value (chat language, default branch) is never hardcoded into a public
   skill. Each consuming repo declares its own values in its own `.claude/policies.json`.
 - **Package by feature, not by artefact type — within the harness's own root directories.**
-  `hooks/` and `skills/` are the two plugin-root directories the harness itself recognises
-  (`hooks/hooks.json`, `skills/<name>/SKILL.md`); every hook/script finds its place inside one of
-  those two, never a sibling top-level folder like a generic `scripts/`.
+  `hooks/`, `skills/`, and `mcp/` are the plugin-root directories the harness itself recognises
+  (`hooks/hooks.json`, `skills/<name>/SKILL.md`, `.mcp.json` declaring an `mcp/` server); every
+  hook/script finds its place inside one of those, never a sibling top-level folder like a generic
+  `scripts/`.
   - A script used by exactly one skill lives in that skill's own `scripts/` subfolder — the
     harness's own convention, exposed to the skill body as `${CLAUDE_SKILL_DIR}/scripts/<file>`
     (e.g. `skills/permission-change/scripts/guard.py`). The coupling is then visible from `ls`,
@@ -44,5 +45,24 @@ lives in `.claude/policies.json`, this is orientation only.
     skill caller (`inject_policies.py`, `read_cost.py`) — plus `policy_lib.py`, the one library
     both `hooks/` directly and `hooks/branch-policy/` import, kept neutral because it belongs to
     neither concern alone.
+  - **Agents never bundle their own script.** Verified against the 8 `agents/`-carrying plugins of
+    the official marketplace: every `agents/*.md` there is a flat, self-contained prompt file, zero
+    exceptions — no plugin ships a script an agent shells out to. An agent needing deterministic
+    work behind it is a signal to route that work through `mcp/` instead (below), not to invent an
+    `agents/scripts/` folder with no precedent anywhere in the ecosystem.
+  - **`mcp/` holds one MCP server's implementation** (`mcp/server.py` + whatever sibling modules it
+    imports, e.g. `pc-core`'s `model_offline.py`/`model_adversarial.py`), declared via a `.mcp.json`
+    at the plugin root (`{"<server-name>": {"command": "uv", "args": ["run", "--script",
+    "${CLAUDE_PLUGIN_ROOT}/mcp/server.py"]}}`). This is the right layer whenever a tool needs to be
+    natively callable (by the main session or any subagent, no spawn) rather than wrapped in an
+    agent that shells out and relays — see `deux-hooks-branche-et-cout-de-lecture`'s sibling
+    decision, `agents-provider-routing-offline-adversarial` (2026-08-19): an agent that does no
+    reasoning of its own, only shelling + relaying, pays for a full subagent spawn for nothing.
+    `uv run --script` with PEP 723 inline `dependencies` resolves the server's own third-party
+    packages (`mcp` itself included) with zero pip-install step for the plugin installer — this
+    repo otherwise ships no runtime dependency mechanism at all (`pyproject.toml`: nobody
+    `pip install`s a Claude Code plugin), so a hard `import mcp` without that resolution path would
+    break for every installer. `uv` is therefore a real prerequisite for any plugin that ships an
+    `mcp/` server, on top of Python.
   - Decided 2026-08-19 (`deux-hooks-branche-et-cout-de-lecture`): an invisible skill→script
     coupling is debt, and directory structure — not prose — is what a reader checks first.
