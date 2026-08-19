@@ -18,10 +18,16 @@ NOISE_FILES=".DS_Store Thumbs.db desktop.ini"
 
 # Chemins non gardés par la politique de branche (branch.md) : un commit qui ne touche
 # QUE ces chemins va directement sur la branche d'intégration, sans feature branch.
+#
+# `uv.lock` accepté ici sciemment (2026-08-19, décision user) : un diff de relock mécanique
+# (déclenché par `uv sync` pour réparer un `.venv` cassé) et un diff qui reflète un vrai
+# ajout/upgrade de dépendance ont la même signature — cette entrée ne distingue pas les deux,
+# donc un changement de dépendance réel passe aussi sans feature branch. Accepté explicitement :
+# la friction d'une PR pour chaque `uv sync` de routine pesait plus que ce risque.
 UNGUARDED_GLOBS=(
     'docs/*' '*.md' '.github/*' 'core/rules/*' '.claude/*'
     'pyproject.toml' '.pre-commit-config.yaml' 'profile.yaml' '.darglint'
-    '.gitignore' '.editorconfig' 'scripts/hooks/*' '.gitleaks.toml'
+    '.gitignore' '.editorconfig' 'scripts/hooks/*' '.gitleaks.toml' 'uv.lock'
 )
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
