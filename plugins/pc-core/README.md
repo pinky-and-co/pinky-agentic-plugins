@@ -1,7 +1,8 @@
-# pc-commit
+# pc-core
 
-Gitmoji-convention git workflow for Claude Code — commit, commit + push + PR/MR, and branch
-cleanup, each auto-executing once invoked.
+Generic workspace mechanics for Claude Code: gitmoji-convention git workflow (commit, commit +
+push + PR/MR, branch cleanup), and permission guards (`careful`, `freeze`, `deny`, `guard`),
+toggled through one `permission-change` skill.
 
 ## Overview
 
@@ -80,6 +81,30 @@ Reference knowledge, not directly invocable (`user-invocable: false`) — the na
 comparison table for the 6 branching strategies (Feature Branching, Git Flow, GitHub Flow, GitLab
 Flow, Release Branching, Trunk-Based Development). `commit-and-pr` consults it to resolve a PR
 base branch; a repo's own `CLAUDE.md` `Branching:` line is always authoritative over this table.
+
+### `permission-change` — careful / freeze / deny / guard
+
+One skill, one positional mode word — not four near-identical skills to remember. Enforced by
+the shared `hooks/guard.py` PreToolUse hook, all four modes share one state file.
+
+- **`careful`** — while on, a destructive `Bash` command (`rm -rf`, `git push --force`,
+  `git reset --hard`, `DROP`, `TRUNCATE`, `DELETE FROM` without `WHERE`, `sudo`, …) returns
+  `permissionDecision: ask` instead of running silently. A speed bump, not a block.
+- **`freeze <dir>...`** — a whitelist: locks `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to
+  the given directories; anything outside is denied.
+- **`deny <dir>...`** — the inverse of `freeze`: a blocklist. The given directories become
+  unwritable; everything else stays open. Not the same as the `permissions.deny` settings key
+  (harder guarantee, session-start only) — see the skill's own note.
+- **`guard <dir>...`** — convenience: `careful` on + `freeze` to the given directories in
+  one call.
+
+**Honest limit, all four**: only the write-class TOOLS are covered. A Bash write (`sed -i`, `tee`,
+`>`, `mv`/`cp`) is NOT intercepted — for a hard guarantee, use `permissions.deny` instead.
+
+**Usage:** `/permission-change careful [on|off]`,
+`/permission-change freeze <dir>... | off`,
+`/permission-change deny <dir>... | off`,
+`/permission-change guard <dir>... | on | off`
 
 ## Best Practices
 

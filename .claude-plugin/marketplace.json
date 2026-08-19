@@ -7,9 +7,9 @@
   },
   "plugins": [
     {
-      "name": "pc-commit",
-      "source": "./plugins/pc-commit",
-      "description": "Generic workspace mechanics: gitmoji commit, branch strategy, per-repo policy injection."
+      "name": "pc-core",
+      "source": "./plugins/pc-core",
+      "description": "Generic workspace mechanics: gitmoji commit, branch strategy, per-repo policy injection, permission guards (careful/freeze/deny)."
     },
     {
       "name": "pc-snow",
