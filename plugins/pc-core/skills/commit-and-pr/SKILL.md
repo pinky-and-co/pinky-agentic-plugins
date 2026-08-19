@@ -6,7 +6,7 @@ disable-model-invocation: true
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Write, AskUserQuestion
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Write, AskUserQuestion
 ---
 
 # Commit + push + PR/MR
@@ -16,7 +16,7 @@ The PR/MR itself is where review happens once it exists; there is nothing to gat
 
 ## What you actually do here
 
-`scripts/bulk_commit.sh` owns everything deterministic: discovering dirty repos, resolving OS noise
+`hooks/branch-policy/bulk_commit.sh` owns everything deterministic: discovering dirty repos, resolving OS noise
 files into `.gitignore`, staging, grouping repos by diff fingerprint, resolving the branch policy,
 applying the branch guard, committing, pushing, opening the PR/MR, and reporting per-stage outcomes.
 
@@ -26,7 +26,7 @@ spawn a subagent per repo — the script handles every repo in one pass, in unde
 ## Step 1 — Plan
 
 ```
-${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}"
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}"
 ```
 
 One repo named as argument → add `--repo <name>`. `--all` or no argument → the whole root.
@@ -60,7 +60,7 @@ correct, not a shortcut.
 ## Step 3 — Apply
 
 ```
-${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file>
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file>
 ```
 
 Add `--dry-run` first if the plan looked surprising — it prints what each repo would get, touching

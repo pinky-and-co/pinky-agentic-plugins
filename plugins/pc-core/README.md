@@ -85,7 +85,7 @@ base branch; a repo's own `CLAUDE.md` `Branching:` line is always authoritative 
 ### `permission-change` — careful / freeze / deny / guard
 
 One skill, one positional mode word — not four near-identical skills to remember. Enforced by
-the shared `hooks/guard.py` PreToolUse hook, all four modes share one state file.
+the shared `skills/permission-change/scripts/guard.py` PreToolUse hook, all four modes share one state file.
 
 - **`careful`** — while on, a destructive `Bash` command (`rm -rf`, `git push --force`,
   `git reset --hard`, `DROP`, `TRUNCATE`, `DELETE FROM` without `WHERE`, `sudo`, …) returns

@@ -8,7 +8,7 @@
 
 set -uo pipefail
 
-SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)/bulk_commit.sh"
+SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bulk_commit.sh"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
