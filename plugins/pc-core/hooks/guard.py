@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""PreToolUse guard — /careful + /freeze + /guard + /deny.
+"""PreToolUse guard — /permission-change --mode=careful|freeze|guard|deny.
 
 A slash command in Claude Code is only a prompt: it cannot enforce anything on its own. So the
-guard rails are split in two — a tiny **state file** the skills toggle, and this **single script**
-that reads it. The script is dual-mode:
+guard rails are split in two — a tiny **state file** the `permission-change` skill toggles, and
+this **single script** that reads it. The script is dual-mode:
 
 - **Hook mode** (no argv, PreToolUse JSON on stdin): enforces the active state.
   - **Generated-tree guard, ALWAYS ON** → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` targeting a
@@ -32,9 +32,10 @@ that reads it. The script is dual-mode:
   - Anything else → no output, exit 0 → normal permission flow (we never emit ``allow``, which would
     short-circuit other hooks).
 
-- **Ctl mode** (argv): the skills call ``guard.py --mode=careful|freeze|guard|deny [args]`` or
-  ``guard.py status`` to mutate the state file deterministically (no LLM guesswork about JSON
-  shape) — one uniform flag instead of four near-identical positional parsers.
+- **Ctl mode** (argv): the `permission-change` skill calls
+  ``guard.py --mode=careful|freeze|guard|deny [args]`` or ``guard.py status`` to mutate the state
+  file deterministically (no LLM guesswork about JSON shape) — one uniform flag, one skill,
+  instead of four near-identical positional parsers behind four near-identical skills.
 
 State lives at ``$CLAUDE_PROJECT_DIR/.claude/.guard-state.json`` (override: ``PC_GUARD_STATE``).
 It persists across turns until explicitly lifted; every deny/ask reason says how to lift it.
@@ -323,8 +324,8 @@ def decide(event: dict, root: Path) -> dict | None:
         if label:
             return _decision(
                 "ask",
-                f"/careful: '{label}' is a destructive command — confirm before it runs. "
-                f"Lift the guard with `/careful off`.",
+                f"careful: '{label}' is a destructive command — confirm before it runs. "
+                f"Lift the guard with `/permission-change --mode=careful off`.",
             )
 
     if tool in FREEZE_TOOLS:
@@ -345,8 +346,8 @@ def decide(event: dict, root: Path) -> dict | None:
                 if scope:
                     return _decision(
                         "deny",
-                        f"/deny: `{scope}` is on the deny list; `{target}` falls inside it. "
-                        f"Lift it with `/deny off`.",
+                        f"deny: `{scope}` is on the deny list; `{target}` falls inside it. "
+                        f"Lift it with `/permission-change --mode=deny off`.",
                     )
 
             if state.get("freeze"):
@@ -354,8 +355,8 @@ def decide(event: dict, root: Path) -> dict | None:
                 if scope:
                     return _decision(
                         "deny",
-                        f"/freeze: edits are locked to `{scope}`; `{target}` is outside it. "
-                        f"Lift the lock with `/freeze off` (or `/unfreeze`).",
+                        f"freeze: edits are locked to `{scope}`; `{target}` is outside it. "
+                        f"Lift the lock with `/permission-change --mode=freeze off`.",
                     )
     return None
 
@@ -410,9 +411,9 @@ USAGE = (
 def ctl(argv: list[str], root: Path) -> int:
     """Mutate the state file from a skill invocation; print the resulting status.
 
-    One uniform `--mode=` flag replaces four near-identical positional sub-commands — `/careful`,
-    `/freeze`, `/guard` and `/deny` are thin shortcuts that each fill in one mode, not four separate
-    parsers to keep in sync.
+    One uniform `--mode=` flag replaces four near-identical positional sub-commands — a single
+    `permission-change` skill forwards `$ARGUMENTS` straight through, instead of four
+    near-duplicate skills each hardcoding their own mode.
     """
     path = state_path(root)
     state = load_state(path)
