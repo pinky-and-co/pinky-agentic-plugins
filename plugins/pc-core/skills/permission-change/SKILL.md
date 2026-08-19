@@ -2,15 +2,24 @@
 name: permission-change
 description: Toggle the PreToolUse permission guards — careful (confirm destructive Bash), freeze (lock edits to a scope), deny (block edits to a scope), or guard (careful + freeze together)
 argument-hint: "careful|freeze|guard|deny [scope-dir...] [on|off] | status"
+arguments: [mode]
 model: haiku
 allowed-tools: Bash(python3:*), Bash(py:*)
 ---
 
 # /permission-change — one entry point for the permission guards
 
-Four related guards, one command — the first word picks which. All four are enforced by the same
-PreToolUse hook (`guard.py`) and share one state file; the mode you pick decides what gets
-written to it.
+Four related guards, one command — `$mode` (the first word) picks which. All four are enforced by
+the same PreToolUse hook (`guard.py`) and share one state file; `$mode` decides what gets written
+to it.
+
+**Why `arguments: [mode]` and not `[mode, scope]` or more**: `$mode` is always the first token,
+unambiguous whatever follows. Everything after it is variadic and mode-dependent (0+ scope
+directories for `freeze`/`deny`/`guard`, or a bare `on`/`off` for `careful`) — a fixed named slot
+for it would mislabel real invocations, e.g. `/permission-change freeze src/core tests` has TWO
+scope directories; a `$scope` bound to position 1 would silently drop `tests` and a `$status`
+bound to position 2 would call it a status when it is really the second directory. `$ARGUMENTS`
+(the full string) stays the only correct vehicle for that variadic remainder — see Action below.
 
 ## Modes
 
