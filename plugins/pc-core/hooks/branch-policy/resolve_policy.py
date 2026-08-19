@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """resolve_policy — deterministic lookup into a repo's .claude/policies.json, for DCI
 (`` !`command` `` in a skill body) instead of asking the model to read and interpret CLAUDE.md
-prose. Reuses inject_policies.py's load_policies()/resolve_repo_root() — one resolution path for
-both the PreToolUse hook (which cannot reach a forked skill, see architecture findings §hook-fork-
+prose. Reuses policy_lib.py's load_policies()/resolve_repo_root() — one resolution path for both
+the PreToolUse hooks (which cannot reach a forked skill, see architecture findings §hook-fork-
 test) and this script (which DCI pre-renders before any fork sees the prompt, so it does).
 
 Usage:
@@ -16,8 +16,8 @@ substitution rather than a broken skill render.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from inject_policies import load_policies, resolve_repo_root  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 
 def main() -> int:

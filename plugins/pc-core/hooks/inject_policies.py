@@ -31,9 +31,11 @@ Wiring (.claude/settings.json):
 
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 # --- Detection: tool call -> artefact_type(s) it implicates -----------------
 # A single Write/Edit on a code file implicates SEVERAL artefact_types at
@@ -84,38 +86,6 @@ def wants_branch_workflow(tool_name: str, tool_input: dict) -> bool:
         re.search(r"\b(gh\s+pr|glab\s+mr)\s+create\b", command)
         or re.search(r"\bgit\s+push\s+-u\b", command)
     )
-
-
-# --- Repo resolution: multi-repo workspace, resolve from the file/command --
-
-
-def resolve_repo_root(project_dir: str, file_path: str | None) -> Path:
-    """Resolve the git repo root for `file_path` (or `project_dir` if none), via `git rev-parse`."""
-    target = Path(file_path).parent if file_path else Path(project_dir)
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        if out.returncode == 0:
-            return Path(out.stdout.strip())
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return Path(project_dir)
-
-
-def load_policies(repo_root: Path) -> dict | None:
-    """Load `.claude/policies.json` from `repo_root`, or None if absent/unreadable."""
-    policies_path = repo_root / ".claude" / "policies.json"
-    if not policies_path.is_file():
-        return None
-    try:
-        return json.loads(policies_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
 
 
 def reverse_language_map(policies: dict) -> dict[str, str]:

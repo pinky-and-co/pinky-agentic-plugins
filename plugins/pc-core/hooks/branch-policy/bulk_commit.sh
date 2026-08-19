@@ -16,27 +16,15 @@ set -euo pipefail
 EXCLUDED_DEFAULT="node_modules,.venv,__pycache__"
 NOISE_FILES=".DS_Store Thumbs.db desktop.ini"
 
-# Chemins non gardés par la politique de branche (branch.md) : un commit qui ne touche
-# QUE ces chemins va directement sur la branche d'intégration, sans feature branch.
-#
-# `uv.lock` accepté ici sciemment (2026-08-19, décision user) : fichier ~2000 lignes, jamais
-# écrit à la main, régénéré uniquement par `uv lock`/`uv sync` — de nature équivalente à un
-# artefact local, pas à du code source portant une décision.
-#
-# Une PR n'aurait de toute façon protégé contre rien ici : un numéro de version compromis (ex.
-# `httpx==0.28.1` → `0.28.3` malveillant) est indétectable à l'œil dans un diff de lockfile —
-# ça prend de l'outillage dédié (scan de vulnérabilités, vérification de hash), jamais une revue
-# humaine. Et GitHub replie déjà ce diff par défaut ("generated file"), donc même les PR passées
-# avant cette décision n'étaient quasi jamais lues. Retirer l'exigence de branche ne sacrifie
-# aucune protection réelle — il n'y en avait pas à ce niveau.
-UNGUARDED_GLOBS=(
-    'docs/*' '*.md' '.github/*' 'core/rules/*' '.claude/*'
-    'pyproject.toml' '.pre-commit-config.yaml' 'profile.yaml' '.darglint'
-    '.gitignore' '.editorconfig' 'scripts/hooks/*' '.gitleaks.toml' 'uv.lock'
-)
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESOLVE_POLICY="$SCRIPT_DIR/../hooks/resolve_policy.py"
+RESOLVE_POLICY="$SCRIPT_DIR/resolve_policy.py"
+
+# Chemins non gardés par la politique de branche : un commit qui ne touche QUE ces chemins va
+# directement sur la branche d'intégration, sans feature branch. Liste + `is_unguarded()`
+# mutualisées avec branch_guard.py, ce dossier (deux-hooks-branche-et-cout-de-lecture,
+# 2026-08-19) — voir branch_paths.sh pour le détail glob par glob (`uv.lock` notamment).
+# shellcheck source=branch_paths.sh
+source "$SCRIPT_DIR/branch_paths.sh"
 
 die() { printf 'bulk_commit: %s\n' "$1" >&2; exit 1; }
 
@@ -53,15 +41,6 @@ fingerprint() {
     d="$(git -C "$1" diff --staged -- . ':(exclude).gitignore' | grep -v '^index ' || true)"
     [ -n "$d" ] || { printf '%s' "$NOISE_ONLY_FP"; return; }
     printf '%s' "$d" | shasum | cut -d' ' -f1 | cut -c1-12
-}
-
-is_unguarded() {
-    local f="$1" g
-    for g in "${UNGUARDED_GLOBS[@]}"; do
-        # shellcheck disable=SC2254
-        case "$f" in $g) return 0 ;; esac
-    done
-    return 1
 }
 
 # Un seul fichier gardé suffit à exiger une feature branch.

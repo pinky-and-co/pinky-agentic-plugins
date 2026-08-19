@@ -46,13 +46,13 @@ reinterpret it.
 Run the control script (use `py -3` instead of `python3` on Windows):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" $ARGUMENTS
+python3 "${CLAUDE_SKILL_DIR}/scripts/guard.py" $ARGUMENTS
 ```
 
 Examples: `/permission-change careful on`, `/permission-change freeze src/core`,
 `/permission-change deny secrets/`, `/permission-change guard off`.
 
-To inspect the current state without changing it: `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" status`.
+To inspect the current state without changing it: `python3 "${CLAUDE_SKILL_DIR}/scripts/guard.py" status`.
 
 Report the printed status line back to the user. The enforcement is the hook's job — do not
 police commands or paths yourself.

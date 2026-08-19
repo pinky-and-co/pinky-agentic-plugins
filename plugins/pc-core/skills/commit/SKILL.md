@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh:*), AskUserQuestion, Read, Write
+allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), AskUserQuestion, Read, Write
 ---
 
 # Commit — gitmoji convention
@@ -41,8 +41,8 @@ fi
     lot to the script, which does every deterministic part in one sub-second pass:
 
     ```
-    ${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
-    ${CLAUDE_PLUGIN_ROOT}/scripts/bulk_commit.sh apply  --root "${CLAUDE_PROJECT_DIR}" \
+    ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
+    ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply  --root "${CLAUDE_PROJECT_DIR}" \
         --messages <file> --no-pr
     ```
 
