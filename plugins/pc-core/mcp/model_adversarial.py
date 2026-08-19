@@ -95,7 +95,7 @@ def call_mistral(
             "Content-Type": "application/json",
         },
     )
-    return json.load(urllib.request.urlopen(req, timeout=timeout))
+    return json.load(urllib.request.urlopen(req, timeout=timeout))  # nosec B310 — req.full_url is API_URL, a hardcoded https:// constant, never attacker-controlled
 
 
 def main(argv: list[str] | None = None) -> int:

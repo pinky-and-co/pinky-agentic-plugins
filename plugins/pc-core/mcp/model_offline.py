@@ -90,7 +90,7 @@ def num_ctx_for(prompt: str, num_predict: int = NUM_PREDICT) -> int:
 def preflight(url: str, model: str) -> str | None:
     """Return a human hint if Ollama isn't running or the model isn't pulled, else None. Never raises."""
     try:
-        tags = json.load(urllib.request.urlopen(f"{url}/api/tags", timeout=5))
+        tags = json.load(urllib.request.urlopen(f"{url}/api/tags", timeout=5))  # nosec B310 — url is resolve_url()'s local Ollama endpoint (PINKY_OLLAMA_URL/localhost), never remote/attacker-controlled
     except (urllib.error.URLError, OSError):
         return (
             f"Ollama not reachable at {url}. Start it (`ollama serve` / `brew services start ollama`) "
@@ -128,7 +128,7 @@ def call_ollama(
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    return json.load(urllib.request.urlopen(req, timeout=timeout))
+    return json.load(urllib.request.urlopen(req, timeout=timeout))  # nosec B310 — req.full_url is built from resolve_url()'s local Ollama endpoint, never remote/attacker-controlled
 
 
 def resolve_session_prefix() -> str:
@@ -145,7 +145,7 @@ def default_out() -> Path:
     unlike the adversarial exchange file, this output survives past the call for the user to open —
     a second call in the same session must not clobber the first before it's read."""
     return Path(
-        f"/tmp/pinky-local-{resolve_session_prefix()}-{datetime.now():%H%M%S}.md"
+        f"/tmp/pinky-local-{resolve_session_prefix()}-{datetime.now():%H%M%S}.md"  # nosec B108 — ephemeral scratch file, zero-egress design already scopes what lands here; not a secret, no symlink-attack surface for a local single-user CLI/MCP call
     )
 
 
