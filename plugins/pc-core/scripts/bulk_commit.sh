@@ -19,11 +19,16 @@ NOISE_FILES=".DS_Store Thumbs.db desktop.ini"
 # Chemins non gardés par la politique de branche (branch.md) : un commit qui ne touche
 # QUE ces chemins va directement sur la branche d'intégration, sans feature branch.
 #
-# `uv.lock` accepté ici sciemment (2026-08-19, décision user) : un diff de relock mécanique
-# (déclenché par `uv sync` pour réparer un `.venv` cassé) et un diff qui reflète un vrai
-# ajout/upgrade de dépendance ont la même signature — cette entrée ne distingue pas les deux,
-# donc un changement de dépendance réel passe aussi sans feature branch. Accepté explicitement :
-# la friction d'une PR pour chaque `uv sync` de routine pesait plus que ce risque.
+# `uv.lock` accepté ici sciemment (2026-08-19, décision user) : fichier ~2000 lignes, jamais
+# écrit à la main, régénéré uniquement par `uv lock`/`uv sync` — de nature équivalente à un
+# artefact local, pas à du code source portant une décision.
+#
+# Une PR n'aurait de toute façon protégé contre rien ici : un numéro de version compromis (ex.
+# `httpx==0.28.1` → `0.28.3` malveillant) est indétectable à l'œil dans un diff de lockfile —
+# ça prend de l'outillage dédié (scan de vulnérabilités, vérification de hash), jamais une revue
+# humaine. Et GitHub replie déjà ce diff par défaut ("generated file"), donc même les PR passées
+# avant cette décision n'étaient quasi jamais lues. Retirer l'exigence de branche ne sacrifie
+# aucune protection réelle — il n'y en avait pas à ce niveau.
 UNGUARDED_GLOBS=(
     'docs/*' '*.md' '.github/*' 'core/rules/*' '.claude/*'
     'pyproject.toml' '.pre-commit-config.yaml' 'profile.yaml' '.darglint'
