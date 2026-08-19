@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-commit/hooks/inject_policies.py — run with:
+"""Tests for plugins/pc-core/hooks/inject_policies.py — run with:
 python3 -m unittest discover tests
 """
 
@@ -10,9 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).parent.parent / "plugins" / "pc-commit" / "hooks")
-)
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
 
 import inject_policies as ip
 
@@ -147,7 +145,7 @@ class TestMainEndToEnd(unittest.TestCase):
     SCRIPT = str(
         Path(__file__).parent.parent
         / "plugins"
-        / "pc-commit"
+        / "pc-core"
         / "hooks"
         / "inject_policies.py"
     )
