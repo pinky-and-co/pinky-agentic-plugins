@@ -22,7 +22,7 @@ commands AND lock edits to that module.
 Run the control script (use `py -3` instead of `python3` on Windows):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" guard $ARGUMENTS
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" --mode=guard $ARGUMENTS
 ```
 
 Report the printed status line. To inspect the current state without changing it, run the same

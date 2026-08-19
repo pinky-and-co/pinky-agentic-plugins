@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse guard — /careful + /freeze + /guard.
+"""PreToolUse guard — /careful + /freeze + /guard + /deny.
 
 A slash command in Claude Code is only a prompt: it cannot enforce anything on its own. So the
 guard rails are split in two — a tiny **state file** the skills toggle, and this **single script**
@@ -26,11 +26,15 @@ that reads it. The script is dual-mode:
     whack-a-mole here; a hard path guarantee belongs to ``permissions.deny``. The always-on guards
     above are the place a hard guarantee IS worth the code: `permissions.deny` entries cannot carry
     a message, and the point here is the guidance text, not the block itself.
+  - `deny`  set → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target sits **inside** any
+    denied directory returns ``permissionDecision: "deny"``. The inverse of `freeze`: a blocklist,
+    not a whitelist — everything outside the denied directories stays writable.
   - Anything else → no output, exit 0 → normal permission flow (we never emit ``allow``, which would
     short-circuit other hooks).
 
-- **Ctl mode** (argv): the skills call ``guard.py careful|freeze|guard|status [args]`` to mutate the
-  state file deterministically (no LLM guesswork about JSON shape).
+- **Ctl mode** (argv): the skills call ``guard.py --mode=careful|freeze|guard|deny [args]`` or
+  ``guard.py status`` to mutate the state file deterministically (no LLM guesswork about JSON
+  shape) — one uniform flag instead of four near-identical positional parsers.
 
 State lives at ``$CLAUDE_PROJECT_DIR/.claude/.guard-state.json`` (override: ``PC_GUARD_STATE``).
 It persists across turns until explicitly lifted; every deny/ask reason says how to lift it.
@@ -143,15 +147,17 @@ def state_path(root: Path) -> Path:
 
 def load_state(path: Path) -> dict:
     """Read the state file; tolerate absent / malformed content (returns the empty default)."""
+    empty = {"careful": False, "freeze": [], "deny": []}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
-        return {"careful": False, "freeze": []}
+        return empty
     if not isinstance(data, dict):
-        return {"careful": False, "freeze": []}
+        return empty
     data.setdefault("careful", False)
-    freeze = data.get("freeze")
-    data["freeze"] = [str(d) for d in freeze] if isinstance(freeze, list) else []
+    for key in ("freeze", "deny"):
+        values = data.get(key)
+        data[key] = [str(d) for d in values] if isinstance(values, list) else []
     return data
 
 
@@ -160,6 +166,7 @@ def save_state(path: Path, state: dict) -> None:
     state = {
         "careful": bool(state.get("careful")),
         "freeze": list(state.get("freeze") or []),
+        "deny": list(state.get("deny") or []),
     }
     state["updated"] = f"{datetime.now():%Y-%m-%d %H:%M}"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,6 +283,24 @@ def frozen_violation(target: str, freeze_dirs: list[str], root: Path) -> str | N
     return freeze_dirs[0] if len(freeze_dirs) == 1 else ", ".join(freeze_dirs)
 
 
+def denied_violation(target: str, deny_dirs: list[str], root: Path) -> str | None:
+    """Return the denied scope a target falls inside, or None when it matches none (or no deny).
+
+    The inverse of `frozen_violation`: `deny_dirs` are the ONLY forbidden zones while a deny list
+    is active — everything else stays writable. Relative paths resolve against the project root.
+    """
+    if not deny_dirs:
+        return None
+    tgt = Path(target)
+    tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
+    for d in deny_dirs:
+        dp = Path(d)
+        dp = (dp if dp.is_absolute() else root / dp).resolve()
+        if tgt == dp or tgt.is_relative_to(dp):
+            return d
+    return None
+
+
 def _decision(kind: str, reason: str) -> dict:
     """Wrap a PreToolUse permission decision in the harness-expected envelope."""
     return {
@@ -314,6 +339,15 @@ def decide(event: dict, root: Path) -> dict | None:
             message = outside_scope_violation(target, root)
             if message:
                 return _decision("deny", message)
+
+            if state.get("deny"):
+                scope = denied_violation(target, state["deny"], root)
+                if scope:
+                    return _decision(
+                        "deny",
+                        f"/deny: `{scope}` is on the deny list; `{target}` falls inside it. "
+                        f"Lift it with `/deny off`.",
+                    )
 
             if state.get("freeze"):
                 scope = frozen_violation(target, state["freeze"], root)
@@ -359,27 +393,61 @@ def format_status(state: dict) -> str:
     careful = "on" if state.get("careful") else "off"
     freeze = state.get("freeze") or []
     freeze_str = ", ".join(freeze) if freeze else "off"
-    return f"careful: {careful} · freeze: {freeze_str}"
+    deny = state.get("deny") or []
+    deny_str = ", ".join(deny) if deny else "off"
+    return f"careful: {careful} · freeze: {freeze_str} · deny: {deny_str}"
+
+
+USAGE = (
+    "usage: guard.py --mode=careful [on|off]\n"
+    "       guard.py --mode=freeze <dir>... | off\n"
+    "       guard.py --mode=guard <dir>... | on | off\n"
+    "       guard.py --mode=deny <dir>... | off\n"
+    "       guard.py status"
+)
 
 
 def ctl(argv: list[str], root: Path) -> int:
-    """Mutate the state file from a skill invocation; print the resulting status."""
+    """Mutate the state file from a skill invocation; print the resulting status.
+
+    One uniform `--mode=` flag replaces four near-identical positional sub-commands — `/careful`,
+    `/freeze`, `/guard` and `/deny` are thin shortcuts that each fill in one mode, not four separate
+    parsers to keep in sync.
+    """
     path = state_path(root)
     state = load_state(path)
-    cmd = argv[0] if argv else "status"
+
+    if not argv:
+        print(USAGE, file=sys.stderr)
+        return 2
+    if argv[0] == "status":
+        print(format_status(state))
+        return 0
+    if not argv[0].startswith("--mode="):
+        print(USAGE, file=sys.stderr)
+        return 2
+    mode = argv[0].removeprefix("--mode=")
     rest = argv[1:]
 
-    if cmd == "careful":
+    if mode == "careful":
         state["careful"] = _onoff(rest[0] if rest else None)
-    elif cmd == "freeze":
+    elif mode == "freeze":
         if rest and rest[0].lower() in {"off", "none", "clear"}:
             state["freeze"] = []
         elif rest:
             state["freeze"] = rest
         else:
-            print("usage: /freeze <dir>... | off", file=sys.stderr)
+            print("usage: guard.py --mode=freeze <dir>... | off", file=sys.stderr)
             return 2
-    elif cmd == "guard":
+    elif mode == "deny":
+        if rest and rest[0].lower() in {"off", "none", "clear"}:
+            state["deny"] = []
+        elif rest:
+            state["deny"] = rest
+        else:
+            print("usage: guard.py --mode=deny <dir>... | off", file=sys.stderr)
+            return 2
+    elif mode == "guard":
         on = _onoff(rest[0] if rest else None)
         if not on:
             state["careful"], state["freeze"] = False, []
@@ -388,11 +456,8 @@ def ctl(argv: list[str], root: Path) -> int:
             dirs = [a for a in rest if a.lower() not in {"on", "true", "1", "yes"}]
             if dirs:
                 state["freeze"] = dirs
-    elif cmd == "status":
-        print(format_status(state))
-        return 0
     else:
-        print(f"unknown guard command: {cmd}", file=sys.stderr)
+        print(f"unknown mode: {mode}\n{USAGE}", file=sys.stderr)
         return 2
 
     save_state(path, state)

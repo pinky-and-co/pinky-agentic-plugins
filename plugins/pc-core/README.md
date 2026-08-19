@@ -1,8 +1,8 @@
 # pc-core
 
 Generic workspace mechanics for Claude Code: gitmoji-convention git workflow (commit, commit +
-push + PR/MR, branch cleanup), and permission guards (`careful`, `freeze`, `guard`) that toggle
-the PreToolUse hook enforcing them.
+push + PR/MR, branch cleanup), and permission guards (`careful`, `freeze`, `deny`, `guard`) that
+toggle the PreToolUse hook enforcing them.
 
 ## Overview
 
@@ -82,20 +82,27 @@ comparison table for the 6 branching strategies (Feature Branching, Git Flow, Gi
 Flow, Release Branching, Trunk-Based Development). `commit-and-pr` consults it to resolve a PR
 base branch; a repo's own `CLAUDE.md` `Branching:` line is always authoritative over this table.
 
-### `careful` / `freeze` / `guard`
+### `careful` / `freeze` / `deny` / `guard`
 
 Permission guards, toggled by these skills and enforced by the shared `hooks/guard.py`
-PreToolUse hook.
+PreToolUse hook — one uniform `--mode=` CLI underneath, each skill is a thin shortcut that fills
+in its own mode.
 
 - **`careful`** — while on, a destructive `Bash` command (`rm -rf`, `git push --force`,
   `git reset --hard`, `DROP`, `TRUNCATE`, `DELETE FROM` without `WHERE`, `sudo`, …) returns
   `permissionDecision: ask` instead of running silently. A speed bump, not a block.
-- **`freeze <dir>...`** — locks `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to the given
-  directories; anything outside is denied. **Honest limit**: a Bash write (`sed -i`, `tee`, `>`)
-  is not intercepted — for a hard guarantee, use `permissions.deny` instead.
+- **`freeze <dir>...`** — a whitelist: locks `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to the given
+  directories; anything outside is denied.
+- **`deny <dir>...`** — the inverse of `freeze`: a blocklist. The given directories become
+  unwritable; everything else stays open. Not the same as the `permissions.deny` settings key
+  (harder guarantee, session-start only) — see the skill's own note.
 - **`guard <dir>...`** — convenience: `careful` on + `freeze` to the given directories in one call.
 
-**Usage:** `/careful [on|off]`, `/freeze <dir>... | off`, `/guard <dir>... | on | off`
+**Honest limit, all four**: only the write-class TOOLS are covered. A Bash write (`sed -i`, `tee`,
+`>`, `mv`/`cp`) is NOT intercepted — for a hard guarantee, use `permissions.deny` instead.
+
+**Usage:** `/careful [on|off]`, `/freeze <dir>... | off`, `/deny <dir>... | off`,
+`/guard <dir>... | on | off`
 
 ## Best Practices
 

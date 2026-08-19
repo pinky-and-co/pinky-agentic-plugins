@@ -24,7 +24,7 @@ those either. Freeze protects against the agent's ordinary edit path, not agains
 Run the control script (use `py -3` instead of `python3` on Windows):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" freeze $ARGUMENTS
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" --mode=freeze $ARGUMENTS
 ```
 
 - `/freeze src/core` → edits are locked to `src/core/` and below.

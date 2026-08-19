@@ -19,7 +19,7 @@ you to confirm before running. It is a speed bump, not a block: one keystroke cl
 Run the control script (use `py -3` instead of `python3` on Windows):
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" careful $ARGUMENTS
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" --mode=careful $ARGUMENTS
 ```
 
 Then report the printed status line (e.g. `careful: on · freeze: off`) back to the user. Do not do
