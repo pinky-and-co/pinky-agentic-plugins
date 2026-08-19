@@ -1,6 +1,7 @@
 ---
 name: permission-change
 description: Toggle the PreToolUse permission guards — careful (confirm destructive Bash), freeze (lock edits to a scope), deny (block edits to a scope), or guard (careful + freeze together)
+argument-hint: "--mode=careful|freeze|guard|deny [scope-dir...] [on|off] | status"
 model: haiku
 allowed-tools: Bash(python3:*), Bash(py:*)
 ---
