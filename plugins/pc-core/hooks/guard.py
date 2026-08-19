@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse guard — /permission-change --mode=careful|freeze|guard|deny.
+"""PreToolUse guard — /permission-change careful|freeze|guard|deny.
 
 A slash command in Claude Code is only a prompt: it cannot enforce anything on its own. So the
 guard rails are split in two — a tiny **state file** the `permission-change` skill toggles, and
@@ -33,9 +33,9 @@ this **single script** that reads it. The script is dual-mode:
     short-circuit other hooks).
 
 - **Ctl mode** (argv): the `permission-change` skill calls
-  ``guard.py --mode=careful|freeze|guard|deny [args]`` or ``guard.py status`` to mutate the state
-  file deterministically (no LLM guesswork about JSON shape) — one uniform flag, one skill,
-  instead of four near-identical positional parsers behind four near-identical skills.
+  ``guard.py careful|freeze|guard|deny [args]`` or ``guard.py status`` to mutate the state file
+  deterministically (no LLM guesswork about JSON shape) — one skill forwarding `$ARGUMENTS`
+  straight through, instead of four near-identical skills each hardcoding their own mode.
 
 State lives at ``$CLAUDE_PROJECT_DIR/.claude/.guard-state.json`` (override: ``PC_GUARD_STATE``).
 It persists across turns until explicitly lifted; every deny/ask reason says how to lift it.
@@ -325,7 +325,7 @@ def decide(event: dict, root: Path) -> dict | None:
             return _decision(
                 "ask",
                 f"careful: '{label}' is a destructive command — confirm before it runs. "
-                f"Lift the guard with `/permission-change --mode=careful off`.",
+                f"Lift the guard with `/permission-change careful off`.",
             )
 
     if tool in FREEZE_TOOLS:
@@ -347,7 +347,7 @@ def decide(event: dict, root: Path) -> dict | None:
                     return _decision(
                         "deny",
                         f"deny: `{scope}` is on the deny list; `{target}` falls inside it. "
-                        f"Lift it with `/permission-change --mode=deny off`.",
+                        f"Lift it with `/permission-change deny off`.",
                     )
 
             if state.get("freeze"):
@@ -356,7 +356,7 @@ def decide(event: dict, root: Path) -> dict | None:
                     return _decision(
                         "deny",
                         f"freeze: edits are locked to `{scope}`; `{target}` is outside it. "
-                        f"Lift the lock with `/permission-change --mode=freeze off`.",
+                        f"Lift the lock with `/permission-change freeze off`.",
                     )
     return None
 
@@ -400,10 +400,10 @@ def format_status(state: dict) -> str:
 
 
 USAGE = (
-    "usage: guard.py --mode=careful [on|off]\n"
-    "       guard.py --mode=freeze <dir>... | off\n"
-    "       guard.py --mode=guard <dir>... | on | off\n"
-    "       guard.py --mode=deny <dir>... | off\n"
+    "usage: guard.py careful [on|off]\n"
+    "       guard.py freeze <dir>... | off\n"
+    "       guard.py guard <dir>... | on | off\n"
+    "       guard.py deny <dir>... | off\n"
     "       guard.py status"
 )
 
@@ -411,8 +411,8 @@ USAGE = (
 def ctl(argv: list[str], root: Path) -> int:
     """Mutate the state file from a skill invocation; print the resulting status.
 
-    One uniform `--mode=` flag replaces four near-identical positional sub-commands — a single
-    `permission-change` skill forwards `$ARGUMENTS` straight through, instead of four
+    A single `permission-change` skill forwards `$ARGUMENTS` straight through — one positional
+    mode word (`careful`/`freeze`/`guard`/`deny`/`status`) picks the branch below, instead of four
     near-duplicate skills each hardcoding their own mode.
     """
     path = state_path(root)
@@ -421,16 +421,13 @@ def ctl(argv: list[str], root: Path) -> int:
     if not argv:
         print(USAGE, file=sys.stderr)
         return 2
-    if argv[0] == "status":
-        print(format_status(state))
-        return 0
-    if not argv[0].startswith("--mode="):
-        print(USAGE, file=sys.stderr)
-        return 2
-    mode = argv[0].removeprefix("--mode=")
+    mode = argv[0]
     rest = argv[1:]
 
-    if mode == "careful":
+    if mode == "status":
+        print(format_status(state))
+        return 0
+    elif mode == "careful":
         state["careful"] = _onoff(rest[0] if rest else None)
     elif mode == "freeze":
         if rest and rest[0].lower() in {"off", "none", "clear"}:
@@ -438,7 +435,7 @@ def ctl(argv: list[str], root: Path) -> int:
         elif rest:
             state["freeze"] = rest
         else:
-            print("usage: guard.py --mode=freeze <dir>... | off", file=sys.stderr)
+            print("usage: guard.py freeze <dir>... | off", file=sys.stderr)
             return 2
     elif mode == "deny":
         if rest and rest[0].lower() in {"off", "none", "clear"}:
@@ -446,7 +443,7 @@ def ctl(argv: list[str], root: Path) -> int:
         elif rest:
             state["deny"] = rest
         else:
-            print("usage: guard.py --mode=deny <dir>... | off", file=sys.stderr)
+            print("usage: guard.py deny <dir>... | off", file=sys.stderr)
             return 2
     elif mode == "guard":
         on = _onoff(rest[0] if rest else None)

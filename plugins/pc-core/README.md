@@ -84,27 +84,27 @@ base branch; a repo's own `CLAUDE.md` `Branching:` line is always authoritative 
 
 ### `permission-change` — careful / freeze / deny / guard
 
-One skill, one `--mode=` flag — not four near-identical skills to remember. Enforced by the
-shared `hooks/guard.py` PreToolUse hook, all four modes share one state file.
+One skill, one positional mode word — not four near-identical skills to remember. Enforced by
+the shared `hooks/guard.py` PreToolUse hook, all four modes share one state file.
 
-- **`--mode=careful`** — while on, a destructive `Bash` command (`rm -rf`, `git push --force`,
+- **`careful`** — while on, a destructive `Bash` command (`rm -rf`, `git push --force`,
   `git reset --hard`, `DROP`, `TRUNCATE`, `DELETE FROM` without `WHERE`, `sudo`, …) returns
   `permissionDecision: ask` instead of running silently. A speed bump, not a block.
-- **`--mode=freeze <dir>...`** — a whitelist: locks `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to
+- **`freeze <dir>...`** — a whitelist: locks `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to
   the given directories; anything outside is denied.
-- **`--mode=deny <dir>...`** — the inverse of `freeze`: a blocklist. The given directories become
+- **`deny <dir>...`** — the inverse of `freeze`: a blocklist. The given directories become
   unwritable; everything else stays open. Not the same as the `permissions.deny` settings key
   (harder guarantee, session-start only) — see the skill's own note.
-- **`--mode=guard <dir>...`** — convenience: `careful` on + `freeze` to the given directories in
+- **`guard <dir>...`** — convenience: `careful` on + `freeze` to the given directories in
   one call.
 
 **Honest limit, all four**: only the write-class TOOLS are covered. A Bash write (`sed -i`, `tee`,
 `>`, `mv`/`cp`) is NOT intercepted — for a hard guarantee, use `permissions.deny` instead.
 
-**Usage:** `/permission-change --mode=careful [on|off]`,
-`/permission-change --mode=freeze <dir>... | off`,
-`/permission-change --mode=deny <dir>... | off`,
-`/permission-change --mode=guard <dir>... | on | off`
+**Usage:** `/permission-change careful [on|off]`,
+`/permission-change freeze <dir>... | off`,
+`/permission-change deny <dir>... | off`,
+`/permission-change guard <dir>... | on | off`
 
 ## Best Practices
 
