@@ -1,6 +1,17 @@
 {
-  "description": "Injects per-repo resolved policies (language, branch) before every write, enforces the careful/freeze/deny/guard permission guards (toggled by the permission-change skill), blocks a guarded write on a permanent branch, asks before a costly native Read, denies reading secret-shaped content, and surfaces the just-edited file's own checker findings — see inject_policies.py, guard.py, branch_guard.py, read_cost.py, privacy_egress.py, post_edit_lint.py",
+  "description": "Injects per-repo resolved policies (language, branch) before every write, enforces the careful/freeze/deny/guard permission guards (toggled by the permission-change skill), blocks a guarded write on a permanent branch, asks before a costly native Read, denies reading secret-shaped content, surfaces the just-edited file's own checker findings, and reinforces a custom output style every turn — see inject_policies.py, guard.py, branch_guard.py, read_cost.py, privacy_egress.py, post_edit_lint.py, style_reminder.py",
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/style_reminder.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|Write|Edit",
