@@ -1,7 +1,8 @@
-# pc-commit
+# pc-core
 
-Gitmoji-convention git workflow for Claude Code — commit, commit + push + PR/MR, and branch
-cleanup, each auto-executing once invoked.
+Generic workspace mechanics for Claude Code: gitmoji-convention git workflow (commit, commit +
+push + PR/MR, branch cleanup), and permission guards (`careful`, `freeze`, `guard`) that toggle
+the PreToolUse hook enforcing them.
 
 ## Overview
 
@@ -80,6 +81,21 @@ Reference knowledge, not directly invocable (`user-invocable: false`) — the na
 comparison table for the 6 branching strategies (Feature Branching, Git Flow, GitHub Flow, GitLab
 Flow, Release Branching, Trunk-Based Development). `commit-and-pr` consults it to resolve a PR
 base branch; a repo's own `CLAUDE.md` `Branching:` line is always authoritative over this table.
+
+### `careful` / `freeze` / `guard`
+
+Permission guards, toggled by these skills and enforced by the shared `hooks/guard.py`
+PreToolUse hook.
+
+- **`careful`** — while on, a destructive `Bash` command (`rm -rf`, `git push --force`,
+  `git reset --hard`, `DROP`, `TRUNCATE`, `DELETE FROM` without `WHERE`, `sudo`, …) returns
+  `permissionDecision: ask` instead of running silently. A speed bump, not a block.
+- **`freeze <dir>...`** — locks `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to the given
+  directories; anything outside is denied. **Honest limit**: a Bash write (`sed -i`, `tee`, `>`)
+  is not intercepted — for a hard guarantee, use `permissions.deny` instead.
+- **`guard <dir>...`** — convenience: `careful` on + `freeze` to the given directories in one call.
+
+**Usage:** `/careful [on|off]`, `/freeze <dir>... | off`, `/guard <dir>... | on | off`
 
 ## Best Practices
 
