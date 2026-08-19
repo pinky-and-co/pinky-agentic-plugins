@@ -13,8 +13,10 @@ this **single script** that reads it. The script is dual-mode:
     this guard makes that loss mode loud instead of silent. Layered ABOVE `freeze` — a freeze
     scoped to `.claude` must not reopen what this guard closes.
   - **Outside-scope guard, ALWAYS ON** → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target
-    sits outside the project root and every declared `permissions.additionalDirectories` entry
-    returns ``permissionDecision: "deny"``. Read-visibility (Claude Code natively loads ancestor
+    sits outside the project root, every `--add-dir`/`/add-dir` directory (read live from the
+    event's `workspace.added_dirs` field — a common field the harness fills on every hook call,
+    no state file needed), and every declared `permissions.additionalDirectories` entry returns
+    ``permissionDecision: "deny"``. Read-visibility (Claude Code natively loads ancestor
     `CLAUDE.md` files as context) is not write authorization — this guard makes that boundary
     mechanical instead of relying on the agent to remember it.
   - `careful` on  → a destructive `Bash` command returns ``permissionDecision: "ask"`` (interactive
@@ -217,16 +219,18 @@ def generated_tree_violation(target: str, root: Path) -> str | None:
     return None
 
 
-def additional_dirs(root: Path) -> list[Path]:
+def additional_dirs(event: dict, root: Path) -> list[Path]:
     """Directories this session may write to beyond the project root.
 
-    Read from `permissions.additionalDirectories` in every settings file the harness itself reads
-    (project, project-local, user-global) — the only place that value is ever persisted. HONEST
-    LIMIT: a bare `--add-dir` CLI flag that was never written to a settings file is invisible to a
-    hook subprocess (no environment variable carries it) — same class of gap as the Bash-write
-    limit documented on `frozen_violation` below.
+    Two sources, merged: `workspace.added_dirs` on the PreToolUse event itself — a common field
+    the harness fills on every hook call with the live `--add-dir` / `/add-dir` list, no state
+    file needed — and `permissions.additionalDirectories` in every settings file the harness reads
+    (project, project-local, user-global), for directories granted that way instead.
     """
     dirs: list[Path] = []
+    for d in (event.get("workspace") or {}).get("added_dirs") or []:
+        dp = Path(str(d))
+        dirs.append(dp if dp.is_absolute() else root / dp)
     for f in (
         root / ".claude" / "settings.json",
         root / ".claude" / "settings.local.json",
@@ -244,7 +248,7 @@ def additional_dirs(root: Path) -> list[Path]:
     return dirs
 
 
-def outside_scope_violation(target: str, root: Path) -> str | None:
+def outside_scope_violation(event: dict, target: str, root: Path) -> str | None:
     """Return guidance when `target` sits outside the project root AND every declared
     additional directory, else None. ALWAYS ON, no opt-out — like the generated-tree guard above.
 
@@ -254,15 +258,15 @@ def outside_scope_violation(target: str, root: Path) -> str | None:
     """
     tgt = Path(target)
     tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
-    allowed = [root.resolve(), *(d.resolve() for d in additional_dirs(root))]
+    allowed = [root.resolve(), *(d.resolve() for d in additional_dirs(event, root))]
     if any(tgt == a or tgt.is_relative_to(a) for a in allowed):
         return None
     return (
-        f"`{target}` resolves outside the project root (`{root}`) and every directory declared in "
-        "`permissions.additionalDirectories`. A file Claude Code loads as ancestor context (e.g. a "
-        "CLAUDE.md one level up) is read-visible by design — that is not write authorization. If "
-        "this edit is genuinely intended, do it by hand, or add the directory to "
-        "`permissions.additionalDirectories` first."
+        f"`{target}` resolves outside the project root (`{root}`) and every `--add-dir` / "
+        "`permissions.additionalDirectories` directory. A file Claude Code loads as ancestor "
+        "context (e.g. a CLAUDE.md one level up) is read-visible by design — that is not write "
+        "authorization. If this edit is genuinely intended, do it by hand, or add the directory "
+        "with `/add-dir` or `permissions.additionalDirectories` first."
     )
 
 
@@ -337,7 +341,7 @@ def decide(event: dict, root: Path) -> dict | None:
             if message:
                 return _decision("deny", message)
 
-            message = outside_scope_violation(target, root)
+            message = outside_scope_violation(event, target, root)
             if message:
                 return _decision("deny", message)
 
