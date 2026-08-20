@@ -80,6 +80,19 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
   `2-selected-for-dev` already carries ordering preference; conflating the two loses the distinction
   between "blocked" and "not yet prioritized".
 
+## Handoff — two layers
+
+- **Narrative (yours).** Prose in the in-progress card — state, decisions, next step. Your job, and
+  the part that matters.
+- **Auto block (the `Stop`/`SessionEnd` hook).** `stop_handoff.py` maintains a managed
+  `<!-- auto-handoff:start … end -->` block at the bottom of in-progress cards whose `repos:` (or
+  legacy `**Repos:**`) matches the session's repo, with the mechanical state (branch, uncommitted
+  files, recent commits) whenever a turn ends with a dirty git tree. Non-blocking and idempotent —
+  **never hand-edit between the markers**, it gets overwritten on the next run.
+- **Anti-secrets, both layers.** The hook scrubs secret-shaped strings from what it writes; the
+  narrative must follow the same directive — never put secrets, credentials or internal URLs in a
+  handoff, in either layer.
+
 ## `/goal`, posed from the root of a `sert` group
 
 A session's real capacity limit is the session itself — one card, or one `sert`-linked group of
@@ -105,11 +118,10 @@ just a mechanical check, prefer in this order — **never `haiku`, whatever tier
 1. **`adversarial` MCP tool** (`pc-core`, native, no spawn) — a genuinely different model family
    (Mistral-served, `mistral-medium-3.5` today), not just a cheaper same-vendor tier. The real
    change of perspective, not a cost optimization.
-2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent
-   (`plugins/pc-core/agents/reviewer.md`, review persona adapted from the `feature-dev` plugin's
-   `code-reviewer`, `docs/ATTRIBUTIONS-WIP.md`), no external plugin dependency. Same vendor as the
-   generator, but a fresh context that never saw the generating session's own rationalizations —
-   `model: sonnet` in its own definition, a real floor.
+2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
+   reviewer.md`), preloads the `review-guidelines` skill, no external plugin dependency. Same
+   vendor as the generator, but a fresh context that never saw the generating session's own
+   rationalizations — `model: sonnet` in its own definition, a real floor.
 3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
    model, same context) rather than presenting it as equivalent to (1) or (2).
 
@@ -119,6 +131,24 @@ just a mechanical check, prefer in this order — **never `haiku`, whatever tier
 elsewhere folded into a single "N autonomous cards" count. Never hand-maintain a critical-path list
 on a parent card; if the render is wrong, a child's `sert` value is wrong, fix the child.
 
+## Orgs — one workspace, several mounted orgs
+
+A workspace is multi-org. An org is a GitHub organization mirrored locally, and it owns three
+coordination artefacts under a single root: `_KANBAN/` (this board), `_AGENT_LOG/` (below), and its
+knowledge corpus. **The org root is not where its repos live** — repos stay local to the workspace;
+only the coordination surface may sit on a drive shared with other people.
+
+**A shared org root is a replication boundary** — everything inside it lands on every machine that
+mounts it. **No secret goes anywhere inside a shared root**; secrets stay outside (local-only /
+`.env`). This is the one rule in this file that is not negotiable by convenience.
+
+Board roots are currently resolved from a machine-local `.pinky/config.txt` (`kanban_roots_local`
+key, `stop_handoff.py --list-kanbans`) — flagged legacy, slated for replacement by reading the
+workspace's own `*.code-workspace` file instead (a user has no choice but to keep that one accurate,
+since it is how their editor already sees every mounted root — see the parked idea card
+`pinky-config-txt-remplace-par-code-workspace`). Don't build more on top of the current mechanism
+than this file already needs.
+
 ## Cross-agent log
 
 `_AGENT_LOG/` (next to `_KANBAN/`) is the async narrative channel between sessions/agents sharing an
@@ -126,6 +156,11 @@ org — what a session did, cross-chantier, that no single card's handoff would 
 `(date, agent)`, append-only, filename `YYYY-MM-DD_<agent-identity>.md`. Read the recent entries at
 session start alongside the board; write into the org whose board carries the chantier worked on.
 Never log secrets, credentials or internal URLs.
+
+Not the only thing in `_AGENT_LOG/` — a Cortex (Snowsight) session writes a per-session **transfer
+manifest** there instead (`YYYYMMDD_HHMISS_CORTEX_SESSION.md`): the file list for the user to
+download, plus card moves Cortex cannot perform itself. The per-(date, agent) rule above does not
+apply to it — the two artefacts coexist, not variants of each other.
 
 ## Boundaries
 
