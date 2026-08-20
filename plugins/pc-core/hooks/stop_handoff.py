@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""Stop/SessionEnd hook — auto-maintain the in-progress card's handoff (kanban feature).
+
+Fires on `Stop` (end of an assistant turn) and `SessionEnd` (a `Stop` hook does not fire on a
+user-interrupted turn — `SessionEnd` is the safety net that still refreshes the breadcrumb once,
+see `hooks-guide.md`). Non-blocking either way: it never sends the agent back to work. Its job is
+mechanical — keep a managed breadcrumb fresh inside the `_KANBAN/CHANTIER*/3-in-progress/*.md` cards
+WHOSE SCOPE MATCHES the session's repo (a card opts in via its `repos:` frontmatter — or the legacy
+`**Repos:**` line during the board's ongoing YAML conversion, see `card_repos` — or its existing
+block's repo) so the next session has the current state without depending on anyone to trigger it.
+The narrative handoff stays the agent's job (skill `kanban`); this only maintains the auto block
+between the markers.
+
+Design:
+- runs only when there is real work to record (a git working tree with changes) — never churns on idle.
+- records branch · uncommitted files · recent commit subjects · a develop→main landmark.
+- carries the anti-secrets directive: commit subjects are scrubbed before being written.
+
+`ADR-0004` (`pinky-bootstrap`) considered adding a signal comparing the card's declared `model:` to
+the model that actually ran the turn, and found it not buildable: a `Stop`/`SessionEnd` event carries
+`session_id`/`cwd`/`hook_event_name`/`stop_hook_active`, no model name, no documented
+`transcript_path` for these events. Left out rather than faked.
+
+Python 3.11+, stdlib only. Exit code is always 0 (a hook failure must never block a Stop/SessionEnd).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from secret_patterns import scrub  # noqa: E402
+
+# Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
+# crashes with UnicodeEncodeError. Same fix as setup/__init__.py, applied here because this script
+# runs standalone (invoked directly by the harness) and never imports that package.
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+BLOCK_START = (
+    "<!-- auto-handoff:start (maintained by stop_handoff.py — do not edit by hand) -->"
+)
+BLOCK_END = "<!-- auto-handoff:end -->"
+ANTI_SECRETS = "never include secrets / credentials / internal URLs in a handoff"  # pragma: allowlist secret
+MAX_FILES = 20  # cap the changed-files list so a huge diff does not bloat the card
+
+# `--list-agent-logs` : bound of the cross-agent journal listing (`hook-output-invariants.md` §
+# bounded output). Deliberately a recency CAP, not a day-window: dating the filter would need a
+# clock, and a hook that writes a managed block must stay a pure function of state — relaxing that
+# guard for a simple listing would be a bad trade. The date stays readable in each entry's name: the
+# agent judges freshness itself, and an org whose journal has gone quiet stays visible instead of
+# disappearing from the listing.
+MAX_AGENT_LOGS = 12
+
+
+def read_event() -> dict:
+    """Parse the hook JSON from stdin; tolerate an empty / malformed payload."""
+    try:
+        return json.loads(sys.stdin.read() or "{}")
+    except (json.JSONDecodeError, ValueError):
+        return {}
+
+
+# ── Declared boards — read from the ONE instance config file (ADR-0069) ──────
+MARKER_DIR_NAME = ".pinky"
+CONFIG_NAME = "config.txt"
+ROOTS_KEY = "kanban_roots_local"
+ROOTS_ENV = "KANBAN_ROOTS"
+# Residual file from before ADR-0069. Never read — only reported, loudly (see stale_pointer).
+LEGACY_POINTER_NAME = "kanban-roots.txt"
+
+
+def _parse_roots(raw: list[str], base: Path) -> list[Path]:
+    """One dir per entry; blanks and `#` comments skipped; relative entries resolved against `base`."""
+    roots: list[Path] = []
+    for item in raw:
+        item = item.strip()
+        if not item or item.startswith("#"):
+            continue
+        p = Path(item).expanduser()
+        roots.append(p if p.is_absolute() else base / p)
+    return roots
+
+
+def _read_config(path: Path) -> dict[str, str]:
+    """Parse `key = value` lines; skip blanks and `#` comments. A missing file is not an error."""
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        if sep:
+            values[key.strip()] = value.strip()
+    return values
+
+
+def workspace_root(start: Path) -> Path | None:
+    """Nearest directory above `start` carrying a `.pinky/config.txt` marker, or None."""
+    for base in [start, *start.parents]:
+        if (base / MARKER_DIR_NAME / CONFIG_NAME).is_file():
+            return base
+    return None
+
+
+def stale_pointer_notice(start: Path) -> str:
+    """The migration message for a residual pointer, or `""` when there is nothing to say."""
+    pointer = stale_pointer(start)
+    if pointer is None:
+        return ""
+    return (
+        f"⚠ {pointer} is no longer read (ADR-0069). Move its paths into the "
+        f"`{ROOTS_KEY}` key of <workspace root>/{MARKER_DIR_NAME}/{CONFIG_NAME} "
+        f"(comma-separated), then delete the file."
+    )
+
+
+def stale_pointer(start: Path) -> Path | None:
+    """A residual pre-ADR-0069 `kanban-roots.txt`, if one is still lying around."""
+    for base in [start, *start.parents]:
+        pointer = base / LEGACY_POINTER_NAME
+        if pointer.is_file():
+            return pointer
+    return None
+
+
+def first_heading(path: Path) -> str:
+    """First `# ` line of a markdown file — a journal entry's title, for the listing."""
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("# "):
+                    return line[2:].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def declared_kanbans(start: Path) -> list[Path]:
+    """Boards declared by this machine — env `KANBAN_ROOTS` > `kanban_roots_local` in the marker."""
+    env = os.environ.get(ROOTS_ENV)
+    if env:
+        roots = _parse_roots(env.split(os.pathsep), start)
+        if roots:
+            return [r / "_KANBAN" for r in roots]
+    root = workspace_root(start)
+    if root is None:
+        return []
+    raw = _read_config(root / MARKER_DIR_NAME / CONFIG_NAME).get(ROOTS_KEY, "")
+    return [r / "_KANBAN" for r in _parse_roots(raw.split(","), root)]
+
+
+def find_kanbans(start: Path) -> list[Path]:
+    """Every `_KANBAN/` this session may write to: the nearest one, plus any declared board."""
+    found: list[Path] = []
+    candidates = [start, *start.parents]
+    proj = os.environ.get("CLAUDE_PROJECT_DIR")
+    if proj:
+        p = Path(proj)
+        candidates = [p, *p.parents, *candidates]
+    for base in candidates:
+        kanban = base / "_KANBAN"
+        if kanban.is_dir():
+            found.append(kanban)
+            break
+    for kanban in declared_kanbans(start):
+        if kanban.is_dir() and kanban not in found:
+            found.append(kanban)
+    return found
+
+
+def inprogress_cards(kanban: Path) -> list[Path]:
+    """Every card currently in a chantier's `3-in-progress/` column."""
+    return sorted(kanban.glob("CHANTIER*/3-in-progress/*.md"))
+
+
+def _git(cwd: Path, *args: str) -> str | None:
+    """Run a git command in `cwd`; return stripped stdout, or None on any failure."""
+    try:
+        out = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            encoding="utf-8",
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip()
+
+
+def parse_changed(status: str) -> list[str]:
+    """Extract the changed paths from `git status --porcelain` output."""
+    out: list[str] = []
+    for line in status.splitlines():
+        parts = line.split(maxsplit=1)
+        if len(parts) == 2:
+            out.append(parts[1])
+    return out
+
+
+_REMOTE_SLUG_RE = re.compile(
+    r"^(?:git@|https://|http://)[^:/]+[:/](?P<slug>.+?)(?:\.git)?$"
+)
+
+
+def remote_slug(cwd: Path) -> str | None:
+    """`org/repo` from `git remote get-url origin`, host-agnostic (SSH or HTTPS, any forge).
+
+    A directory basename collides across orgs (two repos can share a name); the remote does not —
+    same identity kanban cards use for `repos:` (skill `kanban`). None when there is no `origin`
+    remote (a local-only repo) — the caller falls back to the directory name.
+    """
+    url = _git(cwd, "remote", "get-url", "origin")
+    if not url:
+        return None
+    m = _REMOTE_SLUG_RE.match(url)
+    return m.group("slug") if m else None
+
+
+def git_context(cwd: Path) -> dict | None:
+    """Mechanical state of the repo at `cwd`, or None when there is nothing worth recording."""
+    if _git(cwd, "rev-parse", "--is-inside-work-tree") != "true":
+        return None
+    status = _git(cwd, "status", "--porcelain")
+    if not status:  # clean tree → nothing to record
+        return None
+    branch = _git(cwd, "rev-parse", "--abbrev-ref", "HEAD") or "?"
+    changed = parse_changed(status)
+    log = _git(cwd, "log", "-3", "--format=%s") or ""
+    recent = [scrub(s) for s in log.splitlines() if s]
+    slug = remote_slug(cwd)
+    return {
+        "repo": slug or cwd.name,  # display value for the block — prefer the slug
+        "repo_name": cwd.name,
+        "repo_slug": slug,
+        "branch": branch,
+        "changed": changed,
+        "recent": recent,
+        "landmark": branch in {"main", "master"},
+    }
+
+
+# ── Card scope resolution — dual format during the board's YAML conversion ──
+_FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
+CARD_REPOS_RE = re.compile(r"^\*\*Repos?\s*:\*\*\s*(.+)$", re.MULTILINE)
+_BLOCK_REPO_RE = re.compile(
+    re.escape(BLOCK_START) + r".*?Repo / branch:\s*`([^`]+)`", re.DOTALL
+)
+
+
+def parse_frontmatter(text: str) -> dict[str, object] | None:
+    """Minimal YAML frontmatter reader for the card schema (skill `kanban`) — not a general YAML
+    parser. Handles flat `key: value` and `key: [a, b]` / `key: []` only, the two shapes the
+    schema uses. No nesting, no multi-line scalars — stdlib only, by design (this hook is
+    distributed standalone). Returns None when the text carries no `---`-delimited frontmatter."""
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return None
+    data: dict[str, object] = {}
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key, value = key.strip(), value.strip()
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            data[key] = [v.strip().strip("\"'") for v in inner.split(",") if v.strip()]
+        elif value in ("null", "~", ""):
+            data[key] = None
+        else:
+            data[key] = value.strip("\"'")
+    return data
+
+
+def card_repos(card_text: str) -> list[str] | None:
+    """Declared repo-scope for a card, as-is: YAML frontmatter `repos:` (org/repo slugs, skill
+    `kanban`) first, then the legacy `**Repos:**` line still found on cards not yet converted
+    (bare directory names). None means neither is declared. Orientation only — matching a specific
+    session's repo needs both identities, see card_accepts."""
+    fm = parse_frontmatter(card_text)
+    if fm is not None and "repos" in fm:
+        repos = fm["repos"]
+        return list(repos) if isinstance(repos, list) else [str(repos)]
+    declared = CARD_REPOS_RE.search(card_text)
+    if declared:
+        names = {t.strip("`").strip() for t in re.split(r"[,\s]+", declared.group(1))}
+        return sorted(names - {""})
+    return None
+
+
+def card_accepts(card_text: str, repo_name: str, repo_slug: str | None) -> bool:
+    """Whether this session's breadcrumb belongs on this card — the anti-cross-contamination filter.
+
+    A single Stop used to stamp the SAME block (the cwd repo's git state) into every in-progress
+    card of every chantier, clobbering unrelated breadcrumbs. Two repo identities are checked
+    because the board carries both card formats during its ongoing YAML conversion: a YAML
+    `repos:` declares `org/repo` slugs (matched against `repo_slug`, a bare name collides across
+    orgs) ; the legacy `**Repos:**` line declares bare directory names (matched against
+    `repo_name`). Precedence: a declared repo-scope wins in its own format (it also heals a block
+    inherited from a past contamination) ; else the existing block's own repo decides, checked
+    against either identity ; a card with neither never gets a blind block — a wrong breadcrumb is
+    worse than none.
+    """
+    fm = parse_frontmatter(card_text)
+    if fm is not None and "repos" in fm:
+        repos = fm["repos"]
+        repos = list(repos) if isinstance(repos, list) else [str(repos)]
+        return repo_slug is not None and repo_slug in repos
+    declared = CARD_REPOS_RE.search(card_text)
+    if declared:
+        names = {t.strip("`").strip() for t in re.split(r"[,\s]+", declared.group(1))}
+        return repo_name in (names - {""})
+    block = _BLOCK_REPO_RE.search(card_text)
+    if block:
+        return block.group(1) in {repo_name, repo_slug}
+    return False
+
+
+def build_block(ctx: dict) -> str:
+    """Render the managed auto-handoff block from the mechanical git context.
+
+    Deliberately carries NO timestamp: the block must be a pure function of git state so it only
+    rewrites when the state actually changes. Git and the narrative handoff own the "when".
+    """
+    files = ctx["changed"]
+    shown = ", ".join(files[:MAX_FILES])
+    if len(files) > MAX_FILES:
+        shown += f", … (+{len(files) - MAX_FILES})"
+    lines = [
+        BLOCK_START,
+        "## Handoff (auto)",
+        f"- Repo / branch: `{ctx['repo']}` @ `{ctx['branch']}`"
+        + ("  ⚑ develop→main landmark" if ctx["landmark"] else ""),
+        f"- Uncommitted ({len(files)}): {shown or '—'}",
+        "- Recent commits: " + (" · ".join(ctx["recent"]) if ctx["recent"] else "—"),
+        f"- _Auto block — {ANTI_SECRETS}. Narrative handoff above is the agent's job._",
+        BLOCK_END,
+    ]
+    return "\n".join(lines)
+
+
+def upsert_block(card_text: str, block: str) -> str:
+    """Replace the managed block in `card_text`, or append it when absent. Idempotent."""
+    pattern = re.compile(
+        re.escape(BLOCK_START) + r".*?" + re.escape(BLOCK_END), re.DOTALL
+    )
+    if pattern.search(card_text):
+        return pattern.sub(lambda _: block, card_text)
+    sep = "" if card_text.endswith("\n") else "\n"
+    return f"{card_text}{sep}\n{block}\n"
+
+
+def refresh_cards(cards: list[Path], ctx: dict) -> None:
+    """Upsert the auto block into the cards whose scope matches ctx's repo (see card_accepts)."""
+    block = build_block(ctx)
+    for card in cards:
+        try:
+            original = card.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if not card_accepts(original, ctx["repo_name"], ctx["repo_slug"]):
+            continue
+        updated = upsert_block(original, block)
+        if updated != original:  # only write on real change — no mtime churn
+            try:
+                card.write_text(updated, encoding="utf-8")
+            except OSError:
+                continue
+
+
+def main() -> int:
+    # `--list-kanbans` / `--list-chantiers` / `--list-agent-logs` : CLI modes for consumers that
+    # need the SAME board resolution as the hook — first among them the `/chantier` skill's
+    # auto-context. One binary to declare in `allowed-tools`, zero glob to quote, and the resolution
+    # (env > instance key > proximity) is tested once instead of reimplemented in shell.
+    notice = stale_pointer_notice(Path(os.getcwd()))
+    if notice:
+        print(notice, file=sys.stderr)
+
+    if "--list-kanbans" in sys.argv[1:]:
+        for kanban in find_kanbans(Path(os.getcwd())):
+            print(kanban)
+        return 0
+
+    if "--list-chantiers" in sys.argv[1:]:
+        if notice:
+            print(notice)
+        for kanban in find_kanbans(Path(os.getcwd())):
+            print(f"=== BOARD: {kanban}")
+            index = kanban / "INDEX.md"
+            if index.is_file():
+                print(index.read_text(encoding="utf-8").rstrip())
+            print("--- chantiers:")
+            for d in sorted(kanban.glob("CHANTIER*")):
+                if d.is_dir():
+                    print(d.name)
+            print()
+        return 0
+
+    if "--list-agent-logs" in sys.argv[1:]:
+        for kanban in find_kanbans(Path(os.getcwd())):
+            log_dir = kanban.parent / "_AGENT_LOG"
+            if not log_dir.is_dir():
+                continue
+            recent = sorted(
+                log_dir.glob("*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:MAX_AGENT_LOGS]
+            if not recent:
+                continue
+            print(f"=== ORG: {kanban.parent}")
+            for entry in recent:
+                print(f"{entry.name} — {first_heading(entry)}")
+            print()
+        return 0
+
+    event = read_event()
+    cwd = Path(event.get("cwd") or os.getcwd())
+    kanbans = find_kanbans(cwd)
+    if not kanbans:
+        return 0
+    cards = [c for k in kanbans for c in inprogress_cards(k)]
+    if not cards:
+        return 0
+    ctx = git_context(cwd)
+    if ctx is None:
+        return 0
+    refresh_cards(cards, ctx)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

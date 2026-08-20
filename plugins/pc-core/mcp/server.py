@@ -103,14 +103,11 @@ def adversarial(
             "~/.mistral_api_key file). Create the file with your key from console.mistral.ai."
         )
 
-    adversarial_task = (
-        "ADVERSARIAL MODE — this is the whole point of asking a second model. A same-model "
-        "self-check inherits its own blind spots; your job is to actively try to break the material "
-        "below, not to confirm it. Assume it is wrong until you have genuinely failed to find a "
-        "flaw. Do not soften findings, do not praise, and do not conclude approval as a default — "
-        "only do so if you tried hard to break it and could not. Prioritize wrong assumptions, edge "
-        "cases, and failure modes over style.\n\n" + task
-    )
+    # Shared methodology with the `reviewer` agent (`agents/reviewer.md`) — same review guidelines
+    # and output format regardless of which model reviews, its own "Adversarial mode" section
+    # always active here (this tool exists specifically for that stance).
+    methodology = model_adversarial.load_methodology()
+    adversarial_task = (methodology + "\n\n" if methodology else "") + task
     prompt = model_adversarial.build_prompt(adversarial_task, files)
     try:
         r = model_adversarial.call_mistral(api_key, resolved_model, prompt)

@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""Tests for plugins/pc-core/hooks/stop_handoff.py — run with:
+python3 -m unittest discover tests
+"""
+
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
+
+import stop_handoff as sh
+
+
+class TestParseFrontmatter(unittest.TestCase):
+    def test_flat_scalars(self):
+        text = "---\nstatus: in-progress\nmodel: sonnet\nsert: null\n---\nbody\n"
+        self.assertEqual(
+            sh.parse_frontmatter(text),
+            {"status": "in-progress", "model": "sonnet", "sert": None},
+        )
+
+    def test_list_value(self):
+        text = "---\nrepos: [pinky-bootstrap, pinky-agentic-plugins]\n---\n"
+        self.assertEqual(
+            sh.parse_frontmatter(text)["repos"],
+            ["pinky-bootstrap", "pinky-agentic-plugins"],
+        )
+
+    def test_empty_list(self):
+        text = "---\nrepos: []\n---\n"
+        self.assertEqual(sh.parse_frontmatter(text)["repos"], [])
+
+    def test_no_frontmatter_returns_none(self):
+        self.assertIsNone(
+            sh.parse_frontmatter("# just a heading\n\nno frontmatter here")
+        )
+
+    def test_comment_and_blank_lines_skipped(self):
+        text = "---\n# a comment\n\nstatus: todo\n---\n"
+        self.assertEqual(sh.parse_frontmatter(text), {"status": "todo"})
+
+
+class TestCardRepos(unittest.TestCase):
+    def test_yaml_repos(self):
+        text = "---\nrepos: [pinky-bootstrap]\n---\n"
+        self.assertEqual(sh.card_repos(text), ["pinky-bootstrap"])
+
+    def test_yaml_present_without_repos_key_falls_through_to_legacy(self):
+        text = "---\nstatus: todo\n---\n**Repos:** pinky-bootstrap\n"
+        self.assertEqual(sh.card_repos(text), ["pinky-bootstrap"])
+
+    def test_legacy_bold_line_no_frontmatter(self):
+        text = "# Card\n\n**Repos:** pinky-bootstrap, pinky-agentic-plugins\n"
+        self.assertEqual(
+            sh.card_repos(text), ["pinky-agentic-plugins", "pinky-bootstrap"]
+        )
+
+    def test_neither_declared_returns_none(self):
+        self.assertIsNone(sh.card_repos("# Card\n\nno scope declared\n"))
+
+
+class TestCardAccepts(unittest.TestCase):
+    def test_yaml_scope_matches_slug_not_bare_name(self):
+        text = "---\nrepos: [pinky-and-co/pinky-bootstrap]\n---\n"
+        self.assertTrue(
+            sh.card_accepts(text, "pinky-bootstrap", "pinky-and-co/pinky-bootstrap")
+        )
+        # bare name alone never matches a YAML-format card — slug is required
+        self.assertFalse(sh.card_accepts(text, "pinky-bootstrap", None))
+        self.assertFalse(
+            sh.card_accepts(text, "pinky-bootstrap", "other-org/pinky-bootstrap")
+        )
+
+    def test_legacy_scope_matches_bare_name(self):
+        text = "**Repos:** pinky-bootstrap\n"
+        self.assertTrue(
+            sh.card_accepts(text, "pinky-bootstrap", "pinky-and-co/pinky-bootstrap")
+        )
+        self.assertFalse(
+            sh.card_accepts(text, "other-repo", "pinky-and-co/pinky-bootstrap")
+        )
+
+    def test_falls_back_to_existing_block_repo_either_identity(self):
+        text = f"{sh.BLOCK_START}\nRepo / branch: `pinky-bootstrap` @ `main`\n{sh.BLOCK_END}\n"
+        self.assertTrue(sh.card_accepts(text, "pinky-bootstrap", None))
+        slug_text = f"{sh.BLOCK_START}\nRepo / branch: `pinky-and-co/pinky-bootstrap` @ `main`\n{sh.BLOCK_END}\n"
+        self.assertTrue(
+            sh.card_accepts(slug_text, "other-name", "pinky-and-co/pinky-bootstrap")
+        )
+        self.assertFalse(sh.card_accepts(text, "other-repo", None))
+
+    def test_no_scope_declared_never_accepts(self):
+        self.assertFalse(
+            sh.card_accepts("# Card\n\nnothing declared\n", "any-repo", "any/slug")
+        )
+
+
+class TestBuildBlock(unittest.TestCase):
+    def test_exact_output(self):
+        ctx = {
+            "repo": "pinky-bootstrap",
+            "branch": "main",
+            "changed": ["a.py", "b.py"],
+            "recent": ["fix: x", "feat: y"],
+            "landmark": True,
+        }
+        self.assertEqual(
+            sh.build_block(ctx),
+            "\n".join(
+                [
+                    sh.BLOCK_START,
+                    "## Handoff (auto)",
+                    "- Repo / branch: `pinky-bootstrap` @ `main`  ⚑ develop→main landmark",
+                    "- Uncommitted (2): a.py, b.py",
+                    "- Recent commits: fix: x · feat: y",
+                    f"- _Auto block — {sh.ANTI_SECRETS}. Narrative handoff above is the agent's job._",
+                    sh.BLOCK_END,
+                ]
+            ),
+        )
+
+    def test_truncates_beyond_max_files(self):
+        ctx = {
+            "repo": "r",
+            "branch": "b",
+            "changed": [f"f{i}.py" for i in range(sh.MAX_FILES + 3)],
+            "recent": [],
+            "landmark": False,
+        }
+        block = sh.build_block(ctx)
+        self.assertIn("(+3)", block)
+
+
+class TestUpsertBlock(unittest.TestCase):
+    def test_appends_when_absent(self):
+        result = sh.upsert_block("# Card\n\nbody\n", "BLOCKCONTENT")
+        self.assertTrue(result.endswith("BLOCKCONTENT\n"))
+        self.assertIn("body", result)
+
+    def test_replaces_existing_block_idempotently(self):
+        original = f"# Card\n\n{sh.BLOCK_START}\nold\n{sh.BLOCK_END}\n"
+        once = sh.upsert_block(original, f"{sh.BLOCK_START}\nnew\n{sh.BLOCK_END}")
+        twice = sh.upsert_block(once, f"{sh.BLOCK_START}\nnew\n{sh.BLOCK_END}")
+        self.assertEqual(once, twice)
+        self.assertIn("new", once)
+        self.assertNotIn("old", once)
+
+
+class TestParseChanged(unittest.TestCase):
+    def test_extracts_paths(self):
+        status = " M src/app.py\n?? new_file.py\n"
+        self.assertEqual(sh.parse_changed(status), ["src/app.py", "new_file.py"])
+
+    def test_rename_reduces_to_new_path(self):
+        status = "R  old.py -> new.py\n"
+        self.assertEqual(sh.parse_changed(status), ["old.py -> new.py"])
+
+
+class TestGitContext(unittest.TestCase):
+    def _init_repo(self, root: Path) -> None:
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+
+    def test_clean_tree_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root)
+            (root / "a.py").write_text("x = 1\n")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+            self.assertIsNone(sh.git_context(root))
+
+    def test_dirty_tree_returns_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root)
+            (root / "a.py").write_text("x = 1\n")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+            (root / "a.py").write_text("x = 2\n")
+            ctx = sh.git_context(root)
+            self.assertIsNotNone(ctx)
+            self.assertEqual(ctx["repo"], root.name)
+            self.assertIn("a.py", ctx["changed"])
+
+    def test_not_a_git_repo_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(sh.git_context(Path(tmp)))
+
+
+class TestRefreshCards(unittest.TestCase):
+    def test_writes_only_matching_card(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            matching = root / "match.md"
+            other = root / "other.md"
+            matching.write_text("---\nrepos: [org/pinky-bootstrap]\n---\n# Card\n")
+            other.write_text("---\nrepos: [org/pinky-agentic-plugins]\n---\n# Card\n")
+            ctx = {
+                "repo": "org/pinky-bootstrap",
+                "repo_name": "pinky-bootstrap",
+                "repo_slug": "org/pinky-bootstrap",
+                "branch": "main",
+                "changed": ["a.py"],
+                "recent": [],
+                "landmark": False,
+            }
+            sh.refresh_cards([matching, other], ctx)
+            self.assertIn(sh.BLOCK_START, matching.read_text())
+            self.assertNotIn(sh.BLOCK_START, other.read_text())
+
+    def test_idempotent_second_call_no_op(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            card = Path(tmp) / "card.md"
+            card.write_text("---\nrepos: [org/r]\n---\n# Card\n")
+            ctx = {
+                "repo": "org/r",
+                "repo_name": "r",
+                "repo_slug": "org/r",
+                "branch": "main",
+                "changed": [],
+                "recent": [],
+                "landmark": False,
+            }
+            sh.refresh_cards([card], ctx)
+            first = card.read_text()
+            sh.refresh_cards([card], ctx)
+            self.assertEqual(first, card.read_text())
+
+
+class TestRemoteSlug(unittest.TestCase):
+    def _repo_with_remote(self, root: Path, url: str) -> None:
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "remote", "add", "origin", url], cwd=root, check=True)
+
+    def test_https_remote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo_with_remote(
+                root, "https://github.com/pinky-and-co/pinky-bootstrap.git"
+            )
+            self.assertEqual(sh.remote_slug(root), "pinky-and-co/pinky-bootstrap")
+
+    def test_ssh_remote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._repo_with_remote(
+                root, "git@github.com:pinky-and-co/pinky-bootstrap.git"
+            )
+            self.assertEqual(sh.remote_slug(root), "pinky-and-co/pinky-bootstrap")
+
+    def test_no_remote_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            self.assertIsNone(sh.remote_slug(root))
+
+
+class TestSecretScrubImport(unittest.TestCase):
+    def test_scrub_is_imported_from_secret_patterns_not_redefined(self):
+        # stop_handoff.py must not carry its own copy — full coverage of the patterns
+        # themselves lives in test_secret_patterns.py.
+        import secret_patterns
+
+        self.assertIs(sh.scrub, secret_patterns.scrub)
+
+
+if __name__ == "__main__":
+    unittest.main()

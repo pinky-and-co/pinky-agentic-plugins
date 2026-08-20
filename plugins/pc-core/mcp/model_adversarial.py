@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -62,6 +63,28 @@ def resolve_api_key() -> str | None:
     if key_path.exists():
         return key_path.read_text(encoding="utf-8").strip()
     return None
+
+
+_METHODOLOGY_PATH = (
+    Path(__file__).parent.parent / "skills" / "review-guidelines" / "SKILL.md"
+)
+_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
+
+
+def load_methodology() -> str:
+    """The shared review methodology — the `review-guidelines` skill's body, frontmatter stripped.
+
+    Single source of truth for what "reviewed" means in this suite: the `reviewer` agent and this
+    tool both read the SAME skill (neither depends on the other — a skill file is neutral ground,
+    same reasoning as `policy_lib.py` sitting between two hook concerns), so a finding looks the
+    same regardless of which model produced it. Empty string if the file is missing rather than
+    raising — a caller with no methodology loaded still gets a review, just an unstructured one.
+    """
+    try:
+        text = _METHODOLOGY_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return _FRONTMATTER_RE.sub("", text, count=1).strip()
 
 
 def build_prompt(task: str, files: list[str]) -> str:
