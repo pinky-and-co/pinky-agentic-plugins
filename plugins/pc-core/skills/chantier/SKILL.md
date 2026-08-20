@@ -55,6 +55,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
    - Card's `model:` is a stronger model than the session's current one → say so *before* starting
      ("card = `opus`, session = `<current>` → switch before working"). Never start then mention it.
    - Session already at or above the card's `model:` → nothing to say, proceed.
+   - Card's `model: opus` (the top floor) → call the `advisor` tool once, at framing, before
+     writing anything — a second, stronger read on the plan while it still costs nothing to
+     change. Cadrage stays in the session (interactivity is the point, ADR-0004); `advisor` adds a
+     second opinion without taking that away, the same role it already plays in this workspace's
+     own arbitration calls.
 
    `/chantier` sets the scope and the goal, never the execution strategy — that judgment call is
    made once work starts, not here. No generic "run this on haiku" mechanism exists on purpose:
