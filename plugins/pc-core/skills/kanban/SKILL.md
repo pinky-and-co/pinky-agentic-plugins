@@ -32,7 +32,7 @@ handoff); frontmatter carries only what a script or a hook needs to resolve with
 ---
 status: idea | todo | selected | in-progress | done
 date: YYYY-MM-DD       # meaning is implied by status — see table below
-repos: []              # org/repo slugs (from git remote), e.g. [pinky-and-co/pinky-bootstrap]; [] or omitted = kanban-only
+repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
 blocked_by: <card-slug> | null         # a hard dependency, never a mere ordering preference
@@ -59,16 +59,17 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
   overrides outlier checklist items inline (`- [ ] (opus) arbitrate the placement`).
 
 - **`repos`** — the repo-scope a session needs for this card, as `org/repo` slugs derived from each
-  repo's `git remote get-url origin` — never a bare directory name. A name collides across orgs
-  (`kanban.md` § Orgs already flagged this for org identification); the remote does not. Normalize
-  with `sed -E 's#^(git@|https://|http://)[^:/]+[:/]##; s#\.git$##'` — covers SSH and HTTPS on any
-  forge, host-agnostic. `/chantier`, on taking the card into `3-in-progress`, resolves each slug to
-  an absolute path (`skills/chantier/scripts/resolve_repos.sh`, bounded `find` for `.git` + remote
-  match — 0 or >1 candidates is reported, never guessed) and calls `permission-change freeze` with
-  the results — write access is confined to these repos for the session's duration, PLUS every
-  kanban board root (`stop_handoff.py --list-kanbans`, itself multi-board aware) so the session can
-  still maintain cards/handoffs while frozen (see ADR-0004, `pinky-bootstrap`: write-only,
-  deliberately not a read restriction). `[]`/omitted → kanban-only work, no repo touched.
+  repo's `git remote get-url origin` — never a bare directory name. A name collides across orgs (see
+  § Orgs below); the remote does not. Normalize with
+  `sed -E 's#^(git@|https://|http://)[^:/]+[:/]##; s#\.git$##'` — covers SSH and HTTPS on any forge,
+  host-agnostic. `/chantier`, on taking the card into `3-in-progress`, resolves each slug to an
+  absolute path (`skills/chantier/scripts/resolve_repos.sh`, bounded `find` for `.git` + remote match
+  — 0 or >1 candidates is reported, never guessed) and calls `permission-change freeze` with the
+  results — write access is confined to these repos for the session's duration, PLUS every kanban
+  board root (`stop_handoff.py --list-kanbans`, itself multi-board aware) so the session can still
+  maintain cards/handoffs while frozen — deliberately write-only, never a read restriction (an
+  installer tracking its own architecture decisions may want to record why). `[]`/omitted →
+  kanban-only work, no repo touched.
 
 - **`sert`** — what this card serves, a card slug (filename without `.md`) or `null`. Mandatory
   from `idea` onward. `null` marks an autonomous root — the objective itself, not a step toward one.
@@ -79,6 +80,19 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
 - **`blocked_by`** — a hard dependency only, never a preference. Position inside
   `2-selected-for-dev` already carries ordering preference; conflating the two loses the distinction
   between "blocked" and "not yet prioritized".
+
+## Handoff — two layers
+
+- **Narrative (yours).** Prose in the in-progress card — state, decisions, next step. Your job, and
+  the part that matters.
+- **Auto block (the `Stop`/`SessionEnd` hook).** `stop_handoff.py` maintains a managed
+  `<!-- auto-handoff:start … end -->` block at the bottom of in-progress cards whose `repos:` (or
+  legacy `**Repos:**`) matches the session's repo, with the mechanical state (branch, uncommitted
+  files, recent commits) whenever a turn ends with a dirty git tree. Non-blocking and idempotent —
+  **never hand-edit between the markers**, it gets overwritten on the next run.
+- **Anti-secrets, both layers.** The hook scrubs secret-shaped strings from what it writes; the
+  narrative must follow the same directive — never put secrets, credentials or internal URLs in a
+  handoff, in either layer.
 
 ## `/goal`, posed from the root of a `sert` group
 
@@ -97,19 +111,18 @@ output in the transcript fools it exactly the way an unverified sub-agent report
 
 ### Reviewing before declaring `Fini =` met
 
-The reviewer must not be the generator — a same-model self-check inherits its own blind spots,
-and agreement among voices of one model is not proof of correctness (the exact reason
-`council-tech`'s chairman-bis exists). Whenever a card's work needs real judgment reviewed, not
-just a mechanical check, prefer in this order — **never `haiku`, whatever tier is available**:
+The reviewer must not be the generator — a same-model self-check inherits its own blind spots, and
+agreement among several voices of the same model is not proof of correctness either, only a
+correlated blind spot repeated. Whenever a card's work needs real judgment reviewed, not just a
+mechanical check, prefer in this order — **never `haiku`, whatever tier is available**:
 
 1. **`adversarial` MCP tool** (`pc-core`, native, no spawn) — a genuinely different model family
    (Mistral-served, `mistral-medium-3.5` today), not just a cheaper same-vendor tier. The real
    change of perspective, not a cost optimization.
-2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent
-   (`plugins/pc-core/agents/reviewer.md`, review persona adapted from the `feature-dev` plugin's
-   `code-reviewer`, `docs/ATTRIBUTIONS-WIP.md`), no external plugin dependency. Same vendor as the
-   generator, but a fresh context that never saw the generating session's own rationalizations —
-   `model: sonnet` in its own definition, a real floor.
+2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
+   reviewer.md`), preloads the `review-guidelines` skill, no external plugin dependency. Same
+   vendor as the generator, but a fresh context that never saw the generating session's own
+   rationalizations — `model: sonnet` in its own definition, a real floor.
 3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
    model, same context) rather than presenting it as equivalent to (1) or (2).
 
@@ -118,6 +131,24 @@ just a mechanical check, prefer in this order — **never `haiku`, whatever tier
 `/chantier` groups queued cards by `sert` in its report — one group per root, cards with `sert: null`
 elsewhere folded into a single "N autonomous cards" count. Never hand-maintain a critical-path list
 on a parent card; if the render is wrong, a child's `sert` value is wrong, fix the child.
+
+## Orgs — a board can span more than one
+
+Nothing here requires it, but the mechanism does not assume a single board either: a session can
+mount more than one `_KANBAN/` root (`--list-kanbans` below), each optionally paired with its own
+`_AGENT_LOG/` and knowledge corpus. How repos are laid out inside the workspace is a separate,
+subjective choice per installer — this mechanism makes no claim about it either way.
+
+**Wherever one of these roots sits on a drive shared with other people, it is a replication
+boundary** — everything inside it lands on every machine that mounts it. **No secret goes anywhere
+inside a shared root**; secrets stay outside (local-only / `.env`). Wherever this applies at all, it
+is not negotiable by convenience.
+
+`stop_handoff.py --list-kanbans` is what actually finds every board a session may write to — the
+nearest one, plus any additional root a machine-local config declares. Treat that config's exact
+shape as an implementation detail, not something to encode here: it is expected to change (e.g. to
+read multi-root editor config instead of a bespoke file) without altering anything else in this
+skill.
 
 ## Cross-agent log
 
