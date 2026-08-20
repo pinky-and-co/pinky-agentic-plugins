@@ -70,9 +70,6 @@ def read_event() -> dict:
 # ── Declared boards — read from the nearest *.code-workspace's folders[] ─────
 CODE_WORKSPACE_GLOB = "*.code-workspace"
 ROOTS_ENV = "KANBAN_ROOTS"
-# Residual files from the two now-dead instance-config generations. Never read — only reported,
-# loudly (see stale_pointer).
-LEGACY_POINTER_NAMES = ("kanban-roots.txt", ".pinky/config.txt")
 
 
 def _parse_roots(raw: list[str], base: Path) -> list[Path]:
@@ -93,27 +90,6 @@ def _nearest_code_workspace(start: Path) -> Path | None:
         matches = [p for p in base.glob(CODE_WORKSPACE_GLOB) if p.is_file()]
         if matches:
             return matches[0]
-    return None
-
-
-def stale_pointer_notice(start: Path) -> str:
-    """The migration message for a residual pointer, or `""` when there is nothing to say."""
-    pointer = stale_pointer(start)
-    if pointer is None:
-        return ""
-    return (
-        f"⚠ {pointer} is no longer read. Declare its paths as `folders[]` entries in this "
-        f"machine's `*.code-workspace` file instead, then delete it."
-    )
-
-
-def stale_pointer(start: Path) -> Path | None:
-    """A residual pointer from either dead instance-config generation, if still lying around."""
-    for base in [start, *start.parents]:
-        for name in LEGACY_POINTER_NAMES:
-            pointer = base / name
-            if pointer.is_file():
-                return pointer
     return None
 
 
@@ -431,19 +407,13 @@ def main() -> int:
     # `--list-kanbans` / `--list-chantiers` / `--list-agent-logs` : CLI modes for consumers that
     # need the SAME board resolution as the hook — first among them the `/chantier` skill's
     # auto-context. One binary to declare in `allowed-tools`, zero glob to quote, and the resolution
-    # (env > instance key > proximity) is tested once instead of reimplemented in shell.
-    notice = stale_pointer_notice(Path(os.getcwd()))
-    if notice:
-        print(notice, file=sys.stderr)
-
+    # (env > *.code-workspace folders[] > proximity) is tested once instead of reimplemented in shell.
     if "--list-kanbans" in sys.argv[1:]:
         for kanban in find_kanbans(Path(os.getcwd())):
             print(kanban)
         return 0
 
     if "--list-chantiers" in sys.argv[1:]:
-        if notice:
-            print(notice)
         for kanban in find_kanbans(Path(os.getcwd())):
             print(f"=== BOARD: {kanban}")
             index = kanban / "INDEX.md"
