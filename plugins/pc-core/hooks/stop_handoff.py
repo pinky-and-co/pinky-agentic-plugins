@@ -67,13 +67,12 @@ def read_event() -> dict:
         return {}
 
 
-# ── Declared boards — read from the ONE instance config file (ADR-0069) ──────
-MARKER_DIR_NAME = ".pinky"
-CONFIG_NAME = "config.txt"
-ROOTS_KEY = "kanban_roots_local"
+# ── Declared boards — read from the nearest *.code-workspace's folders[] ─────
+CODE_WORKSPACE_GLOB = "*.code-workspace"
 ROOTS_ENV = "KANBAN_ROOTS"
-# Residual file from before ADR-0069. Never read — only reported, loudly (see stale_pointer).
-LEGACY_POINTER_NAME = "kanban-roots.txt"
+# Residual files from the two now-dead instance-config generations. Never read — only reported,
+# loudly (see stale_pointer).
+LEGACY_POINTER_NAMES = ("kanban-roots.txt", ".pinky/config.txt")
 
 
 def _parse_roots(raw: list[str], base: Path) -> list[Path]:
@@ -88,28 +87,12 @@ def _parse_roots(raw: list[str], base: Path) -> list[Path]:
     return roots
 
 
-def _read_config(path: Path) -> dict[str, str]:
-    """Parse `key = value` lines; skip blanks and `#` comments. A missing file is not an error."""
-    values: dict[str, str] = {}
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return values
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, sep, value = line.partition("=")
-        if sep:
-            values[key.strip()] = value.strip()
-    return values
-
-
-def workspace_root(start: Path) -> Path | None:
-    """Nearest directory above `start` carrying a `.pinky/config.txt` marker, or None."""
+def _nearest_code_workspace(start: Path) -> Path | None:
+    """Nearest `*.code-workspace` FILE above `start`, or None."""
     for base in [start, *start.parents]:
-        if (base / MARKER_DIR_NAME / CONFIG_NAME).is_file():
-            return base
+        matches = [p for p in base.glob(CODE_WORKSPACE_GLOB) if p.is_file()]
+        if matches:
+            return matches[0]
     return None
 
 
@@ -119,18 +102,18 @@ def stale_pointer_notice(start: Path) -> str:
     if pointer is None:
         return ""
     return (
-        f"⚠ {pointer} is no longer read (ADR-0069). Move its paths into the "
-        f"`{ROOTS_KEY}` key of <workspace root>/{MARKER_DIR_NAME}/{CONFIG_NAME} "
-        f"(comma-separated), then delete the file."
+        f"⚠ {pointer} is no longer read. Declare its paths as `folders[]` entries in this "
+        f"machine's `*.code-workspace` file instead, then delete it."
     )
 
 
 def stale_pointer(start: Path) -> Path | None:
-    """A residual pre-ADR-0069 `kanban-roots.txt`, if one is still lying around."""
+    """A residual pointer from either dead instance-config generation, if still lying around."""
     for base in [start, *start.parents]:
-        pointer = base / LEGACY_POINTER_NAME
-        if pointer.is_file():
-            return pointer
+        for name in LEGACY_POINTER_NAMES:
+            pointer = base / name
+            if pointer.is_file():
+                return pointer
     return None
 
 
@@ -147,17 +130,33 @@ def first_heading(path: Path) -> str:
 
 
 def declared_kanbans(start: Path) -> list[Path]:
-    """Boards declared by this machine — env `KANBAN_ROOTS` > `kanban_roots_local` in the marker."""
+    """Boards declared by this machine — env `KANBAN_ROOTS` > every `folders[]` entry of the
+    nearest `*.code-workspace` above `start`. The VSCode multi-root convention already declares
+    this N-mount for its own reasons (an interpreter per repo) — nothing pinky-specific to keep."""
     env = os.environ.get(ROOTS_ENV)
     if env:
         roots = _parse_roots(env.split(os.pathsep), start)
         if roots:
             return [r / "_KANBAN" for r in roots]
-    root = workspace_root(start)
-    if root is None:
+    workspace_file = _nearest_code_workspace(start)
+    if workspace_file is None:
         return []
-    raw = _read_config(root / MARKER_DIR_NAME / CONFIG_NAME).get(ROOTS_KEY, "")
-    return [r / "_KANBAN" for r in _parse_roots(raw.split(","), root)]
+    try:
+        data = json.loads(workspace_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    folders = data.get("folders") if isinstance(data, dict) else None
+    if not isinstance(folders, list):
+        return []
+    base = workspace_file.parent
+    roots = []
+    for entry in folders:
+        raw = entry.get("path") if isinstance(entry, dict) else None
+        if not isinstance(raw, str):
+            continue
+        p = Path(raw).expanduser()
+        roots.append(p if p.is_absolute() else (base / p).resolve())
+    return [r / "_KANBAN" for r in roots]
 
 
 def find_kanbans(start: Path) -> list[Path]:

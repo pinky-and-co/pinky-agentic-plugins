@@ -3,10 +3,13 @@
 python3 -m unittest discover tests
 """
 
+import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
@@ -267,6 +270,79 @@ class TestSecretScrubImport(unittest.TestCase):
         import secret_patterns
 
         self.assertIs(sh.scrub, secret_patterns.scrub)
+
+
+class TestDeclaredKanbans(unittest.TestCase):
+    """Boards declared via `folders[]` of the nearest `*.code-workspace` — replaces the dead
+    `.pinky/config.txt` `kanban_roots_local` key (that file no longer exists at all)."""
+
+    def test_folders_of_the_nearest_code_workspace_are_declared(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pinky.code-workspace").write_text(
+                json.dumps({"folders": [{"path": "."}, {"path": "../shared"}]}),
+                encoding="utf-8",
+            )
+            deep = root / "pinky-core" / "src"
+            deep.mkdir(parents=True)
+
+            self.assertEqual(
+                sh.declared_kanbans(deep),
+                [
+                    root.resolve() / "_KANBAN",
+                    (root / "../shared").resolve() / "_KANBAN",
+                ],
+            )
+
+    def test_absolute_folder_path_used_as_is(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ws"
+            root.mkdir()
+            shared = Path(tmp) / "elsewhere" / "shared"
+            shared.mkdir(parents=True)
+            (root / "x.code-workspace").write_text(
+                json.dumps({"folders": [{"path": str(shared)}]}), encoding="utf-8"
+            )
+
+            self.assertEqual(sh.declared_kanbans(root), [shared / "_KANBAN"])
+
+    def test_no_code_workspace_found_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(sh.declared_kanbans(Path(tmp)), [])
+
+    def test_env_wins_over_a_declared_code_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "x.code-workspace").write_text(
+                json.dumps({"folders": [{"path": "."}]}), encoding="utf-8"
+            )
+            other = root / "other"
+            other.mkdir()
+            with unittest.mock.patch.dict(os.environ, {sh.ROOTS_ENV: str(other)}):
+                self.assertEqual(sh.declared_kanbans(root), [other / "_KANBAN"])
+
+
+class TestStalePointer(unittest.TestCase):
+    def test_detects_legacy_kanban_roots_txt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "kanban-roots.txt").write_text("x", encoding="utf-8")
+
+            self.assertEqual(sh.stale_pointer(root), root / "kanban-roots.txt")
+            self.assertIn("*.code-workspace", sh.stale_pointer_notice(root))
+
+    def test_detects_dead_dot_pinky_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".pinky").mkdir()
+            (root / ".pinky" / "config.txt").write_text("x", encoding="utf-8")
+
+            self.assertEqual(sh.stale_pointer(root), root / ".pinky" / "config.txt")
+
+    def test_nothing_lying_around_is_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(sh.stale_pointer(Path(tmp)))
+            self.assertEqual(sh.stale_pointer_notice(Path(tmp)), "")
 
 
 if __name__ == "__main__":

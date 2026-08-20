@@ -154,9 +154,10 @@ skill.
 
 `_AGENT_LOG/` (next to `_KANBAN/`) is the async narrative channel between sessions/agents sharing an
 org — what a session did, cross-chantier, that no single card's handoff would hold. One file per
-`(date, agent)`, append-only, filename `YYYY-MM-DD_<agent-identity>.md`. Read the recent entries at
-session start alongside the board; write into the org whose board carries the chantier worked on.
-Never log secrets, credentials or internal URLs.
+`(date, agent)`, append-only, filename `YYYY-MM-DD_<agent-identity>.md` — `<agent-identity>` is
+`git config user.name` (already declared for real reasons, no separate value to maintain). Read the
+recent entries at session start alongside the board; write into the org whose board carries the
+chantier worked on. Never log secrets, credentials or internal URLs.
 
 ## Boundaries
 
