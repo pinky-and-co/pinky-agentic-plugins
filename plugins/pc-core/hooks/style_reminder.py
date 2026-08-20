@@ -25,8 +25,6 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-BUILTIN_STYLES = {"", "default", "Proactive", "Explanatory", "Learning"}
-
 
 def active_style() -> str:
     """The `outputStyle` value from `~/.claude/settings.json`, or "" if unset/unreadable."""
@@ -42,12 +40,36 @@ def active_style() -> str:
         return ""
 
 
+def custom_style_names() -> frozenset[str]:
+    """Every `name:` frontmatter value found under `~/.claude/output-styles/*.md`.
+
+    A built-in style (Concise, Proactive, ...) has no file here — Claude Code ships its own
+    per-turn reminder for those. Only a name matching a file in this directory is ours to remind.
+    """
+    styles_dir = (
+        Path(os.environ.get("CLAUDE_DIR", Path.home() / ".claude")) / "output-styles"
+    )
+    names: set[str] = set()
+    for path in styles_dir.glob("*.md") if styles_dir.is_dir() else ():
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("name:"):
+                    names.add(line.split(":", 1)[1].strip())
+                    break
+        except OSError:
+            continue
+    return frozenset(names)
+
+
 def reminder() -> str | None:
     """The reminder line for the active custom style, or None if built-in/unset."""
     style = active_style()
-    if style in BUILTIN_STYLES:
+    if not style or style not in custom_style_names():
         return None
-    return f"{style} output style is active. Remember to follow the specific guidelines for this style."
+    return (
+        f"{style} output style is active. "
+        "Remember to follow the specific guidelines for this style."
+    )
 
 
 def run_hook() -> int:
