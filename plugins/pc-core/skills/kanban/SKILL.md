@@ -158,11 +158,6 @@ org — what a session did, cross-chantier, that no single card's handoff would 
 session start alongside the board; write into the org whose board carries the chantier worked on.
 Never log secrets, credentials or internal URLs.
 
-Not the only thing in `_AGENT_LOG/` — a Cortex (Snowsight) session writes a per-session **transfer
-manifest** there instead (`YYYYMMDD_HHMISS_CORTEX_SESSION.md`): the file list for the user to
-download, plus card moves Cortex cannot perform itself. The per-(date, agent) rule above does not
-apply to it — the two artefacts coexist, not variants of each other.
-
 ## Boundaries
 
 - Durable facts (user profile, conventions, contract constraints) live in the agent's persistent
