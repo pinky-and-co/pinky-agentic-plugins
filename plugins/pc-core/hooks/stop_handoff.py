@@ -129,6 +129,48 @@ def first_heading(path: Path) -> str:
     return ""
 
 
+def _strip_jsonc_comments(text: str) -> str:
+    """Strip `//` and `/* */` comments from JSONC, respecting string literals.
+
+    `*.code-workspace` is JSONC (VSCode's own format), not strict JSON — real files carry `//`
+    banners (path warnings, mount-point rationale) that `json.loads` chokes on. A regex would strip
+    a `//` inside a Windows path string; this walks the text char-by-char instead.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_string = False
+    while i < n:
+        c = text[i]
+        if in_string:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def declared_kanbans(start: Path) -> list[Path]:
     """Boards declared by this machine — env `KANBAN_ROOTS` > every `folders[]` entry of the
     nearest `*.code-workspace` above `start`. The VSCode multi-root convention already declares
@@ -142,7 +184,8 @@ def declared_kanbans(start: Path) -> list[Path]:
     if workspace_file is None:
         return []
     try:
-        data = json.loads(workspace_file.read_text(encoding="utf-8"))
+        raw_text = _strip_jsonc_comments(workspace_file.read_text(encoding="utf-8"))
+        data = json.loads(raw_text)
     except (OSError, json.JSONDecodeError):
         return []
     folders = data.get("folders") if isinstance(data, dict) else None

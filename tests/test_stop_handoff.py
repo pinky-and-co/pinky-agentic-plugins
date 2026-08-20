@@ -306,6 +306,41 @@ class TestDeclaredKanbans(unittest.TestCase):
 
             self.assertEqual(sh.declared_kanbans(root), [shared / "_KANBAN"])
 
+    def test_real_code_workspace_files_are_jsonc_not_strict_json(self):
+        # A real *.code-workspace carries `//` banner comments (path warnings, mount rationale) —
+        # json.loads alone would raise, get caught, and silently return []. Found live 2026-08-20
+        # against the author's own pinky.code-workspace: 0 boards instead of 2.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shared = root / "shared"
+            shared.mkdir()
+            (root / "x.code-workspace").write_text(
+                "// a warning about paths: not http://example.test either\n"
+                "/* block\n   comment */\n"
+                "{\n"
+                '  "folders": [\n'
+                '    { "name": "root", "path": "." }, // trailing note\n'
+                f'    {{ "name": "shared", "path": {json.dumps(str(shared))} }}\n'
+                "  ]\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                sh.declared_kanbans(root),
+                [root.resolve() / "_KANBAN", shared / "_KANBAN"],
+            )
+
+    def test_a_slash_slash_inside_a_string_is_not_stripped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "x.code-workspace").write_text(
+                '{"folders": [{"name": "http://example.test", "path": "."}]}',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(sh.declared_kanbans(root), [root.resolve() / "_KANBAN"])
+
     def test_no_code_workspace_found_returns_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(sh.declared_kanbans(Path(tmp)), [])
