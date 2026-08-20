@@ -1,5 +1,5 @@
 # ATTRIBUTIONS — running ledger (WIP)
-*Update date : 2026-08-19 21:35*
+*Update date : 2026-08-20 15:26*
 
 > **Why this file exists.** A NOTICE/CREDITS rebuilt at the end (archaeology) loses attributions.
 > So we log every external source **as we draw on it**, here, all along the repo's life. A future
