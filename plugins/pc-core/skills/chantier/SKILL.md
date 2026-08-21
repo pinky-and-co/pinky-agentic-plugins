@@ -89,7 +89,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
      ```bash
      python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" --root <workspace-root> freeze <resolved-repo-paths...> <kanban-board-roots...>
      ```
-     This is write-scope only — reading outside the list stays open (ADR-0004, `pinky-bootstrap`).
    - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `Fini =` line;
      `sert: <parent>` → walk up to the root card (`sert: null`) this chain ultimately serves, and use
      **its** `Fini =` line instead — the session may then work any card in that group, not just this
