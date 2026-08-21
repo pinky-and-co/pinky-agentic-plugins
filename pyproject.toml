@@ -11,6 +11,7 @@ name = "pinky-agentic-plugins"
 # — same reason it isn't a src/ layout: scripts/hooks/ and plugins/*/hooks/ are read by path at
 # runtime, not imported as a package, same as pinky-workspace's core/ and providers/).
 version = "0.1.0"
+description = "Public Claude Code plugin marketplace — generic, reusable workspace mechanics (git workflow, policy injection, permission guards)."
 requires-python = ">=3.12"
 authors = [{ name = "Pinky & Co" }]
 

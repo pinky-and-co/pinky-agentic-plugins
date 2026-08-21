@@ -455,7 +455,10 @@ def render_readme_why(identity: SuiteIdentity) -> str:
     if not identity.pitch_paragraphs and not identity.pitch_pills:
         # Rien à dire : on rend les marqueurs vides plutôt qu'un titre suivi de blanc. Les marqueurs
         # restent pour que l'injection soit idempotente et qu'un pitch ajouté plus tard atterrisse.
-        return f"{README_WHY_MARK_START}\n{README_WHY_MARK_END}"
+        # La ligne blanche entre les deux n'est pas cosmétique : sans elle, mdformat en ajoute une à
+        # chaque commit et generate-docs la retire à chaque fois — boucle qui bloque `git commit`
+        # indéfiniment sur tout repo dont l'identité de groupe n'a pas encore de pitch.
+        return f"{README_WHY_MARK_START}\n\n{README_WHY_MARK_END}"
     parts = ["\n\n".join(identity.pitch_paragraphs)]
     if identity.pitch_pills:
         parts.append(f"**{' · '.join(identity.pitch_pills)}**")
