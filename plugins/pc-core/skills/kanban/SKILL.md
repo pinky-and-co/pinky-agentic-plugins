@@ -132,6 +132,12 @@ mechanical check, prefer in this order — **never `haiku`, whatever tier is ava
 elsewhere folded into a single "N autonomous cards" count. Never hand-maintain a critical-path list
 on a parent card; if the render is wrong, a child's `sert` value is wrong, fix the child.
 
+## DRY across cards
+
+A card that names another card links by path and stops — never restates its status, findings, or
+design. When substantially editing a card, reduce any other card's pointer to it down to a bare
+link, in the same edit.
+
 ## Orgs — a board can span more than one
 
 Nothing here requires it, but the mechanism does not assume a single board either: a session can

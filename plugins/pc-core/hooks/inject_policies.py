@@ -132,7 +132,7 @@ def main() -> None:
                 "Language policy for this artefact — " + "; ".join(parts) + "."
             )
 
-    if branch_workflow_relevant and "branch_workflow" in policies:
+    if branch_workflow_relevant and policies.get("branch_workflow"):
         lines.append(f"Branch workflow: {policies['branch_workflow']}.")
 
     if not lines:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Repo-local doc rendering: README sections (badges/tagline/documentation/license) + docs/index.md.
 
-Standalone module — stdlib only, no dependency on the workspace or the profile/corpus machinery.
+Standalone module — stdlib only, no dependency on the workspace's distribution machinery.
 Distributed as-is into every repo's scripts/hooks/ (always-on, like generate_ci_badges.py) so the
 `generate-docs` hook can regenerate at commit time without the full pinky-workspace checkout.
 `pinky-workspace/setup.py` imports this same module (CORE_HOOKS_DIR on sys.path) so the two never
@@ -9,8 +9,9 @@ duplicate the render logic — see the `generate-docs-hook` kanban card.
 
 Instance identity (suite header image, suite line, GitHub org, pitch manifesto/pills) is NOT
 hardcoded here — this module is the generic, shippable engine (`core/`). It is loaded from a
-repo-local `docs_identity.json` (distributed by setup.py from the active profile's `docs_identity`
-block), so `core/` carries no `pinky` literal and the engine stays instance-agnostic (de-leak,
+repo-local `docs_identity.json` (distributed by setup.py, sourced from the repo's group config —
+see `_group_docs_identity`), so `core/` carries no `pinky` literal and the engine stays
+instance-agnostic (de-leak,
 2026-07-10). This includes the '## Why <suite>?' pitch section (2026-07-11): the manifesto/pills text used to be read live from pinky-studio's landing page HTML at
 distribution time, a cross-repo dependency a per-repo hook can't reach reliably — that was the
 ONLY identity field not already sourced from docs_identity.json. It now joins the others there
@@ -50,9 +51,10 @@ README_WHY_MARK_END = "<!-- pinky:readme-why:end -->"
 @dataclass(frozen=True)
 class SuiteIdentity:
     """Instance identity injected into generated docs — deliberately NOT hardcoded in this module
-    (the generic, shippable engine). Resolved from the active profile's `docs_identity` block and
-    distributed per-repo as `scripts/hooks/docs_identity.json` by setup.py, so the commit-time hook
-    has it locally without reaching the workspace. Keeps `core/` free of any suite/instance literal.
+    (the generic, shippable engine). Resolved from the repo's group `docs_identity.json` (see
+    `_group_docs_identity`) and distributed per-repo as `scripts/hooks/docs_identity.json` by
+    setup.py, so the commit-time hook has it locally without reaching the workspace. Keeps `core/`
+    free of any suite/instance literal.
     """
 
     header_image_url: str  # hosted suite header image (icon + wordmark lockup)
@@ -125,9 +127,7 @@ def _load_identity() -> SuiteIdentity:
     fallback to some hardcoded default (there is none here, by design — that is the de-leak)."""
     path = Path(__file__).with_name("docs_identity.json")
     if not path.exists():
-        sys.exit(
-            f"✗ {path} missing — run setup.py to distribute docs_identity from the profile"
-        )
+        sys.exit(f"✗ {path} missing — run setup.py to distribute docs_identity")
     return SuiteIdentity.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
 
@@ -455,7 +455,10 @@ def render_readme_why(identity: SuiteIdentity) -> str:
     if not identity.pitch_paragraphs and not identity.pitch_pills:
         # Rien à dire : on rend les marqueurs vides plutôt qu'un titre suivi de blanc. Les marqueurs
         # restent pour que l'injection soit idempotente et qu'un pitch ajouté plus tard atterrisse.
-        return f"{README_WHY_MARK_START}\n{README_WHY_MARK_END}"
+        # La ligne blanche entre les deux n'est pas cosmétique : sans elle, mdformat en ajoute une à
+        # chaque commit et generate-docs la retire à chaque fois — boucle qui bloque `git commit`
+        # indéfiniment sur tout repo dont l'identité de groupe n'a pas encore de pitch.
+        return f"{README_WHY_MARK_START}\n\n{README_WHY_MARK_END}"
     parts = ["\n\n".join(identity.pitch_paragraphs)]
     if identity.pitch_pills:
         parts.append(f"**{' · '.join(identity.pitch_pills)}**")

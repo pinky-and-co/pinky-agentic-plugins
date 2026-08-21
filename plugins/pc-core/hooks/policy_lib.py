@@ -36,11 +36,28 @@ def resolve_repo_root(project_dir: str, file_path: str | None) -> Path:
 
 
 def load_policies(repo_root: Path) -> dict | None:
-    """Load `.claude/policies.json` from `repo_root`, or None if absent/unreadable."""
-    policies_path = repo_root / ".claude" / "policies.json"
-    if not policies_path.is_file():
-        return None
-    try:
-        return json.loads(policies_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
+    """Merge `.claude/policies.json` from `repo_root` up through every parent directory to the
+    filesystem root — the same walk-up Claude Code itself already does for `CLAUDE.md`. Closest
+    wins per key: a key `repo_root` declares is never overridden by an ancestor; a key `repo_root`
+    omits falls back to the nearest ancestor that declares it. No key is exempt — a per-key
+    special case is complexity nothing has asked for. Returns None only if no `.claude/
+    policies.json` exists anywhere in the chain (never an empty dict for "found but empty").
+    """
+    merged: dict = {}
+    found = False
+    current = repo_root
+    while True:
+        policies_path = current / ".claude" / "policies.json"
+        if policies_path.is_file():
+            try:
+                data = json.loads(policies_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                data = None  # malformed at this level — skip it, keep walking up
+            if data is not None:
+                for key, value in data.items():
+                    merged.setdefault(key, value)
+                found = True
+        if current.parent == current:
+            break
+        current = current.parent
+    return merged if found else None
