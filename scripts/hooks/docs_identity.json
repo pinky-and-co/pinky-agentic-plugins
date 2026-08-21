@@ -1,16 +1,10 @@
 {
   "engine_version": "0.1.0.dev1",
-  "profile": "example",
-  "header_image_url": "https://assets.example.invalid/your-suite-header.png",
-  "header_alt": "your suite",
-  "suite_line": "Part of the [your suite](https://example.invalid) suite.",
-  "github_org": "your-org",
-  "pitch_heading": "Why your suite?",
-  "pitch_paragraphs": [
-    "One markdown paragraph per entry. This is the manifesto rendered into each repo's README, above the generated Documentation section."
-  ],
-  "pitch_pills": [
-    "short positioning pill",
-    "another one"
-  ]
+  "header_image_url": "",
+  "header_alt": "",
+  "suite_line": "",
+  "github_org": "",
+  "pitch_heading": "",
+  "pitch_paragraphs": [],
+  "pitch_pills": []
 }
