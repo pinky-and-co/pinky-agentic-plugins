@@ -128,18 +128,42 @@ GENERATED_TREES: list[tuple[str, str]] = [
     ),
 ]
 
+# Files under `.claude/` no plugin ever owns — Claude Code itself expects a project/user to
+# hand-maintain these directly (`settings.local.json` is by definition the personal, gitignored
+# override layer; `policies.json` is explicitly "owned entirely by this hook and by hand-editing",
+# `inject_policies.py`'s own docstring). Unlike `.claude/rules/` (CLI-setup-rendered), there is no
+# "plugin's own source" a `/reload-plugins --force` could regenerate any of these from.
+CLAUDE_DIR_HAND_EDITED = {
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/policies.json",
+}
+
 
 # ── state ─────────────────────────────────────────────────────────────────────
 
 
 def project_root(event: dict | None = None) -> Path:
-    """Resolve the project root: $CLAUDE_PROJECT_DIR > event cwd > current dir."""
+    """Resolve the project root: $CLAUDE_PROJECT_DIR > event cwd > current dir.
+
+    The last fallback only holds when the caller's shell cwd truly IS the project root — always
+    true for the hook (Claude Code sets the event itself) but not for a ctl-mode call from a
+    long-running session shell, where an earlier `cd` can drift it silently (incident 2026-08-21:
+    a stray `.guard-state.json` written under the wrong repo, undetected until the next freeze
+    check missed it). `main()`'s `--root` lets a caller that already knows the root (`/chantier`)
+    skip this guess entirely; this is the last resort, so it prints what it guessed.
+    """
     proj = os.environ.get("CLAUDE_PROJECT_DIR")
     if proj:
         return Path(proj)
     if event and event.get("cwd"):
         return Path(event["cwd"])
-    return Path.cwd()
+    cwd = Path.cwd()
+    print(
+        f"guard.py: no $CLAUDE_PROJECT_DIR/--root given — guessing project root from cwd: {cwd}",
+        file=sys.stderr,
+    )
+    return cwd
 
 
 def state_path(root: Path) -> Path:
@@ -212,6 +236,8 @@ def generated_tree_violation(target: str, root: Path) -> str | None:
         rel = tgt.relative_to(root.resolve())
     except ValueError:
         return None  # outside the workspace root entirely — the outside-scope guard's concern
+    if rel.as_posix() in CLAUDE_DIR_HAND_EDITED:
+        return None
     for prefix, message in GENERATED_TREES:
         prefix_path = Path(prefix)
         if rel == prefix_path or rel.is_relative_to(prefix_path):
@@ -404,11 +430,11 @@ def format_status(state: dict) -> str:
 
 
 USAGE = (
-    "usage: guard.py careful [on|off]\n"
-    "       guard.py freeze <dir>... | off\n"
-    "       guard.py guard <dir>... | on | off\n"
-    "       guard.py deny <dir>... | off\n"
-    "       guard.py status"
+    "usage: guard.py [--root <path>] careful [on|off]\n"
+    "       guard.py [--root <path>] freeze <dir>... | off\n"
+    "       guard.py [--root <path>] guard <dir>... | on | off\n"
+    "       guard.py [--root <path>] deny <dir>... | off\n"
+    "       guard.py [--root <path>] status"
 )
 
 
@@ -468,10 +494,25 @@ def ctl(argv: list[str], root: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    """Dispatch: argv present → ctl mode; otherwise → hook mode (stdin)."""
-    if argv:
-        return ctl(argv, project_root())
-    return run_hook()
+    """Dispatch: argv present → ctl mode; otherwise → hook mode (stdin).
+
+    `--root <path>` (ctl mode only, anywhere in argv) skips `project_root()`'s cwd guess — the
+    caller (e.g. `/chantier`, which already resolved the workspace root) states it explicitly
+    instead of leaving guard.py to infer it from wherever the shell happens to be.
+    """
+    if not argv:
+        return run_hook()
+    root: Path | None = None
+    rest: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--root" and i + 1 < len(argv):
+            root = Path(argv[i + 1])
+            i += 2
+            continue
+        rest.append(argv[i])
+        i += 1
+    return ctl(rest, root if root is not None else project_root())
 
 
 if __name__ == "__main__":

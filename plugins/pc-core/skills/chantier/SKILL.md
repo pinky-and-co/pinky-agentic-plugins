@@ -52,14 +52,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
    - if `4-done/` is non-empty: flag it and offer to fold + archive
 6. **Resolve `model:`, then pick the next move.**
    - Missing `model:` on a selected/in-progress card → propose one and say why, never guess silently.
-   - Card's `model:` is a stronger model than the session's current one → say so *before* starting
-     ("card = `opus`, session = `<current>` → switch before working"). Never start then mention it.
+   - Card's `model:` is a stronger model than the session's current one → call the `advisor` tool
+     once, at framing, before writing anything, instead of proposing a session-wide `/model`
+     switch. Say plainly that the mismatch triggered the call ("card = `<model>`, session =
+     `<current>` → advisor() for a second opinion"). Cadrage stays in the session (interactivity is
+     the point, ADR-0004); `advisor` adds a stronger read on the plan without taking that away —
+     never ask the user to switch models for this. Only propose `/model` if the user asks for a
+     session-wide change outside this arbitration.
    - Session already at or above the card's `model:` → nothing to say, proceed.
-   - Card's `model: opus` (the top floor) → call the `advisor` tool once, at framing, before
-     writing anything — a second, stronger read on the plan while it still costs nothing to
-     change. Cadrage stays in the session (interactivity is the point, ADR-0004); `advisor` adds a
-     second opinion without taking that away, the same role it already plays in this workspace's
-     own arbitration calls.
 
    `/chantier` sets the scope and the goal, never the execution strategy — that judgment call is
    made once work starts, not here. No generic "run this on haiku" mechanism exists on purpose:
@@ -87,7 +87,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
      aware — this workspace has more than one), so the session stays able to maintain cards/handoffs
      while frozen:
      ```bash
-     python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" freeze <resolved-repo-paths...> <kanban-board-roots...>
+     python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" --root <workspace-root> freeze <resolved-repo-paths...> <kanban-board-roots...>
      ```
      This is write-scope only — reading outside the list stays open (ADR-0004, `pinky-bootstrap`).
    - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `Fini =` line;

@@ -3,6 +3,7 @@
 python3 -m unittest discover tests
 """
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,44 @@ class TestLoadPolicies(unittest.TestCase):
             (root / ".claude").mkdir()
             (root / ".claude" / "policies.json").write_text("{not json")
             self.assertIsNone(pl.load_policies(root))
+
+
+class TestLoadPoliciesCascade(unittest.TestCase):
+    """Every key inherits from the nearest ancestor if the repo omits it — no per-key exception
+    (branch_workflow included, deliberately not special-cased)."""
+
+    def _write(self, path: Path, data: dict) -> None:
+        (path / ".claude").mkdir(parents=True, exist_ok=True)
+        (path / ".claude" / "policies.json").write_text(json.dumps(data))
+
+    def test_repo_key_wins_over_ancestor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, repo = Path(tmp), Path(tmp) / "repo"
+            repo.mkdir()
+            self._write(root, {"language": "fr"})
+            self._write(repo, {"language": "en"})
+            self.assertEqual(pl.load_policies(repo)["language"], "en")
+
+    def test_falls_back_to_ancestor_when_repo_omits_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, repo = Path(tmp), Path(tmp) / "repo"
+            repo.mkdir()
+            self._write(root, {"branch_workflow": "git flow"})
+            self._write(repo, {"language": "en"})
+            merged = pl.load_policies(repo)
+            self.assertEqual(merged["language"], "en")
+            self.assertEqual(
+                merged["branch_workflow"], "git flow"
+            )  # no exception for this key
+
+    def test_nested_two_levels_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            group = root / "group"
+            repo = group / "repo"
+            repo.mkdir(parents=True)
+            self._write(root, {"language": "fr"})
+            self.assertEqual(pl.load_policies(repo)["language"], "fr")
 
 
 if __name__ == "__main__":
