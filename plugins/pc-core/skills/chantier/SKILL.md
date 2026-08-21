@@ -92,12 +92,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
    - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `Fini =` line;
      `sert: <parent>` → walk up to the root card (`sert: null`) this chain ultimately serves, and use
      **its** `Fini =` line instead — the session may then work any card in that group, not just this
-     one. Set the session goal from that line by running `/goal <condition>` (native Claude Code
-     feature, v2.1.139+). **Not verified as invocable from inside a skill in every harness** — if the
-     attempt has no visible effect (no `◎ /goal active` indicator), say so plainly and state the goal
-     in the response instead, rather than silently pretending it is active. Either way, phrase the
-     condition so it is demonstrable in the transcript (a test result, an exit code, a real diff) —
-     `/goal`'s evaluator reads only the transcript, never a file or a command it would run itself.
+     one. `/goal` is parsed at the CLI level, before the turn — it cannot be invoked from inside a
+     running skill's own text, so do not attempt to run it. Instead, end this skill's response with:
+
+     ```
+     Next step: activate the goal for this card.
+     /goal <condition>
+     ```
+
+     where `<condition>` is the resolved `Fini =` line, phrased as a demonstrable state (a test
+     result, an exit code, a real diff) — `/goal`'s evaluator reads only the transcript, never a file
+     or a command it would run itself. Add nothing after that block: no "would you like me to…", no
+     rephrasing — just the `/goal` line, ready to paste as the next message. If no `sert` is
+     resolvable (orphan card, a cycle, no root found), say so explicitly instead of inventing a
+     condition.
 8. Execute the card's work.
 
 ## Rules
