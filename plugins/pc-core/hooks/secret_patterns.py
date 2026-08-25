@@ -17,13 +17,18 @@ from __future__ import annotations
 
 import re
 
+# Un match keyword=value dont la valeur est une lecture d'environnement, pas un littéral — exclu des
+# deux natures "* = value" ci-dessous via un negative lookahead juste après le `[:=]`.
+_ENV_READ = r"os\.environ|os\.getenv\(|process\.env\.|System\.getenv\("
+
 # Each entry is (kind, pattern). The `kind` is the human reason a caller surfaces alongside a line
 # number, so a reader hitting a false positive knows WHICH shape matched, not just where.
 _SECRET_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = [
     (
         "secret keyword = value",
         re.compile(
-            r"(?i)\b(?:password|passwd|secret|token|api[_-]?key|bearer)\b[^\S\n]*[:=][^\S\n]*\S+"
+            r"(?i)\b(?:password|passwd|secret|token|api[_-]?key|bearer)\b[^\S\n]*[:=][^\S\n]*"
+            rf"(?!(?:{_ENV_READ}))\S+"
         ),
     ),
     (
@@ -49,7 +54,8 @@ _SECRET_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = [
     (
         "credential keyword = value",
         re.compile(
-            r"(?i)\b(?:aws_secret_access_key|client_secret|private_key|access_token|auth_token|refresh_token|api_secret)[^\S\n]*[:=][^\S\n]*\S+"
+            r"(?i)\b(?:aws_secret_access_key|client_secret|private_key|access_token|auth_token|refresh_token|api_secret)[^\S\n]*[:=][^\S\n]*"
+            rf"(?!(?:{_ENV_READ}))\S+"
         ),
     ),
 ]

@@ -15,6 +15,11 @@
       "name": "pc-snow",
       "source": "./plugins/pc-snow",
       "description": "Snowflake anti-training-bias knowledge (distilled, provenance tracked) — public."
+    },
+    {
+      "name": "pc-craft",
+      "source": "./plugins/pc-craft",
+      "description": "Generic engineering conventions — code and infra-as-code, zero profile-resolved values."
     }
   ]
 }

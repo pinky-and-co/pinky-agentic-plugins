@@ -1,0 +1,9 @@
+{
+  "name": "pc-craft",
+  "version": "0.1.0",
+  "description": "Generic engineering conventions — code and infra-as-code, zero profile-resolved values.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"]
+}
