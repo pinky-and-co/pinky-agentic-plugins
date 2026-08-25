@@ -111,6 +111,10 @@ pinky-agentic-plugins/
 │   │   │   ├── grill/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── kanban/
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── finishing-a-card.md
+│   │   │   │   │   ├── multi-board.md
+│   │   │   │   │   └── requirements.md
 │   │   │   │   └── SKILL.md
 │   │   │   ├── permission-change/
 │   │   │   │   ├── scripts/

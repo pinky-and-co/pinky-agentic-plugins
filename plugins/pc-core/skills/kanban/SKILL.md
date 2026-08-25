@@ -100,48 +100,10 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
   reopens the chantier (skill `grill`), and its cards are backfilled in the same session, while the
   content is loaded. Leave the field omitted until then; omitted and `[]` mean the same thing.
 
-## Requirements — the norm a story's `## Exigences` table follows
-
-Cards trace to requirements; this is what a requirement has to be for the trace to mean anything.
-The method for *finding* them is the skill `grill` — this section is only the written form.
-
-**Four invariants. A line failing any one is rewritten, not filed.**
-
-| Invariant | Test |
-|---|---|
-| **Atomic** | one capability per requirement — an "and", an "or" or a "without" joining two considerations is two requirements |
-| **Verifiable** | a test, an inspection or a command can settle it; no criterion means no requirement |
-| **Solution-free** | it states the need while more than one design satisfies it — once a design is *chosen*, that is a decision recorded in prose, not a requirement retrofitted to what got built |
-| **Traceable** | a unique id, and cards pointing at it through `exigences` |
-
-**Id: `{FAM}-{NNNN}-{NN}`** — family, the chantier's number, then a sequence **counted per family**
-and never reused (a deleted requirement's number stays burnt, so an old card citing it stays
-readable as an obsolete reference rather than silently pointing at something else).
-
-| `FAM` | Family | What it catches that the others miss |
-|---|---|---|
-| `FR` | Functional | an expected service — data, behaviour, business rule |
-| `NFR` | Non-functional | a quality: reliability, extensibility, reusability, portability, verifiability, efficiency |
-| `LEG` | Legal | personal-data law, copyright, statutory duties — externally imposed, not negotiable |
-| `IMP` | Implicit | what every practitioner of the domain knows and nobody writes down, platform facts included |
-| `ASS` | Associated | development, delivery, training, maintenance, and **decommissioning** |
-
-The family is a classification aid — it makes duplicates and conflicts visible across a set, and it
-gives `grill` five angles to sweep. It is not a filing duty: a family that produced nothing is absent
-from the table, and no requirement is invented to fill a row.
-
-**Table columns: `Id` · `Priorité` · `Énoncé` · `Critère de vérification`.**
-
-- **Priorité** — `MUST` (the chantier fails without it) or `SHOULD` (wanted, tradeable). Two values
-  only; a third turns the column into a debate.
-- **Énoncé** — one active sentence, the actor named, one capability. No vague adjective or adverb
-  ("fast", "user-friendly"), no unreachable absolute ("always", "zero bug"), no open end ("etc.",
-  "and/or").
-- **Critère de vérification** — measurable and objective: a command, a test path, a threshold with
-  its range. "Verified by inspection" is acceptable; "obviously true" is not.
-
-The **rationale** — why the requirement is necessary — belongs in the story's prose above the table,
-never inside the statement: mixing them makes the statement untestable and the reason unfindable.
+  What a requirement has to be for the trace to mean anything — id format, the five families, the
+  four invariants, the story table's columns — is the § Requirements of this skill. See
+  [references/requirements.md](references/requirements.md), and read it before writing or auditing
+  a story's table.
 
 - **`blocked_by`** — a hard dependency only, never a preference. Position inside
   `2-selected-for-dev` already carries ordering preference; conflating the two loses the distinction
@@ -160,37 +122,14 @@ never inside the statement: mixing them makes the statement untestable and the r
   narrative must follow the same directive — never put secrets, credentials or internal URLs in a
   handoff, in either layer.
 
-## `/goal`, posed from the root of a `sert` group
+## Finishing a card
 
-A session's real capacity limit is the session itself — one card, or one `sert`-linked group of
-cards, per session. `/chantier` operationalizes this natively instead of relying on judgment:
+A session's capacity limit is the session itself — one card, or one `sert`-linked group, per
+session — and `/goal` is set from the group's **root** card, never the leaf. A `Fini =` line must
+therefore be demonstrable in the transcript, and the reviewer must not be the generator.
 
-- Card's `sert: null` (a root) → `/goal` is set from **this card's own** `Fini =` line.
-- Card's `sert: <parent>` → walk up to the root card (`sert: null`) that this chain ultimately
-  serves, and set `/goal` from **the root's** `Fini =` line, not the leaf's. The session may then
-  freely work any card in that `sert` group — the group is the unit of session, not the single card.
-
-Consequence: a `Fini =` line must be **demonstrable in the transcript** — a test result, an exit
-code, a real diff pasted — never merely true. `/goal`'s evaluator reads only the conversation
-transcript, never a file or a command it would run itself; an assertion without the underlying
-output in the transcript fools it exactly the way an unverified sub-agent report would.
-
-### Reviewing before declaring `Fini =` met
-
-The reviewer must not be the generator — a same-model self-check inherits its own blind spots, and
-agreement among several voices of the same model is not proof of correctness either, only a
-correlated blind spot repeated. Whenever a card's work needs real judgment reviewed, not just a
-mechanical check, prefer in this order — **never `haiku`, whatever tier is available**:
-
-1. **`adversarial` MCP tool** (`pc-core`, native, no spawn) — a genuinely different model family
-   (Mistral-served, `mistral-medium-3.5` today), not just a cheaper same-vendor tier. The real
-   change of perspective, not a cost optimization.
-2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
-   reviewer.md`), preloads the `review-guidelines` skill, no external plugin dependency. Same
-   vendor as the generator, but a fresh context that never saw the generating session's own
-   rationalizations — `model: sonnet` in its own definition, a real floor.
-3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
-   model, same context) rather than presenting it as equivalent to (1) or (2).
+See [references/finishing-a-card.md](references/finishing-a-card.md) for how the root is resolved
+and the reviewer preference order — read it when taking a card in, or before declaring `Fini =`.
 
 ## Filiation as render, not list
 
@@ -206,21 +145,13 @@ link, in the same edit.
 
 ## Orgs — a board can span more than one
 
-Nothing here requires it, but the mechanism does not assume a single board either: a session can
-mount more than one `_KANBAN/` root (`--list-kanbans` below), each optionally paired with its own
-`_AGENT_LOG/` and knowledge corpus. How repos are laid out inside the workspace is a separate,
-subjective choice per installer — this mechanism makes no claim about it either way.
-
-**Wherever one of these roots sits on a drive shared with other people, it is a replication
+**Wherever a `_KANBAN/` root sits on a drive shared with other people, it is a replication
 boundary** — everything inside it lands on every machine that mounts it. **No secret goes anywhere
 inside a shared root**; secrets stay outside (local-only / `.env`). Wherever this applies at all, it
 is not negotiable by convenience.
 
-`stop_handoff.py --list-kanbans` is what actually finds every board a session may write to — the
-nearest one, plus any additional root a machine-local config declares. Treat that config's exact
-shape as an implementation detail, not something to encode here: it is expected to change (e.g. to
-read multi-root editor config instead of a bespoke file) without altering anything else in this
-skill.
+See [references/multi-board.md](references/multi-board.md) for how several boards are mounted and
+discovered — read it on a workspace that mounts more than one.
 
 ## Cross-agent log
 
