@@ -93,6 +93,7 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── chantier/
 │   │   │   │   ├── scripts/
+│   │   │   │   │   ├── archive_card.sh
 │   │   │   │   │   └── resolve_repos.sh
 │   │   │   │   └── SKILL.md
 │   │   │   ├── clean-gone/
@@ -121,6 +122,29 @@ pinky-agentic-plugins/
 │       ├── .claude-plugin/
 │       │   └── plugin.json
 │       ├── skills/
+│       │   ├── cortex/
+│       │   │   ├── references/
+│       │   │   │   ├── cortex-ai-functions.md
+│       │   │   │   └── cortex-search.md
+│       │   │   └── SKILL.md
+│       │   ├── snowflake/
+│       │   │   ├── references/
+│       │   │   │   ├── artifact-repository.md
+│       │   │   │   ├── core-api.md
+│       │   │   │   ├── costs.md
+│       │   │   │   ├── gov.md
+│       │   │   │   ├── native-app.md
+│       │   │   │   ├── telemetry.md
+│       │   │   │   └── warehouses.md
+│       │   │   └── SKILL.md
+│       │   ├── snowpark/
+│       │   │   ├── references/
+│       │   │   │   └── snowpark.md
+│       │   │   └── SKILL.md
+│       │   ├── streamlit/
+│       │   │   ├── references/
+│       │   │   │   └── streamlit.md
+│       │   │   └── SKILL.md
 │       │   └── .gitkeep
 │       └── README.md
 ├── scripts/
