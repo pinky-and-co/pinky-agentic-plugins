@@ -1,0 +1,131 @@
+---
+name: grill
+description: Interview a plan, an idea or an imported brief until nothing is silently assumed, then write the result as a chantier story with numbered, verifiable requirements. Use before starting a chantier, to stress-test a design, or to land an external brainstorm (written elsewhere, in another tool) into the board.
+argument-hint: "[<path-to-an-existing-brief>] [free-text idea]"
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(find:*), Bash(rg:*), Bash(git log:*), Bash(git remote:*), Bash(command -v:*)
+---
+
+# Grill
+
+Turns an intention into a story someone else can build from. The value is not the document — it is
+the **questions that get asked before anyone writes code**. Someone who has designed systems for
+years asks them without noticing; someone who has not does not know they exist. This skill
+enumerates them in dependency order so that ignorance of the question is no longer the failure mode.
+
+## Two entry points, one landing zone
+
+| Input | What gets interviewed |
+|---|---|
+| nothing, or a free-text idea | the user |
+| a path to an existing brief/design doc | **the document first**, the user only for what it leaves unanswered |
+
+Both produce the same artefact: the chantier's story file (schema and columns: skill `kanban`).
+An external brainstorm is not a rival input format — it is the same interview, already half done
+somewhere else.
+
+## The interview
+
+Model the work as a **decision tree**: every decision branches into the decisions that hang off it.
+The **frontier** is every decision whose prerequisites are already settled — the questions that can
+be asked *now* without guessing at answers not yet heard.
+
+Work in **rounds**:
+
+1. Compute the frontier. A question whose answer depends on another question still open belongs to
+   a **later round**, never this one.
+2. Ask the whole frontier in one round. Number each question, state it plainly, and **give your
+   recommended answer** — a question without a default is a question the user has to design from
+   scratch, which defeats the purpose.
+3. Stop and wait. The answers reshape the tree: settled decisions push the frontier outward.
+4. Repeat until the frontier is empty.
+
+Format a round like this:
+
+```
+❓ **Q1 — <title>**
+<the question; state the options when there are options>
+
+➡️ **Recommended:** <your answer, and the one-line reason>
+
+---
+
+❓ **Q2 — <title>**
+…
+```
+
+**Facts are your job, decisions are the user's.** When a frontier question needs a fact about the
+environment — does this file exist, what does that config say, is this binary installed, what did
+that repo decide — go and find it. Never ask the user for anything you can look up. A lookup in
+flight is an unsettled prerequisite: it blocks only the questions downstream of it, so ask the rest
+of the frontier now rather than waiting.
+
+**Never act on the outcome before the user confirms** that you have reached a shared understanding.
+The interview ends with agreement, not with the last answer.
+
+## Document mode — grill the brief, not the human
+
+An imported brief arrives **already decided**, but with its epistemic status stripped: nothing says
+which claims were measured and which were assumed, and the questions nobody asked leave no trace.
+So run the same frontier, and route each question to one of three outcomes:
+
+1. **Answered by the document** → record the decision *and where in the document it came from*.
+2. **Left open by the document** → it becomes a line under `## Items ouverts`, not a question.
+3. **Never asked** → this one, and only this one, goes to the user in the next round.
+
+Treat a stated cause the same way: a brief that asserts *why* something is the case states a
+hypothesis, not a finding. Test the load-bearing ones before they decide the design.
+
+## Sweep all five families before declaring the frontier empty
+
+A decision tree only grows branches someone thought of. Before closing, walk the five requirement
+families (skill `kanban`, § Requirements) and ask what each one has to say about this work:
+functional, non-functional, legal, implicit, associated. Most rounds surface nothing in three of
+them — that is the expected result, and it is cheap. What it buys is the fourth: `LEG` and `ASS` are
+the two nobody asks unaided, and "what happens when this is retired" has no other moment to be asked.
+
+A family that produced nothing is simply absent from the table. Never invent a requirement to fill a
+row.
+
+## What the interview writes
+
+The story file, carrying at minimum:
+
+- **The objective**, and the constraint that shapes everything else.
+- **`## Exigences`** — the table, in the form the skill `kanban` § Requirements defines: id
+  `{FAM}-{NNNN}-{NN}`, priority, statement, verification criterion. That norm is authoritative; do
+  not restate or bend it here.
+- **`## Items ouverts`** — what is knowingly undecided. Declaring the silence is the point; an empty
+  section on a real design is a claim nobody believes.
+- **An ordered implementation priority** — what has to exist first for the rest to be testable.
+
+Every claim carries its status: measured (with what command or test), assumed, or decided by the
+user. Cards then trace back to these ids through their own `exigences` field.
+
+## Self-review before writing the table
+
+Run every candidate line against the four invariants (atomic, verifiable, solution-free, traceable)
+and rewrite what fails. The failures are predictable — these are the ones that actually occur:
+
+| What you wrote | Why it fails | Rewrite as |
+|---|---|---|
+| "X is distributed publicly, **without** any profile-resolved value" | two considerations joined — not atomic | two requirements, one per consideration |
+| "the interface must be clean and responsive" | no measurable criterion | a threshold with its range, or a named test |
+| "must react quickly" | vague adverb | a number and a unit |
+| "must never fail" | unreachable absolute | the cases actually covered, listed |
+| "use <named technology> to …" in a stated need | a solution imposed where the need was asked | the need; the technology is a decision, recorded in prose |
+| the same idea stated in two rows | duplicate — invisible until the set is sorted | one row, cited twice |
+
+Sort the set by family and read it once end to end before writing: duplicates and contradictions are
+visible in a sorted set and invisible in the order they were thought of.
+
+## Boundaries
+
+- **State the need, not the solution** — as long as more than one design satisfies it. Prescribing
+  one implementation removes the chance of a better one being found, and a requirement retrofitted
+  to whatever got built is not a requirement.
+  The exception is deliberate: once a decision is *made* in the interview, it is recorded
+  prescriptively, with its reason. Undecided stays optative; decided stays decided.
+- **Do not grill what is already settled.** A question the user has answered, in this session or in
+  a document, is a fact to record, not a round to re-run.
+- **Stop at the story.** This skill does not implement, and does not open cards beyond the first
+  ones the priority order implies.

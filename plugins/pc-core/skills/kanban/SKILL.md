@@ -44,6 +44,7 @@ date: YYYY-MM-DD       # meaning is implied by status — see table below
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
+exigences: []          # requirement ids this card traces to, e.g. [FR-0042-01]; [] = none
 blocked_by: <card-slug> | null         # a hard dependency, never a mere ordering preference
 ---
 ```
@@ -85,6 +86,62 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
   A card serving two objectives is not a case this schema handles; split it. This field makes the
   critical path a render off the board instead of a hand-maintained list: nothing enumerates what a
   parent needs, every child declares what it serves.
+
+- **`exigences`** — the requirement ids from the chantier's story that this card traces to, as a
+  list; `[]` or omitted = none. Orthogonal to `sert`: `sert` is card-to-card filiation (critical
+  path), `exigences` is card-to-requirement traceability, and a card may trace to several
+  requirements where `sert` allows only one parent. A requirement id is only valid if the
+  chantier's story declares it with a verification criterion — never invent an id.
+
+  **A chantier earns its requirements when it is reopened, never in a campaign.** Backfilling this
+  field across a sleeping chantier assumes its story already states requirements; where the story is
+  a stub, that is not a migration but the product work of writing the spec — and a table written for
+  work nobody is doing goes stale before it is read. So the requirements come from the interview that
+  reopens the chantier (skill `grill`), and its cards are backfilled in the same session, while the
+  content is loaded. Leave the field omitted until then; omitted and `[]` mean the same thing.
+
+## Requirements — the norm a story's `## Exigences` table follows
+
+Cards trace to requirements; this is what a requirement has to be for the trace to mean anything.
+The method for *finding* them is the skill `grill` — this section is only the written form.
+
+**Four invariants. A line failing any one is rewritten, not filed.**
+
+| Invariant | Test |
+|---|---|
+| **Atomic** | one capability per requirement — an "and", an "or" or a "without" joining two considerations is two requirements |
+| **Verifiable** | a test, an inspection or a command can settle it; no criterion means no requirement |
+| **Solution-free** | it states the need while more than one design satisfies it — once a design is *chosen*, that is a decision recorded in prose, not a requirement retrofitted to what got built |
+| **Traceable** | a unique id, and cards pointing at it through `exigences` |
+
+**Id: `{FAM}-{NNNN}-{NN}`** — family, the chantier's number, then a sequence **counted per family**
+and never reused (a deleted requirement's number stays burnt, so an old card citing it stays
+readable as an obsolete reference rather than silently pointing at something else).
+
+| `FAM` | Family | What it catches that the others miss |
+|---|---|---|
+| `FR` | Functional | an expected service — data, behaviour, business rule |
+| `NFR` | Non-functional | a quality: reliability, extensibility, reusability, portability, verifiability, efficiency |
+| `LEG` | Legal | personal-data law, copyright, statutory duties — externally imposed, not negotiable |
+| `IMP` | Implicit | what every practitioner of the domain knows and nobody writes down, platform facts included |
+| `ASS` | Associated | development, delivery, training, maintenance, and **decommissioning** |
+
+The family is a classification aid — it makes duplicates and conflicts visible across a set, and it
+gives `grill` five angles to sweep. It is not a filing duty: a family that produced nothing is absent
+from the table, and no requirement is invented to fill a row.
+
+**Table columns: `Id` · `Priorité` · `Énoncé` · `Critère de vérification`.**
+
+- **Priorité** — `MUST` (the chantier fails without it) or `SHOULD` (wanted, tradeable). Two values
+  only; a third turns the column into a debate.
+- **Énoncé** — one active sentence, the actor named, one capability. No vague adjective or adverb
+  ("fast", "user-friendly"), no unreachable absolute ("always", "zero bug"), no open end ("etc.",
+  "and/or").
+- **Critère de vérification** — measurable and objective: a command, a test path, a threshold with
+  its range. "Verified by inspection" is acceptable; "obviously true" is not.
+
+The **rationale** — why the requirement is necessary — belongs in the story's prose above the table,
+never inside the statement: mixing them makes the statement untestable and the reason unfindable.
 
 - **`blocked_by`** — a hard dependency only, never a preference. Position inside
   `2-selected-for-dev` already carries ordering preference; conflating the two loses the distinction
