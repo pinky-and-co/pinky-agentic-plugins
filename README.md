@@ -118,6 +118,16 @@ pinky-agentic-plugins/
 │   │   │       └── SKILL.md
 │   │   ├── .mcp.json
 │   │   └── README.md
+│   ├── pc-craft/
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json
+│   │   └── skills/
+│   │       └── code-conventions/
+│   │           ├── references/
+│   │           │   ├── lib-api.md
+│   │           │   ├── repro.md
+│   │           │   └── web.md
+│   │           └── SKILL.md
 │   └── pc-snow/
 │       ├── .claude-plugin/
 │       │   └── plugin.json
