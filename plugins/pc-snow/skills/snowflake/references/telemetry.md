@@ -25,7 +25,7 @@ ALTER SCHEMA my_db.my_schema SET METRIC_LEVEL = 'NONE';     -- see below
 ALTER SCHEMA my_db.my_schema SET EVENT_TABLE = my_db.my_schema.EVENTS;
 ```
 
-**Requires `GRANT MODIFY LOG LEVEL ON ACCOUNT TO ROLE DEPLOYER`** — object ownership alone is not enough.
+**Requires `GRANT MODIFY LOG LEVEL ON ACCOUNT TO ROLE <your_deploy_role>`** — object ownership alone is not enough.
 
 ---
 
