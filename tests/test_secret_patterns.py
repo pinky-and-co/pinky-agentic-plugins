@@ -31,6 +31,23 @@ class TestSecretKinds(unittest.TestCase):
         pem = "-----BEGIN RSA PRIVATE KEY-----"  # pragma: allowlist secret
         self.assertIn("PEM private-key header", sp.secret_kinds(pem))
 
+    def test_env_var_read_not_flagged(self):
+        # Lire un secret depuis l'environnement n'est pas une fuite — aucune valeur littérale.
+        for line in (
+            'api_key=os.environ["ANTHROPIC_API_KEY"]',
+            'token = os.environ.get("GITHUB_TOKEN")',
+            'secret = os.getenv("CLIENT_SECRET")',
+            "api_key = process.env.OPENAI_API_KEY",
+        ):
+            self.assertEqual(sp.secret_kinds(line), [], line)
+
+    def test_hardcoded_secret_still_flagged(self):
+        # L'exception env-var ne doit pas avaler une vraie valeur codée en dur.
+        self.assertIn(
+            "secret keyword = value",
+            sp.secret_kinds("password = hunter2-not-an-env-read"),
+        )
+
 
 class TestScrub(unittest.TestCase):
     def test_redacts_secret_line(self):
