@@ -22,6 +22,7 @@ Stack: Snowpark Python (stored procedures, serverless tasks) + Snowflake Python 
 
 ## References
 
+- `references/bootstrap.md` — account bootstrap: what a fresh account ships with, the one-time `ACCOUNTADMIN` setup that can't be automated, the domain-owner role-switching pattern, account roles vs database roles.
 - `references/core-api.md` — `snowflake.core` (Root, the Model/Collection/Resource pattern, CreateMode, Task, Dynamic Table, Table, Alert, Schema/Database, Clone, async PollingOperation), drop-strategy design, gotchas.
 - `references/warehouses.md` — warehouse types and rates, serverless Tasks billing, multi-cluster scaling policy, Streamlit cache strategy (`st.session_state` / `st.cache_resource` / `st.cache_data`), Compute Pool sizing and lifecycle, consumption queries.
 - `references/artifact-repository.md` — making a PyPI package (including your own) available to a Python UDF/SP: Anaconda channel vs artifact repository vs stage upload, extras, packages policy.

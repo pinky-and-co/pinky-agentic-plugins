@@ -130,6 +130,7 @@ pinky-agentic-plugins/
 │       │   ├── snowflake/
 │       │   │   ├── references/
 │       │   │   │   ├── artifact-repository.md
+│       │   │   │   ├── bootstrap.md
 │       │   │   │   ├── core-api.md
 │       │   │   │   ├── costs.md
 │       │   │   │   ├── gov.md
