@@ -108,6 +108,8 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── document-to-md/
 │   │   │   │   └── SKILL.md
+│   │   │   ├── grill/
+│   │   │   │   └── SKILL.md
 │   │   │   ├── kanban/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── permission-change/
