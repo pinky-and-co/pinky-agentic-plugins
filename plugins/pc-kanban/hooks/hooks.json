@@ -1,0 +1,39 @@
+{
+  "description": "Enforces the careful/freeze/deny/guard permission guards (toggled by the permission-change skill) and keeps the in-progress kanban card's handoff fresh on Stop and SessionEnd — see guard.py, stop_handoff.py",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

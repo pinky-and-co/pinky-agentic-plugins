@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .coverage
 .cache/
+.vendor-manifest.json

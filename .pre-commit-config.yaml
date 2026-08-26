@@ -301,6 +301,21 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Card `decouper-pc-core-en-pc-git-et-pc-kanban.md` (chantier 0023): a plugin split across two
+  # plugins can vendor a small shared utility (policy_lib.py, secret_patterns.py) since neither
+  # plugin can import the other's files at runtime. This hook catches a hand-edited copy drifting
+  # from the pinky-bootstrap source instead of letting the next `pinky distribute` silently
+  # overwrite it.
+  - repo: local
+    hooks:
+      - id: check-vendor-checksum
+        name: "[VENDOR] Vendored file matches its source checksum"
+        entry: python scripts/hooks/check_vendor_checksum.py
+        language: python
+        files: \.vendor-manifest\.json$|hooks/(policy_lib|secret_patterns)\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # ── Same quality floor as the `python` extra's src/-scoped hooks, for a plugin repo's own
   # Python — plugins/*/hooks/ (inject_policies.py and siblings) AND plugins/*/mcp/ (an MCP
   # server's own Python, e.g. pc-core's mcp/server.py) — both are hand-authored by this repo, not

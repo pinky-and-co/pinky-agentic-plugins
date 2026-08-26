@@ -1,0 +1,10 @@
+{
+  "name": "pc-git",
+  "version": "0.1.0",
+  "description": "Gitmoji commit workflow, branch strategy, and branch-policy enforcement.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"],
+  "dependencies": ["pc-core"]
+}
