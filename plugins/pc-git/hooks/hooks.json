@@ -1,0 +1,17 @@
+{
+  "description": "Blocks a guarded write on a permanent branch — see branch_guard.py",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/branch_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

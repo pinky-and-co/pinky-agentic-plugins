@@ -1,0 +1,10 @@
+{
+  "name": "pc-kanban",
+  "version": "0.1.0",
+  "description": "File-based kanban board mechanics — chantiers, cards, permission guards (careful/freeze/deny), requirements interviews.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"],
+  "dependencies": ["pc-core"]
+}

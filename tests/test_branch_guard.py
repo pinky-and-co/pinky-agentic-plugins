@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/hooks/branch-policy/branch_guard.py — run with:
+"""Tests for plugins/pc-git/hooks/branch-policy/branch_guard.py — run with:
 python3 -m unittest discover tests
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(
     0,
     str(
-        Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks" / "branch-policy"
+        Path(__file__).parent.parent / "plugins" / "pc-git" / "hooks" / "branch-policy"
     ),
 )
 
@@ -143,7 +143,7 @@ class TestMainEndToEnd(unittest.TestCase):
     SCRIPT = str(
         Path(__file__).parent.parent
         / "plugins"
-        / "pc-core"
+        / "pc-git"
         / "hooks"
         / "branch-policy"
         / "branch_guard.py"

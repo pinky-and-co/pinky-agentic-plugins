@@ -1,7 +1,7 @@
 {
   "name": "pc-core",
   "version": "0.1.0",
-  "description": "Generic workspace mechanics: gitmoji commit, branch strategy, per-repo policy injection.",
+  "description": "Generic workspace mechanics: convention replay, document-to-md, review guidelines, session-hygiene hooks.",
   "author": {
     "name": "Pinky & Co"
   },

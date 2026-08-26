@@ -9,7 +9,17 @@
     {
       "name": "pc-core",
       "source": "./plugins/pc-core",
-      "description": "Generic workspace mechanics: gitmoji commit, branch strategy, per-repo policy injection, permission guards (careful/freeze/deny)."
+      "description": "Generic workspace mechanics: convention replay (apply-pattern), document-to-md, review guidelines, the reviewer agent, and session-hygiene hooks (policy injection, privacy egress, read-cost warning, post-edit lint, output-style reminder)."
+    },
+    {
+      "name": "pc-git",
+      "source": "./plugins/pc-git",
+      "description": "Gitmoji commit workflow, branch strategy, and branch-policy enforcement."
+    },
+    {
+      "name": "pc-kanban",
+      "source": "./plugins/pc-kanban",
+      "description": "File-based kanban board mechanics — chantiers, cards, permission guards (careful/freeze/deny), requirements interviews."
     },
     {
       "name": "pc-snow",

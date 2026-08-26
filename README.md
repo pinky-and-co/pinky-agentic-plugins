@@ -67,12 +67,6 @@ pinky-agentic-plugins/
 │   │   ├── agents/
 │   │   │   └── reviewer.md
 │   │   ├── hooks/
-│   │   │   ├── branch-policy/
-│   │   │   │   ├── branch_guard.py
-│   │   │   │   ├── branch_paths.sh
-│   │   │   │   ├── bulk_commit.sh
-│   │   │   │   ├── resolve_policy.py
-│   │   │   │   └── test_bulk_commit.sh
 │   │   │   ├── hooks.json
 │   │   │   ├── inject_policies.py
 │   │   │   ├── policy_lib.py
@@ -80,7 +74,6 @@ pinky-agentic-plugins/
 │   │   │   ├── privacy_egress.py
 │   │   │   ├── read_cost.py
 │   │   │   ├── secret_patterns.py
-│   │   │   ├── stop_handoff.py
 │   │   │   └── style_reminder.py
 │   │   ├── mcp/
 │   │   │   ├── model_adversarial.py
@@ -89,38 +82,7 @@ pinky-agentic-plugins/
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
 │   │   │   │   └── SKILL.md
-│   │   │   ├── branch-workflow/
-│   │   │   │   └── SKILL.md
-│   │   │   ├── chantier/
-│   │   │   │   ├── scripts/
-│   │   │   │   │   ├── archive_card.sh
-│   │   │   │   │   └── resolve_repos.sh
-│   │   │   │   └── SKILL.md
-│   │   │   ├── clean-gone/
-│   │   │   │   ├── scripts/
-│   │   │   │   │   └── bulk_clean_gone.sh
-│   │   │   │   └── SKILL.md
-│   │   │   ├── commit/
-│   │   │   │   ├── references/
-│   │   │   │   │   └── commit-convention.md
-│   │   │   │   └── SKILL.md
-│   │   │   ├── commit-and-pr/
-│   │   │   │   ├── references/
-│   │   │   │   │   └── commit-convention.md
-│   │   │   │   └── SKILL.md
 │   │   │   ├── document-to-md/
-│   │   │   │   └── SKILL.md
-│   │   │   ├── grill/
-│   │   │   │   └── SKILL.md
-│   │   │   ├── kanban/
-│   │   │   │   ├── references/
-│   │   │   │   │   ├── finishing-a-card.md
-│   │   │   │   │   ├── multi-board.md
-│   │   │   │   │   └── requirements.md
-│   │   │   │   └── SKILL.md
-│   │   │   ├── permission-change/
-│   │   │   │   ├── scripts/
-│   │   │   │   │   └── guard.py
 │   │   │   │   └── SKILL.md
 │   │   │   └── review-guidelines/
 │   │   │       └── SKILL.md
@@ -135,6 +97,58 @@ pinky-agentic-plugins/
 │   │           │   ├── lib-api.md
 │   │           │   ├── repro.md
 │   │           │   └── web.md
+│   │           └── SKILL.md
+│   ├── pc-git/
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json
+│   │   ├── hooks/
+│   │   │   ├── branch-policy/
+│   │   │   │   ├── branch_guard.py
+│   │   │   │   ├── branch_paths.sh
+│   │   │   │   ├── bulk_commit.sh
+│   │   │   │   ├── resolve_policy.py
+│   │   │   │   └── test_bulk_commit.sh
+│   │   │   ├── hooks.json
+│   │   │   └── policy_lib.py
+│   │   └── skills/
+│   │       ├── branch-workflow/
+│   │       │   └── SKILL.md
+│   │       ├── clean-gone/
+│   │       │   ├── scripts/
+│   │       │   │   └── bulk_clean_gone.sh
+│   │       │   └── SKILL.md
+│   │       ├── commit/
+│   │       │   ├── references/
+│   │       │   │   └── commit-convention.md
+│   │       │   └── SKILL.md
+│   │       └── commit-and-pr/
+│   │           ├── references/
+│   │           │   └── commit-convention.md
+│   │           └── SKILL.md
+│   ├── pc-kanban/
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json
+│   │   ├── hooks/
+│   │   │   ├── hooks.json
+│   │   │   ├── secret_patterns.py
+│   │   │   └── stop_handoff.py
+│   │   └── skills/
+│   │       ├── chantier/
+│   │       │   ├── scripts/
+│   │       │   │   ├── archive_card.sh
+│   │       │   │   └── resolve_repos.sh
+│   │       │   └── SKILL.md
+│   │       ├── grill/
+│   │       │   └── SKILL.md
+│   │       ├── kanban/
+│   │       │   ├── references/
+│   │       │   │   ├── finishing-a-card.md
+│   │       │   │   ├── multi-board.md
+│   │       │   │   └── requirements.md
+│   │       │   └── SKILL.md
+│   │       └── permission-change/
+│   │           ├── scripts/
+│   │           │   └── guard.py
 │   │           └── SKILL.md
 │   └── pc-snow/
 │       ├── .claude-plugin/
@@ -171,6 +185,7 @@ pinky-agentic-plugins/
 │       ├── badges.toml
 │       ├── check_forbidden_keywords.py
 │       ├── check_typed_api.py
+│       ├── check_vendor_checksum.py
 │       ├── check_weak_assertions.py
 │       ├── check_zws.py
 │       ├── commit-msg
