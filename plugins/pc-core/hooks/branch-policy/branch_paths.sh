@@ -1,29 +1,24 @@
 #!/usr/bin/env bash
 # branch_paths.sh — single source of truth for which paths skip the branch guard.
 #
-# Two callers needed the same "is this path exempt from the feature-branch requirement"
-# check — bulk_commit.sh (bash, staged-diff-driven) and branch_guard.py (a single file per
-# PreToolUse call), both siblings in this branch-policy/ folder. Duplicating the glob list in
-# both was flagged as a certain future divergence (deux-hooks-branche-et-cout-de-lecture,
-# 2026-08-19); this file is the fix — sourced by bulk_commit.sh as a function, shelled out to
-# by branch_guard.py.
+# Shared by both callers so the glob list can't diverge between them: sourced by bulk_commit.sh
+# as a function, shelled out to by branch_guard.py.
 #
 # CLI mode (non-bash callers): branch_paths.sh <repo-root-relative-path>
 #   exit 0 = unguarded (direct commit allowed), exit 1 = guarded (needs a feature branch).
 # Library mode (bash callers): source this file, then call is_unguarded "<path>".
 
-# `uv.lock` accepted here sciemment (2026-08-19, décision user) : fichier ~2000 lignes, jamais
-# écrit à la main, régénéré uniquement par `uv lock`/`uv sync` — de nature équivalente à un
-# artefact local, pas à du code source portant une décision.
+# Only specific top-level filenames are exempt, never a blanket `*.md` — a markdown file can be a
+# rule source that drives agent behavior (e.g. agentic-harness/rules/*.md), not just documentation.
 #
-# Une PR n'aurait de toute façon protégé contre rien ici : un numéro de version compromis (ex.
-# `httpx==0.28.1` → `0.28.3` malveillant) est indétectable à l'œil dans un diff de lockfile —
-# ça prend de l'outillage dédié (scan de vulnérabilités, vérification de hash), jamais une revue
-# humaine. Et GitHub replie déjà ce diff par défaut ("generated file"), donc même les PR passées
-# avant cette décision n'étaient quasi jamais lues. Retirer l'exigence de branche ne sacrifie
-# aucune protection réelle — il n'y en avait pas à ce niveau.
+# uv.lock stays unguarded: a ~2000-line generated file, never hand-written, regenerated only by
+# `uv lock`/`uv sync` — equivalent to a local artifact, not source code carrying a decision. A PR
+# wouldn't protect anything here either: a compromised pinned version (e.g. a malicious
+# `httpx==0.28.3`) is invisible in a lockfile diff by eye — that takes dedicated tooling
+# (vulnerability scan, hash check), never a human review, and GitHub collapses this diff by default
+# ("generated file") anyway. Dropping the branch requirement sacrifices no real protection.
 UNGUARDED_GLOBS=(
-    'docs/*' '*.md' '.github/*' 'core/rules/*' '.claude/*'
+    'docs/*' 'README.md' 'AGENTS.md' 'CLAUDE.md' 'LICENSE' '.github/*' '.claude/*'
     'pyproject.toml' '.pre-commit-config.yaml' 'profile.yaml' '.darglint'
     '.gitignore' '.editorconfig' 'scripts/hooks/*' '.gitleaks.toml' 'uv.lock'
 )
