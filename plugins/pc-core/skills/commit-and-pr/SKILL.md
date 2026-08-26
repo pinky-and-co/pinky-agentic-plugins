@@ -2,7 +2,6 @@
 name: commit-and-pr
 description: Commit, push, and open a PR (GitHub) or MR (GitLab) — full flow, auto end-to-end. Bulk mode (--all) handles every dirty repo in one deterministic pass.
 argument-hint: "<repository-to-commit> or --all"
-disable-model-invocation: true
 model: haiku
 context: fork
 agent: general-purpose
