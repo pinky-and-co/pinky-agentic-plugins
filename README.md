@@ -97,6 +97,8 @@ pinky-agentic-plugins/
 │   │   │   │   │   └── resolve_repos.sh
 │   │   │   │   └── SKILL.md
 │   │   │   ├── clean-gone/
+│   │   │   │   ├── scripts/
+│   │   │   │   │   └── bulk_clean_gone.sh
 │   │   │   │   └── SKILL.md
 │   │   │   ├── commit/
 │   │   │   │   ├── references/

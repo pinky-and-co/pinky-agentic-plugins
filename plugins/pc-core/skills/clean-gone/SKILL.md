@@ -1,10 +1,11 @@
 ---
 name: clean-gone
-description: Delete local git branches marked [gone] (deleted on the remote, e.g. after a merge) and their worktrees. Auto — nothing here is destructive to unmerged work, [gone] means the remote already dropped it.
+description: Delete local git branches marked [gone] (deleted on the remote, e.g. after a merge) and their worktrees. Auto — nothing here is destructive to unmerged work, [gone] means the remote already dropped it. --all sweeps every repo under the workspace root in one pass, symmetric with commit-and-pr --all.
+argument-hint: "<repository-name> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(git branch:*), Bash(git worktree:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh:*)
 ---
 
 # Clean up merged/gone branches
@@ -12,9 +13,19 @@ allowed-tools: Bash(git branch:*), Bash(git worktree:*)
 Being invoked is the confirmation — this only touches branches the remote has already deleted
 (post-merge or otherwise), never anything with unpushed or unmerged work. No confirmation needed.
 
-1. `git -C "${CLAUDE_PROJECT_DIR}" branch -v` — identify `[gone]` branches. A `+` prefix means an
-   associated worktree exists and must be removed before the branch can be deleted.
-2. `git -C "${CLAUDE_PROJECT_DIR}" worktree list` — match worktrees to `[gone]` branches.
-3. For each `[gone]` branch: remove its worktree if any (`git worktree remove --force <path>`), then
-   delete the branch (`git branch -D <branch>`).
-4. Report which branches/worktrees were removed. None found → say so, nothing to do.
+`scripts/bulk_clean_gone.sh` owns everything deterministic: `fetch --prune` before ever reading
+`[gone]` status (a branch deleted on GitHub/GitLab stays invisible locally until this runs),
+switching off a branch before deleting it, pulling the base branch once landed there, and removing
+any worktree tied to a branch it deletes. No subagent per repo — one process, one pass, same shape
+as `commit-and-pr`'s `bulk_commit.sh`.
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh --root "${CLAUDE_PROJECT_DIR}" [--repo <name>]
+```
+
+A named repo as argument → add `--repo <name>` (basename match against every repo the same
+discovery finds — `find <root> -maxdepth 4 -name .git`, `node_modules` excluded, identical to
+`bulk_commit.sh`'s, reused not reinvented). No argument or `--all` → no `--repo`, the whole root.
+
+Report its output verbatim, per repo: a branch count removed, or "rien à nettoyer". Nothing found
+across the whole run → say so, nothing to do.
