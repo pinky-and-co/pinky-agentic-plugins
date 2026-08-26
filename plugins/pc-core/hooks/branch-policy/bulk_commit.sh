@@ -60,6 +60,19 @@ branch_strategy() {
         | grep -v '^$' || echo "UNDECLARED"
 }
 
+# La branche d'intégration réelle, jamais le HEAD de départ : un HEAD déjà sur une feature
+# branch (checkout fait avant d'invoquer ce script) donnerait sinon une base fausse, et
+# open_pr() sauterait la PR en croyant être sur la branche d'intégration.
+resolve_base() {
+    local repo="$1" ref
+    ref="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    if [ -n "$ref" ]; then
+        printf '%s' "${ref#origin/}"
+        return
+    fi
+    git -C "$repo" symbolic-ref --short HEAD
+}
+
 # `.DS_Store` & co ne sont pas une décision : ils vont dans .gitignore, silencieusement.
 resolve_noise() {
     local repo="$1" n added=0
@@ -181,7 +194,7 @@ do_apply() {
     [ -f "$msgfile" ] || die "fichier de messages introuvable : $msgfile"
 
     local ok=0 failed=0 skipped=0 partial=0
-    local repo name fp msg strategy base branch slug
+    local repo name fp msg strategy base head branch slug
 
     while IFS= read -r repo; do
         [ -n "$repo" ] || continue
@@ -202,9 +215,10 @@ do_apply() {
         fi
 
         strategy="$(branch_strategy "$repo")"
-        base="$(git -C "$repo" symbolic-ref --short HEAD)"
-        branch="$base"
-        if needs_feature_branch "$repo"; then
+        base="$(resolve_base "$repo")"
+        head="$(git -C "$repo" symbolic-ref --short HEAD)"
+        branch="$head"
+        if [ "$head" = "$base" ] && needs_feature_branch "$repo"; then
             slug="$(printf '%s' "$msg" | sed 's/^[^:]*: *//' \
                 | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' \
                 | sed 's/^-*//; s/-*$//' | cut -c1-40)"
@@ -219,7 +233,7 @@ do_apply() {
         # Étages séparés, et nommés dans le rapport : un push qui échoue n'est pas un
         # commit qui échoue. Un "❌ échec git" indifférencié laisse croire à une perte
         # alors que le commit est bien là.
-        if [ "$branch" != "$base" ] \
+        if [ "$branch" != "$head" ] \
            && ! git -C "$repo" checkout -b "$branch" >/dev/null 2>&1; then
             printf '  ❌ %-28s branche %s impossible (modifs stagées, rien de perdu)\n' \
                 "$name" "$branch"

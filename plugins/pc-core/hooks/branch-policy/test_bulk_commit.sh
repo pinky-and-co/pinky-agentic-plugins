@@ -62,5 +62,38 @@ check "racine vide → NO-REPOS-FOUND" "$(printf '%s' "$out" | grep -c 'NO-REPOS
 check "racine vide → exit non nul"   "$([ "$rc" -ne 0 ] && echo yes || echo no)"          yes
 check "jamais NOTHING-TO-COMMIT"     "$(printf '%s' "$out" | grep -c 'NOTHING-TO-COMMIT')" 0
 
+# open_pr() ne doit jamais confondre "aucune bascule faite ici" avec "on est sur la branche
+# d'intégration" — un HEAD déjà sur une feature branch avant l'appel a droit à sa PR comme
+# n'importe quelle branche créée par le script lui-même.
+bare="$T/origin.git"
+git init -q --bare -b main "$bare"
+mkdir -p "$T/foxtrot" && git -C "$T/foxtrot" init -q -b main
+git -C "$T/foxtrot" remote add origin "$bare"
+git -C "$T/foxtrot" commit -q --allow-empty -m init
+git -C "$T/foxtrot" push -q -u origin main
+git -C "$T/foxtrot" remote set-head origin main
+git -C "$T/foxtrot" checkout -q -b feature/preexisting
+printf 'def g():\n    return 2\n' > "$T/foxtrot/lib.py"
+
+ghbin="$T/ghbin"; mkdir -p "$ghbin"
+cat > "$ghbin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh $*" >> "$GH_LOG"
+[ "$1 $2" = "pr view" ] && exit 1
+exit 0
+EOF
+chmod +x "$ghbin/gh"
+export GH_LOG="$T/gh.log"; : > "$GH_LOG"
+
+planfox="$("$SCRIPT" plan --root "$T" --repo foxtrot 2>&1)"
+fpfox="$(printf '%s' "$planfox" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: add g\n' "$fpfox" > "$T/mfox.tsv"
+PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo foxtrot --messages "$T/mfox.tsv" >/dev/null 2>&1
+
+check "PR tentée depuis une feature branch pré-existante" \
+    "$(grep -c '^gh pr create' "$GH_LOG")" 1
+check "reste sur sa branche, aucune nouvelle créée" \
+    "$(git -C "$T/foxtrot" branch --show-current)" "feature/preexisting"
+
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"
