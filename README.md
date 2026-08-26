@@ -197,7 +197,6 @@ pinky-agentic-plugins/
 ├── .secrets.baseline
 ├── AGENTS.md
 ├── CLAUDE.md
-├── commit-messages.txt
 ├── pyproject.toml
 ├── README.md
 └── uv.lock

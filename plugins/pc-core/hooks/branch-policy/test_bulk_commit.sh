@@ -27,7 +27,7 @@ mkrepo() {
 }
 
 # Trois repos, une seule et même distribution (un `.md` → chemin non gardé).
-for r in alpha bravo charlie; do mkrepo "$r"; printf 'shared\n' > "$T/$r/POLICY.md"; done
+for r in alpha bravo charlie; do mkrepo "$r"; printf 'shared\n' > "$T/$r/README.md"; done
 printf 'junk' > "$T/alpha/.DS_Store"          # bruit sur UN SEUL des trois
 mkrepo delta; printf 'def f():\n    return 1\n' > "$T/delta/app.py"   # code → chemin gardé
 mkrepo echo_; printf 'junk' > "$T/echo_/.DS_Store"                    # bruit et rien d'autre
@@ -47,7 +47,7 @@ check "groupe de bruit isolé"     "$(printf '%s' "$plan" | grep -c 'GROUP noise
 check ".DS_Store gitignoré"       "$(grep -c '^\.DS_Store$' "$T/alpha/.gitignore")"            1
 
 # apply --dry-run ne doit rien committer, et doit couvrir les 5 repos.
-printf '%s\t📝 docs: add POLICY\n' "$(printf '%s' "$plan" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)" > "$T/m.tsv"
+printf '%s\t📝 docs: add README\n' "$(printf '%s' "$plan" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)" > "$T/m.tsv"
 dry="$("$SCRIPT" apply --root "$T" --messages "$T/m.tsv" --dry-run 2>&1)"
 check "dry-run ne committe rien"  "$(git -C "$T/bravo" log --oneline | wc -l | tr -d ' ')"     1
 check "groupe sans message → ⏭️"  "$(printf '%s' "$dry" | grep -c 'aucun message')"            1
