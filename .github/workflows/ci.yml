@@ -38,11 +38,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Install dependencies
+        # `--locked`, pas `--frozen` : échoue si `uv.lock` est désynchronisé du `pyproject.toml`
+        # (dépendance ajoutée sans relancer `uv lock`) au lieu d'installer un lock potentiellement
+        # obsolète en silence — `pip install` ignorait totalement `uv.lock` (chantier 0024).
         # --group dev, pas ".[dev]" : les deps de dev sont un dependency-group PEP 735 depuis
         # 2026-07-22 (voir le commentaire dans pyproject.toml — `uv run` désinstallait les extras).
-        # Requiert pip >= 25.1 ; ensurepip en livre 26.1.2 avec Python 3.12, donc rien à épingler.
-        run: pip install -e . --group dev
+        run: uv sync --locked --group dev
+
+      - name: Audit dependencies
+        # `uv run pip-audit`/`uvx pip-audit` seuls auditent un env d'outil ISOLÉ (~29 paquets de
+        # pip-audit lui-même), jamais les deps du projet — un scan vert qui ne prouve rien (mesuré
+        # sur pinky-core, chantier 0024). L'export force pip-audit à lire le VRAI arbre résolu.
+        # Bloquant : une CVE détectée fait échouer le job. Un scan qui ne bloque rien n'est qu'un
+        # log de plus, ignoré comme tout log jusqu'à l'incident.
+        run: |
+          uv export --frozen --all-extras --all-groups --format requirements-txt --no-hashes -o /tmp/pip-audit-requirements.txt
+          uvx pip-audit -r /tmp/pip-audit-requirements.txt
 
       - name: Tests
         # Commande surchargeable : `pytest` ne convient qu'aux repos dont la suite est en Python.
@@ -50,4 +65,7 @@ jobs:
         # collecté », et la commande n'est même pas installée. Cette étape existe en plus du hook
         # `run-tests` parce que celui-ci est filtré sur `files: ^(src|tests)/` : une PR qui ne
         # touche que la doc le saute, et la suite ne tournerait alors nulle part.
-        run: pytest
+        # `uv run`, pas la commande nue : depuis `uv sync --locked` (chantier 0024), les paquets
+        # vivent dans le venv géré par uv, plus dans le Python système comme avec `pip install` —
+        # un `pytest` nu sort "command not found" (mesuré en CI réelle, Linux et Windows).
+        run: uv run pytest
