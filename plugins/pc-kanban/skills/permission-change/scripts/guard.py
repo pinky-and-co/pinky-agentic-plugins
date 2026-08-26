@@ -139,6 +139,12 @@ CLAUDE_DIR_HAND_EDITED = {
     ".claude/policies.json",
 }
 
+# Directories under `.claude/` no plugin ever owns, filename-variable — a set of exact paths
+# (CLAUDE_DIR_HAND_EDITED above) can't cover these. `.claude/memory/` is Claude Code's own
+# auto-memory feature (harness-level, not a plugin), session/hand-maintained by design — the
+# opposite of a regenerated tree.
+CLAUDE_DIR_HAND_EDITED_PREFIXES = {".claude/memory"}
+
 
 # ── state ─────────────────────────────────────────────────────────────────────
 
@@ -237,6 +243,8 @@ def generated_tree_violation(target: str, root: Path) -> str | None:
     except ValueError:
         return None  # outside the workspace root entirely — the outside-scope guard's concern
     if rel.as_posix() in CLAUDE_DIR_HAND_EDITED:
+        return None
+    if any(rel.is_relative_to(Path(p)) for p in CLAUDE_DIR_HAND_EDITED_PREFIXES):
         return None
     for prefix, message in GENERATED_TREES:
         prefix_path = Path(prefix)

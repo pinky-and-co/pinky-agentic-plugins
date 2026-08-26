@@ -198,6 +198,7 @@ pinky-agentic-plugins/
 │       └── validate_plugins_strict.py
 ├── tests/
 │   ├── test_branch_guard.py
+│   ├── test_guard.py
 │   ├── test_inject_policies.py
 │   ├── test_model_adversarial.py
 │   ├── test_policy_lib.py
