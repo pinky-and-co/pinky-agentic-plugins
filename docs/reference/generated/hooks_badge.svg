@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="81" height="20">
-  <title>generate-docs · run-tests · mdformat · check-zws · check-forbidden-keywords · commit-msg-format · mypy · interrogate · darglint · check-typed-api · check-weak-assertions · validate-frontmatter · mypy · interrogate · darglint · check-typed-api</title>
+  <title>generate-docs · run-tests · mdformat · check-zws · check-forbidden-keywords · commit-msg-format · mypy · interrogate · darglint · check-typed-api · check-weak-assertions · validate-frontmatter · validate-plugins-strict · mypy · interrogate · darglint · check-typed-api</title>
   <rect width="81" height="20" rx="3" fill="#555"/>
   <rect x="50" width="31" height="20" rx="3" fill="#007ec6"/>
   <rect x="50" width="4" height="20" fill="#007ec6"/>
   <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
     <text x="25" y="15" fill="#010101" fill-opacity=".3">hooks</text>
     <text x="25" y="14">hooks</text>
-    <text x="65" y="15" fill="#010101" fill-opacity=".3">16</text>
-    <text x="65" y="14">16</text>
+    <text x="65" y="15" fill="#010101" fill-opacity=".3">17</text>
+    <text x="65" y="14">17</text>
   </g>
 </svg>

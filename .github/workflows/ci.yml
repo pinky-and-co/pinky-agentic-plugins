@@ -45,9 +45,15 @@ jobs:
         # `--locked`, pas `--frozen` : échoue si `uv.lock` est désynchronisé du `pyproject.toml`
         # (dépendance ajoutée sans relancer `uv lock`) au lieu d'installer un lock potentiellement
         # obsolète en silence — `pip install` ignorait totalement `uv.lock` (chantier 0024).
+        # `--no-sources` : ignore `[tool.uv.sources]` (override dev vers un repo frère en chemin
+        # relatif, ex. `../pinky-core`) — la CI checkout un seul repo, isolé, ce chemin n'existe
+        # pas. `pip install` ignorait déjà `[tool.uv.sources]` (mécanisme propre à uv), donc
+        # retombait silencieusement sur le paquet publié ; `uv sync` l'honore et casse sans ce
+        # flag (mesuré : "Distribution not found" sur pinky-connect en CI réelle). Résout contre
+        # le contrat publié, ce que teste une CI est censée valider de toute façon.
         # --group dev, pas ".[dev]" : les deps de dev sont un dependency-group PEP 735 depuis
         # 2026-07-22 (voir le commentaire dans pyproject.toml — `uv run` désinstallait les extras).
-        run: uv sync --locked --group dev
+        run: uv sync --locked --no-sources --group dev
 
       - name: Audit dependencies
         # `uv run pip-audit`/`uvx pip-audit` seuls auditent un env d'outil ISOLÉ (~29 paquets de
@@ -68,4 +74,8 @@ jobs:
         # `uv run`, pas la commande nue : depuis `uv sync --locked` (chantier 0024), les paquets
         # vivent dans le venv géré par uv, plus dans le Python système comme avec `pip install` —
         # un `pytest` nu sort "command not found" (mesuré en CI réelle, Linux et Windows).
-        run: uv run pytest
+        # `--no-sources` : `uv run` resynchronise l'environnement AVANT de lancer la commande, avec
+        # la config par défaut du repo — donc `[tool.uv.sources]` si le repo en a un, qui casse en
+        # CI isolée exactement comme l'étape d'install (mesuré : pinky-ai PR#9, "Distribution not
+        # found" ici, pas à l'install). No-op sur un repo sans `[tool.uv.sources]`.
+        run: uv run --no-sources pytest
