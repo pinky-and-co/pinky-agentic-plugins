@@ -287,6 +287,20 @@ repos:
         files: \.md$
         stages: [pre-commit]
 
+  # `claude plugin validate --strict` on every plugin.json + marketplace.json this repo ships —
+  # card `declarer-dependencies-plugin-et-valider-strict.md` (chantier 0023): the dependency between
+  # `pc-priv-snow` and `pc-snow` existed only as prose in a `description` string until the CLI grew
+  # a native `dependencies` field (2026-08-22) — nothing enforced the field's *shape* at commit time.
+  - repo: local
+    hooks:
+      - id: validate-plugins-strict
+        name: "[PLUGIN] claude plugin validate --strict"
+        entry: python scripts/hooks/validate_plugins_strict.py
+        language: python
+        files: (plugins/[^/]+/\.claude-plugin/plugin\.json|\.claude-plugin/marketplace\.json)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # ── Same quality floor as the `python` extra's src/-scoped hooks, for a plugin repo's own
   # Python — plugins/*/hooks/ (inject_policies.py and siblings) AND plugins/*/mcp/ (an MCP
   # server's own Python, e.g. pc-core's mcp/server.py) — both are hand-authored by this repo, not

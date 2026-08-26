@@ -179,7 +179,8 @@ pinky-agentic-plugins/
 │       ├── generate_ci_badges.py
 │       ├── render_docs.py
 │       ├── run-tests
-│       └── validate_frontmatter.py
+│       ├── validate_frontmatter.py
+│       └── validate_plugins_strict.py
 ├── tests/
 │   ├── test_branch_guard.py
 │   ├── test_inject_policies.py
