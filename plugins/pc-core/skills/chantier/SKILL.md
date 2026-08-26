@@ -122,7 +122,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
     running skill's own text, so do not attempt to run it. Instead, end this skill's response with:
 
     ```
-    Next step: activate the goal for this card.
+    🎯 Next step: activate the goal for this card.
     /goal <condition>
     ```
 
