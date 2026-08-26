@@ -80,6 +80,28 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
 7. **Take the card, if one is being taken** (already in `3-in-progress/` → resume directly; else the
   FIRST card of `2-selected-for-dev/` → move it into `3-in-progress/`, set its `date` to today under
   `status: in-progress`):
+   - **Parent context** — part of the "move it into `3-in-progress`" branch only: a card already
+    resident there takes the "resume directly" branch above and never reaches this bullet, so
+    nothing here needs a runtime first-time check. If `sert` is non-null, locate the parent card
+    (`<sert>.md`) in *this same chantier's* `4-done/` or, once archived, its own
+    `_ARCHIVE/CHANTIER<this-chantier's-number>-done/YYYY-MM-DD_<sert>.md` — never glob other
+    chantiers' archives.
+    - Parent found, `done`, and carries both a `## Fini =` and a `## Pourquoi` → append a managed
+      block to the child's body:
+      ```
+      <!-- auto-parent:start -->
+      ## Contexte hérité de `<sert>`
+      <the parent's `## Fini =` section, verbatim>
+      <the parent's `## Pourquoi` section, verbatim>
+      <!-- auto-parent:end -->
+      ```
+      Idempotent by construction — this bullet only ever runs once per card (see above) — never
+      hand-edit between the markers on a later resume.
+    - Parent found but has no `## Pourquoi` → append the block with `## Fini =` only, same markers.
+    - Parent not `done` yet, not found (purged without archive), or `sert` orphaned → say so
+      plainly, append nothing, and move on; never invent parent content.
+    - A card ending up without this block (older cards, `sert: null`, parent unavailable) parses
+      exactly as before — this is appended body content, not a frontmatter field.
    - **Repo-scope.** `repos: []` or absent → kanban-only work, do not freeze (nothing to scope to).
     Otherwise, resolve each `org/repo` slug to its local absolute path:
     ```bash

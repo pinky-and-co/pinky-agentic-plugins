@@ -137,6 +137,12 @@ and the reviewer preference order — read it when taking a card in, or before d
 elsewhere folded into a single "N autonomous cards" count. Never hand-maintain a critical-path list
 on a parent card; if the render is wrong, a child's `sert` value is wrong, fix the child.
 
+`sert` has a second, orthogonal use: at intake (`/chantier` step 7, first move into
+`3-in-progress`), a non-null `sert` whose parent is `done` or already archived gets its
+`Fini =`/`Pourquoi` appended to the child as a managed block — content, not just grouping. See
+`chantier`'s SKILL.md § step 7 for the mechanism; this section only flags that the field now
+carries both.
+
 ## DRY across cards
 
 A card that names another card links by path and stops — never restates its status, findings, or
