@@ -31,3 +31,27 @@ mechanical check, prefer in this order — **never `haiku`, whatever tier is ava
    rationalizations — `model: sonnet` in its own definition, a real floor.
 3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
    model, same context) rather than presenting it as equivalent to (1) or (2).
+
+### Proposing the next card, once `Fini =` is met
+
+Closing a card is not the end of the session's job — the next card does not pick itself. Once
+`Fini =` is verified, propose candidate cards for `2-selected-for-dev`; never move one there
+without an explicit OK in the same exchange — the commitment column stays a human decision
+(`.claude/rules/kanban-proactivity.md`).
+
+**Candidates** — open cards in the same chantier's `1-todo/` (a card still in `0-ideas/` needs
+cadrage first, never proposed directly), filtered and ordered:
+
+1. **Exclude** any card whose `blocked_by` points at a card not yet `done` — never propose a
+   blocked card, however old. A card missing `date:` is malformed; flag it instead of guessing a
+   sort position.
+2. **Sort the rest into two buckets**, each by `date:` ascending: cards whose `blocked_by` was
+   resolved in *this same session* first, then everything else. Both buckets are plain FIFO — the
+   dependency filter already did the real work, this is only the tie-break.
+
+**Nothing survives the filter** → say so plainly ("rien à proposer — `1-todo/` est vide ou tout est
+bloqué") and propose nothing; do not lower the bar to fill a slot.
+
+On explicit user OK: `mv` the chosen card into `2-selected-for-dev`. On silence or "not now": do
+nothing — the proposal is not a commitment, and repeating it unprompted next turn is not this
+skill's job either.

@@ -188,6 +188,7 @@ pinky-agentic-plugins/
 │   ├── test_read_cost.py
 │   ├── test_secret_patterns.py
 │   └── test_stop_handoff.py
+├── .commit-messages.txt
 ├── .darglint
 ├── .gitattributes
 ├── .gitignore
