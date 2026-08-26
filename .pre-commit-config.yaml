@@ -335,6 +335,15 @@ repos:
         types: [python]
         args: [--ignore-missing-imports]
         files: ^plugins/[^/]+/(hooks|mcp)/
+        # A vendored file (policy_lib.py, secret_patterns.py — chantier 0023,
+        # decouper-pc-core-en-pc-git-et-pc-kanban) is the SAME filename in two sibling
+        # plugins/*/hooks/ dirs, neither carrying an __init__.py — mypy errors "Duplicate module
+        # named X" the moment it sees both (measured: `--explicit-package-bases` alone doesn't fix
+        # this without a MYPYPATH, and plugin dir names carry hyphens, not valid as Python module
+        # path components, so MYPYPATH isn't a clean answer either). Exclude every vendored copy
+        # but the canonical pc-core one — check-vendor-checksum already guarantees byte-identity,
+        # so mypy on one copy covers both.
+        exclude: ^plugins/(pc-git|pc-kanban)/hooks/(policy_lib|secret_patterns)\.py$
         require_serial: true
 
   - repo: https://github.com/PyCQA/bandit
