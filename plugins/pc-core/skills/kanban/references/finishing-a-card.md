@@ -32,6 +32,22 @@ mechanical check, prefer in this order — **never `haiku`, whatever tier is ava
 3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
    model, same context) rather than presenting it as equivalent to (1) or (2).
 
+### Making the review visible on the card
+
+Not every card goes through the section above — a purely mechanical change has nothing for a
+reviewer to catch, and stamping one on every card regardless would turn a real judgment call into a
+box-ticking ritual. When a card's work *did* need real judgment reviewed, make it visible on the
+card itself: immediately above the `## Fini =` line (already present by this point — it was set at
+selection), add `- [ ] reviewed (method)`, `method` one of `adversarial`, `reviewer`,
+`self-degraded`, comma-separated if more than one was actually used (e.g. `adversarial, reviewer`).
+Check it — `- [x] reviewed (…)` — once the review above is done, before declaring `Fini =` met.
+
+Added by the session doing the work, never by `/chantier`'s intake (step 7). This checkbox is
+descriptive, not a new gate: the review itself stays mandatory per the section above whenever real
+judgment is involved, independent of whether the checkbox is present. What is *not* enforced is the
+checkbox's own bookkeeping — no script blocks `Fini =` on a missing box, so an omitted checkbox
+makes a past review harder to audit later, it does not mean the review was skipped or optional.
+
 ### Proposing the next card, once `Fini =` is met
 
 Closing a card is not the end of the session's job — the next card does not pick itself. Once
