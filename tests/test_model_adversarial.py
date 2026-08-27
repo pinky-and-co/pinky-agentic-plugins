@@ -11,6 +11,137 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "m
 
 import model_adversarial as ma
 
+MISTRAL = {
+    "name": "mistral-medium-3.5",
+    "kind": "http",
+    "provider": "mistral",
+    "model": "mistral-medium-3.5",
+    "base_url": "https://api.mistral.ai/v1/chat/completions",
+    "api_key_env": "MISTRAL_API_KEY",  # pragma: allowlist secret
+    "api_key_file": "~/.mistral_api_key",  # pragma: allowlist secret
+    "capacity_tier": "opus",
+    "free_tier": False,
+    "concurrency": None,
+}
+GLM = {
+    "name": "glm-5-2",
+    "kind": "http",
+    "provider": "openrouter",
+    "model": "z-ai/glm-5-2",
+    "base_url": "https://openrouter.ai/api/v1/chat/completions",
+    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
+    "api_key_file": "~/.openrouter_api_key",  # pragma: allowlist secret
+    "capacity_tier": "opus",
+    "free_tier": True,
+    "concurrency": None,
+}
+KIMI = {
+    "name": "kimi-k2.6",
+    "kind": "http",
+    "provider": "openrouter",
+    "model": "moonshotai/kimi-k2.6:free",
+    "base_url": "https://openrouter.ai/api/v1/chat/completions",
+    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
+    "api_key_file": "~/.openrouter_api_key",  # pragma: allowlist secret
+    "capacity_tier": "sonnet",
+    "free_tier": True,
+    "concurrency": None,
+}
+OFFLINE = {
+    "name": "local-ollama",
+    "kind": "offline",
+    "provider": "ollama",
+    "model": None,
+    "capacity_tier": "haiku",
+    "free_tier": True,
+    "concurrency": 1,
+}
+POOL = [MISTRAL, GLM, KIMI, OFFLINE]
+
+
+class TestSelectForAdversarial(unittest.TestCase):
+    def test_excludes_offline_and_orders_direct_before_aggregator(self):
+        self.assertEqual(
+            ma.select_for_adversarial(POOL, floor_tier="sonnet"), [MISTRAL, GLM, KIMI]
+        )
+
+    def test_floor_excludes_weaker_tiers(self):
+        self.assertEqual(
+            ma.select_for_adversarial(POOL, floor_tier="opus"), [MISTRAL, GLM]
+        )
+
+    def test_empty_pool_yields_empty_list(self):
+        self.assertEqual(ma.select_for_adversarial([]), [])
+
+
+class TestSelectForDelegation(unittest.TestCase):
+    def test_free_before_paid_then_cheapest_capable_tier(self):
+        self.assertEqual(
+            ma.select_for_delegation(POOL, task_tier="haiku"),
+            [OFFLINE, KIMI, GLM, MISTRAL],
+        )
+
+    def test_floor_excludes_offline_for_a_sonnet_task(self):
+        self.assertEqual(
+            ma.select_for_delegation(POOL, task_tier="sonnet"), [KIMI, GLM, MISTRAL]
+        )
+
+
+class TestLoadPool(unittest.TestCase):
+    def test_missing_config_file_returns_builtin_default(self):
+        original = ma.resolve_pool_config_path
+        ma.resolve_pool_config_path = lambda: Path("/nonexistent/pinky_model_pool.json")
+        try:
+            self.assertEqual(ma.load_pool(), ma._DEFAULT_POOL)
+        finally:
+            ma.resolve_pool_config_path = original
+
+
+class TestResolveApiKeyFor(unittest.TestCase):
+    def test_env_var_wins_over_file(self, monkeypatch=None):
+        import os
+
+        os.environ["OPENROUTER_API_KEY"] = "env-value"  # pragma: allowlist secret
+        try:
+            self.assertEqual(ma.resolve_api_key_for(GLM), "env-value")
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
+
+    def test_falls_back_to_file(self):
+        import os
+        import tempfile
+
+        os.environ.pop("OPENROUTER_API_KEY", None)
+        with tempfile.NamedTemporaryFile("w", suffix=".key", delete=False) as f:
+            f.write("file-value\n")
+            key_path = f.name
+        try:
+            entry = {**GLM, "api_key_file": key_path}
+            self.assertEqual(ma.resolve_api_key_for(entry), "file-value")
+        finally:
+            Path(key_path).unlink()
+
+    def test_neither_present_returns_none(self):
+        import os
+
+        os.environ.pop("OPENROUTER_API_KEY", None)
+        entry = {**GLM, "api_key_file": "/nonexistent/.openrouter_api_key"}
+        self.assertIsNone(ma.resolve_api_key_for(entry))
+
+
+class TestRunPool(unittest.TestCase):
+    def test_offline_entry_never_reaches_call_provider(self):
+        # only offline in the pool, nothing else to try → must fail without calling call_provider
+        result = ma.run_pool([OFFLINE], "prompt")
+        self.assertIsNone(result.entry)
+        self.assertIn("offline entries are not callable", result.result)
+
+    def test_non_https_base_url_is_refused(self):
+        with self.assertRaises(ValueError):
+            ma.call_provider(
+                "http://insecure.example/v1/chat/completions", "key", "m", "prompt"
+            )
+
 
 class TestLoadMethodology(unittest.TestCase):
     def test_strips_frontmatter(self):

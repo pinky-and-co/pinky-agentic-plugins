@@ -91,17 +91,21 @@ def adversarial(
     """Challenge THIS session's own output with a contrarian second opinion from a non-Claude model.
 
     Pass your own plan/review/reasoning as `task` (plus source files if relevant) — a same-model
-    self-check inherits its own blind spots, which is exactly what this tool exists to avoid. Returns
-    the full verdict verbatim; do not summarize or soften it on the model's behalf.
+    self-check inherits its own blind spots, which is exactly what this tool exists to avoid. Tries
+    each pool candidate in order, falling through to the next on failure; the returned text always
+    opens with which model actually answered — never present a review as verdict without knowing
+    which model produced it. The verdict itself is returned verbatim below that line; do not
+    summarize or soften it on the model's behalf.
     """
     files = files or []
-    resolved_model = model_adversarial.resolve_model(model)
-    api_key = model_adversarial.resolve_api_key()  # pragma: allowlist secret
-    if not api_key:
-        return (
-            "[adversarial] BLOCKED — no API key found (MISTRAL_API_KEY env var or "
-            "~/.mistral_api_key file). Create the file with your key from console.mistral.ai."
-        )
+    override = model_adversarial.resolve_model(model)
+    entries = (
+        [{**model_adversarial._DEFAULT_POOL[0], "model": override, "name": override}]
+        if override
+        else model_adversarial.select_for_adversarial(model_adversarial.load_pool())
+    )
+    if not entries:
+        return "[adversarial] BLOCKED — no candidate model in the pool."
 
     # Shared methodology with the `reviewer` agent (`agents/reviewer.md`) — same review guidelines
     # and output format regardless of which model reviews, its own "Adversarial mode" section
@@ -109,28 +113,14 @@ def adversarial(
     methodology = model_adversarial.load_methodology()
     adversarial_task = (methodology + "\n\n" if methodology else "") + task
     prompt = model_adversarial.build_prompt(adversarial_task, files)
-    try:
-        r = model_adversarial.call_mistral(api_key, resolved_model, prompt)
-    except urllib.error.HTTPError as e:
-        return (
-            f"[adversarial] ERROR — HTTP {e.code}: {e.read().decode(errors='ignore')}"
-        )
-    except (urllib.error.URLError, OSError) as e:
-        return f"[adversarial] ERROR — call failed: {e}"
 
-    choice = r.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    content = (
-        message.get("content") or message.get("reasoning_content") or "(empty response)"
-    )
-    if isinstance(content, list):
-        texts = [
-            b.get("text", "")
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        ]
-        content = "\n".join(t for t in texts if t) or "(no text block — reasoning only)"
-    return content
+    pool_result = model_adversarial.run_pool(entries, prompt)
+    if pool_result.entry is None:
+        return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
+    response = pool_result.result
+    assert isinstance(response, dict)  # guardrail for mypy
+    content = model_adversarial.extract_content(response)
+    return f"[answered by {pool_result.entry['name']}]\n\n{content}"
 
 
 if __name__ == "__main__":
