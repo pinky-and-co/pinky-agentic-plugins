@@ -80,9 +80,18 @@ pinky-agentic-plugins/
 │   │   ├── mcp/
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
+│   │   │   ├── model_panel.py
 │   │   │   └── server.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── council/
+│   │   │   │   ├── evals/
+│   │   │   │   │   └── evals.json
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── type-generic.md
+│   │   │   │   │   ├── type-pitch.md
+│   │   │   │   │   └── type-tech.md
 │   │   │   │   └── SKILL.md
 │   │   │   ├── document-to-md/
 │   │   │   │   └── SKILL.md
@@ -205,6 +214,7 @@ pinky-agentic-plugins/
 │   ├── test_keychain.py
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
+│   ├── test_model_panel.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
 │   ├── test_privacy_egress.py

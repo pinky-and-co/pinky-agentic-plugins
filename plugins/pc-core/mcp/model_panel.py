@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""Panel runtime — dispatch one prompt PER SLOT to a different model family each, in parallel.
+
+Called by the `panel` MCP tool (`mcp/server.py`). Where `adversarial` runs a single contrarian
+check and `offline` runs one local model, `panel` fans a batch of prompts out across several
+*different* model families at once — `prompts[i]` to the i-th selected model — and returns every
+answer, each labelled with the model that produced it. It exists for a council of advisor voices
+(five lenses, five prompts, five models) and for any other multi-model fan-out. For the same
+question to N models, repeat it in the batch. **No review posture is injected** (unlike
+`adversarial`, which prepends the shared review methodology): each prompt is sent verbatim, because
+a council's lenses are not all adversarial.
+
+Dual-use: standalone CLI (below) and an importable library for `mcp/server.py`, which calls these
+functions directly. Pool resolution, key resolution, the HTTP call and response parsing are all
+reused from `model_adversarial` — this module only adds the selection policy and the parallel
+dispatch.
+
+Eligibility for a slot: `kind` is `http` (never `offline` — that has its own zero-egress tool) and
+`capacity_tier` is `sonnet` or `opus` (a `haiku`-tier model cannot hold an advisor analysis, and
+mixing one in reads as model diversity when it is really a quality gap — see
+`pinky-bootstrap/docs/adr/0006-council-advisors-cross-modele.md`).
+
+Usage:
+    model_panel.py --task "<prompt>" [--task "<prompt>" ...] [--model NAME ...]
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import json
+import sys
+import time
+import urllib.error
+from pathlib import Path
+from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+import model_adversarial as ma
+
+ADVISOR_TIERS = frozenset({"sonnet", "opus"})
+DEFAULT_TIMEOUT = 180
+
+
+class Answer(NamedTuple):
+    """One model's reply in a panel run. `slot` is the 1-based index of the prompt it answered."""
+
+    slot: int
+    model: str
+    text: str
+
+
+class Skip(NamedTuple):
+    """A selected model that was tried and did not answer. `slot` is its prompt's 1-based index."""
+
+    slot: int
+    model: str
+    reason: str
+
+
+class PanelResponse(NamedTuple):
+    """One panel run: the answers that came back, and the selected slots that did not."""
+
+    answers: list[Answer]
+    skipped: list[Skip]
+
+
+class _SlotResult(NamedTuple):
+    """Internal: one worker's outcome — exactly one of `answer` / `reason` is set."""
+
+    entry: dict
+    answer: str | None
+    reason: str | None
+
+
+def _eligible(entry: dict) -> bool:
+    """True if this pool entry can take an advisor slot: an HTTP model of sonnet/opus tier."""
+    return (
+        entry.get("kind") != "offline" and entry.get("capacity_tier") in ADVISOR_TIERS
+    )
+
+
+def _distinct_families(entries: list[dict], n: int) -> list[dict]:
+    """Keep the first entry of each `provider`, in the given order, capped at `n`.
+
+    One family = one voice: two models behind the same provider add no model diversity and, since
+    `run_panel` fans out in parallel, would also hit that provider's rate limit at once.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if entry["provider"] in seen:
+            continue
+        seen.add(entry["provider"])
+        out.append(entry)
+        if len(out) == n:
+            break
+    return out
+
+
+def select_for_panel(
+    pool: list[dict], n: int, models: list[str] | None = None
+) -> list[dict]:
+    """Pick up to `n` eligible, family-distinct pool entries for a panel, deterministically.
+
+    Both paths enforce one entry per `provider` (see `_distinct_families`) and drop `offline` /
+    `haiku`-tier entries (see `_eligible`).
+
+    `models` given: the named entries in that order, minus the ineligible and the family duplicates
+    (an unknown or dropped name is silent here — `run_panel`'s skipped-reason channel is for entries
+    that were selected and then failed, not for selection choices).
+
+    `models` omitted: the eligible entries ranked strongest-tier-first then by name (a total order,
+    so the result is stable), then de-duplicated by family, capped at `n`.
+    """
+    if models is not None:
+        by_name = {e["name"]: e for e in pool}
+        chosen = [by_name[m] for m in models if m in by_name and _eligible(by_name[m])]
+        return _distinct_families(chosen, n)
+
+    ranked = sorted(
+        (e for e in pool if _eligible(e)),
+        key=lambda e: (-ma.tier_rank(e["capacity_tier"]), e["name"]),
+    )
+    return _distinct_families(ranked, n)
+
+
+def _dispatch_one(entry: dict, prompt: str, timeout: int) -> _SlotResult:
+    """Call one model. `answer` set on success, `reason` set on failure — never both, never raises.
+
+    Every failure mode (no key, HTTP error, transport error, malformed body) becomes a reason
+    string, so one dead entry in a parallel batch cannot take the batch down.
+    """
+    api_key = ma.resolve_api_key_for(entry)  # pragma: allowlist secret
+    if not api_key:
+        return _SlotResult(
+            entry,
+            None,
+            f"no API key ({entry['api_key_env']} absent from env and keychain)",
+        )
+    try:
+        raw = ma.call_provider(
+            entry["base_url"],
+            api_key,
+            entry["model"],
+            prompt,
+            timeout,
+            entry.get("max_tokens", ma.MAX_TOKENS),
+        )
+    except urllib.error.HTTPError as exc:
+        return _SlotResult(entry, None, f"HTTP {exc.code}")
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError) as exc:
+        return _SlotResult(entry, None, f"{type(exc).__name__}: {exc}")
+    return _SlotResult(entry, ma.extract_content(raw), None)
+
+
+def run_panel(
+    entries: list[dict], prompts: list[str], timeout: int = DEFAULT_TIMEOUT
+) -> PanelResponse:
+    """Send `prompts[i]` to `entries[i]` in parallel; collect answers in the entries' own order.
+
+    `entries` and `prompts` must be the same length — pairing is positional, and a mismatch is a
+    caller bug, not a runtime condition, so it raises. Each entry carries its own socket timeout, so
+    a slow model is dropped as a skipped slot rather than stalling the batch — there is no retry.
+    `entries` is expected pre-filtered by `select_for_panel`, which guarantees one entry per
+    provider, so the fan-out never sends two concurrent calls to one provider and no per-provider
+    `concurrency` cap is consulted. An `offline` entry slipping through is skipped, never called.
+    """
+    if len(entries) != len(prompts):
+        raise ValueError(
+            f"run_panel: {len(entries)} entries but {len(prompts)} prompts — must match"
+        )
+    answers: list[Answer] = []
+    skipped: list[Skip] = []
+    if not entries:
+        return PanelResponse(answers, skipped)
+
+    def worker(entry: dict, prompt: str) -> _SlotResult:
+        """Dispatch one (entry, prompt) pair, guarding the offline case that must not be called."""
+        if entry.get("kind") == "offline":
+            return _SlotResult(
+                entry,
+                None,
+                "offline entry — route through the `offline` tool, not `panel`",
+            )
+        return _dispatch_one(entry, prompt, timeout)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(entries)) as pool:
+        for slot, res in enumerate(pool.map(worker, entries, prompts), start=1):
+            if res.reason is None and res.answer is not None:
+                answers.append(Answer(slot, res.entry["name"], res.answer))
+            else:
+                skipped.append(Skip(slot, res.entry["name"], res.reason or "unknown"))
+    return PanelResponse(answers, skipped)
+
+
+def format_panel(response: PanelResponse, requested: int) -> str:
+    """Render a panel run as text: a header, then one block per answer, each tagged with its slot.
+
+    Every slot is named by its 1-based prompt index, so a caller that paired prompt *i* with its own
+    role/lens *i* can map each answer straight back — even with gaps. The header separates the two
+    ways a slot can be empty, because a caller filling the rest itself needs to tell them apart:
+      - *skipped* — a selected model was tried and failed (no key / HTTP error / timeout), named.
+      - *unfilled* — the pool had fewer eligible families than `requested`; the trailing slots were
+        never assigned a model at all.
+    """
+    answered = len(response.answers)
+    failed = len(response.skipped)
+    unfilled_slots = list(range(answered + failed + 1, requested + 1))
+
+    header = f"[panel] {answered}/{requested} slots answered"
+    notes: list[str] = []
+    if response.skipped:
+        notes.append(
+            "skipped: "
+            + ", ".join(
+                f"slot {s.slot} {s.model} ({s.reason})" for s in response.skipped
+            )
+        )
+    if unfilled_slots:
+        joined = ", ".join(str(n) for n in unfilled_slots)
+        notes.append(
+            f"unfilled: slot(s) {joined} — pool has fewer eligible families than requested"
+        )
+    if notes:
+        header += " · " + " · ".join(notes)
+
+    blocks = "\n\n".join(
+        f"--- [slot {a.slot} · {a.model}] ---\n{a.text}" for a in response.answers
+    )
+    return f"{header}\n\n{blocks}" if blocks else header
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Dispatch one prompt per slot to a different pool family, in parallel."
+    )
+    ap.add_argument("--task", action="append", default=[], dest="tasks", required=True)
+    ap.add_argument("--model", action="append", default=None, dest="models")
+    args = ap.parse_args(argv)
+
+    entries = select_for_panel(ma.load_pool(), len(args.tasks), args.models)
+    if not entries:
+        print(
+            "[panel] BLOCKED — no eligible model in the pool (need kind=http, tier sonnet/opus).",
+            file=sys.stderr,
+        )
+        return 2
+
+    prompts = args.tasks[: len(entries)]
+    start = time.time()
+    response = run_panel(entries, prompts)
+    if not response.answers:
+        print(
+            f"[panel] BLOCKED — every candidate failed. Skipped: {response.skipped}",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(
+        f"[panel] {len(response.answers)}/{len(args.tasks)} answered · {time.time() - start:.0f}s",
+        file=sys.stderr,
+    )
+    print(format_panel(response, len(args.tasks)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

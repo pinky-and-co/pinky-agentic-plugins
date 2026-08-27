@@ -112,7 +112,11 @@ def load_pool() -> list[dict[str, Any]]:
     return settings.get("model_pool", list(_DEFAULT_POOL))
 
 
-def _tier_rank(tier: str) -> int:
+def tier_rank(tier: str) -> int:
+    """Ordinal for a `capacity_tier` string (haiku < sonnet < opus); unknown tiers sort lowest.
+
+    Public because `model_panel` shares the same tier ordering — one definition, both callers.
+    """
     return _TIER_RANK.get(tier, 0)
 
 
@@ -127,7 +131,7 @@ def select_for_adversarial(
         e
         for e in pool
         if e["kind"] != "offline"
-        and _tier_rank(e["capacity_tier"]) >= _tier_rank(floor_tier)
+        and tier_rank(e["capacity_tier"]) >= tier_rank(floor_tier)
     ]
     return sorted(candidates, key=lambda e: 0 if e["provider"] != "openrouter" else 1)
 
@@ -144,11 +148,11 @@ def select_for_delegation(
     `call_provider` (that would break its zero-egress guarantee).
     """
     candidates = [
-        e for e in pool if _tier_rank(e["capacity_tier"]) >= _tier_rank(task_tier)
+        e for e in pool if tier_rank(e["capacity_tier"]) >= tier_rank(task_tier)
     ]
     return sorted(
         candidates,
-        key=lambda e: (not e.get("free_tier", False), _tier_rank(e["capacity_tier"])),
+        key=lambda e: (not e.get("free_tier", False), tier_rank(e["capacity_tier"])),
     )
 
 

@@ -1,0 +1,23 @@
+{
+  "skill_name": "council",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "council this: should the plugin installer write a lockfile of resolved plugin versions, or trust the marketplace to be stable? we've been bitten once by a marketplace bumping a skill under us mid-session.",
+      "expected_output": "Runs as type `generic` (no tech/pitch trigger word, phrased as an open decision). Frames the question neutrally, spawns a prior-art scan, convenes 5 advisor lenses via the `panel` MCP tool (routed to distinct model families) with any unfilled/skipped lens falling back to a Claude sub-agent and being logged as such, anonymous peer review, chairman synthesis with the 5 fixed sections, a cross-model chairman check, then writes a `council-report-<ts>.html` plus a `council-transcript-<ts>.md`. The transcript carries a `lens -> model -> version -> tier` assignment log.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "ADR this: for the panel MCP tool's parallel dispatch, threads vs asyncio? the calls are all blocking urllib right now.",
+      "expected_output": "Runs as type `tech` ('ADR this' is a MANDATORY trigger). Reads `references/type-tech.md`, scans `docs/adr/` first and aborts+cites if an accepted ADR already settles it. Prior-art focus is packages/patterns. Advisor lenses framed technically. `## The Recommendation` lands on one concrete option (threads or asyncio), not a hedge. Output is `docs/adr/NNNN-<slug>.md` with the repo's ADR template (title/Update date/Status/Context/Options evaluated/Council verdict/Decision/Consequences) plus a `docs/index.md` pointer, and the transcript.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "pitch council: a standalone CLI that lints a `.claude-plugin/` tree against the marketplace schema before you publish it, catching the class of bug `claude plugin validate` misses (dangling skill refs, a hook script that isn't executable, a reference file no SKILL.md points at).",
+      "expected_output": "Runs as type `pitch` ('pitch council' is a MANDATORY trigger). Reads `references/type-pitch.md`, aborts if the question is detail-level rather than concept-level. Prior-art scan looks for existing OSS/native coverage. Chairman verdict adds a `## Verdict` section with Go / No-Go / Conditional Go. On Go/Conditional Go, writes `explanation/1-design.md` + `explanation/2-features.md` (each with an Update date line and a `docs/index.md` pointer); on No-Go, a rejected ADR. Plus the transcript.",
+      "files": []
+    }
+  ]
+}

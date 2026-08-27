@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import model_adversarial
 import model_offline
+import model_panel
 from mcp.server import MCPServer
 
 m = MCPServer("pc-core-models")
@@ -121,6 +122,34 @@ def adversarial(
     assert isinstance(response, dict)  # guardrail for mypy
     content = model_adversarial.extract_content(response)
     return f"[answered by {pool_result.entry['name']}]\n\n{content}"
+
+
+@m.tool()
+def panel(tasks: list[str], models: list[str] | None = None) -> str:
+    """Send one prompt PER SLOT to a DIFFERENT model family each, in parallel; return every answer.
+
+    `tasks` is one prompt per slot — `tasks[i]` goes to the i-th selected model. Use for a council
+    of advisor voices (five lenses → five prompts → five models); for the same question to N models,
+    repeat it (`["Q", "Q", "Q"]`). `len(tasks)` distinct families are selected from the pool, or
+    `models` (by pool name, order kept). Unlike `adversarial`, no review posture is injected — each
+    prompt is sent verbatim. Each answer is labelled with the model that produced it; the header
+    reports answered/requested and names any slot skipped (no key / HTTP error / timeout — no retry)
+    or left unfilled (pool has fewer eligible families than requested). `offline` and `haiku`-tier
+    entries are never used.
+    """
+    if not tasks:
+        return "[panel] BLOCKED — no task given."
+
+    entries = model_panel.select_for_panel(
+        model_adversarial.load_pool(), len(tasks), models
+    )
+    if not entries:
+        return "[panel] BLOCKED — no eligible model in the pool (need kind=http, tier sonnet/opus)."
+
+    response = model_panel.run_panel(entries, tasks[: len(entries)])
+    if not response.answers:
+        return f"[panel] BLOCKED — every candidate failed. Skipped: {response.skipped}"
+    return model_panel.format_panel(response, len(tasks))
 
 
 if __name__ == "__main__":
