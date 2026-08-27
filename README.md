@@ -92,11 +92,13 @@ pinky-agentic-plugins/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
 │   │   └── skills/
-│   │       └── code-conventions/
-│   │           ├── references/
-│   │           │   ├── lib-api.md
-│   │           │   ├── repro.md
-│   │           │   └── web.md
+│   │       ├── code-conventions/
+│   │       │   ├── references/
+│   │       │   │   ├── lib-api.md
+│   │       │   │   ├── repro.md
+│   │       │   │   └── web.md
+│   │       │   └── SKILL.md
+│   │       └── improve/
 │   │           └── SKILL.md
 │   ├── pc-git/
 │   │   ├── .claude-plugin/
@@ -175,6 +177,10 @@ pinky-agentic-plugins/
 │       │   ├── snowpark/
 │       │   │   ├── references/
 │       │   │   │   └── snowpark.md
+│       │   │   └── SKILL.md
+│       │   ├── snowpark-to-sql/
+│       │   │   └── SKILL.md
+│       │   ├── sql-to-snowpark/
 │       │   │   └── SKILL.md
 │       │   ├── streamlit/
 │       │   │   ├── references/
