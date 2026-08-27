@@ -130,13 +130,13 @@ GENERATED_TREES: list[tuple[str, str]] = [
 
 # Files under `.claude/` no plugin ever owns — Claude Code itself expects a project/user to
 # hand-maintain these directly (`settings.local.json` is by definition the personal, gitignored
-# override layer; `policies.json` is explicitly "owned entirely by this hook and by hand-editing",
-# `inject_policies.py`'s own docstring). Unlike `.claude/rules/` (CLI-setup-rendered), there is no
-# "plugin's own source" a `/reload-plugins --force` could regenerate any of these from.
+# override layer; `settings.pinky.json` is explicitly "owned entirely by this hook and by
+# hand-editing", `inject_policies.py`'s own docstring). Unlike `.claude/rules/` (CLI-setup-rendered),
+# there is no "plugin's own source" a `/reload-plugins --force` could regenerate any of these from.
 CLAUDE_DIR_HAND_EDITED = {
     ".claude/settings.json",
     ".claude/settings.local.json",
-    ".claude/policies.json",
+    ".claude/settings.pinky.json",
 }
 
 # Directories under `.claude/` no plugin ever owns, filename-variable — a set of exact paths

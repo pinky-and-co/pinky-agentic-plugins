@@ -28,7 +28,7 @@ sense inside a specific org). Installable by anyone via `claude plugin marketpla
 
 | Plugin | What it ships |
 |--------|----------------|
-| [`pc-core`](plugins/pc-core/) | Generic workspace mechanics: gitmoji git workflow (`commit`, `commit-and-pr`, `clean-gone`, `branch-workflow`), the `inject_policies` hook and its `policies.json` contract, and permission guards (`careful`, `freeze`, `guard`) |
+| [`pc-core`](plugins/pc-core/) | Generic workspace mechanics: gitmoji git workflow (`commit`, `commit-and-pr`, `clean-gone`, `branch-workflow`), the `inject_policies` hook and its `settings.pinky.json` contract, and permission guards (`careful`, `freeze`, `guard`) |
 | [`pc-snow`](plugins/pc-snow/) | Snowflake anti-training-bias knowledge (distilled, provenance-tracked) — not yet populated |
 
 ## Install
@@ -52,7 +52,7 @@ claude plugin install pc-core@pinky-agentic-plugins
 ```text
 pinky-agentic-plugins/
 ├── .claude/
-│   └── policies.json
+│   └── settings.pinky.json
 ├── .claude-plugin/
 │   └── marketplace.json
 ├── .github/

@@ -69,7 +69,7 @@ class TestDecide(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", branch], cwd=root, check=True)
         if strategy is not None:
             (root / ".claude").mkdir()
-            (root / ".claude" / "policies.json").write_text(
+            (root / ".claude" / "settings.pinky.json").write_text(
                 json.dumps({"branch_workflow": strategy})
             )
         return root
@@ -168,7 +168,7 @@ class TestMainEndToEnd(unittest.TestCase):
             root = Path(tmp)
             subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
             (root / ".claude").mkdir()
-            (root / ".claude" / "policies.json").write_text(
+            (root / ".claude" / "settings.pinky.json").write_text(
                 json.dumps({"branch_workflow": "github flow"})
             )
             result = self._run(
@@ -188,7 +188,7 @@ class TestMainEndToEnd(unittest.TestCase):
                 ["git", "init", "-q", "-b", "feature/x"], cwd=root, check=True
             )
             (root / ".claude").mkdir()
-            (root / ".claude" / "policies.json").write_text(
+            (root / ".claude" / "settings.pinky.json").write_text(
                 json.dumps({"branch_workflow": "github flow"})
             )
             result = self._run(

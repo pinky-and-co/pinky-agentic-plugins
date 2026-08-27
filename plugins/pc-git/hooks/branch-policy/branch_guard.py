@@ -7,8 +7,8 @@ GitHub branch protection ("require PR before merge") is a paid feature on a priv
 a direct push to `main` is never server-side rejected. This hook is the actual gate.
 
 Fires on `Edit`/`Write`/`MultiEdit`/`NotebookEdit`. Reads the repo's declared `branch_workflow`
-from `.claude/policies.json` (via `hooks/policy_lib.py`'s `load_policies`/`resolve_repo_root` —
-same resolution `resolve_policy.py` uses for the DCI path) and the current git branch. Denies
+from `.claude/settings.pinky.json` (via `hooks/policy_lib.py`'s `load_policies`/`resolve_repo_root`
+— same resolution `resolve_policy.py` uses for the DCI path) and the current git branch. Denies
 only when BOTH hold: the current branch is one of that strategy's permanent branches, AND the
 target path is not in the non-guarded list (`branch_paths.sh`, this folder — shared with
 `bulk_commit.sh`). Undeclared strategy, non-git target, or an already-checked-out topic branch

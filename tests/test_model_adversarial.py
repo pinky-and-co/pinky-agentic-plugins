@@ -3,7 +3,9 @@
 python3 -m unittest discover tests
 """
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -88,13 +90,35 @@ class TestSelectForDelegation(unittest.TestCase):
 
 
 class TestLoadPool(unittest.TestCase):
-    def test_missing_config_file_returns_builtin_default(self):
-        original = ma.resolve_pool_config_path
-        ma.resolve_pool_config_path = lambda: Path("/nonexistent/pinky_model_pool.json")
-        try:
-            self.assertEqual(ma.load_pool(), ma._DEFAULT_POOL)
-        finally:
-            ma.resolve_pool_config_path = original
+    """Exercises the real `policy_lib` ascending walk — no mock of the resolver itself."""
+
+    def setUp(self):
+        import os
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project_dir = Path(self._tmp.name)
+        self._original_project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
+        os.environ["CLAUDE_PROJECT_DIR"] = str(self.project_dir)
+
+    def tearDown(self):
+        import os
+
+        if self._original_project_dir is None:
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        else:
+            os.environ["CLAUDE_PROJECT_DIR"] = self._original_project_dir
+        self._tmp.cleanup()
+
+    def test_no_settings_pinky_json_anywhere_returns_builtin_default(self):
+        self.assertEqual(ma.load_pool(), ma._DEFAULT_POOL)
+
+    def test_model_pool_key_from_settings_pinky_json_is_returned(self):
+        custom_pool = [{"name": "custom", "kind": "http", "capacity_tier": "haiku"}]
+        (self.project_dir / ".claude").mkdir()
+        (self.project_dir / ".claude" / "settings.pinky.json").write_text(
+            json.dumps({"model_pool": custom_pool})
+        )
+        self.assertEqual(ma.load_pool(), custom_pool)
 
 
 class TestResolveApiKeyFor(unittest.TestCase):

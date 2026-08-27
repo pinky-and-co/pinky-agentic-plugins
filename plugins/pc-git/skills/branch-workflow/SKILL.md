@@ -6,7 +6,7 @@ user-invocable: false
 
 # Branch workflow
 
-A repo's actual strategy is declared in its own `.claude/policies.json` (`branch_workflow` key) —
+A repo's actual strategy is declared in its own `.claude/settings.pinky.json` (`branch_workflow` key) —
 this skill is the generic reference, not the source of truth for any specific repo. The caller
 (`commit-and-pr`) already resolves that value deterministically before invoking this skill; use
 this table only to interpret what the resolved strategy name means, never to re-derive it from
@@ -38,7 +38,7 @@ this guard is what stands in for it.
 
 1. `git branch --show-current` — the current branch.
 2. Is it one of the strategy's **permanent branches** (the table above, resolved strategy from
-   `.claude/policies.json` as in "Choosing a base branch" below)? If not — already on a topic
+   `.claude/settings.pinky.json` as in "Choosing a base branch" below)? If not — already on a topic
    branch, nothing to do, proceed to commit.
 3. On a permanent branch — check every changed file (`git status --porcelain`) against the
    non-guarded exemption: documentation (`*.md`, anything under `docs/`), CI/config files
@@ -51,9 +51,9 @@ this guard is what stands in for it.
 
 ## Choosing a base branch for a PR — decision order
 
-1. Use the strategy name the caller already resolved from `.claude/policies.json`
+1. Use the strategy name the caller already resolved from `.claude/settings.pinky.json`
    (`resolve_policy.py branch_workflow`) — that's authoritative; use the "PR base" column above
    for the named strategy, don't re-derive it from branch names or CLAUDE.md.
 2. Nothing resolved (empty value) → do not guess. Ask, or default to proposing the PR against the
    branch the feature branch was created from (`git merge-base` if unclear), and flag the missing
-   `.claude/policies.json` declaration so it can be added.
+   `.claude/settings.pinky.json` declaration so it can be added.

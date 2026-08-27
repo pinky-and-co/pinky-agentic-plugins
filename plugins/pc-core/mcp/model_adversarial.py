@@ -8,10 +8,12 @@ blind spots.
 Dual-use: this module is both a standalone CLI (below) and an importable library for
 `mcp/server.py`, which calls its functions directly rather than shelling out to a subprocess.
 
-Pool: read from ``~/.claude/pinky_model_pool.json`` (user-level — this MCP server is a standalone
-per-account process, not a per-repo one, and API keys never belong in a repo or a shared board). No
-file → a single built-in entry reproducing the original hardcoded default (``mistral-medium-3.5``),
-so an unconfigured install behaves exactly as before. Adding a provider is a config edit only — this
+Pool: the ``model_pool`` key of ``settings.pinky.json``, resolved by the same ascending walk-up as
+every other pinky setting (``policy_lib.load_policies`` — repo → parent directories → ``~/.claude/``),
+seeded from ``CLAUDE_PROJECT_DIR`` (already present in this MCP server's own environment — no
+``project_dir``/``file_path`` parameter needed on the tool itself). No file anywhere in the chain →
+a single built-in entry reproducing the original hardcoded default (``mistral-medium-3.5``), so an
+unconfigured install behaves exactly as before. Adding a provider is a config edit only — this
 module never special-cases a provider name; every entry carries its own call shape (OpenAI-compatible
 ``/v1/chat/completions``), key resolution, and capability/cost metadata.
 
@@ -53,6 +55,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any, NamedTuple
 
+sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
+from policy_lib import load_policies, resolve_repo_root  # noqa: E402
+
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -89,19 +94,19 @@ _DEFAULT_POOL: list[dict[str, Any]] = [
 ]
 
 
-def resolve_pool_config_path() -> Path:
-    """User-level, never a repo — this server runs once per account, not per repo."""
-    return Path.home() / ".claude" / "pinky_model_pool.json"
-
-
 def load_pool() -> list[dict[str, Any]]:
-    """The configured pool, or the single built-in Mistral entry if unconfigured."""
-    path = resolve_pool_config_path()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    """The configured `model_pool`, or the single built-in Mistral entry if unconfigured.
+
+    Same ascending `settings.pinky.json` resolution as every other pinky setting — no
+    `project_dir`/`file_path` parameter on the caller, `CLAUDE_PROJECT_DIR` is already present in
+    this MCP server's own process environment (set by the harness, same as for a hook subprocess).
+    """
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    repo_root = resolve_repo_root(project_dir, None)
+    settings = load_policies(repo_root)
+    if settings is None:
         return list(_DEFAULT_POOL)
-    return data.get("pool", list(_DEFAULT_POOL))
+    return settings.get("model_pool", list(_DEFAULT_POOL))
 
 
 def _tier_rank(tier: str) -> int:

@@ -28,7 +28,7 @@ dev = ["pytest"]
 # 3 jours — avancée manuellement avant tout `uv lock` (discipline documentée dans l'AGENTS.md de
 # `pinky-bootstrap`, pas de job planifié). Enregistrée dans `uv.lock` : `grep exclude-newer
 # uv.lock` dit exactement quelle fenêtre a produit le lock courant.
-exclude-newer = "2026-08-23T00:00:00Z"
+exclude-newer = "2026-08-24T00:00:00Z"
 
 # No package to build (see the `[project]` comment) — bypass-selection tells hatchling not to
 # error looking for one, so `pip install -e . --group dev` still succeeds (it only needs to land

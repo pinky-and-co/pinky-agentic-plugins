@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""resolve_policy — deterministic lookup into a repo's .claude/policies.json, for DCI
+"""resolve_policy — deterministic lookup into a repo's .claude/settings.pinky.json, for DCI
 (`` !`command` `` in a skill body) instead of asking the model to read and interpret CLAUDE.md
 prose. Reuses policy_lib.py's load_policies()/resolve_repo_root() — one resolution path for both
 the PreToolUse hooks (which cannot reach a forked skill, see architecture findings §hook-fork-
@@ -9,7 +9,7 @@ Usage:
     python3 resolve_policy.py <key> [--repo <path>]
 
 Prints the raw value for <key> (e.g. "git flow" for branch_workflow), or nothing if the key or
-policies.json is absent — never an error, so a missing declaration degrades to an empty DCI
+settings.pinky.json is absent — never an error, so a missing declaration degrades to an empty DCI
 substitution rather than a broken skill render.
 """
 
