@@ -211,12 +211,17 @@ def call_provider(
     model: str,
     prompt: str,
     timeout: int = 180,
+    max_tokens: int = MAX_TOKENS,
 ) -> dict:
     """POST to any OpenAI-compatible /v1/chat/completions endpoint (non-streaming).
 
     `base_url` now comes from a config file rather than a hardcoded constant, so it is checked
     https-only before use — the trust level changed even though the file is user-owned, not
     attacker-supplied.
+
+    `max_tokens` overridable per call: Groq's free tier caps `openai/gpt-oss-120b` at 8000
+    tokens/minute (TPM) — the global default alone exceeds that budget, confirmed via a real 413
+    from the API, not assumed. A pool entry sets its own via `max_tokens` (see `run_pool`).
     """
     if not base_url.startswith("https://"):
         raise ValueError(f"refusing non-https base_url from pool config: {base_url}")
@@ -224,7 +229,7 @@ def call_provider(
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": TEMPERATURE,
-        "max_tokens": MAX_TOKENS,
+        "max_tokens": max_tokens,
         "stream": False,
     }
     req = urllib.request.Request(
@@ -233,6 +238,9 @@ def call_provider(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # urllib's default User-Agent ("Python-urllib/x.y") gets blocked by some providers'
+            # WAF (Cloudflare error 1010 on Groq, confirmed) — a plain UA string is enough to pass.
+            "User-Agent": "pinky-adversarial/1.0",
         },
     )
     return json.load(urllib.request.urlopen(req, timeout=timeout))  # nosec B310 — base_url is checked https-only above
@@ -269,7 +277,12 @@ def run_pool(
             continue
         try:
             r = call_provider(
-                entry["base_url"], api_key, entry["model"], prompt, timeout
+                entry["base_url"],
+                api_key,
+                entry["model"],
+                prompt,
+                timeout,
+                entry.get("max_tokens", MAX_TOKENS),
             )
         except urllib.error.HTTPError as e:
             last_error = f"{entry['name']}: HTTP {e.code}"

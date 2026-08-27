@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
@@ -165,6 +166,39 @@ class TestRunPool(unittest.TestCase):
             ma.call_provider(
                 "http://insecure.example/v1/chat/completions", "key", "m", "prompt"
             )
+
+    def test_entry_max_tokens_overrides_the_global_default(self):
+        captured = {}
+
+        def fake_call_provider(
+            base_url, api_key, model, prompt, timeout=180, max_tokens=ma.MAX_TOKENS
+        ):
+            captured["max_tokens"] = max_tokens
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        entry = {**MISTRAL, "max_tokens": 50}
+        with (
+            unittest.mock.patch.object(ma, "call_provider", fake_call_provider),
+            unittest.mock.patch.object(ma, "resolve_api_key_for", return_value="k"),
+        ):
+            ma.run_pool([entry], "prompt")
+        self.assertEqual(captured["max_tokens"], 50)
+
+    def test_missing_max_tokens_falls_back_to_global_default(self):
+        captured = {}
+
+        def fake_call_provider(
+            base_url, api_key, model, prompt, timeout=180, max_tokens=ma.MAX_TOKENS
+        ):
+            captured["max_tokens"] = max_tokens
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        with (
+            unittest.mock.patch.object(ma, "call_provider", fake_call_provider),
+            unittest.mock.patch.object(ma, "resolve_api_key_for", return_value="k"),
+        ):
+            ma.run_pool([MISTRAL], "prompt")
+        self.assertEqual(captured["max_tokens"], ma.MAX_TOKENS)
 
 
 class TestLoadMethodology(unittest.TestCase):
