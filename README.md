@@ -69,6 +69,7 @@ pinky-agentic-plugins/
 │   │   ├── hooks/
 │   │   │   ├── hooks.json
 │   │   │   ├── inject_policies.py
+│   │   │   ├── load_secrets.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
 │   │   │   ├── privacy_egress.py
@@ -200,6 +201,7 @@ pinky-agentic-plugins/
 │   ├── test_branch_guard.py
 │   ├── test_guard.py
 │   ├── test_inject_policies.py
+│   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py

@@ -1,6 +1,18 @@
 {
-  "description": "Injects per-repo resolved policies (language, branch) before every write, asks before a costly native Read, denies reading secret-shaped content, surfaces the just-edited file's own checker findings, and reinforces a custom output style every turn — see inject_policies.py, read_cost.py, privacy_egress.py, post_edit_lint.py, style_reminder.py",
+  "description": "Injects per-repo resolved policies (language, branch) before every write, asks before a costly native Read, denies reading secret-shaped content, surfaces the just-edited file's own checker findings, reinforces a custom output style every turn, and exports declared API keys from the keychain at session start — see inject_policies.py, read_cost.py, privacy_egress.py, post_edit_lint.py, style_reminder.py, load_secrets.py",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/load_secrets.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
