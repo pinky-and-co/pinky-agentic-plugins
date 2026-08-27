@@ -10,8 +10,8 @@ this file; truncating it would erase a sibling hook's contribution.
 Each `keys` entry: `{"reader": "...", "env": "VAR_NAME", ...reader-specific fields}`. `reader`
 dispatches to a wiring function below — `macos_keychain` is the only one wired today (the classic
 keychain, Trousseau d'accès, `security find-generic-password`; NOT the Passwords app, which stores
-in a structurally different, unreachable format — see `docs/how-to/setup-model-pool.md` sibling doc
-for why). An unwired reader (`aws_secretsmanager`, ...) fails loud on stderr and leaves that
+in a structurally different, unreachable format — see `docs/how-to/setup-declarative-secrets.md`
+(pinky-bootstrap) for why). An unwired reader (`aws_secretsmanager`, ...) fails loud on stderr and leaves that
 variable unset — never a silent skip, never a fabricated value.
 
 This hook must never hang: it runs on every session start, including a scheduled/headless one with
