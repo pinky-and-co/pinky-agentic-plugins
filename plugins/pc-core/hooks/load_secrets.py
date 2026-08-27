@@ -19,11 +19,13 @@ no physical user to unlock a keychain or answer a Touch ID prompt. Every subproc
 short timeout; a timeout, a missing item, or a locked keychain all degrade to "skip this entry,
 log why" — never a hang, never a crash that blocks the session from starting.
 
-Wiring (.claude/settings.json):
+Wiring (.claude/settings.json) — no matcher: every `SessionStart` sub-type (`startup`, `resume`,
+`clear`) must run this, since a reattached/resumed session is exactly as likely to need its keys
+freshly exported as a cold start (confirmed the hard way: scoping this to `matcher: "startup"`
+meant a resumed session — same session id, new harness process — never got them).
   "hooks": {
     "SessionStart": [
-      { "matcher": "startup",
-        "hooks": [{"type": "command",
+      { "hooks": [{"type": "command",
                     "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/load_secrets.py\""}] }
     ]
   }
