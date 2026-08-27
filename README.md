@@ -146,9 +146,11 @@ pinky-agentic-plugins/
 │   │       │   │   ├── multi-board.md
 │   │       │   │   └── requirements.md
 │   │       │   └── SKILL.md
-│   │       └── permission-change/
-│   │           ├── scripts/
-│   │           │   └── guard.py
+│   │       ├── permission-change/
+│   │       │   ├── scripts/
+│   │       │   │   └── guard.py
+│   │       │   └── SKILL.md
+│   │       └── yt/
 │   │           └── SKILL.md
 │   └── pc-snow/
 │       ├── .claude-plugin/
