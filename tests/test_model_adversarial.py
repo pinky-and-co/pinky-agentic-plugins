@@ -21,7 +21,6 @@ MISTRAL = {
     "model": "mistral-medium-3.5",
     "base_url": "https://api.mistral.ai/v1/chat/completions",
     "api_key_env": "MISTRAL_API_KEY",  # pragma: allowlist secret
-    "api_key_file": "~/.mistral_api_key",  # pragma: allowlist secret
     "capacity_tier": "opus",
     "free_tier": False,
     "concurrency": None,
@@ -33,7 +32,6 @@ GLM = {
     "model": "z-ai/glm-5-2",
     "base_url": "https://openrouter.ai/api/v1/chat/completions",
     "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
-    "api_key_file": "~/.openrouter_api_key",  # pragma: allowlist secret
     "capacity_tier": "opus",
     "free_tier": True,
     "concurrency": None,
@@ -45,7 +43,6 @@ KIMI = {
     "model": "moonshotai/kimi-k2.6:free",
     "base_url": "https://openrouter.ai/api/v1/chat/completions",
     "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
-    "api_key_file": "~/.openrouter_api_key",  # pragma: allowlist secret
     "capacity_tier": "sonnet",
     "free_tier": True,
     "concurrency": None,
@@ -123,35 +120,33 @@ class TestLoadPool(unittest.TestCase):
 
 
 class TestResolveApiKeyFor(unittest.TestCase):
-    def test_env_var_wins_over_file(self, monkeypatch=None):
+    def test_env_var_wins_and_keychain_is_not_consulted(self):
         import os
 
         os.environ["OPENROUTER_API_KEY"] = "env-value"  # pragma: allowlist secret
         try:
-            self.assertEqual(ma.resolve_api_key_for(GLM), "env-value")
+            with unittest.mock.patch.object(ma, "read_macos_keychain") as kc:
+                self.assertEqual(ma.resolve_api_key_for(GLM), "env-value")
+            kc.assert_not_called()
         finally:
             del os.environ["OPENROUTER_API_KEY"]
 
-    def test_falls_back_to_file(self):
-        import os
-        import tempfile
-
-        os.environ.pop("OPENROUTER_API_KEY", None)
-        with tempfile.NamedTemporaryFile("w", suffix=".key", delete=False) as f:
-            f.write("file-value\n")
-            key_path = f.name
-        try:
-            entry = {**GLM, "api_key_file": key_path}
-            self.assertEqual(ma.resolve_api_key_for(entry), "file-value")
-        finally:
-            Path(key_path).unlink()
-
-    def test_neither_present_returns_none(self):
+    def test_falls_back_to_keychain_keyed_on_the_env_name(self):
         import os
 
         os.environ.pop("OPENROUTER_API_KEY", None)
-        entry = {**GLM, "api_key_file": "/nonexistent/.openrouter_api_key"}
-        self.assertIsNone(ma.resolve_api_key_for(entry))
+        with unittest.mock.patch.object(
+            ma, "read_macos_keychain", return_value="kc-value"
+        ) as kc:
+            self.assertEqual(ma.resolve_api_key_for(GLM), "kc-value")
+        kc.assert_called_once_with("OPENROUTER_API_KEY")
+
+    def test_neither_env_nor_keychain_returns_none(self):
+        import os
+
+        os.environ.pop("OPENROUTER_API_KEY", None)
+        with unittest.mock.patch.object(ma, "read_macos_keychain", return_value=None):
+            self.assertIsNone(ma.resolve_api_key_for(GLM))
 
 
 class TestRunPool(unittest.TestCase):

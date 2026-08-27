@@ -29,31 +29,21 @@ def _fake_security_only(cmd, *args, **kwargs):
 
 
 class TestReadMacosKeychain(unittest.TestCase):
-    def test_returns_value_on_success(self):
-        completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="secret-value\n", stderr=""
-        )
-        with unittest.mock.patch("subprocess.run", return_value=completed):
+    """The adapter only: unpack `service`, delegate to keychain.py (covered by test_keychain.py)."""
+
+    def test_delegates_service_to_the_shared_reader(self):
+        with unittest.mock.patch.object(
+            ls, "_read_keychain", return_value="secret-value"
+        ) as reader:
             self.assertEqual(
                 ls.read_macos_keychain({"service": "MISTRAL_API_KEY"}), "secret-value"
             )
+        reader.assert_called_once_with("MISTRAL_API_KEY")
 
-    def test_returns_none_when_item_not_found(self):
-        completed = subprocess.CompletedProcess(
-            args=[], returncode=44, stdout="", stderr=""
-        )
-        with unittest.mock.patch("subprocess.run", return_value=completed):
-            self.assertIsNone(ls.read_macos_keychain({"service": "MISSING_KEY"}))
-
-    def test_never_hangs_on_timeout(self):
-        with unittest.mock.patch(
-            "subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="security", timeout=5),
-        ):
-            self.assertIsNone(ls.read_macos_keychain({"service": "SLOW_KEY"}))
-
-    def test_missing_service_field_returns_none(self):
-        self.assertIsNone(ls.read_macos_keychain({}))
+    def test_missing_service_field_returns_none_without_calling_the_reader(self):
+        with unittest.mock.patch.object(ls, "_read_keychain") as reader:
+            self.assertIsNone(ls.read_macos_keychain({}))
+        reader.assert_not_called()
 
 
 class TestReadAwsSecretsmanager(unittest.TestCase):

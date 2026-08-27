@@ -33,51 +33,23 @@ meant a resumed session — same session id, new harness process — never got t
 
 from __future__ import annotations
 
-import getpass
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
+from keychain import read_macos_keychain as _read_keychain  # noqa: E402
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
-
-SECURITY_TIMEOUT = 5
 
 
 def read_macos_keychain(entry: dict[str, Any]) -> str | None:
-    """`security find-generic-password` against the classic keychain — never the Passwords app."""
+    """Adapt a `keys` entry (`{"service": ...}`) to the shared keychain reader."""
     service = entry.get("service")
     if not service:
         print("[load_secrets] macos_keychain entry missing 'service'", file=sys.stderr)
         return None
-    try:
-        result = subprocess.run(
-            [
-                "security",
-                "find-generic-password",
-                "-a",
-                getpass.getuser(),
-                "-s",
-                service,
-                "-w",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=SECURITY_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as e:
-        print(f"[load_secrets] {service}: keychain call failed — {e}", file=sys.stderr)
-        return None
-    if result.returncode != 0:
-        print(
-            f"[load_secrets] {service}: not found in keychain (exit {result.returncode})",
-            file=sys.stderr,
-        )
-        return None
-    return result.stdout.strip()
+    return _read_keychain(service)
 
 
 def read_aws_secretsmanager(entry: dict[str, Any]) -> str | None:

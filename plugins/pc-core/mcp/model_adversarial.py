@@ -24,15 +24,18 @@ Each entry:
     provider       informational label, also used for direct-vs-aggregator ordering
     model          provider-side model id
     base_url       OpenAI-compatible chat-completions endpoint (absent/ignored for kind="offline")
-    api_key_env    env var checked first
-    api_key_file   fallback file (an unattended/scheduled caller has no shell env)
+    api_key_env    env var checked first; also the macOS keychain service name (see Auth below)
     capacity_tier  rough Claude-tier equivalence: "haiku" | "sonnet" | "opus"
     free_tier      true if this entry has no marginal cost (drives delegation's cost order)
     concurrency    max simultaneous tasks, or null for no known limit (offline: 1 — one local
                    machine; recorded for a future concurrent dispatcher, not enforced here — nothing
                    dispatches more than one task at a time yet)
 
-Auth (per entry): ``api_key_env`` env var, else ``api_key_file`` on disk.
+Auth (per entry): ``api_key_env`` from the process env, else the macOS keychain item stored under
+that same name. This server's process never receives ``$CLAUDE_ENV_FILE`` (Claude Code sources it
+for Bash commands only, never for an MCP server), so the keychain is the real path — the env branch
+only catches a value exported into the session by hand. Keychain reads need the ``login`` keychain
+unlocked: a headless/SSH caller with it locked gets no key and the entry is skipped.
 
 Explicit ``--model``/``PINKY_ADVERSARIAL_MODEL`` override bypasses the pool entirely and calls that
 model id directly against the Mistral endpoint — the original single-provider override behavior,
@@ -56,6 +59,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
+from keychain import read_macos_keychain  # noqa: E402
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
@@ -86,7 +90,6 @@ _DEFAULT_POOL: list[dict[str, Any]] = [
         "model": DEFAULT_MODEL,
         "base_url": MISTRAL_API_URL,
         "api_key_env": "MISTRAL_API_KEY",  # pragma: allowlist secret
-        "api_key_file": "~/.mistral_api_key",  # pragma: allowlist secret
         "capacity_tier": "opus",
         "free_tier": False,
         "concurrency": None,
@@ -154,24 +157,17 @@ def resolve_model(cli_model: str | None = None) -> str | None:
     return cli_model or os.environ.get("PINKY_ADVERSARIAL_MODEL")
 
 
-def _read_key_file(path: str) -> str | None:
-    key_path = Path(path).expanduser()
-    if key_path.exists():
-        return key_path.read_text(encoding="utf-8").strip()
-    return None
-
-
 def resolve_api_key_for(entry: dict[str, Any]) -> str | None:
-    """entry's api_key_env > entry's api_key_file. None if neither is set."""
+    """`entry["api_key_env"]` from the process env, else the macOS keychain item of the same name.
+
+    The keychain lookup keys on `api_key_env` directly — it works because this suite's `keys`
+    array (`settings.pinky.json`) names each keychain service identically to its env var. Nothing
+    enforces that: an item stored under a different service name would not be found.
+    """
     env_key = os.environ.get(entry["api_key_env"])
     if env_key:
         return env_key.strip()
-    return _read_key_file(entry["api_key_file"])
-
-
-def resolve_api_key() -> str | None:
-    """Mistral key only — used by the explicit --model override path (bypasses the pool)."""
-    return resolve_api_key_for(_DEFAULT_POOL[0])
+    return read_macos_keychain(entry["api_key_env"])
 
 
 _METHODOLOGY_PATH = (
@@ -273,7 +269,10 @@ def run_pool(
             continue
         api_key = resolve_api_key_for(entry)  # pragma: allowlist secret
         if not api_key:
-            last_error = f"{entry['name']}: no API key ({entry['api_key_env']} or {entry['api_key_file']})"
+            last_error = (
+                f"{entry['name']}: no API key — {entry['api_key_env']} not in env, "
+                f"and no keychain item of that name (or the keychain is locked)"
+            )
             continue
         try:
             r = call_provider(
