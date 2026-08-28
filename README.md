@@ -175,6 +175,12 @@ pinky-agentic-plugins/
 │   │   │   └── server.py
 │   │   ├── .mcp.json
 │   │   └── README.md
+│   ├── pc-pypi/
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json
+│   │   └── skills/
+│   │       └── dev-prerelease/
+│   │           └── SKILL.md
 │   ├── pc-snow/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
