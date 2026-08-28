@@ -125,7 +125,11 @@ def adversarial(
 
 
 @m.tool()
-def panel(tasks: list[str], models: list[str] | None = None) -> str:
+def panel(
+    tasks: list[str],
+    models: list[str] | None = None,
+    tier: str | list[str] | None = None,
+) -> str:
     """Send one prompt PER SLOT to a DIFFERENT model family each, in parallel; return every answer.
 
     `tasks` is one prompt per slot — `tasks[i]` goes to the i-th selected model. Use for a council
@@ -134,17 +138,20 @@ def panel(tasks: list[str], models: list[str] | None = None) -> str:
     `models` (by pool name, order kept). Unlike `adversarial`, no review posture is injected — each
     prompt is sent verbatim. Each answer is labelled with the model that produced it; the header
     reports answered/requested and names any slot skipped (no key / HTTP error / timeout — no retry)
-    or left unfilled (pool has fewer eligible families than requested). `offline` and `haiku`-tier
-    entries are never used.
+    or left unfilled (pool has fewer eligible families than requested). `offline` entries are never
+    used. By default only sonnet/opus-tier models are eligible; pass `tier` (a `capacity_tier` name
+    or a list of them, e.g. `"haiku"`) to select from those tiers instead — for a non-advisor task
+    that wants a small deterministic model.
     """
     if not tasks:
         return "[panel] BLOCKED — no task given."
 
     entries = model_panel.select_for_panel(
-        model_adversarial.load_pool(), len(tasks), models
+        model_adversarial.load_pool(), len(tasks), models, tier
     )
     if not entries:
-        return "[panel] BLOCKED — no eligible model in the pool (need kind=http, tier sonnet/opus)."
+        want = "sonnet/opus" if tier is None else tier
+        return f"[panel] BLOCKED — no eligible model in the pool (need kind=http, tier {want})."
 
     response = model_panel.run_panel(entries, tasks[: len(entries)])
     if not response.answers:
