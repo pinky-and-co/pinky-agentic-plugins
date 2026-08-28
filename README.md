@@ -165,6 +165,14 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       └── yt/
 │   │           └── SKILL.md
+│   ├── pc-privacy/
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json
+│   │   ├── mcp/
+│   │   │   ├── anonymize.py
+│   │   │   └── server.py
+│   │   ├── .mcp.json
+│   │   └── README.md
 │   ├── pc-snow/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
@@ -225,6 +233,7 @@ pinky-agentic-plugins/
 │       ├── validate_frontmatter.py
 │       └── validate_plugins_strict.py
 ├── tests/
+│   ├── test_anonymize.py
 │   ├── test_branch_guard.py
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
