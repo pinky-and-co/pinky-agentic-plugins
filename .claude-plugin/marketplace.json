@@ -40,6 +40,11 @@
       "name": "pc-privacy",
       "source": "./plugins/pc-privacy",
       "description": "Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools — detect sensitive columns, then write coherently anonymized copies. No LLM, no profile-resolved values."
+    },
+    {
+      "name": "pc-pypi",
+      "source": "./plugins/pc-pypi",
+      "description": "Cut a dev pre-release of a PyPI library — preconditions, version bump, push, then stop before the publishing tag for an explicit human go. Zero profile-resolved values."
     }
   ]
 }
