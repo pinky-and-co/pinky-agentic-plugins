@@ -16,9 +16,11 @@ reused from `model_adversarial` — this module only adds the selection policy a
 dispatch.
 
 Eligibility for a slot: `kind` is `http` (never `offline` — that has its own zero-egress tool) and
-`capacity_tier` is `sonnet` or `opus` (a `haiku`-tier model cannot hold an advisor analysis, and
-mixing one in reads as model diversity when it is really a quality gap — see
-`pinky-bootstrap/docs/adr/0006-council-advisors-cross-modele.md`).
+`capacity_tier` is `sonnet` or `opus` by default (a `haiku`-tier model cannot hold an advisor
+analysis, and mixing one in reads as model diversity when it is really a quality gap — see
+`pinky-bootstrap/docs/adr/0006-council-advisors-cross-modele.md`). A caller that is not running a
+council can pass an explicit `tiers` to `select_for_panel` to opt past that default — e.g. a small
+deterministic model for a non-advisor task.
 
 Usage:
     model_panel.py --task "<prompt>" [--task "<prompt>" ...] [--model NAME ...]
@@ -32,6 +34,7 @@ import json
 import sys
 import time
 import urllib.error
+from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -74,11 +77,23 @@ class _SlotResult(NamedTuple):
     reason: str | None
 
 
-def _eligible(entry: dict) -> bool:
-    """True if this pool entry can take an advisor slot: an HTTP model of sonnet/opus tier."""
-    return (
-        entry.get("kind") != "offline" and entry.get("capacity_tier") in ADVISOR_TIERS
-    )
+def _eligible(entry: dict, tiers: frozenset[str] = ADVISOR_TIERS) -> bool:
+    """True if this pool entry can fill a slot: an HTTP model whose tier is in `tiers`.
+
+    `tiers` defaults to the sonnet/opus advisor set; a caller passing an explicit set (e.g. a
+    non-advisor consumer that wants a small deterministic model) opts past that default. The
+    `kind != "offline"` half is never relaxed — offline has its own zero-egress tool.
+    """
+    return entry.get("kind") != "offline" and entry.get("capacity_tier") in tiers
+
+
+def _normalize_tiers(tiers: str | Iterable[str] | None) -> frozenset[str]:
+    """Coerce the `tiers` argument to a frozenset; `None` means the default advisor set."""
+    if tiers is None:
+        return ADVISOR_TIERS
+    if isinstance(tiers, str):
+        return frozenset({tiers})
+    return frozenset(tiers)
 
 
 def _distinct_families(entries: list[dict], n: int) -> list[dict]:
@@ -100,27 +115,41 @@ def _distinct_families(entries: list[dict], n: int) -> list[dict]:
 
 
 def select_for_panel(
-    pool: list[dict], n: int, models: list[str] | None = None
+    pool: list[dict],
+    n: int,
+    models: list[str] | None = None,
+    tiers: str | Iterable[str] | None = None,
 ) -> list[dict]:
     """Pick up to `n` eligible, family-distinct pool entries for a panel, deterministically.
 
-    Both paths enforce one entry per `provider` (see `_distinct_families`) and drop `offline` /
-    `haiku`-tier entries (see `_eligible`).
+    Both paths enforce one entry per `provider` (see `_distinct_families`) and drop `offline`
+    entries plus any whose `capacity_tier` is outside `tiers` (see `_eligible`).
+
+    `tiers` omitted: only sonnet/opus entries are eligible (the advisor default). `tiers` given (a
+    tier name or an iterable of them): exactly those tiers are eligible — an explicit opt-out of
+    the advisor filter for a non-advisor caller (e.g. a small deterministic model). It applies on
+    both selection paths.
 
     `models` given: the named entries in that order, minus the ineligible and the family duplicates
     (an unknown or dropped name is silent here — `run_panel`'s skipped-reason channel is for entries
     that were selected and then failed, not for selection choices).
 
     `models` omitted: the eligible entries ranked strongest-tier-first then by name (a total order,
-    so the result is stable), then de-duplicated by family, capped at `n`.
+    so the result is stable), then de-duplicated by family, capped at `n`. With a single-tier
+    `tiers`, every entry ranks equal, so the order is name-only — still a total order, still stable.
     """
+    allowed = _normalize_tiers(tiers)
     if models is not None:
         by_name = {e["name"]: e for e in pool}
-        chosen = [by_name[m] for m in models if m in by_name and _eligible(by_name[m])]
+        chosen = [
+            by_name[m]
+            for m in models
+            if m in by_name and _eligible(by_name[m], allowed)
+        ]
         return _distinct_families(chosen, n)
 
     ranked = sorted(
-        (e for e in pool if _eligible(e)),
+        (e for e in pool if _eligible(e, allowed)),
         key=lambda e: (-ma.tier_rank(e["capacity_tier"]), e["name"]),
     )
     return _distinct_families(ranked, n)

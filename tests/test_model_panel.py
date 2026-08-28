@@ -121,6 +121,26 @@ class TestSelectForPanel(unittest.TestCase):
     def test_empty_pool_yields_empty_list(self):
         self.assertEqual(mp.select_for_panel([], n=5), [])
 
+    def test_tiers_restricts_selection_to_the_named_capacity_tier(self):
+        # explicit opt-in past the default sonnet/opus advisor filter — cohere-r7b is the only
+        # haiku-tier http entry; the opus/sonnet models are now out
+        self.assertEqual(mp.select_for_panel(POOL, n=5, tiers={"haiku"}), [COHERE_R7B])
+
+    def test_tiers_still_excludes_offline_entries(self):
+        # haiku is allowed now, but local-ollama is offline — it has its own zero-egress tool
+        self.assertNotIn(OFFLINE, mp.select_for_panel(POOL, n=5, tiers={"haiku"}))
+
+    def test_tiers_applies_on_the_explicit_models_path_too(self):
+        self.assertEqual(
+            mp.select_for_panel(
+                POOL, n=5, models=["cohere-command-r7b", "glm-5-2"], tiers={"haiku"}
+            ),
+            [COHERE_R7B],
+        )
+
+    def test_tiers_accepts_a_bare_string(self):
+        self.assertEqual(mp.select_for_panel(POOL, n=5, tiers="haiku"), [COHERE_R7B])
+
 
 class TestRunPanel(unittest.TestCase):
     def _fake_provider(self, answers_by_model):
