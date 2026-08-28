@@ -12,7 +12,7 @@ Cursor…), no tool-specific mechanics (no slash-command name, no literal model 
 ## Branch strategy
 
 GitHub Flow — the resolved value the skills rely on
-lives in `.claude/policies.json`, this is orientation only.
+lives in `.claude/settings.pinky.json`, this is orientation only.
 
 ## Naming glossary
 
@@ -28,7 +28,7 @@ lives in `.claude/policies.json`, this is orientation only.
   quality gates (mypy, bandit, interrogate, darglint) run against every authored `.py` under a
   plugin — `hooks/` (concern folders nested inside it included) and `skills/<name>/` alike.
 - A profile-resolved value (chat language, default branch) is never hardcoded into a public
-  skill. Each consuming repo declares its own values in its own `.claude/policies.json`.
+  skill. Each consuming repo declares its own values in its own `.claude/settings.pinky.json`.
 - **Package by feature, not by artefact type — within the harness's own root directories.**
   `hooks/`, `skills/`, and `mcp/` are the plugin-root directories the harness itself recognises
   (`hooks/hooks.json`, `skills/<name>/SKILL.md`, `.mcp.json` declaring an `mcp/` server); every

@@ -28,7 +28,7 @@ sense inside a specific org). Installable by anyone via `claude plugin marketpla
 
 | Plugin | What it ships |
 |--------|----------------|
-| [`pc-core`](plugins/pc-core/) | Generic workspace mechanics: gitmoji git workflow (`commit`, `commit-and-pr`, `clean-gone`, `branch-workflow`), the `inject_policies` hook and its `policies.json` contract, and permission guards (`careful`, `freeze`, `guard`) |
+| [`pc-core`](plugins/pc-core/) | Generic workspace mechanics: gitmoji git workflow (`commit`, `commit-and-pr`, `clean-gone`, `branch-workflow`), the `inject_policies` hook and its `settings.pinky.json` contract, and permission guards (`careful`, `freeze`, `guard`) |
 | [`pc-snow`](plugins/pc-snow/) | Snowflake anti-training-bias knowledge (distilled, provenance-tracked) — not yet populated |
 
 ## Install
@@ -52,7 +52,7 @@ claude plugin install pc-core@pinky-agentic-plugins
 ```text
 pinky-agentic-plugins/
 ├── .claude/
-│   └── policies.json
+│   └── settings.pinky.json
 ├── .claude-plugin/
 │   └── marketplace.json
 ├── .github/
@@ -69,6 +69,8 @@ pinky-agentic-plugins/
 │   │   ├── hooks/
 │   │   │   ├── hooks.json
 │   │   │   ├── inject_policies.py
+│   │   │   ├── keychain.py
+│   │   │   ├── load_secrets.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
 │   │   │   ├── privacy_egress.py
@@ -78,9 +80,18 @@ pinky-agentic-plugins/
 │   │   ├── mcp/
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
+│   │   │   ├── model_panel.py
 │   │   │   └── server.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── council/
+│   │   │   │   ├── evals/
+│   │   │   │   │   └── evals.json
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── type-generic.md
+│   │   │   │   │   ├── type-pitch.md
+│   │   │   │   │   └── type-tech.md
 │   │   │   │   └── SKILL.md
 │   │   │   ├── document-to-md/
 │   │   │   │   └── SKILL.md
@@ -218,7 +229,10 @@ pinky-agentic-plugins/
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py
+│   ├── test_keychain.py
+│   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
+│   ├── test_model_panel.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
 │   ├── test_privacy_egress.py

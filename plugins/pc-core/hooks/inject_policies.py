@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """inject_policies — PreToolUse hook that injects language / workflow
-policies from .claude/policies.json right before the tool call that
+policies from .claude/settings.pinky.json right before the tool call that
 produces the relevant artefact.
 
 Why not CLAUDE.md: CLAUDE.md is prose meant for a model to read; parsing
-it with sed/regex is fragile against reformatting. policies.json is data,
+it with sed/regex is fragile against reformatting. settings.pinky.json is data,
 parsed once with json.load, no regex.
 
 Why not settings.json: Claude Code writes to settings.json itself (the
 /config UI, permanent "don't ask again" permission approvals). Mixing an
 arbitrary custom top-level key into a file the tool itself rewrites is a
-risk with no upside — policies.json is untouched by Claude Code, owned
+risk with no upside — settings.pinky.json is untouched by Claude Code, owned
 entirely by this hook and by hand-editing.
 
 Detection rules (which artefact_type(s) a tool call implicates) are kept
-in this script rather than in policies.json — policies.json stays pure
+in this script rather than in settings.pinky.json — settings.pinky.json stays pure
 "what language for what artefact" data, editable without touching logic.
 Move DETECTORS to config later if it needs to vary per repo; today it's
 shared across repos via .claude/hooks/inject_policies.py.
@@ -115,7 +115,7 @@ def main() -> None:
     repo_root = resolve_repo_root(project_dir, tool_input.get("file_path"))
     policies = load_policies(repo_root)
     if policies is None:
-        return  # no policies.json for this repo — nothing to inject
+        return  # no settings.pinky.json for this repo — nothing to inject
 
     lines = []
 

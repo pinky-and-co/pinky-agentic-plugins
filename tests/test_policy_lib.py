@@ -41,7 +41,7 @@ class TestLoadPolicies(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / ".claude").mkdir()
-            (root / ".claude" / "policies.json").write_text(
+            (root / ".claude" / "settings.pinky.json").write_text(
                 '{"branch_workflow": "git flow"}'
             )
             self.assertEqual(pl.load_policies(root), {"branch_workflow": "git flow"})
@@ -54,7 +54,7 @@ class TestLoadPolicies(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / ".claude").mkdir()
-            (root / ".claude" / "policies.json").write_text("{not json")
+            (root / ".claude" / "settings.pinky.json").write_text("{not json")
             self.assertIsNone(pl.load_policies(root))
 
 
@@ -64,7 +64,7 @@ class TestLoadPoliciesCascade(unittest.TestCase):
 
     def _write(self, path: Path, data: dict) -> None:
         (path / ".claude").mkdir(parents=True, exist_ok=True)
-        (path / ".claude" / "policies.json").write_text(json.dumps(data))
+        (path / ".claude" / "settings.pinky.json").write_text(json.dumps(data))
 
     def test_repo_key_wins_over_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:

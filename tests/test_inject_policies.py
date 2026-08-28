@@ -123,7 +123,7 @@ class TestMainEndToEnd(unittest.TestCase):
             check=False,
         )
 
-    def test_silent_when_no_policies_json(self):
+    def test_silent_when_no_settings_pinky_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -142,7 +142,7 @@ class TestMainEndToEnd(unittest.TestCase):
             root = Path(tmp)
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             (root / ".claude").mkdir()
-            (root / ".claude" / "policies.json").write_text(
+            (root / ".claude" / "settings.pinky.json").write_text(
                 json.dumps(
                     {
                         "language": {
