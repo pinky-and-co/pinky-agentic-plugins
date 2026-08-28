@@ -16,17 +16,9 @@ entirely by this hook and by hand-editing.
 Detection rules (which artefact_type(s) a tool call implicates) are kept
 in this script rather than in settings.pinky.json — settings.pinky.json stays pure
 "what language for what artefact" data, editable without touching logic.
-Move DETECTORS to config later if it needs to vary per repo; today it's
-shared across repos via .claude/hooks/inject_policies.py.
+Move DETECTORS to config later if it needs to vary per repo.
 
-Wiring (.claude/settings.json):
-  "hooks": {
-    "PreToolUse": [
-      { "matcher": "Bash|Write|Edit",
-        "hooks": [{"type": "command",
-                    "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/inject_policies.py"}] }
-    ]
-  }
+Registered as a PreToolUse (Bash|Write|Edit) hook in hooks/hooks.json.
 """
 
 import json
