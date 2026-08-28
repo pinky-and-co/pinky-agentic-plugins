@@ -154,40 +154,49 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       └── yt/
 │   │           └── SKILL.md
-│   └── pc-snow/
+│   ├── pc-snow/
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json
+│   │   ├── skills/
+│   │   │   ├── cortex/
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── cortex-ai-functions.md
+│   │   │   │   │   └── cortex-search.md
+│   │   │   │   └── SKILL.md
+│   │   │   ├── snowflake/
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── artifact-repository.md
+│   │   │   │   │   ├── bootstrap.md
+│   │   │   │   │   ├── core-api.md
+│   │   │   │   │   ├── costs.md
+│   │   │   │   │   ├── gov.md
+│   │   │   │   │   ├── native-app.md
+│   │   │   │   │   ├── telemetry.md
+│   │   │   │   │   └── warehouses.md
+│   │   │   │   └── SKILL.md
+│   │   │   ├── snowpark/
+│   │   │   │   ├── references/
+│   │   │   │   │   └── snowpark.md
+│   │   │   │   └── SKILL.md
+│   │   │   ├── snowpark-to-sql/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── sql-to-snowpark/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── streamlit/
+│   │   │   │   ├── references/
+│   │   │   │   │   └── streamlit.md
+│   │   │   │   └── SKILL.md
+│   │   │   └── .gitkeep
+│   │   └── README.md
+│   └── pc-statusline/
 │       ├── .claude-plugin/
 │       │   └── plugin.json
-│       ├── skills/
-│       │   ├── cortex/
-│       │   │   ├── references/
-│       │   │   │   ├── cortex-ai-functions.md
-│       │   │   │   └── cortex-search.md
-│       │   │   └── SKILL.md
-│       │   ├── snowflake/
-│       │   │   ├── references/
-│       │   │   │   ├── artifact-repository.md
-│       │   │   │   ├── bootstrap.md
-│       │   │   │   ├── core-api.md
-│       │   │   │   ├── costs.md
-│       │   │   │   ├── gov.md
-│       │   │   │   ├── native-app.md
-│       │   │   │   ├── telemetry.md
-│       │   │   │   └── warehouses.md
-│       │   │   └── SKILL.md
-│       │   ├── snowpark/
-│       │   │   ├── references/
-│       │   │   │   └── snowpark.md
-│       │   │   └── SKILL.md
-│       │   ├── snowpark-to-sql/
-│       │   │   └── SKILL.md
-│       │   ├── sql-to-snowpark/
-│       │   │   └── SKILL.md
-│       │   ├── streamlit/
-│       │   │   ├── references/
-│       │   │   │   └── streamlit.md
-│       │   │   └── SKILL.md
-│       │   └── .gitkeep
-│       └── README.md
+│       ├── scripts/
+│       │   ├── _common.py
+│       │   ├── statusline.py
+│       │   └── subagent_statusline.py
+│       ├── README.md
+│       └── settings.json
 ├── scripts/
 │   └── hooks/
 │       ├── badges.toml
@@ -207,6 +216,7 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── test_branch_guard.py
 │   ├── test_guard.py
+│   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py
 │   ├── test_model_adversarial.py
 │   ├── test_policy_lib.py
@@ -214,7 +224,10 @@ pinky-agentic-plugins/
 │   ├── test_privacy_egress.py
 │   ├── test_read_cost.py
 │   ├── test_secret_patterns.py
-│   └── test_stop_handoff.py
+│   ├── test_statusline.py
+│   ├── test_statusline_common.py
+│   ├── test_stop_handoff.py
+│   └── test_subagent_statusline.py
 ├── .darglint
 ├── .gitattributes
 ├── .gitignore

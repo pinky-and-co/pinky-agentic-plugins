@@ -64,5 +64,12 @@ lives in `.claude/policies.json`, this is orientation only.
     `pip install`s a Claude Code plugin), so a hard `import mcp` without that resolution path would
     break for every installer. `uv` is therefore a real prerequisite for any plugin that ships an
     `mcp/` server, on top of Python.
+  - **`scripts/` holds a status line's command scripts** (`pc-statusline/scripts/statusline.py`
+    + `subagent_statusline.py` + a shared module). A status line is not a hook (not in
+    `hooks.json`), a skill, an agent, or an MCP server — it is a command wired through a
+    `settings.json` key (`statusLine` by `pinky install --plugin`, `subagentStatusLine` by the
+    plugin's own bundled `settings.json`, `${CLAUDE_PLUGIN_ROOT}/scripts/<file>`). This is the one
+    sanctioned `scripts/` directory; every other script still lives in `hooks/`,
+    `skills/<name>/scripts/`, or `mcp/`.
   - Decided 2026-08-19 (`deux-hooks-branche-et-cout-de-lecture`): an invisible skill→script
     coupling is debt, and directory structure — not prose — is what a reader checks first.

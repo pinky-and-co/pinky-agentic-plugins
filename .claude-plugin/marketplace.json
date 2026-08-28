@@ -30,6 +30,11 @@
       "name": "pc-craft",
       "source": "./plugins/pc-craft",
       "description": "Generic engineering conventions — code and infra-as-code, zero profile-resolved values."
+    },
+    {
+      "name": "pc-statusline",
+      "source": "./plugins/pc-statusline",
+      "description": "Multi-line status line — main-session dashboard (model, context bar, cache hit, cost, rate limits) and a per-subagent row. Pure rendering, zero profile-resolved values."
     }
   ]
 }
