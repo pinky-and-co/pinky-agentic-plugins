@@ -180,6 +180,8 @@ pinky-agentic-plugins/
 │   │   │   └── plugin.json
 │   │   └── skills/
 │   │       └── dev-prerelease/
+│   │           ├── scripts/
+│   │           │   └── reconcile.py
 │   │           └── SKILL.md
 │   ├── pc-snow/
 │   │   ├── .claude-plugin/
@@ -254,6 +256,7 @@ pinky-agentic-plugins/
 │   ├── test_post_edit_lint.py
 │   ├── test_privacy_egress.py
 │   ├── test_read_cost.py
+│   ├── test_reconcile.py
 │   ├── test_secret_patterns.py
 │   ├── test_statusline.py
 │   ├── test_statusline_common.py
