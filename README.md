@@ -109,6 +109,8 @@ pinky-agentic-plugins/
 │   │       │   │   ├── repro.md
 │   │       │   │   └── web.md
 │   │       │   └── SKILL.md
+│   │       ├── debug_brief/
+│   │       │   └── SKILL.md
 │   │       └── improve/
 │   │           └── SKILL.md
 │   ├── pc-git/
