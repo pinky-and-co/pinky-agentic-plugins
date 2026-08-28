@@ -1,5 +1,5 @@
 ---
-name: debug_brief
+name: debug-brief
 description: "Assemble a self-contained debug brief — a human-reported behavior discrepancy confronted against the code, an optional spec, and a coherently anonymized sample of the real data — so a model can reason about root cause without ever seeing real customer/business data. Output is one text block to paste into an external model, or send through the panel MCP tool. Use when someone reports 'X does the wrong thing' and wants a rigorous bug/not-a-bug qualification before touching the code."
 user-invocable: true
 allowed-tools: Read, Bash(find:*), Bash(ls:*), Skill
@@ -22,9 +22,10 @@ values are pseudonymized by a deterministic tool *before* any model sees them.
 ## Preflight
 
 1. **`pc-privacy` reachable?** This skill masks the dataset through the `anonymize_detect` /
-   `anonymize_apply` MCP tools (`pc-privacy` server). If they are not in your tool list, stop and
-   tell the user to install the plugin (`claude plugin install pc-privacy@pinky-agentic-plugins`)
-   and run its one-time spaCy model download — do **not** fall back to reading the raw file or to a
+   `anonymize_apply` MCP tools (`pc-privacy` server) — a declared `dependencies` entry of `pc-craft`,
+   so a normal install resolves it. If the tools are not in your tool list, the dependency did not
+   resolve: stop and tell the user to reinstall `pc-craft` (or install `pc-privacy` directly) and
+   run its one-time spaCy model download. Do **not** fall back to reading the raw file or to a
    hand-rolled masking pass.
 2. **`--send` requested but `panel` unreachable or empty?** The `panel` MCP tool (`pc-core-models`
    server) runs the brief through one non-Claude pool model (sonnet/opus-tier entries only). If
