@@ -1,5 +1,5 @@
 # ATTRIBUTIONS — running ledger
-*Update date : 2026-08-31 12:55*
+*Update date : 2026-08-31 13:10*
 
 > **Carried over from pinky-workspace** (`docs/ATTRIBUTIONS-WIP.md`) when its engine migrated into
 > these plugins. This stays the append-as-you-go ledger — every external source logged the moment
@@ -54,9 +54,27 @@
 
 - **2026-07-05 — closed.** All TBD rows of the time resolved. NOTICE + CREDITS produced at
   pinky-workspace root.
-- **2026-07-28 — reopened, 1 TBD.** The *task-observer* row (CC BY 4.0) — its credit lived inline
-  inside `memory-promotion.md`/`skill-discovery.md`; merging those rules surfaced it. Verify the
-  CC BY 4.0 terms and add the credit before going public.
-- **2026-08-31 — carried into `pinky-agentic-plugins`** as the engine's plugins became the live
-  home. NOTICE + CREDITS copied alongside. Per-repo verification pending: card
-  `notice-licenses-scrub-plugins`.
+- **2026-07-28 — reopened, 1 TBD.** The *task-observer* row (CC BY 4.0).
+- **2026-08-31 — scrub done for the plugin repos** (card `notice-licenses-scrub-plugins`). Verdict
+  per source, checked against the current plugin repos:
+
+  | Source | Verdict | Home |
+  |---|---|---|
+  | markitdown (MIT) | NOTICE — optional runtime dep | `pinky-agentic-plugins` NOTICE — `pc-core:document-to-md` |
+  | yt-dlp (Unlicense) | NOTICE — courtesy (public domain) | `pinky-agentic-plugins` NOTICE — `pc-kanban:yt` |
+  | Snowflake docs (adapted) | NOTICE — transformative adaptation | `pinky-agentic-plugins` NOTICE — `pc-snow` skills, `metadata.source` per file |
+  | Streamlit docs (Apache-2.0, adapted) | NOTICE — attribution given | `pinky-agentic-plugins` NOTICE — `pc-snow:streamlit` |
+  | markdownify · beautifulsoup4 · lxml | NOTICE — generation-time only, not shipped | `pinky-bootstrap` NOTICE — `tools/mirror_to_md.py` |
+  | LLM Council / Karpathy | CREDITS — concept, no obligation | `pinky-agentic-plugins` CREDITS — `pc-core:council` |
+  | gstack (MIT) | CREDITS — concept/design, no code | `pinky-agentic-plugins` CREDITS — `pc-kanban:permission-change`, `pc-core:council` |
+  | ADHD (MIT) | CREDITS — pattern, text rewritten | `pinky-agentic-plugins` CREDITS — `pc-core:council` pre-flight |
+  | ponytail (MIT) | CREDITS — concept, no code | `pinky-bootstrap` CREDITS — rule `minimal-code.md` |
+  | ECC (MIT) | CREDITS — "specific overrides general" phrase/concept | `pinky-bootstrap` CREDITS — rule `minimal-code.md` |
+  | Diátaxis (CC-BY-SA text) | CREDITS — folder structure only, text not reproduced | both repos' CREDITS |
+  | **task-observer (CC BY 4.0)** | **N/A — the derivative was removed.** The `proactivity.md` rule was deleted in the plugin migration (card `migration-des-24-rules-verdict-par-fichier`, line 29 — "supprimées, condensées en une puce"); the current `behavior` config carries none of its two observations. No distributed derivative → no attribution obligation. | — |
+  | AgentShield · trafilatura · html2text · pandoc · docling | N/A — never adopted | — |
+
+- **`pinky-agentic-plugins-private`** — no external-derived content (proprietary domain knowledge
+  only); no NOTICE/CREDITS needed.
+- **Blocking-before-public** (FR-0023-01): re-run this table against each repo's actual state right
+  before flipping any repo public — the plugin set moves.
