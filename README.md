@@ -81,6 +81,7 @@ pinky-agentic-plugins/
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
 │   │   │   ├── model_panel.py
+│   │   │   ├── review_complexity.py
 │   │   │   └── server.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
@@ -263,6 +264,7 @@ pinky-agentic-plugins/
 │   ├── test_privacy_egress.py
 │   ├── test_read_cost.py
 │   ├── test_reconcile.py
+│   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
 │   ├── test_statusline.py
 │   ├── test_statusline_common.py
