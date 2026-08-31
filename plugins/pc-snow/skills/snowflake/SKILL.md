@@ -30,6 +30,7 @@ Stack: Snowpark Python (stored procedures, serverless tasks) + Snowflake Python 
 - `references/telemetry.md` — LOG_LEVEL/TRACE_LEVEL/METRIC_LEVEL, the event table, custom telemetry via `snowflake.telemetry` (`add_event`, `set_span_attribute`), storage lifecycle policy, per-schema event table architecture.
 - `references/costs.md` — credit consumption model per stack component (SPs, serverless Tasks, Dynamic Tables, Streamlit, Cortex, Openflow), storage & retention costs, Resource Monitors vs Budgets vs per-user Quotas, optimization patterns.
 - `references/native-app.md` — Native App Framework: provider/consumer model, `snowflake.yml`/`manifest.yml`, `setup.sql` rules, telemetry cascade, `snow app` CLI, RBAC via application roles, lifecycle (install/upgrade/uninstall), publication (private listing vs Marketplace).
+- `references/review.md` — the Snowflake-stack review checklist (deployment, SP/UDF, telemetry/event table, governance), applied on top of `pc-core:review-guidelines` when reviewing code that deploys to or runs on Snowflake.
 
 Load whichever reference fits the task — most questions need only one; a deployment question
 spanning cost and governance may need two.

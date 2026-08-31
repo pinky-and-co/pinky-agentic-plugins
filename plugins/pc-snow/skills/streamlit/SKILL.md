@@ -23,8 +23,11 @@ constraints, and how to evaluate a version upgrade.
 > this reference deliberately does not track a rolling "what's new since our pin" list, because
 > that kind of content goes stale within weeks and was cut for exactly that reason.
 
-## Reference
+## References
 
 - `references/streamlit.md` — Container vs Standard runtime comparison, SiS vs desktop Streamlit
   constraints, upgrade evaluation methodology, layout/CSS constraints (what's native vs a hack),
   SiS-specific APIs, `st.fragment` partial reruns, cache layering for SPCS cold starts, gotchas.
+- `references/review.md` — the SiS review checklist (page config, session injection, callback
+  discipline, cache, module-scoped CSS), applied on top of `pc-core:review-guidelines` when
+  reviewing a Streamlit app that runs inside Snowflake.

@@ -111,6 +111,10 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       ├── debug-brief/
 │   │       │   └── SKILL.md
+│   │       ├── fastapi/
+│   │       │   ├── references/
+│   │       │   │   └── review.md
+│   │       │   └── SKILL.md
 │   │       └── improve/
 │   │           └── SKILL.md
 │   ├── pc-git/
@@ -200,6 +204,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── costs.md
 │   │   │   │   │   ├── gov.md
 │   │   │   │   │   ├── native-app.md
+│   │   │   │   │   ├── review.md
 │   │   │   │   │   ├── telemetry.md
 │   │   │   │   │   └── warehouses.md
 │   │   │   │   └── SKILL.md
@@ -213,6 +218,7 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── streamlit/
 │   │   │   │   ├── references/
+│   │   │   │   │   ├── review.md
 │   │   │   │   │   └── streamlit.md
 │   │   │   │   └── SKILL.md
 │   │   │   └── .gitkeep
