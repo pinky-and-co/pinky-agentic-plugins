@@ -278,7 +278,10 @@ pinky-agentic-plugins/
 ├── .python-version
 ├── .secrets.baseline
 ├── AGENTS.md
+├── ATTRIBUTIONS.md
 ├── CLAUDE.md
+├── CREDITS
+├── NOTICE
 ├── pyproject.toml
 ├── README.md
 └── uv.lock
