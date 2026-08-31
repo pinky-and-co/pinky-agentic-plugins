@@ -81,6 +81,7 @@ pinky-agentic-plugins/
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
 │   │   │   ├── model_panel.py
+│   │   │   ├── review_complexity.py
 │   │   │   └── server.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
@@ -110,6 +111,10 @@ pinky-agentic-plugins/
 │   │       │   │   └── web.md
 │   │       │   └── SKILL.md
 │   │       ├── debug-brief/
+│   │       │   └── SKILL.md
+│   │       ├── fastapi/
+│   │       │   ├── references/
+│   │       │   │   └── review.md
 │   │       │   └── SKILL.md
 │   │       └── improve/
 │   │           └── SKILL.md
@@ -200,6 +205,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── costs.md
 │   │   │   │   │   ├── gov.md
 │   │   │   │   │   ├── native-app.md
+│   │   │   │   │   ├── review.md
 │   │   │   │   │   ├── telemetry.md
 │   │   │   │   │   └── warehouses.md
 │   │   │   │   └── SKILL.md
@@ -213,6 +219,7 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── streamlit/
 │   │   │   │   ├── references/
+│   │   │   │   │   ├── review.md
 │   │   │   │   │   └── streamlit.md
 │   │   │   │   └── SKILL.md
 │   │   │   └── .gitkeep
@@ -257,6 +264,7 @@ pinky-agentic-plugins/
 │   ├── test_privacy_egress.py
 │   ├── test_read_cost.py
 │   ├── test_reconcile.py
+│   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
 │   ├── test_statusline.py
 │   ├── test_statusline_common.py

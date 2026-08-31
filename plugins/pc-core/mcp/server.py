@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import model_adversarial
 import model_offline
 import model_panel
+import review_complexity
 from mcp.server import MCPServer
 
 m = MCPServer("pc-core-models")
@@ -87,7 +88,12 @@ def offline(
 
 @m.tool()
 def adversarial(
-    task: str, files: list[str] | None = None, model: str | None = None
+    task: str,
+    files: list[str] | None = None,
+    model: str | None = None,
+    stack: str | None = None,
+    tier: str | None = None,
+    diff: str | None = None,
 ) -> str:
     """Challenge THIS session's own output with a contrarian second opinion from a non-Claude model.
 
@@ -97,21 +103,57 @@ def adversarial(
     opens with which model actually answered — never present a review as verdict without knowing
     which model produced it. The verdict itself is returned verbatim below that line; do not
     summarize or soften it on the model's behalf.
+
+    `stack` (`fastapi` / `streamlit` / `snowflake`) appends that stack's review checklist to the
+    methodology, since the pool model cannot invoke a skill itself. Omitted → inferred from import
+    markers in `files`.
+
+    `tier` (`haiku` / `sonnet` / `opus`) routes to the cheapest pool entry at or above that
+    capacity — free before paid — instead of the default adversarial selection. `diff` (a path to
+    a unified diff) derives that tier deterministically from the change size and risk factors when
+    `tier` is not passed explicitly.
     """
     files = files or []
     override = model_adversarial.resolve_model(model)
-    entries = (
-        [{**model_adversarial._DEFAULT_POOL[0], "model": override, "name": override}]
-        if override
-        else model_adversarial.select_for_adversarial(model_adversarial.load_pool())
-    )
+
+    # an unrecognised tier string would silently rank 0 in select_for_delegation (all entries
+    # qualify) — ignore it and fall to the default selection instead
+    resolved_tier = tier if tier in model_adversarial._TIER_RANK else None
+    if resolved_tier is None and diff:
+        try:
+            resolved_tier = review_complexity.tier_for(
+                Path(diff).read_text(encoding="utf-8", errors="ignore")
+            )
+        except OSError:
+            resolved_tier = None
+
+    if override:
+        entries = [
+            {**model_adversarial._DEFAULT_POOL[0], "model": override, "name": override}
+        ]
+    elif resolved_tier:
+        # delegation selection is free-first and includes offline; this tool has no offline path,
+        # so keep only the HTTP entries
+        entries = [
+            e
+            for e in model_adversarial.select_for_delegation(
+                model_adversarial.load_pool(), resolved_tier
+            )
+            if e["kind"] == "http"
+        ]
+    else:
+        entries = model_adversarial.select_for_adversarial(
+            model_adversarial.load_pool()
+        )
     if not entries:
         return "[adversarial] BLOCKED — no candidate model in the pool."
 
     # Shared methodology with the `reviewer` agent (`agents/reviewer.md`) — same review guidelines
     # and output format regardless of which model reviews, its own "Adversarial mode" section
-    # always active here (this tool exists specifically for that stance).
-    methodology = model_adversarial.load_methodology()
+    # always active here (this tool exists specifically for that stance). A stack checklist is
+    # folded in for the pool model, which has no `Skill` tool to load it as the agent would.
+    resolved_stack = stack or model_adversarial.detect_stack(files)
+    methodology = model_adversarial.load_methodology(resolved_stack)
     adversarial_task = (methodology + "\n\n" if methodology else "") + task
     prompt = model_adversarial.build_prompt(adversarial_task, files)
 

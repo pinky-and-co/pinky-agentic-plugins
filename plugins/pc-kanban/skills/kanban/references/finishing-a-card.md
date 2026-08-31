@@ -20,15 +20,22 @@ output in the transcript fools it exactly the way an unverified sub-agent report
 The reviewer must not be the generator — a same-model self-check inherits its own blind spots, and
 agreement among several voices of the same model is not proof of correctness either, only a
 correlated blind spot repeated. Whenever a card's work needs real judgment reviewed, not just a
-mechanical check, prefer in this order — **never `haiku`, whatever tier is available**:
+mechanical check, prefer in this order:
 
-1. **`adversarial` MCP tool** (`pc-core`, native, no spawn) — a genuinely different model family
-   (Mistral-served, `mistral-medium-3.5` today), not just a cheaper same-vendor tier. The real
-   change of perspective, not a cost optimization.
+1. **`adversarial` MCP tool** (`pc-core`, native, no spawn) — the default. Routes the review to a
+   non-Claude pool model, not a cheaper same-vendor tier: the real change of perspective. Pass
+   `diff` (a path to the change under review) so the tool picks the model tier deterministically
+   from the diff's size and risk factors — a security-sensitive or large change goes opus-tier, a
+   small mechanical one to the cheapest capable entry. Pass `stack`, or let it infer one from the
+   imports, so a FastAPI / SiS / Snowflake checklist rides along (the pool model has no `Skill`
+   tool). Falls through pool candidates on failure; returns `[adversarial] BLOCKED — …` when no
+   pool key resolves at all — that is the signal to drop to (2).
 2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
-   reviewer.md`), preloads the `review-guidelines` skill, no external plugin dependency. Same
-   vendor as the generator, but a fresh context that never saw the generating session's own
-   rationalizations — `model: sonnet` in its own definition, a real floor.
+   reviewer.md`), preloads the `review-guidelines` skill, no external plugin dependency. The
+   fallback when (1) returns `BLOCKED`, and the right first choice when the review needs a reviewer
+   that navigates the repo itself rather than a single-shot pool call. Same vendor as the
+   generator, but a fresh context that never saw the generating session's own rationalizations —
+   `model: sonnet` in its own definition, a real floor.
 3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
    model, same context) rather than presenting it as equivalent to (1) or (2).
 
