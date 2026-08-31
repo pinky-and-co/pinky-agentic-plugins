@@ -179,8 +179,76 @@ _METHODOLOGY_PATH = (
 )
 _FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
 
+# Stack-specific review guidance lives in a dedicated skill per stack, following the
+# `skills/<skill>/references/review.md` naming. This is a soft convention, not a plugin
+# dependency: pc-core does not depend on pc-craft/pc-snow, it just knows where they put their
+# review reference. Same-marketplace siblings resolve from this module's location; a missing file
+# (the plugin is not installed) degrades to no stack section, exactly like a missing methodology.
+_STACK_SKILLS: dict[str, tuple[str, str]] = {
+    "fastapi": ("pc-craft", "fastapi"),
+    "streamlit": ("pc-snow", "streamlit"),
+    "snowflake": ("pc-snow", "snowflake"),
+}
 
-def load_methodology() -> str:
+# Import markers that identify a stack in the reviewed files, used only when the caller passes no
+# explicit `stack`. First match wins.
+_STACK_MARKERS: dict[str, tuple[str, ...]] = {
+    "fastapi": ("fastapi", "APIRouter"),
+    "streamlit": ("import streamlit", "from streamlit"),
+    "snowflake": ("snowflake.core", "snowflake.snowpark", "import snowflake"),
+}
+
+
+def _stack_review_path(stack: str) -> Path | None:
+    """Filesystem path of a stack's `references/review.md`, or None for an unknown stack key.
+
+    `parents[2]` is the plugins root in dev (`<root>/plugins/pc-core/mcp/...`) and the marketplace
+    root once installed (`<mp>/pc-core/mcp/...`) — sibling plugins sit next to `pc-core` in both.
+    """
+    spec = _STACK_SKILLS.get(stack)
+    if spec is None:
+        return None
+    plugin, skill = spec
+    return (
+        Path(__file__).parents[2]
+        / plugin
+        / "skills"
+        / skill
+        / "references"
+        / "review.md"
+    )
+
+
+def _load_stack_review(stack: str) -> str:
+    """The stack's review reference body, or empty string if the key is unknown or the file absent."""
+    path = _stack_review_path(stack)
+    if path is None:
+        return ""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def detect_stack(files: list[str]) -> str | None:
+    """Best-effort stack key from import markers in the reviewed files.
+
+    Used when the caller does not pass an explicit `stack`; first marker match wins, None when
+    nothing matches. Unreadable files are skipped.
+    """
+    blob = ""
+    for p in files:
+        try:
+            blob += Path(p).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+    for stack, markers in _STACK_MARKERS.items():
+        if any(marker in blob for marker in markers):
+            return stack
+    return None
+
+
+def load_methodology(stack: str | None = None) -> str:
     """The shared review methodology — the `review-guidelines` skill's body, frontmatter stripped.
 
     Single source of truth for what "reviewed" means in this suite: the `reviewer` agent and this
@@ -188,12 +256,22 @@ def load_methodology() -> str:
     same reasoning as `policy_lib.py` sitting between two hook concerns), so a finding looks the
     same regardless of which model produced it. Empty string if the file is missing rather than
     raising — a caller with no methodology loaded still gets a review, just an unstructured one.
+
+    `stack` (optional) appends that stack's `references/review.md` after the generic methodology,
+    so a pool model with no `Skill` tool still gets the FastAPI / SiS / Snowflake checklist the
+    `reviewer` agent would load itself. An unknown key or an uninstalled plugin adds nothing —
+    same graceful-degrade as the methodology file.
     """
     try:
         text = _METHODOLOGY_PATH.read_text(encoding="utf-8")
+        methodology = _FRONTMATTER_RE.sub("", text, count=1).strip()
     except OSError:
-        return ""
-    return _FRONTMATTER_RE.sub("", text, count=1).strip()
+        methodology = ""
+    if stack:
+        extra = _load_stack_review(stack)
+        if extra:
+            return "\n\n".join(p for p in (methodology, extra) if p)
+    return methodology
 
 
 def build_prompt(task: str, files: list[str]) -> str:

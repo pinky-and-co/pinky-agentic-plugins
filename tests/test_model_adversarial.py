@@ -10,6 +10,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
 
 import model_adversarial as ma
@@ -214,6 +216,82 @@ class TestLoadMethodology(unittest.TestCase):
             self.assertEqual(ma.load_methodology(), "")
         finally:
             ma._METHODOLOGY_PATH = original
+
+
+class TestStackReview(unittest.TestCase):
+    def test_known_stack_appends_its_checklist(self):
+        base = ma.load_methodology()
+        withfastapi = ma.load_methodology("fastapi")
+        self.assertTrue(withfastapi.startswith(base))
+        self.assertGreater(len(withfastapi), len(base))
+        self.assertIn("FastAPI", withfastapi)
+
+    def test_unknown_stack_changes_nothing(self):
+        self.assertEqual(ma.load_methodology("cobol"), ma.load_methodology())
+
+    def test_uninstalled_plugin_degrades_to_no_section(self):
+        # the file simply does not resolve — same graceful-degrade as a missing methodology file
+        original = ma._STACK_SKILLS["fastapi"]
+        ma._STACK_SKILLS["fastapi"] = ("pc-not-installed", "nope")
+        try:
+            self.assertEqual(ma.load_methodology("fastapi"), ma.load_methodology())
+        finally:
+            ma._STACK_SKILLS["fastapi"] = original
+
+    def test_stack_review_path_none_for_unknown_key(self):
+        self.assertIsNone(ma._stack_review_path("cobol"))
+
+
+class TestDetectStack(unittest.TestCase):
+    def _write(self, text: str) -> str:
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", delete=False, encoding="utf-8"
+        )
+        f.write(text)
+        f.close()
+        return f.name
+
+    def test_fastapi_import_is_detected(self):
+        self.assertEqual(
+            ma.detect_stack([self._write("from fastapi import APIRouter\n")]), "fastapi"
+        )
+
+    def test_streamlit_import_is_detected(self):
+        self.assertEqual(
+            ma.detect_stack([self._write("import streamlit as st\n")]), "streamlit"
+        )
+
+    def test_no_marker_returns_none(self):
+        self.assertIsNone(ma.detect_stack([self._write("import os\nx = 1\n")]))
+
+    def test_unreadable_file_is_skipped_not_raised(self):
+        self.assertIsNone(ma.detect_stack(["/nonexistent/whatever.py"]))
+
+
+def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp_path):
+    """FR-0023-28 — the pool model has no `Skill` tool, so the stack checklist must be in the prompt."""
+    pytest.importorskip("mcp")
+    sys.path.insert(
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+    )
+    import server
+
+    src = tmp_path / "api.py"
+    src.write_text(
+        "from fastapi import APIRouter\nrouter = APIRouter()\n", encoding="utf-8"
+    )
+
+    captured: dict[str, str] = {}
+
+    def fake_run_pool(entries, prompt, timeout=180):
+        captured["prompt"] = prompt
+        return ma.PoolResult(entries[0], {"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
+
+    server.adversarial(task="review this", files=[str(src)])
+    # a phrase unique to the FastAPI review reference, not the generic methodology
+    assert "N+1 query pattern" in captured["prompt"]
 
 
 if __name__ == "__main__":

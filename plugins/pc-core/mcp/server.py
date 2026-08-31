@@ -87,7 +87,10 @@ def offline(
 
 @m.tool()
 def adversarial(
-    task: str, files: list[str] | None = None, model: str | None = None
+    task: str,
+    files: list[str] | None = None,
+    model: str | None = None,
+    stack: str | None = None,
 ) -> str:
     """Challenge THIS session's own output with a contrarian second opinion from a non-Claude model.
 
@@ -97,6 +100,10 @@ def adversarial(
     opens with which model actually answered — never present a review as verdict without knowing
     which model produced it. The verdict itself is returned verbatim below that line; do not
     summarize or soften it on the model's behalf.
+
+    `stack` (`fastapi` / `streamlit` / `snowflake`) appends that stack's review checklist to the
+    methodology, since the pool model cannot invoke a skill itself. Omitted → inferred from import
+    markers in `files`.
     """
     files = files or []
     override = model_adversarial.resolve_model(model)
@@ -110,8 +117,10 @@ def adversarial(
 
     # Shared methodology with the `reviewer` agent (`agents/reviewer.md`) — same review guidelines
     # and output format regardless of which model reviews, its own "Adversarial mode" section
-    # always active here (this tool exists specifically for that stance).
-    methodology = model_adversarial.load_methodology()
+    # always active here (this tool exists specifically for that stance). A stack checklist is
+    # folded in for the pool model, which has no `Skill` tool to load it as the agent would.
+    resolved_stack = stack or model_adversarial.detect_stack(files)
+    methodology = model_adversarial.load_methodology(resolved_stack)
     adversarial_task = (methodology + "\n\n" if methodology else "") + task
     prompt = model_adversarial.build_prompt(adversarial_task, files)
 
