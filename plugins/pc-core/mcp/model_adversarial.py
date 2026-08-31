@@ -190,12 +190,13 @@ _STACK_SKILLS: dict[str, tuple[str, str]] = {
     "snowflake": ("pc-snow", "snowflake"),
 }
 
-# Import markers that identify a stack in the reviewed files, used only when the caller passes no
-# explicit `stack`. First match wins.
-_STACK_MARKERS: dict[str, tuple[str, ...]] = {
-    "fastapi": ("fastapi", "APIRouter"),
-    "streamlit": ("import streamlit", "from streamlit"),
-    "snowflake": ("snowflake.core", "snowflake.snowpark", "import snowflake"),
+# Import-line patterns that identify a stack in the reviewed files, used only when the caller
+# passes no explicit `stack`. Matched against whole file contents; anchored on `import`/`from` so a
+# stray mention in a comment or string does not trigger. First stack with a match wins.
+_STACK_MARKERS: dict[str, re.Pattern[str]] = {
+    "fastapi": re.compile(r"^\s*(from fastapi\b|import fastapi\b)", re.MULTILINE),
+    "streamlit": re.compile(r"^\s*(from streamlit\b|import streamlit\b)", re.MULTILINE),
+    "snowflake": re.compile(r"^\s*(from snowflake\b|import snowflake\b)", re.MULTILINE),
 }
 
 
@@ -239,11 +240,11 @@ def detect_stack(files: list[str]) -> str | None:
     blob = ""
     for p in files:
         try:
-            blob += Path(p).read_text(encoding="utf-8", errors="ignore")
+            blob += Path(p).read_text(encoding="utf-8", errors="ignore") + "\n"
         except OSError:
             continue
-    for stack, markers in _STACK_MARKERS.items():
-        if any(marker in blob for marker in markers):
+    for stack, pattern in _STACK_MARKERS.items():
+        if pattern.search(blob):
             return stack
     return None
 

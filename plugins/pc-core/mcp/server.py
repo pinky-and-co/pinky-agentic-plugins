@@ -116,7 +116,9 @@ def adversarial(
     files = files or []
     override = model_adversarial.resolve_model(model)
 
-    resolved_tier = tier
+    # an unrecognised tier string would silently rank 0 in select_for_delegation (all entries
+    # qualify) — ignore it and fall to the default selection instead
+    resolved_tier = tier if tier in model_adversarial._TIER_RANK else None
     if resolved_tier is None and diff:
         try:
             resolved_tier = review_complexity.tier_for(

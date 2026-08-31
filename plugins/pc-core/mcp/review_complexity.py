@@ -38,6 +38,14 @@ _TEST_PATH_RE = re.compile(
 )
 _DIFF_HEADER_RE = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+)$")
 
+# tier_for thresholds — a first cut, meant to be tuned against real runs (story § Items ouverts).
+# All comparisons are strict ``>``.
+_NO_TEST_MIN_LINES = 50  # below this a testless change is too small to flag
+_UNDERTESTED_OPUS_LINES = 150  # testless AND bigger than this → top tier
+_OPUS_LINES = 400
+_SONNET_LINES = 80
+_SONNET_FILES = 5
+
 
 @dataclass
 class DiffStats:
@@ -80,7 +88,7 @@ def analyze(diff: str) -> DiffStats:
     risks: list[str] = []
     if changed > 400:
         risks.append("large-diff")
-    if test_lines == 0 and changed > 50:
+    if test_lines == 0 and changed > _NO_TEST_MIN_LINES:
         risks.append("no-test-changes")
     for p, _ in blocks:
         if any(marker in p.lower() for marker in _SECURITY_MARKERS):
@@ -108,10 +116,11 @@ def tier_for(diff: str) -> str:
     stats = analyze(diff)
     security = any(r.startswith("security-sensitive:") for r in stats.risk_factors)
     undertested_and_big = (
-        "no-test-changes" in stats.risk_factors and stats.changed_lines > 150
+        "no-test-changes" in stats.risk_factors
+        and stats.changed_lines > _UNDERTESTED_OPUS_LINES
     )
-    if stats.changed_lines > 400 or security or undertested_and_big:
+    if stats.changed_lines > _OPUS_LINES or security or undertested_and_big:
         return "opus"
-    if stats.changed_lines > 80 or stats.files > 5:
+    if stats.changed_lines > _SONNET_LINES or stats.files > _SONNET_FILES:
         return "sonnet"
     return "haiku"

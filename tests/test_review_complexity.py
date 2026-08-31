@@ -54,6 +54,26 @@ class TestAnalyze(unittest.TestCase):
         stats = rc.analyze("")
         self.assertEqual((stats.files, stats.changed_lines), (0, 0))
 
+    def test_binary_diff_counts_zero_lines(self):
+        diff = (
+            "diff --git a/logo.png b/logo.png\n"
+            "index 1111111..2222222 100644\n"
+            "Binary files a/logo.png and b/logo.png differ\n"
+        )
+        stats = rc.analyze(diff)
+        self.assertEqual((stats.files, stats.changed_lines), (1, 0))
+
+    def test_pure_rename_counts_zero_lines(self):
+        diff = (
+            "diff --git a/old_name.py b/new_name.py\n"
+            "similarity index 100%\n"
+            "rename from old_name.py\n"
+            "rename to new_name.py\n"
+        )
+        stats = rc.analyze(diff)
+        self.assertEqual(stats.changed_lines, 0)
+        self.assertEqual(rc.tier_for(diff), "haiku")
+
 
 class TestTierFor(unittest.TestCase):
     def test_small_mechanical_diff_is_haiku(self):

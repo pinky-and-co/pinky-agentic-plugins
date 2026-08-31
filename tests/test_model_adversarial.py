@@ -264,6 +264,11 @@ class TestDetectStack(unittest.TestCase):
     def test_no_marker_returns_none(self):
         self.assertIsNone(ma.detect_stack([self._write("import os\nx = 1\n")]))
 
+    def test_a_bare_mention_is_not_a_match(self):
+        # "fastapi" in a comment or string must not trigger — the marker is anchored on an import
+        src = '# this is not a fastapi app\nMSG = "see fastapi docs"\nimport os\n'
+        self.assertIsNone(ma.detect_stack([self._write(src)]))
+
     def test_unreadable_file_is_skipped_not_raised(self):
         self.assertIsNone(ma.detect_stack(["/nonexistent/whatever.py"]))
 
@@ -294,6 +299,46 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
     assert "N+1 query pattern" in captured["prompt"]
     # IMP-0023-17 — the answer names the model that produced it, before the verdict
     assert out.startswith("[answered by ")
+
+
+def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
+    """An unrecognised tier must not route — fall back to the default adversarial selection."""
+    pytest.importorskip("mcp")
+    sys.path.insert(
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+    )
+    import server
+
+    seen: dict[str, list] = {}
+
+    def fake_select_for_adversarial(pool, floor_tier="sonnet"):
+        seen["adversarial"] = pool
+        return [MISTRAL]
+
+    def fake_select_for_delegation(pool, task_tier="haiku"):
+        seen["delegation"] = task_tier
+        return [MISTRAL]
+
+    monkeypatch.setattr(
+        server.model_adversarial,
+        "select_for_adversarial",
+        fake_select_for_adversarial,
+    )
+    monkeypatch.setattr(
+        server.model_adversarial,
+        "select_for_delegation",
+        fake_select_for_delegation,
+    )
+    monkeypatch.setattr(
+        server.model_adversarial,
+        "run_pool",
+        lambda entries, prompt, timeout=180: ma.PoolResult(
+            entries[0], {"choices": [{"message": {"content": "ok"}}]}
+        ),
+    )
+
+    server.adversarial(task="review", tier="turbo-9000")
+    assert "adversarial" in seen and "delegation" not in seen
 
 
 class TestKeylessPoolDegrades(unittest.TestCase):
