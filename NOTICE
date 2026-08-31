@@ -1,0 +1,61 @@
+pinky-and-co plugins — Third-Party Notices
+
+Carried over from pinky-workspace (its engine migrated into these plugins). This is the
+preserved ledger; the per-repo aggregation and verification of every migrated source is the
+kanban card `notice-licenses-scrub-plugins` — BLOCKING before any plugin repo goes public.
+Original generation: 2026-07-05 from ATTRIBUTIONS.md. Paths below (`core/rules/base/...`,
+`corpus-public/...`) are pinky-workspace paths — the scrub card maps each to its plugin home.
+
+This file lists third-party content and dependencies that carry a license obligation:
+bundled/optional runtime dependencies, and documentation adapted from external sources.
+Courtesy-only inspirations (concept/format reuse, no obligation) are listed in CREDITS
+instead.
+
+================================================================================
+OPTIONAL RUNTIME DEPENDENCIES
+================================================================================
+
+markitdown (Microsoft)
+  License: MIT
+  Used by: `read-documents` rule — convert-then-read for office/HTML formats.
+  https://github.com/microsoft/markitdown
+
+yt-dlp
+  License: Unlicense
+  Used by: `yt` skill — fetch auto-generated subtitles (VTT), no video download.
+  https://github.com/yt-dlp/yt-dlp
+
+================================================================================
+GENERATION-TIME TOOLING (not shipped in any distributed lib)
+================================================================================
+
+markdownify
+  License: MIT
+beautifulsoup4
+  License: MIT
+lxml
+  License: BSD-3-Clause
+
+  Used by: `scripts/mirror_to_md.py` (ADR-0017) to convert wget HTML mirrors of
+  Snowflake/Streamlit docs into lean Markdown for local agent reference. The
+  generated mirror (`docs/api/`) is gitignored and never committed or distributed —
+  these tools run locally only, at generation time.
+
+================================================================================
+ADAPTED DOCUMENTATION
+================================================================================
+
+Snowflake official docs (docs.snowflake.com)
+  License: proprietary vendor documentation, no open license published.
+  Adapted into: 13 files under `corpus-public/knowledge/AGENT_SNOWFLAKE_*.md` —
+  distilled and rewritten (own prose, tables, code examples), not reproduced
+  verbatim. Each file carries a Source/License line per
+  `core/rules/base/agent-knowledge-format.md`.
+
+Streamlit official docs (docs.streamlit.io / github.com/streamlit/docs)
+  License: Apache-2.0
+  Adapted into: `corpus-public/knowledge/AGENT_SNOWFLAKE_STREAMLIT.md` (partial) —
+  distilled and rewritten, attribution given per Apache-2.0 terms.
+
+================================================================================
+Full ledger, verification method, and open-question history: ATTRIBUTIONS.md

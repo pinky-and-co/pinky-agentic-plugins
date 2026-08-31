@@ -1,0 +1,41 @@
+pinky-and-co plugins — Credits
+
+Carried over from pinky-workspace (its engine migrated into these plugins). Per-repo
+aggregation + verification: kanban card `notice-licenses-scrub-plugins`, blocking before
+any plugin repo goes public. Original generation: 2026-07-05 from ATTRIBUTIONS.md.
+
+Courtesy attribution for concepts, formats, and patterns that shaped this framework —
+no code was copied and no license obligation applies (idea/format reuse, not
+distributed text or code). See NOTICE for items that do carry a license obligation.
+
+Diátaxis (Daniele Procida)
+  https://diataxis.fr
+  Doc folder structure (tutorials/how-to/reference/explanation) — structure only,
+  text is CC-BY-SA.
+
+LLM Council (Andrej Karpathy)
+  https://github.com/karpathy/llm-council
+  Multi-advisor debate + peer-review + chairman methodology — concept only, no
+  code or text copied. Powers the `llm-council` skill.
+
+gstack (garrytan/gstack)
+  https://github.com/garrytan/gstack
+  License: MIT
+  Council decision→artefact pattern; `/careful` `/freeze` `/guard` `/investigate`
+  skill design; "taste decisions → human, rest auto-fixes" philosophy.
+
+ECC (affaan-m/ECC)
+  https://github.com/affaan-m/ECC
+  License: MIT
+  Format ideas only (not adopted as code): "specific overrides general", hooks
+  "how-to-fix" column, runtime hook-disable env var.
+
+ponytail (DietrichGebert/ponytail)
+  https://github.com/DietrichGebert/ponytail
+  License: MIT
+  Concept only (plugin not installed): the pre-generation decision ladder
+  (YAGNI → reuse → stdlib → native → installed dep → one line → MVP) and the
+  "minimal ≠ unsafe" guardrail, adapted into `core/rules/base/minimal-code.md`.
+
+================================================================================
+Full ledger and verification method: ATTRIBUTIONS.md
