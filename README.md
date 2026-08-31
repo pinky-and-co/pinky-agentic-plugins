@@ -185,6 +185,25 @@ pinky-agentic-plugins/
 │   │   │   └── plugin.json
 │   │   └── skills/
 │   │       └── dev-prerelease/
+│   │           ├── docs/
+│   │           │   └── reference/
+│   │           │       └── reconcile-model-benchmark.md
+│   │           ├── evals/
+│   │           │   ├── fixtures/
+│   │           │   │   ├── precision_clean_table/
+│   │           │   │   │   ├── src/
+│   │           │   │   │   │   └── ai.py
+│   │           │   │   │   ├── features_table.md
+│   │           │   │   │   └── oracle.json
+│   │           │   │   └── recall_broken_promises/
+│   │           │   │       ├── src/
+│   │           │   │       │   ├── api_integration.py
+│   │           │   │       │   ├── compute_pool.py
+│   │           │   │       │   ├── database.py
+│   │           │   │       │   └── grant.py
+│   │           │   │       ├── features_table.md
+│   │           │   │       └── oracle.json
+│   │           │   └── reconcile_oracle.py
 │   │           ├── scripts/
 │   │           │   └── reconcile.py
 │   │           └── SKILL.md
@@ -264,6 +283,7 @@ pinky-agentic-plugins/
 │   ├── test_privacy_egress.py
 │   ├── test_read_cost.py
 │   ├── test_reconcile.py
+│   ├── test_reconcile_oracle.py
 │   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
 │   ├── test_statusline.py

@@ -3,9 +3,12 @@
 python3 -m unittest discover tests
 """
 
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(
@@ -90,6 +93,18 @@ class TestParseFeatureRows(unittest.TestCase):
             "| a | `m` | stable |\n"  # second table, no header -> not read
         )
         self.assertEqual(len(rc.parse_feature_rows(md)), 1)
+
+    def test_column_roles_resolved_by_name_not_position(self):
+        # Object|Status|Notes: no free-text feature column, module is col 0, ✓ -> stable
+        md = (
+            "| Object | Status | Notes |\n"
+            "|---|---|---|\n"
+            "| grant | ✓ | database-scoped privilege grant |\n"
+        )
+        self.assertEqual(
+            rc.parse_feature_rows(md, header=("object", "status", "notes")),
+            [rc.Row("database-scoped privilege grant", "grant", "stable")],
+        )
 
 
 class TestClassifySymbol(unittest.TestCase):
@@ -230,6 +245,68 @@ class TestDropAlreadyDocumented(unittest.TestCase):
         )
 
 
+class TestStubDetection(unittest.TestCase):
+    def _cls(self, body: str):
+        import ast
+
+        return ast.parse(body).body[0]
+
+    def test_docstring_only_class_is_a_stub(self):
+        self.assertTrue(rc._is_stub_body(self._cls('class C:\n    "doc"\n')))
+
+    def test_pass_and_ellipsis_and_notimplemented_are_stubs(self):
+        self.assertTrue(rc._is_stub_body(self._cls("def f():\n    pass\n")))
+        self.assertTrue(rc._is_stub_body(self._cls("def f():\n    ...\n")))
+        self.assertTrue(
+            rc._is_stub_body(self._cls("def f():\n    raise NotImplementedError\n"))
+        )
+
+    def test_a_real_body_is_not_a_stub(self):
+        self.assertFalse(rc._is_stub_body(self._cls("def f():\n    return 1\n")))
+        self.assertFalse(rc._is_stub_body(self._cls("class C:\n    x: int = 1\n")))
+
+
+class TestNormalizeManquants(unittest.TestCase):
+    def test_bare_capability_line(self):
+        out = rc.normalize_manquants(
+            "MANQUANT — `xml_path_str` : fonction publique absente du tableau\n"
+            "VERDICT: 0 diverge, 1 manquant\n"
+        )
+        self.assertEqual(out, ["xml_path_str"])
+
+    def test_module_prefix_when_the_line_names_it(self):
+        out = rc.normalize_manquants(
+            "MANQUANT dans `xml` : `xml_path_str` n'a pas de ligne\n"
+        )
+        self.assertEqual(out, ["xml: xml_path_str"])
+
+    def test_call_parens_are_stripped_and_verdict_line_ignored(self):
+        out = rc.normalize_manquants(
+            "MANQUANT: `charge_card()` — méthode publique de billing\n"
+            "VERDICT: 0 diverge, 1 MANQUANT\n"
+        )
+        self.assertEqual(out, ["charge_card"])
+
+    def test_manquant_line_without_a_symbol_is_dropped(self):
+        self.assertEqual(rc.normalize_manquants("Aucun MANQUANT à signaler.\n"), [])
+
+    def test_no_manquant_returns_empty(self):
+        self.assertEqual(
+            rc.normalize_manquants(
+                "DIVERGE: `get_ai` est un stub\nVERDICT: 1 diverge, 0 manquant"
+            ),
+            [],
+        )
+
+    def test_output_feeds_drop_already_documented(self):
+        # the whole point: the normalised list is exactly drop_already_documented's input contract
+        raw = "MANQUANT — `xml_path_str` doit être ajouté\nMANQUANT — `charge_card` de billing\n"
+        self.assertEqual(
+            rc.drop_already_documented(rc.normalize_manquants(raw), _TABLE),
+            ["charge_card"],  # xml_path_str is named inside the xml row -> dropped
+        )
+
+
 class TestGeneratorsHaveAnOracle(unittest.TestCase):
     def test_build_structural_index_full_output(self):
         self.assertEqual(
@@ -251,6 +328,27 @@ class TestGeneratorsHaveAnOracle(unittest.TestCase):
             "--- CODE: src/lib/ai.py ---\n```python\nclass Ai:\n    def get(self): pass\n\n```",
         )
 
+    def test_build_signature_brief_full_output(self):
+        self.assertEqual(
+            rc.build_signature_brief("docs/f.md", "The doc.", _SOURCES),
+            "--- TABLEAU DE FEATURES (docs/f.md) ---\n"
+            "The doc.\n\n"
+            "--- API PUBLIQUE (signatures + 1re ligne de docstring ; ⚠ STUB = corps vide/trivial, "
+            "à traiter comme NON implémenté quoi qu'affirme la docstring ou le tableau) ---\n\n"
+            "### src/lib/ai.py\n"
+            "class Ai\n"
+            "    def get(self)  ⚠ STUB",
+        )
+
+    def test_build_phase1_brief_full_output(self):
+        self.assertEqual(
+            rc.build_phase1_brief("docs/f.md", "The doc.", _SOURCES),
+            "--- TABLEAU DE FEATURES (docs/f.md) ---\n"
+            "The doc.\n\n"
+            "--- CODE: src/lib/ai.py ---\n```python\nclass Ai:\n    def get(self): pass\n\n```\n\n"
+            "--- CODE: src/lib/util.py ---\n```python\nPLAIN = 1\n\n```",
+        )
+
     def test_render_full_output(self):
         result = rc.ScanResult(
             findings=[
@@ -270,6 +368,64 @@ class TestGeneratorsHaveAnOracle(unittest.TestCase):
             "## Model residue (1 rows) — present, semantic correctness unverified\n"
             "- `ai` · `y` works",
         )
+
+
+class TestCliModes(unittest.TestCase):
+    def _repo(self) -> Path:
+        root = Path(tempfile.mkdtemp())
+        (root / "docs").mkdir()
+        (root / "docs" / "f.md").write_text(
+            "| Feature | Module | Status |\n"
+            "|---|---|---|\n"
+            "| `get_ai` factory | `ai` | stable |\n",
+            encoding="utf-8",
+        )
+        pkg = root / "src" / "lib"
+        pkg.mkdir(parents=True)
+        (pkg / "__init__.py").write_text("", encoding="utf-8")
+        (pkg / "ai.py").write_text(
+            "def get_ai():\n    return 1\n\ndef _hidden():\n    pass\n",
+            encoding="utf-8",
+        )
+        return root
+
+    def test_emit_prompt_outputs_phase1_task_then_signature_brief(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = rc.main(
+                [
+                    "--repo",
+                    str(self._repo()),
+                    "--features-doc",
+                    "docs/f.md",
+                    "--emit-prompt",
+                ]
+            )
+        out = buf.getvalue()
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith(rc.PHASE1_TASK))
+        self.assertIn("--- API PUBLIQUE", out)
+        self.assertIn("def get_ai()", out)
+        self.assertNotIn("_hidden", out)  # private symbols stay out of the brief
+
+    def test_filter_model_output_reads_stdin_and_drops_documented(self):
+        repo = str(self._repo())
+        stdin = io.StringIO(
+            "MANQUANT: `charge_card` (billing)\nMANQUANT: `get_ai` needs a row\n"
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), unittest.mock.patch("sys.stdin", stdin):
+            code = rc.main(
+                [
+                    "--repo",
+                    repo,
+                    "--features-doc",
+                    "docs/f.md",
+                    "--filter-model-output",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(buf.getvalue().splitlines(), ["charge_card"])
 
 
 if __name__ == "__main__":

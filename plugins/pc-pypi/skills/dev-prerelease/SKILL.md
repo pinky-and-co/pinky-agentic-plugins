@@ -2,7 +2,7 @@
 name: dev-prerelease
 description: Cut a `.devN` pre-release of the PyPI library in the current repo — fail-fast preconditions, version bump, commit, push, then stop before the publishing tag for an explicit human go. Never publishes on its own.
 argument-hint: "[<library-checkout-path>] — defaults to the current directory's git repo"
-allowed-tools: Bash(git branch:*), Bash(git status:*), Bash(git fetch:*), Bash(git rev-parse:*), Bash(git symbolic-ref:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(git tag:*), Bash(gh run list:*), Bash(gh run watch:*), Bash(rg:*), Bash(cat:*), Bash(curl:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(git branch:*), Bash(git status:*), Bash(git fetch:*), Bash(git rev-parse:*), Bash(git symbolic-ref:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(git tag:*), Bash(gh run list:*), Bash(gh run watch:*), Bash(rg:*), Bash(cat:*), Bash(curl:*), Bash(python3:*), Read, Edit, AskUserQuestion, mcp__plugin_pc-core_pc-core-models__offline, mcp__plugin_pc-core_pc-core-models__panel
 ---
 
 # Dev pre-release (PyPI via tag)
@@ -60,14 +60,72 @@ fix a failed precondition — report it and let the user decide.
 - `test -f .github/workflows/publish.yml` and confirm it triggers on `v*.dev*` — if the repo is not
   wired for dev PyPI publishing, stop.
 
-## Step 0 — Doc reconciliation gate
+## Step 0 — Doc reconciliation (advisory, never blocks)
 
 Releasing a package whose feature documentation contradicts the code ships a lie, so a reconciliation
-of the feature doc against the code belongs here, before the bump.
+of the feature doc against the code belongs here, before the bump. Two layers: a **deterministic**
+pass whose findings are real, and a **model** pass that is **advisory** — it is a lead generator, not
+a gate, and a missing model transport skips it without blocking the release.
 
-**Not implemented in this skill yet.** Until it is: say so plainly, and have the user verify by hand
-that the repo's feature documentation still matches the code before continuing. Never block the
-release on this step.
+`${CLAUDE_SKILL_DIR}/scripts/reconcile.py` — call it `$RECONCILE` below — drives every step
+(stdlib only, no model calls). Resolve two per-repo values first, from the nearest
+`.claude/settings.pinky.json` (walk up from the repo root), falling back to the defaults:
+
+- `reconcile.features_doc` → the capability table's repo-relative path (default
+  `docs/explanation/2-features.md`)
+- `reconcile.features_header` → its 3 column headers, lowercased, comma-separated (default
+  `feature,module,status`)
+
+Pass both as `--features-doc <path> --features-header <a,b,c>` on every `$RECONCILE` call below.
+
+### 0a — Deterministic scan
+
+```
+python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,c>
+```
+
+- **Exit 2** → the reconcile does not apply (no such doc, or its table shape is unrecognised).
+  Report the reason it printed and go to Step 1. This is not a failure.
+- **Exit 0 or 1** → it prints deterministic divergences and a residue count. The divergences
+  (`stable-absent`, `planned-present`, `module-missing`) are **real** — show them and have the user
+  fix the doc or the code before continuing. The residue rows are claims determinism cannot refute;
+  the model pass judges those.
+
+### 0b — Model pass (advisory)
+
+1. Build the prompt:
+   ```
+   python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,c> --emit-prompt
+   ```
+2. Run it, in this order, stopping at the first that answers:
+   - `offline` (MCP tool `mcp__plugin_pc-core_pc-core-models__offline`) with `task` = the emitted
+     prompt. It returns a status line and a local file path (never the answer). `Read` that file —
+     you are allowed to: the prompt carries only the feature doc and public signatures, no private
+     bodies. A `[offline] BLOCKED` line means no local Ollama — fall through.
+   - `panel` (MCP tool `mcp__plugin_pc-core_pc-core-models__panel`) with `tasks` = `[the prompt]`
+     and `models` = `["mistral-medium-3.5"]`. Pin that model — it is the one cloud pool entry the
+     reconcile oracle passes; the unpinned default does not. A `[panel] BLOCKED` line means no key —
+     fall through.
+   - Neither answered → print "reconcile — modèle non joignable, passe advisory sautée" and go to
+     Step 1. **Never block the release on this.**
+3. Filter the model's MANQUANT findings through the deterministic post-filter (kills the recurring
+   "add a row for something already in the table" false positive):
+   ```
+   printf '%s' "<the model's full reply>" | python3 "$RECONCILE" --repo <repo> \
+     --features-doc <path> --features-header <a,b,c> --filter-model-output
+   ```
+   Its stdout is the MANQUANT findings that survived, one per line (empty = all were noise).
+4. Present, for accept/reject: the model's **DIVERGE** findings (read from its prose report) and the
+   **surviving MANQUANT** findings. For each one the user accepts, `Edit` **exactly that one line**
+   of the feature doc — nothing else. Reject-all → the doc is left byte-for-byte unchanged.
+
+**Vigilance — the model pass is advisory, treat every finding as a lead to verify, not a verdict.**
+Known failure modes: a small model rubber-stamps a thin brief, and cloud models vary (only local
+`gemma4:12b` and `mistral-medium-3.5` clear the oracle). On a repo's first few releases, read the
+feature doc against the code by hand regardless of what this step reports.
+
+The `adversarial` MCP tool is **never** used here: it injects a review methodology and a contrarian
+posture built for auditing this session's own work, which is wrong for a neutral doc↔code diff.
 
 Then proceed to Step 1.
 

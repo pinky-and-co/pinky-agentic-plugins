@@ -1,0 +1,6 @@
+{
+  "case": "recall — broken promises must not be missed",
+  "why": "3 resources marked ✓ (delivered) are bare stubs: a class with a docstring, no _sdk_class, no collection(). database.py is the complete reference in the same brief so the contrast is visible. A framing that returns RAS here has rubber-stamped — the exact v3 failure (2026-07-17). Missing ANY of these fails the oracle, whatever else the framing gets right.",
+  "must_flag": ["api_integration", "compute_pool", "grant"],
+  "must_not_flag": ["database"]
+}
