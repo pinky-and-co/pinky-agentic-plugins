@@ -1,0 +1,7 @@
+{
+  "case": "precision — an honest table must stay quiet",
+  "why": "The real pinky-ai table + real ai.py, verified by hand (2026-07-16) to match the code. Every stable row's symbol is present and does what it claims. The `planned` row (multi-turn window) is genuinely not built. So the correct output is near-silence. The committed v2 framing wrongly demands adding a `purge_expired` row — which already exists in the table (line 5). That specific false positive is the precision anchor: flag it and the framing is auditing prose, not checking delivery.",
+  "must_flag": [],
+  "must_not_flag": ["purge_expired"],
+  "soft_max_findings": 0
+}

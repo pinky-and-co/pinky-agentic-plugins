@@ -38,9 +38,7 @@ class TestGeneratedTreeViolation(unittest.TestCase):
             g.generated_tree_violation(".claude/memory/MEMORY.md", self.root)
         )
         self.assertIsNone(
-            g.generated_tree_violation(
-                ".claude/memory/project_foo.md", self.root
-            )
+            g.generated_tree_violation(".claude/memory/project_foo.md", self.root)
         )
 
     def test_other_claude_paths_still_flagged_as_generated(self):

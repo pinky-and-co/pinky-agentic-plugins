@@ -85,6 +85,56 @@ class ScanResult:
 
 # --- table parsing -------------------------------------------------------------------------------
 
+# noms de colonne (lowercased) qui désignent le module de code, quel que soit l'ordre
+_MODULE_COL_NAMES = {"module", "object", "resource", "component", "class", "file"}
+# marqueurs "livré" au-delà du littéral "stable" — ✓/✔ suffisent, "yes"/"done" sont ambigus
+_DELIVERED_MARKS = ("✓", "✔")
+
+
+def _resolve_columns(header: tuple[str, str, str]) -> tuple[int, int, int]:
+    """Map a 3-column header to ``(feature_i, module_i, status_i)`` by column name, not position.
+
+    ``| Feature | Module | Status |`` and ``| Object | Status | Notes |`` both parse — the second
+    has no free-text feature column, so its Notes cell fills that role.
+
+    Args:
+        header: the table's 3 lowercased column names.
+
+    Returns:
+        The cell index for the feature text, the module name, and the status.
+    """
+    status_i = next(
+        (i for i, h in enumerate(header) if "status" in h or "state" in h), 2
+    )
+    module_i = next(
+        (
+            i for i, h in enumerate(header) if h == "module"
+        ),  # exact wins over the broad set
+        next(
+            (i for i, h in enumerate(header) if h in _MODULE_COL_NAMES),
+            0 if status_i == 1 else 1,
+        ),
+    )
+    feature_i = next((i for i in range(3) if i not in {status_i, module_i}), 0)
+    return feature_i, module_i, status_i
+
+
+def _norm_status(raw: str) -> str:
+    """Normalise a status cell to ``stable`` / ``planned`` / the verbatim lowercase otherwise.
+
+    Args:
+        raw: the status cell text.
+
+    Returns:
+        The normalised status.
+    """
+    low = raw.strip().lower()
+    if low.startswith("planned"):
+        return "planned"
+    if low.startswith("stable") or any(m in raw for m in _DELIVERED_MARKS):
+        return "stable"
+    return low
+
 
 def parse_feature_rows(
     md: str, header: tuple[str, str, str] = DEFAULT_HEADER
@@ -93,7 +143,8 @@ def parse_feature_rows(
 
     Abstains on any other table shape: a feature doc is not standardised across libraries, so a row
     is only read once its table's header has been recognised. An unknown format is not "nothing to
-    report" — it is "determinism cannot refute this", and the row falls to the model layer.
+    report" — it is "determinism cannot refute this", and the row falls to the model layer. Column
+    *roles* are resolved by name (`_resolve_columns`), so a non-standard order still parses.
 
     Args:
         md: the feature document's markdown.
@@ -102,6 +153,7 @@ def parse_feature_rows(
     Returns:
         The recognised data rows, in document order.
     """
+    feature_i, module_i, status_i = _resolve_columns(header)
     rows: list[Row] = []
     in_table = False
     for raw in md.splitlines():
@@ -118,17 +170,15 @@ def parse_feature_rows(
             continue
         if not in_table:
             continue  # a 3-column table we do not recognise -> not ours to judge
-        feature, module, status = cells
-        if set(feature) <= {"-", ":", " "}:  # separator row
+        if set(cells[feature_i]) <= {"-", ":", " "}:  # separator row
             continue
-        module = module.strip("`").strip()
-        low = status.lower()
-        status_norm = (
-            "stable"
-            if low.startswith("stable")
-            else ("planned" if low.startswith("planned") else low)
+        rows.append(
+            Row(
+                feature=cells[feature_i],
+                module=cells[module_i].strip("`").strip(),
+                status=_norm_status(cells[status_i]),
+            )
         )
-        rows.append(Row(feature=feature, module=module, status=status_norm))
     return rows
 
 
@@ -301,6 +351,139 @@ def defined_symbols(src: str) -> list[str]:
     return out
 
 
+def _is_stub_body(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True when the node's body carries no implementation: only a docstring, ``pass``, ``...``,
+    or ``raise NotImplementedError``.
+
+    The signal ``build_signature_brief`` uses to mark a symbol NON implémenté regardless of what its
+    docstring claims — the recurring failure a docstring-quality gate cannot catch (interrogate
+    checks a docstring exists, darglint that it matches the signature, neither that it matches the
+    behaviour).
+
+    Args:
+        node: a class, function, or async-function definition node.
+
+    Returns:
+        Whether the body is implementation-free.
+    """
+    body = list(node.body)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]  # drop the leading docstring
+    if not body:
+        return True
+    for stmt in body:
+        if isinstance(stmt, ast.Pass):
+            continue
+        if (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Constant)
+            and stmt.value.value is Ellipsis
+        ):
+            continue
+        exc = stmt.exc if isinstance(stmt, ast.Raise) else None
+        name = exc.func if isinstance(exc, ast.Call) else exc
+        if isinstance(name, ast.Name) and name.id == "NotImplementedError":
+            continue
+        return False
+    return True
+
+
+def _signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    """Reconstruct a ``def name(args) -> ret`` line from a function node, body omitted.
+
+    Args:
+        node: a function or async-function definition node.
+
+    Returns:
+        The one-line signature.
+    """
+    prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+    ret = f" -> {ast.unparse(node.returns)}" if node.returns else ""
+    return f"{prefix} {node.name}({ast.unparse(node.args)}){ret}"
+
+
+def _module_api_digest(src: str) -> str:
+    """Every public top-level symbol of a module as signature + first docstring line + stub flag.
+
+    Classes also list their public method signatures. Private names (leading ``_``) are skipped —
+    a feature table documents features, not internals.
+
+    Args:
+        src: a module's source text.
+
+    Returns:
+        The digest text, or an empty string when the source has no public symbol or does not parse.
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return ""
+    lines: list[str] = []
+
+    def emit(node: ast.FunctionDef | ast.AsyncFunctionDef, indent: str) -> None:
+        flag = "  ⚠ STUB" if _is_stub_body(node) else ""
+        lines.append(f"{indent}{_signature(node)}{flag}")
+        doc = ast.get_docstring(node)
+        if doc:
+            lines.append(f'{indent}    "{doc.splitlines()[0]}"')
+
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if not node.name.startswith("_"):
+                emit(node, "")
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+            bases = ", ".join(ast.unparse(b) for b in node.bases)
+            head = f"class {node.name}({bases})" if bases else f"class {node.name}"
+            flag = (
+                "  ⚠ STUB — corps = docstring seule, aucune méthode"
+                if _is_stub_body(node)
+                else ""
+            )
+            lines.append(f"{head}{flag}")
+            doc = ast.get_docstring(node)
+            if doc:
+                lines.append(f'    "{doc.splitlines()[0]}"')
+            for sub in node.body:
+                if isinstance(
+                    sub, ast.FunctionDef | ast.AsyncFunctionDef
+                ) and not sub.name.startswith("_"):
+                    emit(sub, "    ")
+    return "\n".join(lines)
+
+
+def build_signature_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) -> str:
+    """Document + every module's public-API digest (signatures + docstrings + stub flags).
+
+    The bounded middle ground between `build_phase1_brief` (every full body — overflows a small
+    model on a real repo) and `build_selective_brief` (index + referenced bodies — a small model
+    rubber-stamps it). Trusts the docstrings a repo's own gates already enforce, and hands the model
+    a deterministic ``⚠ STUB`` flag for the one thing a docstring can still lie about: an empty body.
+
+    Args:
+        doc_rel: the feature document's repo-relative path, for the header.
+        doc_md: the feature document's markdown.
+        sources: the path -> source map from `collect_sources`.
+
+    Returns:
+        The brief text: the document, then one digest block per module with a public API.
+    """
+    api_header = (
+        "--- API PUBLIQUE (signatures + 1re ligne de docstring ; ⚠ STUB = corps vide/trivial, "
+        "à traiter comme NON implémenté quoi qu'affirme la docstring ou le tableau) ---"
+    )
+    parts = [f"--- TABLEAU DE FEATURES ({doc_rel}) ---\n{doc_md}", api_header]
+    for path in sorted(sources):
+        digest = _module_api_digest(sources[path])
+        if digest:
+            parts.append(f"### {path}\n{digest}")
+    return "\n\n".join(parts)
+
+
 def build_structural_index(sources: dict[str, str]) -> str:
     """One compact line per file: ``path: Sym1, Sym2, …`` — the whole-package presence map.
 
@@ -389,6 +572,124 @@ def build_selective_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) ->
         for path in referenced:
             parts.append(f"--- CODE: {path} ---\n```python\n{sources[path]}\n```")
     return "\n\n".join(parts)
+
+
+def build_phase1_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) -> str:
+    """Document + the full source of every package file — the unbounded, format-agnostic brief.
+
+    The all-source counterpart to `build_selective_brief`: no index, no module selection, every
+    ``.py`` inlined. Too large for a real repo (that is what `build_selective_brief` is for), but it
+    is the surface the reconcile oracle drives — a framing change is scored against a fixed set of
+    sources, so the brief must not itself do any selecting.
+
+    Args:
+        doc_rel: the feature document's repo-relative path, for the header.
+        doc_md: the feature document's markdown.
+        sources: the path -> source map from `collect_sources`.
+
+    Returns:
+        The brief text: the document, then every source file in path order.
+    """
+    parts = [f"--- TABLEAU DE FEATURES ({doc_rel}) ---\n{doc_md}"]
+    for path in sorted(sources):
+        parts.append(f"--- CODE: {path} ---\n```python\n{sources[path]}\n```")
+    return "\n\n".join(parts)
+
+
+# --- model layer: the prompt + its output normalisation --------------------------------------
+#
+# Ce module n'appelle jamais de modèle (NFR-0026-03) : il porte seulement le *texte* du prompt de
+# jugement sémantique et le parsing de ce qu'un modèle renvoie. C'est le corps du skill qui passe
+# `PHASE1_TASK` + un brief au tool MCP `offline` / `panel`, puis redonne la réponse ici.
+#
+# `PHASE1_TASK` est repris verbatim du moteur déprécié (`pinky_reconcile.py`). Son framing exact est
+# précisément ce que l'oracle reconcile (`evals/reconcile_oracle.py`) protège — l'incident de
+# rubber-stamp des 2026-07-16/17 vient d'un réajustement à l'œil. Ne pas le reformuler sans l'oracle
+# vert sur les deux fixtures.
+
+PHASE1_TASK = (
+    "Tu réconcilies le tableau de features d'un repo avec le code qui est censé l'implémenter.\n"
+    "Le code fait FOI. Le tableau est le document suspect.\n"
+    "\n"
+    "Vérifie les DEUX directions :\n"
+    "1. Pour chaque ligne du tableau : le code fait-il ce que la ligne affirme ? MATCH ou DIVERGE.\n"
+    "2. Inversement : une capacité publique importante est-elle absente du tableau ? MANQUANT.\n"
+    "\n"
+    "DIVERGE — définition stricte. La ligne affirme quelque chose que le code ne fait pas :\n"
+    "- le code ne le fait pas du tout (déclaré stable/✓ mais absent, ou simple stub) ;\n"
+    "- le code le fait autrement (valeur, seuil, comportement différent de l'affirmation) ;\n"
+    "- le code ne le fait qu'à MOITIÉ (la ligne annonce une portée que l'implémentation "
+    "n'atteint que partiellement).\n"
+    "\n"
+    "N'est PAS un DIVERGE — ne les signale sous aucun prétexte :\n"
+    "- une ligne qui décrit MOINS que ce que le code fait. Une description incomplète n'est pas "
+    "un mensonge : si le code offre en plus une option, un paramètre ou un réglage que la ligne "
+    "ne mentionne pas, la ligne reste VRAIE. C'est un MATCH.\n"
+    "- du code perfectible, mal nommé, ou dont tu discutes la conception : tu juges la "
+    "correspondance ligne↔code, jamais la qualité du code.\n"
+    "- une limitation que le tableau ASSUME lui-même : si une colonne (notes, commentaire, "
+    "statut) justifie explicitement l'écart, c'est documenté, donc MATCH.\n"
+    "\n"
+    "MANQUANT — réservé aux capacités PUBLIQUES qu'un utilisateur du repo appellerait : classes et "
+    "fonctions de l'API publique. Ne signale JAMAIS comme manquant : un helper privé (nom préfixé "
+    "d'un `_`), une constante, une table de configuration, un détail d'implémentation interne. Un "
+    "tableau de features documente des features, pas des rouages.\n"
+    "\n"
+    "Le tableau peut avoir n'importe quelle forme de colonnes — déduis-en le sens toi-même.\n"
+    "Si tu n'as pas de quoi trancher une ligne, dis-le plutôt que de supposer.\n"
+    "\n"
+    "Pour chaque DIVERGE ou MANQUANT : ce que la ligne prétend / ce que le code fait réellement, "
+    "puis la ligne de tableau corrigée, prête à relire.\n"
+    "Ne rends que les lignes à problème + une ligne de synthèse. Ne détaille pas les MATCH.\n"
+    "Un tableau honnête est le cas NORMAL : s'il n'y a rien à signaler, dis-le en une ligne. "
+    "Ne cherche pas à remplir le rapport.\n"
+    "\n"
+    "AVANT de signaler un MANQUANT, relis le tableau en entier et vérifie que la capacité n'y est "
+    "pas DÉJÀ, sous un autre libellé : réclamer l'ajout d'une ligne qui existe déjà est l'erreur la "
+    "plus coûteuse de cet exercice. En particulier, une capacité citée À L'INTÉRIEUR de la "
+    "description d'une autre ligne (une méthode nommée dans la cellule d'une feature plus large) EST "
+    "documentée — le tableau décrit des features, pas des signatures : ne réclame JAMAIS une ligne "
+    "dédiée par méthode ou par symbole.\n"
+    "\n"
+    "Termine impérativement par cette ligne, seule et exactement à ce format :\n"
+    "VERDICT: <nombre de DIVERGE> diverge, <nombre de MANQUANT> manquant"
+)
+
+_MANQUANT_LINE = re.compile(r"^.*\bMANQUANT\b.*$", re.MULTILINE)
+
+
+def normalize_manquants(model_output: str) -> list[str]:
+    """Extract the model's MANQUANT findings as ``drop_already_documented`` input.
+
+    `PHASE1_TASK` asks for free prose, not a machine format, so a MANQUANT surfaces as a line that
+    names the capability (``MANQUANT — `xml_path_str` : …``). Each such line yields one entry: its
+    first backtick-quoted symbol, prefixed with a module when the line reads ``… dans `xml` …``
+    (``"xml: xml_path_str"``), else the bare capability name — `drop_already_documented` accepts
+    both. A MANQUANT line with no backtick symbol is dropped (nothing to filter on).
+
+    The trailing ``VERDICT:`` line is skipped: it restates counts and would echo the word MANQUANT
+    with no symbol.
+
+    Args:
+        model_output: the raw text the model returned for `PHASE1_TASK` + a brief.
+
+    Returns:
+        One ``"module: capability"`` or ``"capability"`` string per MANQUANT finding, in order.
+    """
+    out: list[str] = []
+    for line in _MANQUANT_LINE.findall(model_output):
+        if line.lstrip().upper().startswith("VERDICT:"):
+            continue
+        symbols = [s.strip() for s in _BACKTICK.findall(line)]
+        # `dans `xml`` -> module ; la capacité est le premier autre symbole entre backticks
+        module = next(
+            (s for s in symbols if re.search(rf"dans\s+`{re.escape(s)}`", line)), ""
+        )
+        capability = next((s.split("(")[0].strip() for s in symbols if s != module), "")
+        if not capability:
+            continue
+        out.append(f"{module}: {capability}" if module else capability)
+    return out
 
 
 # --- MANQUANT post-filter ----------------------------------------------------------------------
@@ -542,16 +843,24 @@ def render(repo: Path, result: ScanResult) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point for the deterministic scan.
+    """CLI entry point.
+
+    Three modes, all reading ``--repo`` / ``--features-doc``:
+      - default: run the deterministic scan, print its report (exit 1 if it found divergences).
+      - ``--emit-prompt``: print ``PHASE1_TASK`` + the signature brief — the text the skill body
+        hands to the ``offline`` / ``panel`` MCP tool. No model is called here.
+      - ``--filter-model-output``: read the model's reply on stdin, print the MANQUANT findings that
+        survive `drop_already_documented`, one per line (the DIVERGE prose is for the skill body to
+        read directly). Empty output = every MANQUANT was already-documented noise.
 
     Args:
         argv: argument vector, or None to read ``sys.argv``.
 
     Returns:
-        int: 0 clean, 1 when deterministic divergences were found, 2 on a usage error.
+        int: 0 clean, 1 when the default scan found divergences, 2 on a not-applicable repo.
     """
     ap = argparse.ArgumentParser(
-        description="Deterministic code<->feature-table reconciliation."
+        description="Deterministic code<->feature-table reconciliation + model-layer plumbing."
     )
     ap.add_argument("--repo", required=True, type=Path)
     ap.add_argument(
@@ -559,15 +868,51 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="feature document, repo-relative (e.g. docs/features.md)",
     )
+    ap.add_argument(
+        "--features-header",
+        default=",".join(DEFAULT_HEADER),
+        help="the table's 3 column headers, lowercased and comma-separated "
+        f"(default: {','.join(DEFAULT_HEADER)})",
+    )
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--emit-prompt",
+        action="store_true",
+        help="print PHASE1_TASK + the signature brief for the model layer",
+    )
+    mode.add_argument(
+        "--filter-model-output",
+        action="store_true",
+        help="read the model reply on stdin, print the surviving MANQUANT findings",
+    )
     args = ap.parse_args(argv)
+    parts = tuple(h.strip().lower() for h in args.features_header.split(","))
+    if len(parts) != 3:
+        ap.error("--features-header needs exactly 3 comma-separated names")
+    header: tuple[str, str, str] = parts  # type: ignore[assignment]
 
     repo: Path = args.repo
-    reason = not_applicable(repo, args.features_doc)
+    reason = not_applicable(repo, args.features_doc, header)
     if reason is not None:
         print(f"[reconcile] not applicable — {reason}", file=sys.stderr)
         return 2
 
-    result = scan(repo, args.features_doc)
+    if args.filter_model_output:
+        doc_md = (repo / args.features_doc).read_text(encoding="utf-8")
+        survivors = drop_already_documented(
+            normalize_manquants(sys.stdin.read()), doc_md, header
+        )
+        print("\n".join(survivors))
+        return 0
+
+    if args.emit_prompt:
+        doc_md = (repo / args.features_doc).read_text(encoding="utf-8")
+        sources = collect_sources(repo)
+        brief = build_signature_brief(args.features_doc, doc_md, sources)
+        print(f"{PHASE1_TASK}\n\n{brief}")
+        return 0
+
+    result = scan(repo, args.features_doc, header)
     print(render(repo, result))
     return 1 if result.findings else 0
 
