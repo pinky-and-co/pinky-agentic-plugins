@@ -39,6 +39,30 @@ mechanical check, prefer in this order:
 3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
    model, same context) rather than presenting it as equivalent to (1) or (2).
 
+### The review belongs in the `/goal` condition, not in an after-the-fact hope
+
+The section above is a *should* that nothing enforced — an audit of closed cards found it skipped
+on roughly half the judgment work, invisibly. So when a card's work needs judgment review, the
+review goes **into the `/goal` condition itself**, set when the card is taken (`chantier` SKILL.md
+step 7): the harness-native Stop-hook then holds the card open until the transcript shows the
+review ran. Phrase it as a transcript-verifiable state, never a promise — e.g. append to the
+`Fini =`-derived condition `… et le diff final a été review par `adversarial` ou `Agent(reviewer)`,
+findings traités, et la case `- [x] reviewed (<méthode>)` cochée sur la card` — naming the
+checkbox so satisfying the goal and stamping the box are one action.
+
+The judgment/mechanical call is made at intake, before the diff exists — so **when it is unclear,
+include the clause**: a spurious clause on a card that turns out mechanical costs one
+`- [x] reviewed (n/a — mécanique)` stamp, a missing clause on judgment work is the failure this
+whole mechanism exists to stop. An *obviously* mechanical card (doc typo, rename, one-line config)
+carries no clause and is closed `- [x] reviewed (n/a — mécanique)`, so the audit can tell "nothing
+to review" from "review skipped".
+
+`stop_handoff.py --list-unreviewed-done` (surfaced by `/chantier`'s intake) is the retroactive
+net: `4-done` cards missing a checked `reviewed (...)` line, tagged `(aucune ligne review)` or
+`(reviewed non coché)`, most recent first, plus a count of cards closed `(n/a — mécanique)` so that
+escape hatch's rate stays visible. It reaches `4-done` only — a card folded to `_ARCHIVE/` leaves
+the net. Not a gate — a card is never blocked from `4-done` — just the end of the silence.
+
 ### Making the review visible on the card
 
 Not every card goes through the section above — a purely mechanical change has nothing for a
@@ -46,14 +70,17 @@ reviewer to catch, and stamping one on every card regardless would turn a real j
 box-ticking ritual. When a card's work *did* need real judgment reviewed, make it visible on the
 card itself: immediately above the `## Fini =` line (already present by this point — it was set at
 selection), add `- [ ] reviewed (method)`, `method` one of `adversarial`, `reviewer`,
-`self-degraded`, comma-separated if more than one was actually used (e.g. `adversarial, reviewer`).
+`self-degraded`, comma-separated if more than one was actually used (e.g. `adversarial, reviewer`) —
+or `n/a — mécanique` for a mechanical card that had nothing for a reviewer to catch.
 Check it — `- [x] reviewed (…)` — once the review above is done, before declaring `Fini =` met.
 
 Added by the session doing the work, never by `/chantier`'s intake (step 7). This checkbox is
 descriptive, not a new gate: the review itself stays mandatory per the section above whenever real
 judgment is involved, independent of whether the checkbox is present. What is *not* enforced is the
-checkbox's own bookkeeping — no script blocks `Fini =` on a missing box, so an omitted checkbox
-makes a past review harder to audit later, it does not mean the review was skipped or optional.
+checkbox's own bookkeeping — no script blocks `Fini =` on a missing box. An omitted checkbox on a
+`4-done` card is surfaced by `--list-unreviewed-done`, so the silence is visible even though it is
+not blocking; the fix is one line (`reviewed (<method>)` or `reviewed (n/a — mécanique)`), not a
+re-review.
 
 ### Proposing the next card, once `Fini =` is met
 

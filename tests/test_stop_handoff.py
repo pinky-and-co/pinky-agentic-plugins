@@ -358,5 +358,57 @@ class TestDeclaredKanbans(unittest.TestCase):
                 self.assertEqual(sh.declared_kanbans(root), [other / "_KANBAN"])
 
 
+class TestUnreviewedDoneCards(unittest.TestCase):
+    def _done(
+        self, kanban: Path, chantier: str, name: str, body: str, date: str = ""
+    ) -> Path:
+        col = kanban / f"CHANTIER{chantier}" / "4-done"
+        col.mkdir(parents=True, exist_ok=True)
+        card = col / name
+        fm = f"status: done\ndate: {date}\n" if date else "status: done\n"
+        card.write_text(f"---\n{fm}---\n# {name}\n{body}\n", encoding="utf-8")
+        return card
+
+    def test_flags_only_the_unreviewed_by_date_desc_with_tags_and_mechanical_count(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            self._done(
+                kb, "0001", "checked.md", "- [x] reviewed (adversarial)", "2026-01-01"
+            )
+            self._done(
+                kb,
+                "0001",
+                "mechanical.md",
+                "- [x] reviewed (n/a — mécanique)",
+                "2026-01-02",
+            )
+            unchecked = self._done(
+                kb, "0002", "unchecked.md", "- [ ] reviewed (adversarial)", "2026-01-03"
+            )
+            silent = self._done(
+                kb, "0002", "silent.md", "no review line here", "2026-01-04"
+            )
+
+            self.assertEqual(
+                sh.unreviewed_done_cards(kb),
+                (
+                    [
+                        (silent, "aucune ligne review"),
+                        (unchecked, "reviewed non coché"),
+                    ],
+                    1,
+                ),
+            )
+
+    def test_checked_line_matched_despite_spacing_case_and_colon_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            self._done(kb, "0001", "spaced.md", "  - [X]  reviewed  (reviewer)")
+            self._done(kb, "0001", "colon.md", "- [x] reviewed: adversarial")
+            self.assertEqual(sh.unreviewed_done_cards(kb), ([], 0))
+
+
 if __name__ == "__main__":
     unittest.main()
