@@ -115,6 +115,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
     ```bash
     python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" --root <workspace-root> freeze <resolved-repo-paths...> <kanban-board-roots...>
     ```
+   - **Session name.** Either branch of this step took the card — resumed from `3-in-progress/` or
+    just moved there — so the session now carries one card and should be named for it. `/rename` is
+    parsed at the CLI level before the turn, exactly like `/goal` below, so this skill cannot run
+    it: emit it as a pasteable line at the tail of the response, **before** the `/goal` block
+    (nothing may follow that — its evaluator reads only the transcript) and before the grill
+    routing:
+
+    ```
+    📛 Next step: rename this session to match the card.
+    /rename <card-slug>
+    ```
+
+    where `<card-slug>` is the card's filename without `.md`. The user pastes it (no turn), then
+    the `/goal` line — or the grill routing — as the next message.
    - **Grill gate — before the goal.** Set the goal only when the card is execution-ready: its
     `Fini =` is a concrete demonstrable state and its requirements are settled. **If the card still
     carries open design questions** — a `## Pistes à explorer` / `## À trancher` / `## Questions
@@ -124,7 +138,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
     active Stop-hook goal fights a multi-turn interview: the session cannot yield while the user
     thinks between rounds, so the model loops re-answering "waiting for your input" while the hook
     re-fires (observed repeatedly). Instead, end the response by routing to `pc-kanban:grill`, and
-    say the goal is set from the rewritten `Fini =` once the grill converges. Then skip the rest of
+    say the goal is set from the rewritten `Fini =` once the grill converges. The **Session name**
+    bullet still applies — emit its `/rename` line just before that routing. Then skip the rest of
     this bullet.
    - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `Fini =` line;
     `sert: <parent>` → walk up to the root card (`sert: null`) this chain ultimately serves, and use
@@ -139,8 +154,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
 
     where `<condition>` is the resolved `Fini =` line, phrased as a demonstrable state (a test
     result, an exit code, a real diff) — `/goal`'s evaluator reads only the transcript, never a file
-    or a command it would run itself. Add nothing after that block: no "would you like me to…", no
-    rephrasing — just the `/goal` line, ready to paste as the next message. If no `sert` is
+    or a command it would run itself. Add nothing after that block (the **Session name** `/rename`
+    line goes just before it, never after): no "would you like me to…", no rephrasing — just the
+    `/goal` line, ready to paste as the next message. If no `sert` is
     resolvable (orphan card, a cycle, no root found), say so explicitly instead of inventing a
     condition.
 8. Execute the card's work — or, if step 7's grill gate routed to `pc-kanban:grill`, run that
