@@ -52,6 +52,7 @@ claude plugin install pc-core@pinky-agentic-plugins
 ```text
 pinky-agentic-plugins/
 ├── .claude/
+│   ├── settings.json
 │   └── settings.pinky.json
 ├── .claude-plugin/
 │   └── marketplace.json
