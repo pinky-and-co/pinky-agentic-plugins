@@ -115,6 +115,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
     ```bash
     python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" --root <workspace-root> freeze <resolved-repo-paths...> <kanban-board-roots...>
     ```
+   - **Grill gate — before the goal.** Set the goal only when the card is execution-ready: its
+    `Fini =` is a concrete demonstrable state and its requirements are settled. **If the card still
+    carries open design questions** — a `## Pistes à explorer` / `## À trancher` / `## Questions
+    ouvertes` section, a "grill avant de coder" note, `exigences: []` on a card that is not a
+    single mechanical change, or a written *cause* the plan rests on (`verify-diagnosis`) — do
+    **not** emit the goal block. The grill can rewrite the `Fini =` out from under it, and an
+    active Stop-hook goal fights a multi-turn interview: the session cannot yield while the user
+    thinks between rounds, so the model loops re-answering "waiting for your input" while the hook
+    re-fires (observed repeatedly). Instead, end the response by routing to `pc-kanban:grill`, and
+    say the goal is set from the rewritten `Fini =` once the grill converges. Then skip the rest of
+    this bullet.
    - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `Fini =` line;
     `sert: <parent>` → walk up to the root card (`sert: null`) this chain ultimately serves, and use
      **its** `Fini =` line instead — the session may then work any card in that group, not just this
@@ -132,13 +143,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
     rephrasing — just the `/goal` line, ready to paste as the next message. If no `sert` is
     resolvable (orphan card, a cycle, no root found), say so explicitly instead of inventing a
     condition.
-8. Execute the card's work.
+8. Execute the card's work — or, if step 7's grill gate routed to `pc-kanban:grill`, run that
+  first, then set the goal (step 7's **Goal** bullet) from the converged `Fini =`, then execute.
 
 ## Rules
 
 1. Read-only for browsing — this skill does not edit cards to build the report. The one exception is
-  step 7's `2-selected-for-dev/` → `3-in-progress/` move plus its freeze/goal setup: the user already
-  committed by selecting, so this performs it directly. Every other card move happens as work
-  progresses.
+  step 7's `2-selected-for-dev/` → `3-in-progress/` move plus its freeze and, *when the card clears
+  the grill gate*, its goal setup: the user already committed by selecting, so this performs it
+  directly. Every other card move happens as work progresses.
 2. Reference the story and ADRs by path — never inline their full content into the report.
 3. Keep the report under ~15 lines — orientation, not a recap of every card.
