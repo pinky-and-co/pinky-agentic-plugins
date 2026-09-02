@@ -31,6 +31,23 @@ for r in alpha bravo charlie; do mkrepo "$r"; printf 'shared\n' > "$T/$r/README.
 printf 'junk' > "$T/alpha/.DS_Store"          # bruit sur UN SEUL des trois
 mkrepo delta; printf 'def f():\n    return 1\n' > "$T/delta/app.py"   # code → chemin gardé
 mkrepo echo_; printf 'junk' > "$T/echo_/.DS_Store"                    # bruit et rien d'autre
+mkrepo golf-clean                                                     # propre : jamais listé
+
+# `discover` — READ-ONLY : liste les repos sales, ne stage rien (le skill résout le scope
+# avec, AVANT `plan` qui stage). Testé avant tout `plan`.
+disc="$("$SCRIPT" discover --root "$T" 2>&1)"; disc_rc=$?
+check "discover liste les 5 repos sales"   "$(printf '%s\n' "$disc" | sort | tr '\n' ' ')" \
+    "alpha bravo charlie delta echo_ "
+check "discover exit 0 même si le dernier repo (golf-clean, trié en dernier) est propre" "$disc_rc" 0
+check "discover ne stage rien (delta)"     "$(git -C "$T/delta" diff --cached --name-only | wc -l | tr -d ' ')" 0
+check "discover n'écrit aucun .gitignore"  "$([ -e "$T/alpha/.gitignore" ] && echo yes || echo no)" no
+# Racine sans dépôt : `discover` doit dire NO-REPOS-FOUND + exit non nul, jamais une
+# sortie vide qui se confondrait avec "des repos, tous propres".
+demptyd="$(mktemp -d)"
+outd="$("$SCRIPT" discover --root "$demptyd" 2>&1)"; rcd=$?
+rmdir "$demptyd"
+check "discover racine vide → NO-REPOS-FOUND"  "$(printf '%s' "$outd" | grep -c 'NO-REPOS-FOUND')" 1
+check "discover racine vide → exit non nul"    "$([ "$rcd" -ne 0 ] && echo yes || echo no)"        yes
 
 plan="$("$SCRIPT" plan --root "$T" 2>&1)"
 
@@ -51,6 +68,8 @@ printf '%s\t📝 docs: add README\n' "$(printf '%s' "$plan" | grep -o 'GROUP [a-
 dry="$("$SCRIPT" apply --root "$T" --messages "$T/m.tsv" --dry-run 2>&1)"
 check "dry-run ne committe rien"  "$(git -C "$T/bravo" log --oneline | wc -l | tr -d ' ')"     1
 check "groupe sans message → ⏭️"  "$(printf '%s' "$dry" | grep -c 'aucun message')"            1
+check "plan non filtré → note sur stderr (pas un die)" \
+    "$("$SCRIPT" plan --root "$T" 2>&1 >/dev/null | grep -c 'note: plan non filtré')"           1
 
 # Une racine sans aucun dépôt n'est pas un workspace propre : c'est une racine fausse.
 # Les confondre annonce "rien à faire" après avoir regardé au mauvais endroit — vu en vrai
@@ -79,7 +98,10 @@ ghbin="$T/ghbin"; mkdir -p "$ghbin"
 cat > "$ghbin/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "$GH_LOG"
-[ "$1 $2" = "pr view" ] && exit 1
+case "$1 $2" in
+  "pr view")   exit 1 ;;
+  "pr create") echo "https://github.com/x/foxtrot/pull/1" ;;
+esac
 exit 0
 EOF
 chmod +x "$ghbin/gh"
@@ -88,12 +110,48 @@ export GH_LOG="$T/gh.log"; : > "$GH_LOG"
 planfox="$("$SCRIPT" plan --root "$T" --repo foxtrot 2>&1)"
 fpfox="$(printf '%s' "$planfox" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
 printf '%s\t✨ feat: add g\n' "$fpfox" > "$T/mfox.tsv"
-PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo foxtrot --messages "$T/mfox.tsv" >/dev/null 2>&1
+# Un fork commit-and-pr hérite l'env du parent (vérifié 2026-09-02) : le trailer doit
+# donc être composé à partir de cette variable, jamais du system-reminder (absent d'un fork).
+export CLAUDE_CODE_BRIDGE_SESSION_ID="session_TESTBRIDGE"
+outfox="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo foxtrot --messages "$T/mfox.tsv" 2>&1)"
 
 check "PR tentée depuis une feature branch pré-existante" \
     "$(grep -c '^gh pr create' "$GH_LOG")" 1
 check "reste sur sa branche, aucune nouvelle créée" \
     "$(git -C "$T/foxtrot" branch --show-current)" "feature/preexisting"
+
+# ── Contrat de sortie : bloc RESULTS + trailer (carte durcir-commit-and-pr-contrat-de-sortie) ──
+tab="$(printf '\t')"   # BSD `grep -E` n'étend pas `\t` — passer un vrai tab
+# Oracle : le contenu entre `=== RESULTS` et `=== END RESULTS` est EXACTEMENT cette ligne.
+results_block="$(printf '%s' "$outfox" | awk '/^=== RESULTS/{f=1;next} /^=== END RESULTS/{f=0} f')"
+check "RESULTS foxtrot = ligne exacte pushed-pr + URL" \
+    "$results_block" "foxtrot${tab}pushed-pr${tab}https://github.com/x/foxtrot/pull/1"
+check "marqueur === END RESULTS émis" \
+    "$(printf '%s' "$outfox" | grep -c '^=== END RESULTS$')" 1
+check "trailer Co-Authored-By dans le commit" \
+    "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Co-Authored-By: Claude <noreply@anthropic.com>$')" 1
+check "trailer Claude-Session dérivé du bridge id" \
+    "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Claude-Session: https://claude.ai/code/session_TESTBRIDGE$')" 1
+
+# ── pr-na : docs-only sur la branche d'intégration, remote résolu → commit direct, zéro PR ──
+gbare="$T/golf-origin.git"
+git init -q --bare -b main "$gbare"
+mkdir -p "$T/golf" && git -C "$T/golf" init -q -b main
+git -C "$T/golf" remote add origin "$gbare"
+git -C "$T/golf" commit -q --allow-empty -m init
+git -C "$T/golf" push -q -u origin main
+git -C "$T/golf" remote set-head origin main          # résout pour de vrai (main fetché)
+printf 'hello\n' > "$T/golf/README.md"                # chemin non gardé → HEAD == base == main
+: > "$GH_LOG"
+plang="$("$SCRIPT" plan --root "$T" --repo golf 2>&1)"
+fpg="$(printf '%s' "$plang" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t📝 docs: readme\n' "$fpg" > "$T/mg.tsv"
+outg="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo golf --messages "$T/mg.tsv" 2>&1)"
+golf_block="$(printf '%s' "$outg" | awk '/^=== RESULTS/{f=1;next} /^=== END RESULTS/{f=0} f')"
+check "RESULTS golf = commit direct, state pushed-nopr exact" \
+    "$golf_block" "golf${tab}pushed-nopr${tab}-"
+check "golf : aucune PR tentée sur un commit direct" \
+    "$(grep -c '^gh pr create' "$GH_LOG")" 0
 
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"

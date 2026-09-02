@@ -52,8 +52,9 @@ fi
     the wording), then apply. `--no-pr` because this skill stops at the commit; `commit-and-pr`
     is the one that opens the PR/MR.
 
-    Pass the script's per-repo outcome through verbatim, keeping ✅ / ⚠️ / ⏭️ / ❌ distinct — ⚠️ means
-    committed but not pushed, and flattening it into ❌ would claim a loss that did not happen.
+    Reproduce the script's `=== RESULTS` block verbatim (one `<repo>\t<state>\t-` line per repo;
+    `--no-pr` so `pr_url` is always `-`), keeping `commit-nopush` distinct from `failed` — the first
+    means the commit is there, the second that nothing was committed. Derive no state not in the block.
 
 ## Step 2 — Commit
 
@@ -70,5 +71,16 @@ fi
   pre-reformat version). Re-check `git diff HEAD` after — a hook FAILURE (not a reformat) stops you,
   report it, commit nothing.
 6. Apply the `branch-workflow` skill's Guard section before staging anything — it decides whether
-  a feature branch is needed first. Follow what it says, then `git add <files> && git commit -m
-  "<message>"`. Report `<emoji> <subject>` (+ file list) and the branch you committed on.
+  a feature branch is needed first. Follow what it says, then `git add <files>` and commit with the
+  attribution trailer built programmatically (never hand-assembled — an empty env var must drop the
+  line, not emit a broken URL):
+
+   ```
+   trailer="Co-Authored-By: Claude <noreply@anthropic.com>"
+   [ -n "${CLAUDE_CODE_BRIDGE_SESSION_ID:-}" ] && trailer="$trailer
+   Claude-Session: https://claude.ai/code/$CLAUDE_CODE_BRIDGE_SESSION_ID"
+   git commit -m "<message>" -m "$trailer"
+   ```
+
+   `$CLAUDE_CODE_BRIDGE_SESSION_ID` is inherited from the parent even in a fork. Report
+  `<emoji> <subject>` (+ file list) and the branch you committed on.
