@@ -129,3 +129,7 @@ visible in a sorted set and invisible in the order they were thought of.
   a document, is a fact to record, not a round to re-run.
 - **Stop at the story.** This skill does not implement, and does not open cards beyond the first
   ones the priority order implies.
+- **A goal already active on entry was set too early.** Say so: a Stop-hook goal fights this
+  interview (the session cannot yield while the user thinks between rounds). The goal belongs
+  *after* the grill, set from the `Fini =` this interview produces — `pc-kanban:chantier`'s grill
+  gate exists to prevent this.
