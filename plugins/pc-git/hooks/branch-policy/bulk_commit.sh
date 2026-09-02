@@ -32,8 +32,8 @@ die() { printf 'bulk_commit: %s\n' "$1" >&2; exit 1; }
 # Partagé par `do_discover` et `do_plan` pour que le message ne dérive pas entre les deux.
 no_repos_found() {
     printf 'NO-REPOS-FOUND sous : %s\n' "$1"
-    printf 'Aucun dépôt git sous cette racine — elle est probablement périmée\n'
-    printf '(workspace déplacé ?). Vérifier --root avant de conclure quoi que ce soit.\n'
+    printf 'No git repo under this root — it is probably stale\n'
+    printf '(moved workspace?). Check --root before concluding anything.\n'
 }
 
 # ── Empreinte d'un diff stagé ─────────────────────────────────────────────────
@@ -135,7 +135,7 @@ do_plan() {
 
     # `plan` stage (`git add -A`) chaque repo qu'il scanne. Sans `--repo`, c'est tout le
     # workspace : rendre l'effet de bord visible plutôt que silencieux (`discover` = read-only).
-    [ -n "$filter" ] || printf 'bulk_commit: note: plan non filtré — staging de tous les repos sales sous %s\n' "$root" >&2
+    [ -n "$filter" ] || printf 'bulk_commit: note: unfiltered plan — staging every dirty repo under %s\n' "$root" >&2
 
     while IFS= read -r repo; do
         [ -n "$repo" ] || continue
@@ -157,7 +157,7 @@ do_plan() {
         return 1
     fi
     [ ${#repos[@]} -gt 0 ] \
-        || { printf 'NOTHING-TO-COMMIT (%d repo(s) scanné(s), tous propres)\n' "$scanned"; return 0; }
+        || { printf 'NOTHING-TO-COMMIT (%d repo(s) scanned, all clean)\n' "$scanned"; return 0; }
 
     # Groupes = empreintes distinctes, dans l'ordre de première apparition.
     local -a seen=()
@@ -168,7 +168,7 @@ do_plan() {
         [ $known -eq 1 ] || seen+=("${fps[$i]}")
     done
 
-    printf '# %d repo(s) à committer, %d groupe(s) de diff distinct(s)\n\n' \
+    printf '# %d repo(s) to commit, %d distinct diff group(s)\n\n' \
         "${#repos[@]}" "${#seen[@]}"
 
     for fp in "${seen[@]}"; do
@@ -185,13 +185,13 @@ do_plan() {
                 "$repo" "$(branch_strategy "$repo")" \
                 "$(needs_feature_branch "$repo" && echo yes || echo no)"
         done
-        printf 'DIFF (tronqué à 120 lignes, identique pour tout le groupe) :\n'
+        printf 'DIFF (truncated to 120 lines, identical for the whole group):\n'
         git -C "${members[0]}" diff --staged | head -120
         printf '=== END %s\n\n' "$fp"
     done
 
-    printf 'Rédige UN message par groupe, puis :\n'
-    printf '  bulk_commit.sh apply --messages <fichier>   # lignes "<empreinte><TAB><message>"\n'
+    printf 'Write ONE message per group, then:\n'
+    printf '  bulk_commit.sh apply --messages <file>   # lines "<fingerprint><TAB><message>"\n'
 }
 
 # ── PR / MR ───────────────────────────────────────────────────────────────────
@@ -238,7 +238,7 @@ open_pr() {
 # ── apply ─────────────────────────────────────────────────────────────────────
 do_apply() {
     local root="$1" filter="$2" msgfile="$3" dry="$4" nopr="$5"
-    [ -f "$msgfile" ] || die "fichier de messages introuvable : $msgfile"
+    [ -f "$msgfile" ] || die "message file not found: $msgfile"
 
     local ok=0 failed=0 skipped=0 partial=0
     local repo name fp msg strategy base head branch slug prv state url
@@ -269,7 +269,7 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
             msg="🔧 chore: ignore OS noise files"
         fi
         if [ -z "$msg" ]; then
-            printf '  ⏭️  %-28s aucun message pour l’empreinte %s\n' "$name" "$fp"
+            printf '  ⏭️  %-28s no message for fingerprint %s\n' "$name" "$fp"
             results+=("$(printf '%s\tskipped\t-' "$name")")
             skipped=$((skipped + 1)); continue
         fi
@@ -295,18 +295,18 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
         # alors que le commit est bien là.
         if [ "$branch" != "$head" ] \
            && ! git -C "$repo" checkout -b "$branch" >/dev/null 2>&1; then
-            printf '  ❌ %-28s branche %s impossible (modifs stagées, rien de perdu)\n' \
+            printf '  ❌ %-28s branch %s failed (changes staged, nothing lost)\n' \
                 "$name" "$branch"
             results+=("$(printf '%s\tfailed\t-' "$name")")
             failed=$((failed + 1)); continue
         fi
         if ! git -C "$repo" commit -m "$msg" -m "$trailer" >/dev/null 2>&1; then
-            printf '  ❌ %-28s commit refusé, hook probable (modifs stagées, rien de perdu)\n' "$name"
+            printf '  ❌ %-28s commit refused, likely a hook (changes staged, nothing lost)\n' "$name"
             results+=("$(printf '%s\tfailed\t-' "$name")")
             failed=$((failed + 1)); continue
         fi
         if ! git -C "$repo" push -u origin "$branch" >/dev/null 2>&1; then
-            printf '  ⚠️  %-28s committé sur %s, push échoué (commit local conservé)\n' \
+            printf '  ⚠️  %-28s committed on %s, push failed (local commit kept)\n' \
                 "$name" "$branch"
             results+=("$(printf '%s\tcommit-nopush\t-' "$name")")
             partial=$((partial + 1)); continue
@@ -321,11 +321,11 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
             IFS=$'\t' read -r prv url < <(open_pr "$repo" "$branch" "$base" "$msg") \
                 || { prv=pr-failed; url=-; }
             case "$prv" in
-                pr)         state="pushed-pr";       printf '      PR ouverte : %s\n' "$url" ;;
-                pr-open)    state="pushed-pr";       printf '      PR déjà ouverte : %s\n' "$url" ;;
-                pr-na)      state="pushed-nopr";     printf '      commit direct sur %s, pas de PR\n' "$base" ;;
+                pr)         state="pushed-pr";       printf '      PR opened: %s\n' "$url" ;;
+                pr-open)    state="pushed-pr";       printf '      PR already open: %s\n' "$url" ;;
+                pr-na)      state="pushed-nopr";     printf '      direct commit on %s, no PR\n' "$base" ;;
                 *)          state="pushed-prfailed"; url="-"
-                            printf '      ⚠️  PR non ouverte — à ouvrir à la main\n' ;;
+                            printf '      ⚠️  PR not opened — open it manually\n' ;;
             esac
         fi
         results+=("$(printf '%s\t%s\t%s' "$name" "$state" "${url:--}")")
@@ -343,7 +343,7 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
     # | skipped | failed. Correctif de l'incident 2026-09-02 (résumé forké inventé).
     # Sauté en `--dry-run` : rien n'a été fait, un bloc vide serait un piège pour l'agent.
     if [ "$dry" != "yes" ]; then
-        printf '\n=== RESULTS (repo\tstate\tpr_url) — reproduire tel quel\n'
+        printf '\n=== RESULTS (repo\tstate\tpr_url) — reproduce verbatim\n'
         local line
         for line in "${results[@]:-}"; do [ -n "$line" ] && printf '%s\n' "$line"; done
         printf '=== END RESULTS\n'
@@ -362,7 +362,7 @@ while [ $# -gt 0 ]; do
         --messages) MSGFILE="$2"; shift 2 ;;
         --dry-run)  DRY="yes"; shift ;;
         --no-pr)    NOPR="yes"; shift ;;
-        *)          die "option inconnue : $1" ;;
+        *)          die "unknown option: $1" ;;
     esac
 done
 

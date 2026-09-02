@@ -36,40 +36,40 @@ mkrepo golf-clean                                                     # propre :
 # `discover` — READ-ONLY : liste les repos sales, ne stage rien (le skill résout le scope
 # avec, AVANT `plan` qui stage). Testé avant tout `plan`.
 disc="$("$SCRIPT" discover --root "$T" 2>&1)"; disc_rc=$?
-check "discover liste les 5 repos sales"   "$(printf '%s\n' "$disc" | sort | tr '\n' ' ')" \
+check "discover lists the 5 dirty repos"   "$(printf '%s\n' "$disc" | sort | tr '\n' ' ')" \
     "alpha bravo charlie delta echo_ "
-check "discover exit 0 même si le dernier repo (golf-clean, trié en dernier) est propre" "$disc_rc" 0
-check "discover ne stage rien (delta)"     "$(git -C "$T/delta" diff --cached --name-only | wc -l | tr -d ' ')" 0
-check "discover n'écrit aucun .gitignore"  "$([ -e "$T/alpha/.gitignore" ] && echo yes || echo no)" no
+check "discover exits 0 even when the last-sorted repo (golf-clean) is clean" "$disc_rc" 0
+check "discover stages nothing (delta)"     "$(git -C "$T/delta" diff --cached --name-only | wc -l | tr -d ' ')" 0
+check "discover writes no .gitignore"  "$([ -e "$T/alpha/.gitignore" ] && echo yes || echo no)" no
 # Racine sans dépôt : `discover` doit dire NO-REPOS-FOUND + exit non nul, jamais une
 # sortie vide qui se confondrait avec "des repos, tous propres".
 demptyd="$(mktemp -d)"
 outd="$("$SCRIPT" discover --root "$demptyd" 2>&1)"; rcd=$?
 rmdir "$demptyd"
-check "discover racine vide → NO-REPOS-FOUND"  "$(printf '%s' "$outd" | grep -c 'NO-REPOS-FOUND')" 1
-check "discover racine vide → exit non nul"    "$([ "$rcd" -ne 0 ] && echo yes || echo no)"        yes
+check "discover empty root -> NO-REPOS-FOUND"  "$(printf '%s' "$outd" | grep -c 'NO-REPOS-FOUND')" 1
+check "discover empty root -> non-zero exit"    "$([ "$rcd" -ne 0 ] && echo yes || echo no)"        yes
 
 plan="$("$SCRIPT" plan --root "$T" 2>&1)"
 
-check "5 repos détectés"          "$(printf '%s' "$plan" | grep -c '^  /')"                    5
-check "3 groupes distincts"       "$(printf '%s' "$plan" | grep -c '^=== GROUP')"              3
+check "5 repos detected"          "$(printf '%s' "$plan" | grep -c '^  /')"                    5
+check "3 distinct groups"       "$(printf '%s' "$plan" | grep -c '^=== GROUP')"              3
 # Taille de chaque groupe (nombre de lignes de repo entre GROUP et END) : le groupe de la
 # distribution partagée doit en compter 3. Compter par `grep -A<n>` ne marche pas — la
 # fenêtre fixe tronque le groupe dès qu'il dépasse n lignes.
 sizes="$(printf '%s\n' "$plan" | awk '/^=== GROUP/{n=0} /^  \//{n++} /^=== END/{print n}' | sort -rn | head -1)"
-check "le bruit ne fragmente pas" "$sizes" 3
-check "code → feature branch"     "$(printf '%s' "$plan" | grep 'delta' | grep -c 'feature-branch=yes')" 1
-check "docs → commit direct"      "$(printf '%s' "$plan" | grep 'bravo' | grep -c 'feature-branch=no')"  1
-check "groupe de bruit isolé"     "$(printf '%s' "$plan" | grep -c 'GROUP noise-gitignore')"   1
-check ".DS_Store gitignoré"       "$(grep -c '^\.DS_Store$' "$T/alpha/.gitignore")"            1
+check "noise does not fragment the group" "$sizes" 3
+check "code -> feature branch"     "$(printf '%s' "$plan" | grep 'delta' | grep -c 'feature-branch=yes')" 1
+check "docs -> direct commit"      "$(printf '%s' "$plan" | grep 'bravo' | grep -c 'feature-branch=no')"  1
+check "noise group isolated"     "$(printf '%s' "$plan" | grep -c 'GROUP noise-gitignore')"   1
+check ".DS_Store gitignored"       "$(grep -c '^\.DS_Store$' "$T/alpha/.gitignore")"            1
 
 # apply --dry-run ne doit rien committer, et doit couvrir les 5 repos.
 printf '%s\t📝 docs: add README\n' "$(printf '%s' "$plan" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)" > "$T/m.tsv"
 dry="$("$SCRIPT" apply --root "$T" --messages "$T/m.tsv" --dry-run 2>&1)"
-check "dry-run ne committe rien"  "$(git -C "$T/bravo" log --oneline | wc -l | tr -d ' ')"     1
-check "groupe sans message → ⏭️"  "$(printf '%s' "$dry" | grep -c 'aucun message')"            1
-check "plan non filtré → note sur stderr (pas un die)" \
-    "$("$SCRIPT" plan --root "$T" 2>&1 >/dev/null | grep -c 'note: plan non filtré')"           1
+check "dry-run commits nothing"  "$(git -C "$T/bravo" log --oneline | wc -l | tr -d ' ')"     1
+check "group with no message -> skipped"  "$(printf '%s' "$dry" | grep -c 'no message')"            1
+check "unfiltered plan -> stderr note (not a die)" \
+    "$("$SCRIPT" plan --root "$T" 2>&1 >/dev/null | grep -c 'note: unfiltered plan')"           1
 
 # Une racine sans aucun dépôt n'est pas un workspace propre : c'est une racine fausse.
 # Les confondre annonce "rien à faire" après avoir regardé au mauvais endroit — vu en vrai
@@ -77,9 +77,9 @@ check "plan non filtré → note sur stderr (pas un die)" \
 empty="$(mktemp -d)"
 out="$("$SCRIPT" plan --root "$empty" 2>&1)"; rc=$?
 rmdir "$empty"
-check "racine vide → NO-REPOS-FOUND" "$(printf '%s' "$out" | grep -c 'NO-REPOS-FOUND')" 1
-check "racine vide → exit non nul"   "$([ "$rc" -ne 0 ] && echo yes || echo no)"          yes
-check "jamais NOTHING-TO-COMMIT"     "$(printf '%s' "$out" | grep -c 'NOTHING-TO-COMMIT')" 0
+check "empty root -> NO-REPOS-FOUND" "$(printf '%s' "$out" | grep -c 'NO-REPOS-FOUND')" 1
+check "empty root -> non-zero exit"   "$([ "$rc" -ne 0 ] && echo yes || echo no)"          yes
+check "never NOTHING-TO-COMMIT"     "$(printf '%s' "$out" | grep -c 'NOTHING-TO-COMMIT')" 0
 
 # open_pr() ne doit jamais confondre "aucune bascule faite ici" avec "on est sur la branche
 # d'intégration" — un HEAD déjà sur une feature branch avant l'appel a droit à sa PR comme
@@ -115,22 +115,22 @@ printf '%s\t✨ feat: add g\n' "$fpfox" > "$T/mfox.tsv"
 export CLAUDE_CODE_BRIDGE_SESSION_ID="session_TESTBRIDGE"
 outfox="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo foxtrot --messages "$T/mfox.tsv" 2>&1)"
 
-check "PR tentée depuis une feature branch pré-existante" \
+check "PR attempted from a pre-existing feature branch" \
     "$(grep -c '^gh pr create' "$GH_LOG")" 1
-check "reste sur sa branche, aucune nouvelle créée" \
+check "stays on its branch, no new one created" \
     "$(git -C "$T/foxtrot" branch --show-current)" "feature/preexisting"
 
 # ── Contrat de sortie : bloc RESULTS + trailer (carte durcir-commit-and-pr-contrat-de-sortie) ──
 tab="$(printf '\t')"   # BSD `grep -E` n'étend pas `\t` — passer un vrai tab
 # Oracle : le contenu entre `=== RESULTS` et `=== END RESULTS` est EXACTEMENT cette ligne.
 results_block="$(printf '%s' "$outfox" | awk '/^=== RESULTS/{f=1;next} /^=== END RESULTS/{f=0} f')"
-check "RESULTS foxtrot = ligne exacte pushed-pr + URL" \
+check "RESULTS foxtrot = exact pushed-pr line + URL" \
     "$results_block" "foxtrot${tab}pushed-pr${tab}https://github.com/x/foxtrot/pull/1"
-check "marqueur === END RESULTS émis" \
+check "=== END RESULTS marker emitted" \
     "$(printf '%s' "$outfox" | grep -c '^=== END RESULTS$')" 1
-check "trailer Co-Authored-By dans le commit" \
+check "Co-Authored-By trailer in the commit" \
     "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Co-Authored-By: Claude <noreply@anthropic.com>$')" 1
-check "trailer Claude-Session dérivé du bridge id" \
+check "Claude-Session trailer derived from the bridge id" \
     "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Claude-Session: https://claude.ai/code/session_TESTBRIDGE$')" 1
 
 # ── pr-na : docs-only sur la branche d'intégration, remote résolu → commit direct, zéro PR ──
@@ -148,9 +148,9 @@ fpg="$(printf '%s' "$plang" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d'
 printf '%s\t📝 docs: readme\n' "$fpg" > "$T/mg.tsv"
 outg="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo golf --messages "$T/mg.tsv" 2>&1)"
 golf_block="$(printf '%s' "$outg" | awk '/^=== RESULTS/{f=1;next} /^=== END RESULTS/{f=0} f')"
-check "RESULTS golf = commit direct, state pushed-nopr exact" \
+check "RESULTS golf = direct commit, exact pushed-nopr state" \
     "$golf_block" "golf${tab}pushed-nopr${tab}-"
-check "golf : aucune PR tentée sur un commit direct" \
+check "golf: no PR attempted on a direct commit" \
     "$(grep -c '^gh pr create' "$GH_LOG")" 0
 
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
