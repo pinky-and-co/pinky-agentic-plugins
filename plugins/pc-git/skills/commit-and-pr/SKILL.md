@@ -22,21 +22,47 @@ applying the branch guard, committing, pushing, opening the PR/MR, and reporting
 You do the one thing it cannot: **write the commit messages**. Nothing else. In particular, do not
 spawn a subagent per repo — the script handles every repo in one pass, in under a second.
 
-## Step 1 — Plan
+## Step 1 — Resolve the scope (read-only), then plan
+
+**Never run `plan` unfiltered to "see what's there"** — `plan` stages (`git add -A`) every repo it
+scans. Discover the scope with the read-only subcommand first:
 
 ```
-${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}"
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh discover --root "${CLAUDE_PROJECT_DIR}"
 ```
 
-One repo named as argument → add `--repo <name>`. `--all` or no argument → the whole root.
-Output `NOTHING-TO-COMMIT` → say so and stop. Output `NO-REPOS-FOUND` → **do not report
-success**: the root holds no git repo at all, so it is stale (a moved workspace is the usual
-cause). Say the root is wrong and stop; "nothing to commit" and "I looked in the wrong place"
-are not the same answer.
+It prints one dirty-repo basename per line, stages nothing. From that list + the argument:
 
-The plan groups repos by **diff fingerprint**, and that grouping is the point: the common case for
-`--all` is one identical distribution landing on many repos, so N repos share one diff and need one
-message. Twenty repos usually come back as two or three groups.
+- **`NO-REPOS-FOUND`** (non-zero exit) → **do not report success**: no git repo under the root at
+  all, so it is stale (a moved workspace is the usual cause). Say the root is wrong and stop —
+  "nothing to commit" and "I looked in the wrong place" are not the same answer.
+- **empty list, exit 0** → "nothing to commit", stop.
+- **argument names one repo** → target = that repo.
+- **`--all`** → target = *whole root* (no `--repo`). `--all` is never passed to the script; it just
+  means "omit `--repo`".
+- **no argument, one line** → target = that repo.
+- **no argument, more than one line** → never sweep (an unqualified run once committed 7 unrelated
+  dirty repos and reported PRs that were never opened). `AskUserQuestion`:
+  1. "One specific repo, or all of them?" → `just one` / `all of them` / `stop`.
+  2. if `just one`: offer the first 4 basenames plus `none of these`; on `none of these`, ask again
+     with the next 4, until one is picked.
+
+  `all of them` *is* the consent for a whole-root run. `stop` → do nothing.
+
+Then plan the resolved target:
+
+```
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}" [--repo <target>]
+```
+
+Include `--repo <target>` for every scope except `--all` / `all of them`.
+
+- `NO-REPOS-FOUND` → **do not report success**: the root holds no git repo at all, so it is stale
+  (a moved workspace is the usual cause). Say the root is wrong and stop.
+
+The plan groups repos by **diff fingerprint**: the common case for `--all` is one identical
+distribution landing on many repos, so N repos share one diff and need one message. Twenty repos
+usually come back as two or three groups.
 
 Each group carries its fingerprint, the file list, the shared diff, and per repo the resolved branch
 strategy plus whether the guard requires a feature branch. A group whose fingerprint is
@@ -59,22 +85,29 @@ correct, not a shortcut.
 ## Step 3 — Apply
 
 ```
-${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file>
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> [--repo <target>]
 ```
 
-Add `--dry-run` first if the plan looked surprising — it prints what each repo would get, touching
-nothing.
+Pass the **same `--repo <target>`** you resolved in Step 1 — omit it only for `--all` / `all of
+them`. Add `--dry-run` first if the plan looked surprising — it prints what each repo would get,
+touching nothing, and emits **no `=== RESULTS` block** (run the real apply for that).
 
 ## Step 4 — Report what the script reported
 
-Pass its outcome through verbatim, per repo. The four states are distinct and must stay distinct:
+The script ends with a `=== RESULTS` block, one tab-separated line per repo — `<repo>\t<state>\t<pr_url|->`.
+**Reproduce those lines. Derive no sentence that is not in them** — in particular never write "PR
+created" / "PR opened" for a repo whose `state` is not `pushed-pr`. The forked agent that broke this
+filled the script's silence with a guess; the block exists so there is no silence to fill.
 
-| State | Meaning |
-|---|---|
-| ✅ | committed, pushed, PR/MR handled |
-| ⚠️ | committed, push failed — the commit is there, nothing is lost |
-| ⏭️ | no message matched this group's fingerprint |
-| ❌ | branch or commit failed — changes remain staged, nothing is lost |
+| `state` | Meaning | `pr_url` |
+|---|---|---|
+| `pushed-pr` | committed, pushed, PR/MR exists | the URL |
+| `pushed-nopr` | committed + pushed straight to the integration branch (unguarded paths), or `--no-pr` | `-` |
+| `pushed-prfailed` | committed + pushed on a feature branch, but PR creation failed — **a human must open it** | `-` |
+| `commit-nopush` | committed locally, push failed — the commit is there, nothing lost | `-` |
+| `skipped` | no message matched this group's fingerprint | `-` |
+| `failed` | branch or commit failed — changes remain staged, nothing lost | `-` |
 
-Never flatten ⚠️ into ❌, and never report ✅ for a repo the script did not mark ✅. A bulk run that
-claims success while leaving work on the floor is worse than one that fails loudly.
+Never flatten `commit-nopush`/`pushed-prfailed` into `failed`, and never report `pushed-pr` for a
+repo the block did not. A run that claims success while leaving work on the floor is worse than one
+that fails loudly.
