@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 from secret_patterns import scrub  # noqa: E402
@@ -57,6 +58,10 @@ MAX_FILES = 20  # cap the changed-files list so a huge diff does not bloat the c
 # agent judges freshness itself, and an org whose journal has gone quiet stays visible instead of
 # disappearing from the listing.
 MAX_AGENT_LOGS = 12
+
+# `--list-unreviewed-done` : same bounded-output guard. The tail count keeps the pre-convention
+# backlog visible as a number without pasting the whole of it on every `/chantier` intake.
+MAX_UNREVIEWED_DONE = 10
 
 
 def read_event() -> dict:
@@ -200,6 +205,63 @@ def find_kanbans(start: Path) -> list[Path]:
 def inprogress_cards(kanban: Path) -> list[Path]:
     """Every card currently in a chantier's `3-in-progress/` column."""
     return sorted(kanban.glob("CHANTIER*/3-in-progress/*.md"))
+
+
+# Lenient on spacing, checkbox case and the `(`/`:` delimiter — the convention writes
+# `- [x] reviewed (…)` at column 0, but a hand-edited card drifts and the audit must not miss it.
+_REVIEWED_DONE_RE = re.compile(r"^\s*-\s+\[[xX]\]\s+reviewed\s*[(:]", re.MULTILINE)
+_REVIEWED_OPEN_RE = re.compile(r"^\s*-\s+\[ \]\s+reviewed\s*[(:]", re.MULTILINE)
+_REVIEWED_MECHANICAL_RE = re.compile(
+    r"^\s*-\s+\[[xX]\]\s+reviewed\s*\(\s*n/a", re.MULTILINE
+)
+
+
+class UnreviewedDone(NamedTuple):
+    """Result of `unreviewed_done_cards` — see that function's docstring."""
+
+    flagged: list[tuple[Path, str]]
+    mechanical: int
+
+
+def unreviewed_done_cards(kanban: Path) -> UnreviewedDone:
+    """`4-done/` cards missing a checked `reviewed (...)` line, plus the mechanical count.
+
+    Args:
+        kanban: a board root, as returned by `find_kanbans`.
+
+    Returns:
+        An `UnreviewedDone`. `.flagged` holds `(card_path, tag)` pairs ordered by the
+        card's `date:` frontmatter descending — recent work first; `date:` is set at
+        intake rather than close but stays stable where a sync drive rewrites mtime — a
+        missing `date:` sorting last, then by filename. `tag` is `reviewed non coché`
+        when an unchecked `- [ ] reviewed (...)` line is present (review declared needed,
+        then skipped), or `aucune ligne review` when no such line exists. `.mechanical`
+        counts cards closed `- [x] reviewed (n/a — mécanique)`: a real method line keeps a
+        card out of both buckets, this escape hatch stays a visible number so its rate
+        cannot drift the way the un-mechanized convention did.
+    """
+    flagged: list[tuple[str, Path, str]] = []
+    mechanical = 0
+    for card in kanban.glob("CHANTIER*/4-done/*.md"):
+        try:
+            text = card.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _REVIEWED_MECHANICAL_RE.search(text):
+            mechanical += 1
+            continue
+        if _REVIEWED_DONE_RE.search(text):
+            continue
+        tag = (
+            "reviewed non coché"
+            if _REVIEWED_OPEN_RE.search(text)
+            else "aucune ligne review"
+        )
+        fm = parse_frontmatter(text) or {}
+        date = fm.get("date")
+        flagged.append((date if isinstance(date, str) else "", card, tag))
+    flagged.sort(key=lambda row: (row[0], row[1].name), reverse=True)
+    return UnreviewedDone([(card, tag) for _, card, tag in flagged], mechanical)
 
 
 def _git(cwd: Path, *args: str) -> str | None:
@@ -404,8 +466,9 @@ def refresh_cards(cards: list[Path], ctx: dict) -> None:
 
 
 def main() -> int:
-    # `--list-kanbans` / `--list-chantiers` / `--list-agent-logs` : CLI modes for consumers that
-    # need the SAME board resolution as the hook — first among them the `/chantier` skill's
+    # `--list-kanbans` / `--list-chantiers` / `--list-unreviewed-done` / `--list-agent-logs` : CLI
+    # modes for consumers that need the SAME board resolution as the hook — first among them the
+    # `/chantier` skill's
     # auto-context. One binary to declare in `allowed-tools`, zero glob to quote, and the resolution
     # (env > *.code-workspace folders[] > proximity) is tested once instead of reimplemented in shell.
     if "--list-kanbans" in sys.argv[1:]:
@@ -423,6 +486,22 @@ def main() -> int:
             for d in sorted(kanban.glob("CHANTIER*")):
                 if d.is_dir():
                     print(d.name)
+            print()
+        return 0
+
+    if "--list-unreviewed-done" in sys.argv[1:]:
+        for kanban in find_kanbans(Path(os.getcwd())):
+            flagged, mechanical = unreviewed_done_cards(kanban)
+            if not flagged and not mechanical:
+                continue
+            print(f"=== BOARD: {kanban}")
+            for card, tag in flagged[:MAX_UNREVIEWED_DONE]:
+                print(f"{card.relative_to(kanban)}  ({tag})")
+            extra = len(flagged) - MAX_UNREVIEWED_DONE
+            if extra > 0:
+                print(f"… (+{extra} de plus)")
+            if mechanical:
+                print(f"— {mechanical} fermées `reviewed (n/a — mécanique)`")
             print()
         return 0
 

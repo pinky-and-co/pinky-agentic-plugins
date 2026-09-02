@@ -24,6 +24,7 @@ keeps its number when it moves between boards. If two boards ever collide on an 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-chantiers
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
 ```
 
 ## Steps
@@ -49,6 +50,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
   - if `2-selected-for-dev/` is non-empty: name the first card, it's the work order
   - queued cards grouped by `sert` (skill `kanban` § Filiation) — one group per root, `sert: null`
     cards elsewhere folded into a single "N autonomous cards" count
+  - if the `--list-unreviewed-done` output names any card in **this chantier**: one line — the
+    count (the output is already capped and `date:`-ordered, bulk is pre-convention history so do
+    not paste it whole), then the newest one or two. Not blocking; the fix is a `reviewed (…)` line
+    on each, `n/a — mécanique` if there was nothing to review.
   - if `4-done/` is non-empty: flag it and offer to fold + archive. Only after the user confirms
     the rationale is folded into the story/an ADR, archive via:
 ```bash
@@ -154,7 +159,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
 
     where `<condition>` is the resolved `Fini =` line, phrased as a demonstrable state (a test
     result, an exit code, a real diff) — `/goal`'s evaluator reads only the transcript, never a file
-    or a command it would run itself. Add nothing after that block (the **Session name** `/rename`
+    or a command it would run itself.
+    **Review clause.** If the card's work needs judgment reviewed — the same criterion as
+    `finishing-a-card.md` § "Reviewing before declaring `Fini =` met", i.e. anything beyond a purely
+    mechanical change — append to `<condition>`: `… et le diff final a été review par `adversarial`
+    ou `Agent(reviewer)`, findings traités, et la case `- [x] reviewed (<méthode>)` cochée sur la
+    card`. Naming the checkbox in the clause makes satisfying the goal and stamping the box one
+    action, not two — so the retroactive audit does not later flag a genuinely-reviewed card.
+    The decision is made pre-work, on `Fini =` and `exigences:` alone, so **when it is unclear,
+    include the clause** — a spurious clause on a card that turns out mechanical costs one
+    `- [x] reviewed (n/a — mécanique)` stamp at close; a missing clause on judgment work is the
+    expensive failure this card exists to stop. A card that is *obviously* mechanical (doc typo, a
+    rename, a one-line config) gets no clause and is closed with `- [x] reviewed (n/a — mécanique)`.
+    Add nothing after that block (the **Session name** `/rename`
     line goes just before it, never after): no "would you like me to…", no rephrasing — just the
     `/goal` line, ready to paste as the next message. If no `sert` is
     resolvable (orphan card, a cycle, no root found), say so explicitly instead of inventing a
