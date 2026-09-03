@@ -42,6 +42,16 @@ RED_BG = "\033[41;30m"  # red background, white text ->  "alert" effect
 
 SEP = f"  {GREY}·{RESET}  "
 
+# Headroom (optional third-party tool, headroomlabs-ai/headroom) appends one JSON line per
+# compressed request here. The file is absent entirely when Headroom is not installed — the
+# savings segment then never renders and the read below costs nothing.
+_HEADROOM_LEDGER = os.path.expanduser("~/.headroom/savings_events.jsonl")
+# The ledger is a rolling ~30-day append log of every compressed request, all clients. The
+# statusline repaints constantly, so only this many trailing bytes are read (session-window
+# events are the most recent) — flat cost per paint whatever the file has grown to. ~180 B/event,
+# so this covers a very long session's worth.
+_HEADROOM_LEDGER_TAIL_BYTES = 65536
+
 # Minimum blank gap between a row's left and right groups, and the gutter added past the widest
 # natural row to place the shared right-hand column.
 _MIN_GAP = 10
@@ -225,6 +235,69 @@ def _get_advisor_model(transcript_path, tail_bytes=16384):
         return None
 
 
+def _headroom_savings(
+    session_start: datetime,
+    ledger_path: str | None = None,
+    tail_bytes: int = _HEADROOM_LEDGER_TAIL_BYTES,
+) -> tuple[float, int] | None:
+    """Context tokens Headroom has compressed away since the session started.
+
+    Sums the Headroom ledger events written by this client at or after ``session_start``. The
+    ledger carries no session id, so the time window stands in for "this session" — exact as long
+    as a single session runs at a time, a slight over-count otherwise (acceptable for an
+    indicator). Only the last ``tail_bytes`` of the file are read, since the ledger grows without
+    bound and the statusline repaints on every turn.
+
+    Args:
+        session_start: session start datetime — the value already derived for the "Started at"
+            segment.
+        ledger_path: override for the ledger path, for tests. ``None`` uses the standard
+            ``~/.headroom/savings_events.jsonl``.
+        tail_bytes: how many trailing bytes of the ledger to read.
+
+    Returns:
+        A ``(percent, tokens_saved)`` pair over the window, or ``None`` when the ledger is
+        absent, unreadable, or holds no matching saving inside the window.
+    """
+    try:
+        start_ts = session_start.timestamp()
+    except (AttributeError, OSError, OverflowError, ValueError):
+        return None
+
+    try:
+        size = os.path.getsize(ledger_path or _HEADROOM_LEDGER)
+        with open(ledger_path or _HEADROOM_LEDGER, "rb") as handle:
+            handle.seek(max(0, size - tail_bytes))
+            chunk = handle.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    lines = chunk.split("\n")
+    if size > tail_bytes:
+        lines = lines[
+            1:
+        ]  # le seek tombe au milieu d'une ligne : la première est partielle
+
+    before_total = saved_total = 0
+    for raw_line in lines:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            event = json.loads(raw_line)
+            when = datetime.fromisoformat(event["ts"]).timestamp()
+        except (ValueError, TypeError, KeyError):
+            continue  # ligne corrompue ou horodatage illisible : on l'ignore
+        if when < start_ts or event.get("client") != "claude-code":
+            continue
+        before_total += event.get("before", 0) or 0
+        saved_total += event.get("saved", 0) or 0
+
+    if before_total <= 0 or saved_total <= 0:
+        return None
+    return (saved_total / before_total * 100, saved_total)
+
+
 def _short_model(model_id):
     """claude-opus-4-8 -> Opus 4.8, claude-sonnet-5 -> Sonnet 5, etc."""
     if not model_id:
@@ -326,6 +399,13 @@ def build_lines(data: dict) -> list[str]:
         f"Context window {bar} {_color_for_pct(pct)}{pct}%{RESET}",
         f"Cache hit {cache_txt}{RESET}",
     ]
+    headroom = _headroom_savings(start_dt)
+    if headroom:
+        hr_pct, hr_saved = headroom
+        hr_amount = f"{hr_saved // 1000}k" if hr_saved >= 1000 else str(hr_saved)
+        line3_left_parts.append(
+            f"{GREEN}🗜 Headroom {hr_pct:.0f}% (-{hr_amount} tok){RESET}"
+        )
     line3_right_parts: list[str] = [f"💲 {cost:.2f} (API-equiv)"]
 
     # ---------- Optional line : rate limits > 90% ----------

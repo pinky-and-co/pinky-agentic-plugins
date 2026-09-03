@@ -1,6 +1,6 @@
 {
   "name": "pc-statusline",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Multi-line Claude Code status line — main-session dashboard (model, effort, context bar, cache hit, cost, rate limits) and a per-subagent row. Pure rendering, zero profile-resolved values.",
   "author": {
     "name": "Pinky & Co"
