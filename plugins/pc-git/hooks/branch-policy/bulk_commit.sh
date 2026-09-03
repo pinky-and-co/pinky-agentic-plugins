@@ -16,6 +16,14 @@ set -euo pipefail
 EXCLUDED_DEFAULT="node_modules,.venv,__pycache__"
 NOISE_FILES=".DS_Store Thumbs.db desktop.ini"
 
+# Fenêtre d'attente CI par PR pour `--watch-ci`, en secondes. PAR PR, jamais globale :
+# le coût assumé est 15 min × N repos (story § « Durcir pc-git:commit-and-pr », défaut
+# écarté = watch par défaut). Overridable pour les tests.
+BULK_CI_TIMEOUT="${BULK_CI_TIMEOUT:-900}"
+# Délai avant l'unique re-probe « des checks existent-ils ? » — couvre la course entre
+# `gh pr create` et l'enregistrement des workflows. Un seul deuxième essai, pas une boucle.
+BULK_CI_GRACE="${BULK_CI_GRACE:-10}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESOLVE_POLICY="$SCRIPT_DIR/resolve_policy.py"
 
@@ -235,14 +243,85 @@ open_pr() {
     esac
 }
 
+# ── watch CI (`--watch-ci`) ───────────────────────────────────────────────────
+# Après l'ouverture d'une PR GitHub, attend le verdict CI et l'émet en UNE ligne
+# machine `<verdict>\t<url>\t<log|->` — verdict ∈ pass | fail | no-ci | timeout.
+# Opt-in (NFR-0023-18) : sans `--watch-ci`, aucun de ces appels n'a lieu.
+#
+# Pas de boucle de polling maison : `gh pr checks --watch --fail-fast` EST la
+# primitive (elle boucle et sort à la première défaite). Autour, juste un
+# watchdog bash — `timeout(1)` n'est pas partout (absent de macOS). Le stdout du
+# `--watch` est un affichage live (cadres ANSI) : jeté, seul l'exit code compte.
+#
+# `no-ci` est tranché AVANT tout watch (une PR sans check ferait tourner `--watch`
+# jusqu'au timeout). GitLab est hors scope : `glab` n'a pas d'équivalent `--watch`.
+
+# Nombre de checks sur la PR : un entier, ou -1 si `gh` n'a pas pu répondre.
+_ci_check_count() {
+    local url="$1" repo="$2" out
+    out="$( (cd "$repo" && gh pr checks "$url" --json state --jq 'length' 2>&1) || true )"
+    case "$out" in
+        *[!0-9]*|'')
+            printf '%s' "$out" | grep -qi 'no checks' && { printf '0'; return; }
+            printf -- '-1' ;;
+        *) printf '%s' "$out" ;;
+    esac
+}
+
+watch_ci() {
+    local repo="$1" branch="$2" url="$3"
+    local count rc started elapsed logf runid ghpid wdpid wdflag
+
+    count="$(_ci_check_count "$url" "$repo")"
+    if [ "$count" = "0" ]; then
+        sleep "$BULK_CI_GRACE"
+        count="$(_ci_check_count "$url" "$repo")"
+    fi
+    [ "$count" = "0" ] && { printf 'no-ci\t%s\t-\n' "$url"; return 0; }
+
+    # Watchdog : `gh … --watch` borné par un kill différé. Les deux sous-shells sont
+    # `>/dev/null 2>&1` — sinon, sous `$(watch_ci …)`, la substitution de commande
+    # resterait bloquée jusqu'à la fin du `sleep` (il tiendrait le fd stdout du pipe).
+    # `exec gh` : `$ghpid` EST le process gh, donc le watchdog le tue directement.
+    # `wdflag` : si le `sleep` s'orpheline malgré le cleanup, il se réveille bien plus
+    # tard et un `kill -TERM "$ghpid"` frapperait un PID recyclé. Le flag retiré ici
+    # neutralise ce tir différé — le `sleep` orphelin ne tue alors plus rien.
+    wdflag="$(mktemp "${TMPDIR:-/tmp}/bulk_ci_wd.XXXXXX")"
+    started=$SECONDS
+    ( cd "$repo" && exec gh pr checks "$url" --watch --fail-fast --interval 15 ) >/dev/null 2>&1 &
+    ghpid=$!
+    ( sleep "$BULK_CI_TIMEOUT"; [ -e "$wdflag" ] && kill -TERM "$ghpid" 2>/dev/null ) >/dev/null 2>&1 &
+    wdpid=$!
+    if wait "$ghpid" 2>/dev/null; then rc=0; else rc=$?; fi
+    rm -f "$wdflag"
+    pkill -P "$wdpid" 2>/dev/null || true
+    kill -TERM "$wdpid" 2>/dev/null || true
+    wait "$wdpid" 2>/dev/null || true
+    elapsed=$((SECONDS - started))
+
+    [ "$elapsed" -ge "$BULK_CI_TIMEOUT" ] && { printf 'timeout\t%s\t-\n' "$url"; return 0; }
+    [ "$rc" -eq 0 ] && { printf 'pass\t%s\t-\n' "$url"; return 0; }
+
+    # fail : extrait du log de la dernière run de la branche, plafonné.
+    logf="$(mktemp "${TMPDIR:-/tmp}/bulk_ci_fail.XXXXXX")"
+    runid="$( (cd "$repo" && gh run list --branch "$branch" --limit 1 \
+        --json databaseId --jq '.[0].databaseId' 2>/dev/null) || true )"
+    if [ -n "$runid" ]; then
+        (cd "$repo" && gh run view "$runid" --log-failed 2>/dev/null || true) \
+            | tail -80 > "$logf"
+    fi
+    [ -s "$logf" ] || { rm -f "$logf"; logf="-"; }
+    printf 'fail\t%s\t%s\n' "$url" "$logf"
+}
+
 # ── apply ─────────────────────────────────────────────────────────────────────
 do_apply() {
-    local root="$1" filter="$2" msgfile="$3" dry="$4" nopr="$5"
+    local root="$1" filter="$2" msgfile="$3" dry="$4" nopr="$5" watchci="$6"
     [ -f "$msgfile" ] || die "message file not found: $msgfile"
 
     local ok=0 failed=0 skipped=0 partial=0
     local repo name fp msg strategy base head branch slug prv state url
-    local -a results=()
+    local -a results=() ci_results=()
 
     # Trailer d'attribution : composé ici, jamais du system-reminder (absent d'un fork
     # commit-and-pr). `Co-Authored-By` sans version — le fork tourne `haiku` mais le
@@ -332,6 +411,19 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
         # `pushed-prfailed` : commité + poussé, mais une PR reste à ouvrir à la main —
         # compté comme partiel, jamais dans le ✅.
         [ "$state" = "pushed-prfailed" ] && partial=$((partial + 1)) || ok=$((ok + 1))
+
+        # `--watch-ci` : seulement pour une PR GitHub réellement ouverte. GitLab est
+        # hors scope (`glab` n'a pas de `--watch`) — pas de ligne CI pour ces repos.
+        if [ "$watchci" = "yes" ] && [ "$state" = "pushed-pr" ] && [ "$url" != "-" ]; then
+            case "$(git -C "$repo" remote get-url origin 2>/dev/null || true)" in
+                *gitlab*) : ;;
+                *)
+                    printf '      ⏳ watching CI (timeout %ss/PR)…\n' "$BULK_CI_TIMEOUT"
+                    ci_results+=("$(printf '%s\t%s' "$name" \
+                        "$(watch_ci "$repo" "$branch" "$url")")")
+                    ;;
+            esac
+        fi
     done < <(discover_repos "$root")
 
     # ⚠️ compté à part : un commit fait mais non poussé (ou une PR à ouvrir à la main)
@@ -347,6 +439,19 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
         local line
         for line in "${results[@]:-}"; do [ -n "$line" ] && printf '%s\n' "$line"; done
         printf '=== END RESULTS\n'
+
+        # Bloc CI : présent UNIQUEMENT avec `--watch-ci` (NFR-0023-18 — sans le flag,
+        # rien ici, et aucun `gh pr checks` n'a été appelé). L'agent le reproduit tel
+        # quel ; `verdict` ∈ pass | fail | no-ci | timeout ; `log_path` pointe l'extrait
+        # de log (`fail` seulement), à lire côté parent — cf. `references/ci-reaction.md`.
+        if [ "$watchci" = "yes" ]; then
+            printf '\n=== CI (repo\tverdict\turl\tlog_path) — reproduce verbatim\n'
+            local cline
+            for cline in "${ci_results[@]:-}"; do
+                [ -n "$cline" ] && printf '%s\n' "$cline"
+            done
+            printf '=== END CI\n'
+        fi
     fi
 
     [ "$failed" -eq 0 ]
@@ -354,7 +459,7 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 MODE="${1:-}"; shift || true
-ROOT="$PWD"; FILTER=""; MSGFILE=""; DRY="no"; NOPR="no"
+ROOT="$PWD"; FILTER=""; MSGFILE=""; DRY="no"; NOPR="no"; WATCHCI="no"
 while [ $# -gt 0 ]; do
     case "$1" in
         --root)     ROOT="$2"; shift 2 ;;
@@ -362,6 +467,7 @@ while [ $# -gt 0 ]; do
         --messages) MSGFILE="$2"; shift 2 ;;
         --dry-run)  DRY="yes"; shift ;;
         --no-pr)    NOPR="yes"; shift ;;
+        --watch-ci) WATCHCI="yes"; shift ;;
         *)          die "unknown option: $1" ;;
     esac
 done
@@ -369,6 +475,6 @@ done
 case "$MODE" in
     discover) do_discover "$ROOT" ;;
     plan)     do_plan  "$ROOT" "$FILTER" ;;
-    apply)    do_apply "$ROOT" "$FILTER" "$MSGFILE" "$DRY" "$NOPR" ;;
-    *)        die "usage: bulk_commit.sh {discover|plan|apply} [--root PATH] [--repo NAME] [--messages FILE] [--dry-run] [--no-pr]" ;;
+    apply)    do_apply "$ROOT" "$FILTER" "$MSGFILE" "$DRY" "$NOPR" "$WATCHCI" ;;
+    *)        die "usage: bulk_commit.sh {discover|plan|apply} [--root PATH] [--repo NAME] [--messages FILE] [--dry-run] [--no-pr] [--watch-ci]" ;;
 esac
