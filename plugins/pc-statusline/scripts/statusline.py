@@ -257,7 +257,7 @@ def _headroom_stats() -> dict | None:
         pass  # no cache yet, or a torn write from a concurrent paint — refetch
 
     try:
-        with urllib.request.urlopen(
+        with urllib.request.urlopen(  # nosec B310 — the URL is the module constant above, a hardcoded http:// loopback address; no caller input reaches it, so no file:/ or custom scheme is reachable
             _HEADROOM_STATS_URL, timeout=_HEADROOM_HTTP_TIMEOUT_S
         ) as response:
             payload = json.loads(response.read().decode("utf-8"))
