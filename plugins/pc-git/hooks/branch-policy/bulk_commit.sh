@@ -278,7 +278,11 @@ _bounded_gh() {
     wdflag="$(mktemp "${TMPDIR:-/tmp}/bgh_wd.XXXXXX")"
     ( cd "$dir" && exec gh "$@" ) >"$outf" 2>"$errf" &
     pid=$!
-    ( sleep "$secs"; [ -e "$wdflag" ] && kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    # `pkill -P` avant le `kill` : tant que `gh` vit, ses éventuels enfants (ou, en
+    # test, le `sleep` du stub) sont visibles ; après, ils sont reparentés à init.
+    ( sleep "$secs"
+      [ -e "$wdflag" ] || exit 0
+      pkill -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     wd=$!
     if wait "$pid" 2>/dev/null; then rc=0; else rc=$?; fi
     rm -f "$wdflag"
@@ -297,7 +301,9 @@ _check_count() {
     local dir="$1" url="$2" n
     _bounded_gh "$dir" "$BULK_CI_PROBE_TIMEOUT" pr checks "$url" --json state --jq 'length' || true
     printf '%s' "$_BGH_ERR" | grep -qi 'no checks' && { printf '0'; return; }
-    n="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1)"
+    # `|| true` : `grep` sans match / `head` SIGPIPE sortent non-zéro — inoffensif
+    # aujourd'hui (errexit désarmé dans `$(…)`), pas si un jour `inherit_errexit`.
+    n="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1 || true)"
     printf '%s' "${n:--1}"
 }
 
@@ -335,7 +341,7 @@ watch_ci() {
     logf="$(mktemp "${TMPDIR:-/tmp}/bulk_ci_fail.XXXXXX")"
     _bounded_gh "$repo" "$BULK_CI_PROBE_TIMEOUT" run list --branch "$branch" --limit 1 \
         --json databaseId --jq '.[0].databaseId' || true
-    runid="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1)"
+    runid="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1 || true)"
     if [ -n "$runid" ]; then
         _bounded_gh "$repo" "$((BULK_CI_PROBE_TIMEOUT * 2))" run view "$runid" --log-failed || true
         printf '%s' "$_BGH_OUT" | tail -80 > "$logf"
@@ -448,7 +454,7 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
             case "$(git -C "$repo" remote get-url origin 2>/dev/null || true)" in
                 *gitlab*) : ;;
                 *)
-                    printf '      ⏳ watching CI (timeout %ss/PR)…\n' "$BULK_CI_TIMEOUT"
+                    printf '      ⏳ watching CI (watch ≤%ss/PR + bounded probes)…\n' "$BULK_CI_TIMEOUT"
                     ci_results+=("$(printf '%s\t%s' "$name" \
                         "$(watch_ci "$repo" "$branch" "$url")")")
                     ;;

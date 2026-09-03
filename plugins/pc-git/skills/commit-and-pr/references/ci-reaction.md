@@ -32,6 +32,9 @@ yourself before reacting; do not guess from the check name alone.
 The line between the two is: *can the fix be read straight off the tool's output with no decision?*
 If yes, it is dictated. If you have to reason about intent, it is judgment.
 
+The extract file lives under `$TMPDIR` (or `/tmp`). Nothing deletes it — read it, then remove it
+once you have acted; leaving it is harmless (small, temp-dir) but yours to clean.
+
 ## `timeout`
 
 CI did not finish within the watch window (`BULK_CI_TIMEOUT`, default 900s per PR). The PR is open;

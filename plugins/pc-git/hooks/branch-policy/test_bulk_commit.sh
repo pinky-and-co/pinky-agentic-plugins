@@ -268,14 +268,18 @@ check "watch-ci #3: count 0 + stderr warning -> no-ci (stderr not merged into pa
 check "watch-ci #3: never entered --watch" \
     "$(grep -c 'pr checks .*--watch' "$GH_LOG")" 0
 
-# #1 — un appel `gh` court qui bloque (ici le probe JSON) est borné, il ne fait pas
-# hang `$(watch_ci …)` : probe borné à 1s vs stub qui dort 4s -> count indéterminé ->
-# --watch (RC 0) -> pass. Le test qui se termine EST la preuve de la borne.
+# #1 — un appel `gh` court qui bloque (ici le probe JSON) est borné : probe borné à
+# 1s vs stub qui dort 9s. Sans la borne le run durerait ≥9s ; avec, ~1s. On mesure
+# le mur, pas juste le verdict. Probe tué → count indéterminé → `--watch` (RC 0) → pass.
 mk_watch_repo november
-outn="$(run_watch november GH_CI_JSON_SLEEP=4 GH_CI_WATCH_RC=0 \
+t0=$SECONDS
+outn="$(run_watch november GH_CI_JSON_SLEEP=9 GH_CI_WATCH_RC=0 \
     BULK_CI_PROBE_TIMEOUT=1 BULK_CI_TIMEOUT=3 BULK_CI_GRACE=0)"
-check "watch-ci #1: a stalled short gh call is time-bounded, no hang" \
+dt=$((SECONDS - t0))
+check "watch-ci #1: stalled probe bounded, verdict still reached" \
     "$(ci_block "$outn" | cut -f1-2)" "november${tab}pass"
+check "watch-ci #1: bound fired — wall time well under the 9s stall" \
+    "$([ "$dt" -lt 7 ] && echo yes || echo no)" yes
 
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"
