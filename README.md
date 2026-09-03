@@ -124,8 +124,6 @@ pinky-agentic-plugins/
 │   │   │   └── plugin.json
 │   │   ├── hooks/
 │   │   │   ├── branch-policy/
-│   │   │   │   ├── .claude/
-│   │   │   │   │   └── .guard-state.json
 │   │   │   │   ├── branch_guard.py
 │   │   │   │   ├── branch_paths.sh
 │   │   │   │   ├── bulk_commit.sh

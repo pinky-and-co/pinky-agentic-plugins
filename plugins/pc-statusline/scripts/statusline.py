@@ -13,7 +13,10 @@ to separate them fully.
 import json
 import os
 import sys
+import tempfile
 import unicodedata
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 
 from _common import (
@@ -42,15 +45,18 @@ RED_BG = "\033[41;30m"  # red background, white text ->  "alert" effect
 
 SEP = f"  {GREY}·{RESET}  "
 
-# Headroom (optional third-party tool, headroomlabs-ai/headroom) appends one JSON line per
-# compressed request here. The file is absent entirely when Headroom is not installed — the
-# savings segment then never renders and the read below costs nothing.
-_HEADROOM_LEDGER = os.path.expanduser("~/.headroom/savings_events.jsonl")
-# The ledger is a rolling ~30-day append log of every compressed request, all clients. The
-# statusline repaints constantly, so only this many trailing bytes are read (session-window
-# events are the most recent) — flat cost per paint whatever the file has grown to. ~180 B/event,
-# so this covers a very long session's worth.
-_HEADROOM_LEDGER_TAIL_BYTES = 65536
+# Headroom (optional third-party tool, headroomlabs-ai/headroom) proxies requests through a local
+# port and serves live counters there. Nothing listens when Headroom is not running — the line then
+# never renders. Scope is the proxy's own lifetime, which `headroom wrap claude` ties to one Claude
+# Code session.
+_HEADROOM_STATS_URL = "http://127.0.0.1:8787/stats"
+# A status line repaints on every turn, so the HTTP call is both hard-bounded and memoized: a hung
+# proxy costs one timeout, not one per paint.
+_HEADROOM_HTTP_TIMEOUT_S = 0.15
+_HEADROOM_CACHE_TTL_S = 5.0
+_HEADROOM_CACHE = os.path.join(
+    tempfile.gettempdir(), f"pc-statusline-headroom-{os.getuid()}.json"
+)
 
 # Minimum blank gap between a row's left and right groups, and the gutter added past the widest
 # natural row to place the shared right-hand column.
@@ -235,67 +241,88 @@ def _get_advisor_model(transcript_path, tail_bytes=16384):
         return None
 
 
-def _headroom_savings(
-    session_start: datetime,
-    ledger_path: str | None = None,
-    tail_bytes: int = _HEADROOM_LEDGER_TAIL_BYTES,
-) -> tuple[float, int] | None:
-    """Context tokens Headroom has compressed away since the session started.
+def _headroom_stats() -> dict | None:
+    """Raw Headroom proxy counters, memoized on disk for `_HEADROOM_CACHE_TTL_S`.
 
-    Sums the Headroom ledger events written by this client at or after ``session_start``. The
-    ledger carries no session id, so the time window stands in for "this session" — exact as long
-    as a single session runs at a time, a slight over-count otherwise (acceptable for an
-    indicator). Only the last ``tail_bytes`` of the file are read, since the ledger grows without
-    bound and the statusline repaints on every turn.
-
-    Args:
-        session_start: session start datetime — the value already derived for the "Started at"
-            segment.
-        ledger_path: override for the ledger path, for tests. ``None`` uses the standard
-            ``~/.headroom/savings_events.jsonl``.
-        tail_bytes: how many trailing bytes of the ledger to read.
-
-    Returns:
-        A ``(percent, tokens_saved)`` pair over the window, or ``None`` when the ledger is
-        absent, unreadable, or holds no matching saving inside the window.
+    Returns the decoded `/stats` payload, or None when the proxy is down, slow or unreadable —
+    every failure mode is the same answer, because a status line has nothing useful to say about
+    a tool that is not running.
     """
     try:
-        start_ts = session_start.timestamp()
-    except (AttributeError, OSError, OverflowError, ValueError):
+        cached = os.path.getmtime(_HEADROOM_CACHE)
+        if (datetime.now().timestamp() - cached) < _HEADROOM_CACHE_TTL_S:
+            with open(_HEADROOM_CACHE, encoding="utf-8") as handle:
+                return json.load(handle)
+    except (OSError, ValueError):
+        pass  # no cache yet, or a torn write from a concurrent paint — refetch
+
+    try:
+        with urllib.request.urlopen(
+            _HEADROOM_STATS_URL, timeout=_HEADROOM_HTTP_TIMEOUT_S
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
         return None
 
     try:
-        size = os.path.getsize(ledger_path or _HEADROOM_LEDGER)
-        with open(ledger_path or _HEADROOM_LEDGER, "rb") as handle:
-            handle.seek(max(0, size - tail_bytes))
-            chunk = handle.read().decode("utf-8", errors="ignore")
+        with open(_HEADROOM_CACHE, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
     except OSError:
+        pass  # an unwritable temp dir costs a refetch per paint, never a missing line
+    return payload
+
+
+def _headroom_net(stats: dict | None = None) -> tuple[int, float, int] | None:
+    """Net effect of Headroom's compression, as `(net_tokens, percent, bust_count)`.
+
+    Compression removes tokens before send, but rewriting a request mutates the cached prefix and
+    invalidates it: the tokens that would have been read at a discount are re-sent instead. Only
+    the difference says whether the tool is paying for itself, so the gross figure Headroom
+    advertises is deliberately not what this reports.
+
+    Tool-schema deferral is excluded on purpose. Routing through the proxy is what disables
+    on-demand tool loading in the first place (Headroom issue #746), so re-enabling it restores the
+    unproxied baseline rather than beating it — counting it as a gain would overstate the tool the
+    same way the gross figure does.
+
+    `percent` is the net against what the session would have sent uncompressed, so it reads as
+    "N% cheaper" or "N% dearer". Its denominator counts only the requests actually compressed while
+    busts are charged against the whole session, so a negative reading errs pessimistic rather than
+    flattering the tool. It is always positive; `net_tokens` carries the sign.
+    """
+    stats = _headroom_stats() if stats is None else stats
+    if not isinstance(stats, dict):
         return None
 
-    lines = chunk.split("\n")
-    if size > tail_bytes:
-        lines = lines[
-            1:
-        ]  # le seek tombe au milieu d'une ligne : la première est partielle
-
-    before_total = saved_total = 0
-    for raw_line in lines:
-        raw_line = raw_line.strip()
-        if not raw_line:
-            continue
-        try:
-            event = json.loads(raw_line)
-            when = datetime.fromisoformat(event["ts"]).timestamp()
-        except (ValueError, TypeError, KeyError):
-            continue  # ligne corrompue ou horodatage illisible : on l'ignore
-        if when < start_ts or event.get("client") != "claude-code":
-            continue
-        before_total += event.get("before", 0) or 0
-        saved_total += event.get("saved", 0) or 0
-
-    if before_total <= 0 or saved_total <= 0:
+    saved = _safe_get(stats, "cost.total_compression_tokens_saved") or 0
+    lost = _safe_get(stats, "prefix_cache.totals.bust_write_tokens") or 0
+    before = _safe_get(stats, "summary.compression.total_tokens_before") or 0
+    busts = _safe_get(stats, "prefix_cache.totals.bust_count") or 0
+    if not isinstance(saved, int) or not isinstance(lost, int) or not before:
         return None
-    return (saved_total / before_total * 100, saved_total)
+
+    net = saved - lost
+    if net == 0:
+        return None
+    return (net, abs(net) / before * 100, busts if isinstance(busts, int) else 0)
+
+
+def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
+    """The Headroom row: one verdict, one magnitude, coloured by the sign.
+
+    Deliberately not a neutral indicator — a reader who has never heard of prompt caching must be
+    able to tell in one glance whether the tool is helping, so the wording flips with the sign
+    instead of staying constant and leaving the reader to work out what a minus means.
+    """
+    amount = abs(net)
+    amount_txt = f"{amount // 1000}k" if amount >= 1000 else str(amount)
+    pct_txt = f"{percent:.1f}%" if percent < 10 else f"{percent:.0f}%"
+    if net > 0:
+        colour, face, verb = GREEN, "🤑", "saved"
+    else:
+        colour, face, verb = RED, "💸", "lost"
+    bust_txt = f"{SEP}{busts} cache bust{'s' if busts != 1 else ''}" if busts else ""
+    return f"Headroom {face} {colour}{pct_txt}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
 
 
 def _short_model(model_id):
@@ -399,14 +426,14 @@ def build_lines(data: dict) -> list[str]:
         f"Context window {bar} {_color_for_pct(pct)}{pct}%{RESET}",
         f"Cache hit {cache_txt}{RESET}",
     ]
-    headroom = _headroom_savings(start_dt)
-    if headroom:
-        hr_pct, hr_saved = headroom
-        hr_amount = f"{hr_saved // 1000}k" if hr_saved >= 1000 else str(hr_saved)
-        line3_left_parts.append(
-            f"{GREEN}🗜 Headroom {hr_pct:.0f}% (-{hr_amount} tok){RESET}"
-        )
     line3_right_parts: list[str] = [f"💲 {cost:.2f} (API-equiv)"]
+
+    # ---------- Optional line : Headroom, only while its proxy is up ----------
+    line4_left_parts: list[str] = []
+    line4_right_parts: list[str] = []
+    headroom = _headroom_net()
+    if headroom:
+        line4_left_parts.append(_fmt_headroom_line(*headroom))
 
     # ---------- Optional line : rate limits > 90% ----------
     warnings = []
@@ -428,6 +455,7 @@ def build_lines(data: dict) -> list[str]:
             (line1_left_parts, line1_right_parts),
             (line2_left_parts, line2_right_parts),
             (line3_left_parts, line3_right_parts),
+            (line4_left_parts, line4_right_parts),
         ]
     )
     # Shared right-hand column: the widest natural row plus one gutter. Content-derived on
@@ -442,6 +470,9 @@ def build_lines(data: dict) -> list[str]:
     lines.append(_SPACER_ROW)
     lines.append(_render_flex(line3_left_parts, line3_right_parts, right_edge))
     lines.append(_SPACER_ROW)
+    if line4_left_parts:
+        lines.append(_render_flex(line4_left_parts, line4_right_parts, right_edge))
+        lines.append(_SPACER_ROW)
 
     return lines
 
