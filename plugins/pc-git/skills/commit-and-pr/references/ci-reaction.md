@@ -16,9 +16,10 @@ wait for. Treat it like `pass`: the PR is open, hand back to the user.
 
 ## `fail` — decide which kind before touching anything
 
-Read the extract at `log_path` (tail of `gh run view --log-failed`, ~80 lines). If `log_path` is
-`-`, the watch saw a red check but the failing run could not be fetched — open the PR's checks tab
-yourself before reacting; do not guess from the check name alone.
+Read the extract at `log_path` (~80-line tail — GitHub: `gh run view --log-failed`; GitLab: the
+failed job's `glab api .../trace`). If `log_path` is `-`, the watch saw a red check but the failing
+run/job could not be fetched — open the PR/MR's checks (or pipeline) tab yourself before reacting;
+do not guess from the check name alone.
 
 - **Dictated by the tool.** The failing step names the file, the line, and the remedy —
   `ruff`, `mypy`, `mdformat`, `prettier`, a formatter's `--check`. The fix is mechanical and
@@ -41,13 +42,19 @@ CI did not finish within the watch window (`BULK_CI_TIMEOUT`, default 900s per P
 the verdict is unknown, not bad. Give the user the URL and let them decide — wait longer, or check
 the run by hand. Never report it as `pass` or `fail`.
 
+On GitLab, `timeout` also covers an unreadable pipeline status (auth failure, project not found) —
+nothing distinguishes that from "still running" without a human checking `glab auth status`. If the
+PR/MR is on GitLab and `timeout` looks suspicious (e.g. every repo in the batch got it), check auth
+before assuming it is just slow CI.
+
 ## Flaky
 
 A check that fails, then passes on a plain re-run with no code change (a network blip, a runner
-timeout, a transient registry 503). Re-run the check — `gh run rerun --failed` on the run, or
-another `commit-and-pr --watch-ci` if the branch moved. **Ceiling: 3 attempts, advisory.** There is
-no counter in the code and there will not be one; if a check needs a 4th re-run it is not flaky, it
-is broken — treat it as a judgment-call `fail` and hand back.
+timeout, a transient registry 503). Re-run the check — `gh run rerun --failed` (GitHub) or `glab ci
+retry <job-id>` (GitLab) on the run/job, or another `commit-and-pr --watch-ci` if the branch moved.
+**Ceiling: 3 attempts, advisory.** There is no counter in the code and there will not be one; if a
+check needs a 4th re-run it is not flaky, it is broken — treat it as a judgment-call `fail` and hand
+back.
 
 ## Never
 

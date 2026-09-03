@@ -93,9 +93,13 @@ them`. Add `--dry-run` first if the plan looked surprising — it prints what ea
 touching nothing, and emits **no `=== RESULTS` block** (run the real apply for that).
 
 Pass **`--watch-ci` only when the invocation asked for it** (the parent wants the CI verdict, not
-just "PR opened"). It makes the script chain `gh pr checks --watch --fail-fast` on each GitHub PR it
-opened — up to 15 min per PR — and append a `=== CI` block. Without the flag the script never calls
-`gh pr checks` and the run ends at PR creation, exactly as before. GitLab MRs are not watched.
+just "PR/MR opened"). It makes the script watch CI on each PR/MR it opened — up to 15 min per PR/MR —
+and append a `=== CI` block. Without the flag the script never calls `gh pr checks`/`glab ci`/`glab
+api` and the run ends at PR/MR creation, exactly as before.
+
+- **GitHub** — chains `gh pr checks --watch --fail-fast`.
+- **GitLab** — `glab` has no equivalent primitive with a trustworthy exit code, so the script reads
+  the status of the MR's own pipeline through `glab api` instead of trusting `glab ci status --wait`.
 
 ## Step 4 — Report what the script reported
 
@@ -120,15 +124,15 @@ that fails loudly.
 ## Step 5 — Report the CI verdicts (only when `--watch-ci` was passed)
 
 With `--watch-ci` the script appends a second block, `=== CI` … `=== END CI`, one tab-separated
-line per PR it watched — `<repo>\t<verdict>\t<url>\t<log_path|->`. **Reproduce those lines too.
+line per PR/MR it watched — `<repo>\t<verdict>\t<url>\t<log_path|->`. **Reproduce those lines too.
 Derive nothing.**
 
 | `verdict` | Meaning | `log_path` |
 |---|---|---|
-| `pass` | every check green | `-` |
-| `fail` | a check failed (`--fail-fast` stopped the watch) | path to an ~80-line extract of `gh run view --log-failed`, or `-` if the failing run could not be retrieved |
-| `no-ci` | PR open, repo has no checks — **not** a pass, nothing was waited for | `-` |
-| `timeout` | CI still running after 15 min/PR — verdict unknown, PR is open | `-` |
+| `pass` | every check green (GitLab: includes a pipeline blocked on a `manual` job — a process gate, not a CI failure) | `-` |
+| `fail` | a check failed (GitHub: `--fail-fast` stopped the watch · GitLab: pipeline `status` is `failed`/`canceled`) | GitHub: ~80-line extract of `gh run view --log-failed` · GitLab: ~80-line extract of `glab api .../trace` for the first failed job — `-` either way if the failing run/job could not be retrieved |
+| `no-ci` | PR/MR open, no checks/pipeline for it — **not** a pass, nothing was waited for | `-` |
+| `timeout` | CI still running after 15 min/PR — verdict unknown, PR/MR is open (GitLab: also covers an unreadable pipeline status — auth failure, project not found — since that is not distinguishable from "still running" without a human checking `glab auth status`) | `-` |
 
 Do **not** fix anything here — this skill runs in a fork without the code context. Hand the block
 back to the parent. If any line is `fail`, tell the parent to read

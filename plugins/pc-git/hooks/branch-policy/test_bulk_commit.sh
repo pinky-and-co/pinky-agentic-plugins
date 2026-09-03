@@ -281,5 +281,273 @@ check "watch-ci #1: stalled probe bounded, verdict still reached" \
 check "watch-ci #1: bound fired — wall time well under the 9s stall" \
     "$([ "$dt" -lt 7 ] && echo yes || echo no)" yes
 
+# ── NFR-0023-20 (inspection) : chaque appel `glab` du bloc watch GitLab passe par
+# `_bounded_cmd` — `open_pr` (`mr view`/`mr create`) est hors scope, précédent déjà
+# accepté côté `gh` (carte watch-ci-support-gitlab).
+gl_watch_src="$(awk '/^# ── watch CI — GitLab/,/^# ── apply/' "$SCRIPT")"
+bad_glab="$(printf '%s\n' "$gl_watch_src" | grep -v '^[[:space:]]*#' | grep -v '_bounded_cmd glab' | grep -c 'glab' || true)"
+check "NFR-0023-20: every glab call in the GitLab watch path goes through _bounded_cmd" "$bad_glab" 0
+
+# Régression : `glab api --jq` n'existe pas sur `glab` réel (testé en direct sur
+# 1.116.0, `ERROR: Unknown flag: --jq`) — un stub trop permissif avait laissé ce
+# flag inerte passer 67/67 verts pendant tout le développement de cette carte.
+no_jq_flag="$(printf '%s\n' "$gl_watch_src" | grep -v '^[[:space:]]*#' | grep -c -- '--jq' || true)"
+check "no --jq flag left in the GitLab watch path (glab api has none)" "$no_jq_flag" 0
+
+# ── --watch-ci GitLab : mapping des verdicts + IMP-0023-27/28 (carte watch-ci-support-gitlab) ──
+# Stub `glab` piloté par env, même discipline que le stub `gh` ci-dessus : log complet dans
+# `$GL_LOG`, statut/erreurs pilotés par variable pour ne dépendre d'aucun vrai `glab auth`.
+glbin="$T/glbin"; mkdir -p "$glbin"
+cat > "$glbin/glab" <<'EOF'
+#!/usr/bin/env bash
+echo "glab $*" >> "$GL_LOG"
+case "$*" in
+  "mr view"*)                    exit 1 ;;
+  "mr create"*)                  printf '%s\n' "$GL_MR_URL"; exit 0 ;;
+  "ci status --wait")
+      [ -n "${GL_WAIT_SLEEP:-}" ] && sleep "$GL_WAIT_SLEEP"
+      [ -n "${GL_WAIT_STDERR:-}" ] && printf '%s\n' "$GL_WAIT_STDERR" >&2
+      # Statut délibérément contradictoire sur stdout — FR-0023-47 exige que le
+      # verdict ignore ce flux et ne suive que l'API du pipeline de la MR.
+      [ -n "${GL_CI_STATUS_STDOUT:-}" ] && printf '%s\n' "$GL_CI_STATUS_STDOUT"
+      exit "${GL_WAIT_RC:-0}" ;;
+  *"merge_requests/"*"/pipelines")
+      # `glab api` n'a pas de `--jq` (flag inexistant, testé en direct sur
+      # `glab 1.116.0` — `ERROR: Unknown flag: --jq`) : `bulk_commit.sh` filtre
+      # désormais lui-même via `jq` sur la sortie JSON brute. Les 3 anciens appels
+      # (`length`/`.[0].status`/`.[0].id`) tapent tous ce même endpoint sans rien
+      # qui les distingue — le stub rend donc un unique document complet, piloté
+      # par les mêmes variables qu'avant.
+      if [ -n "${GL_PIPE_COUNT_SEQ_FILE:-}" ] && [ -s "$GL_PIPE_COUNT_SEQ_FILE" ]; then
+          n="$(head -1 "$GL_PIPE_COUNT_SEQ_FILE")"
+          tail -n +2 "$GL_PIPE_COUNT_SEQ_FILE" > "$GL_PIPE_COUNT_SEQ_FILE.tmp"
+          mv "$GL_PIPE_COUNT_SEQ_FILE.tmp" "$GL_PIPE_COUNT_SEQ_FILE"
+      else
+          n="${GL_PIPE_COUNT:-1}"
+      fi
+      if [ "$n" = "0" ]; then printf '[]\n'; exit 0; fi
+      if [ -n "${GL_STATUS_SEQ_FILE:-}" ] && [ -s "$GL_STATUS_SEQ_FILE" ]; then
+          s="$(head -1 "$GL_STATUS_SEQ_FILE")"
+          tail -n +2 "$GL_STATUS_SEQ_FILE" > "$GL_STATUS_SEQ_FILE.tmp"
+          mv "$GL_STATUS_SEQ_FILE.tmp" "$GL_STATUS_SEQ_FILE"
+      else
+          s="${GL_STATUS-}"
+      fi
+      id="${GL_PIPE_ID:-1}"
+      # `id` toujours quoté (JSON string valide même si `GL_PIPE_ID='-'`, gl-canceled,
+      # simule un id inexploitable) : `jq -r '.id'` le rend tel quel, le
+      # `grep -oE '[0-9]+'` côté script ne matche alors rien — même résultat qu'avant
+      # (log_path `-`) — sans casser le parse JSON du `status` voisin dans le même document.
+      if [ -z "$s" ]; then
+          printf '[{"id": "%s", "status": null}]\n' "$id"
+      else
+          printf '[{"id": "%s", "status": "%s"}]\n' "$id" "$s"
+      fi
+      exit 0 ;;
+  *"pipelines/"*"/jobs")
+      if [ -n "${GL_JOB_ID:-}" ]; then
+          printf '[{"id": "%s", "status": "%s"}]\n' "$GL_JOB_ID" "${GL_JOB_STATUS:-failed}"
+      else
+          printf '[]\n'
+      fi
+      exit 0 ;;
+  *"jobs/"*"/trace")
+      [ -n "${GL_TRACE:-}" ] && printf '%s\n' "$GL_TRACE"
+      exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "$glbin/glab"
+
+mk_watch_repo_gitlab() {   # NAME → repo poussé sur `main`, checkout feature branch, remote "gitlab"
+    local n="$1" b="$T/gitlab-$1-origin.git"
+    git init -q --bare -b main "$b"
+    mkdir -p "$T/$n" && git -C "$T/$n" init -q -b main
+    git -C "$T/$n" remote add origin "$b"
+    git -C "$T/$n" commit -q --allow-empty -m init
+    git -C "$T/$n" push -q -u origin main
+    git -C "$T/$n" remote set-head origin main
+    git -C "$T/$n" checkout -q -b "feature/$n"
+    printf 'def x():\n    return 1\n' > "$T/$n/mod_$n.py"
+}
+
+run_watch_gl() {   # NAME  KEY=VAL...  → stdout de `apply --watch-ci` sur ce repo GitLab
+    local n="$1"; shift
+    local plan fp
+    plan="$("$SCRIPT" plan --root "$T" --repo "$n" 2>&1)"
+    fp="$(printf '%s' "$plan" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+    printf '%s\t✨ feat: %s\n' "$fp" "$n" > "$T/m_$n.tsv"
+    env "$@" PATH="$glbin:$PATH" \
+        "$SCRIPT" apply --root "$T" --repo "$n" --messages "$T/m_$n.tsv" --watch-ci 2>&1
+}
+
+# 6 lignes du mapping (FR-0023-48) — `--wait` réussit direct, `_gl_status` rend le
+# statut terminal du premier coup.
+mk_watch_repo_gitlab gl-pass
+outglp="$(run_watch_gl gl-pass GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-pass/-/merge_requests/11' \
+    GL_PIPE_COUNT=1 GL_STATUS=success BULK_CI_TIMEOUT=3)"
+check "watch-ci gitlab: success -> pass" "$(ci_block "$outglp" | cut -f1-3)" \
+    "gl-pass${tab}pass${tab}https://gitlab.example.com/g/gl-pass/-/merge_requests/11"
+
+mk_watch_repo_gitlab gl-fail
+outglf="$(run_watch_gl gl-fail GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-fail/-/merge_requests/12' \
+    GL_PIPE_COUNT=1 GL_STATUS=failed GL_PIPE_ID=55 GL_JOB_ID=77 GL_TRACE='job failed: exit 1' BULK_CI_TIMEOUT=3)"
+glfb="$(ci_block "$outglf")"
+check "watch-ci gitlab: failed -> fail" "$(printf '%s' "$glfb" | cut -f1-2)" "gl-fail${tab}fail"
+check "watch-ci gitlab: fail carries a non-empty log-extract path" \
+    "$([ -s "$(printf '%s' "$glfb" | cut -f4)" ] && echo yes || echo no)" yes
+
+mk_watch_repo_gitlab gl-canceled
+outglc="$(run_watch_gl gl-canceled GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-canceled/-/merge_requests/13' \
+    GL_PIPE_COUNT=1 GL_STATUS=canceled GL_PIPE_ID='-' BULK_CI_TIMEOUT=3)"
+check "watch-ci gitlab: canceled -> fail" "$(ci_block "$outglc" | cut -f1-2)" "gl-canceled${tab}fail"
+
+# Contrepartie de `gl-manual` ci-dessous : `skipped` sans job manuel (aucun
+# `GL_JOB_ID`) reste `no-ci` — seule la présence d'un job `status: manual`
+# doit faire basculer un pipeline `skipped` en `pass`.
+mk_watch_repo_gitlab gl-skipped
+outgls="$(run_watch_gl gl-skipped GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-skipped/-/merge_requests/14' \
+    GL_PIPE_COUNT=1 GL_STATUS=skipped BULK_CI_TIMEOUT=3)"
+check "watch-ci gitlab: skipped, no manual job -> no-ci" "$(ci_block "$outgls")" "gl-skipped${tab}no-ci${tab}https://gitlab.example.com/g/gl-skipped/-/merge_requests/14${tab}-"
+
+# GitLab n'expose jamais `status: "manual"` au niveau pipeline pour un gate
+# manuel jamais déclenché — confirmé sur witness réel (repo jetable
+# `pinky-ci-watch-witness`, MR `!3`) : le pipeline vaut `skipped`, seul le job
+# porte `status: "manual"`. Stub aligné sur cette réalité, pas sur l'hypothèse
+# initiale (fausse) d'un `status` pipeline littéralement `manual`.
+mk_watch_repo_gitlab gl-manual
+outglm="$(run_watch_gl gl-manual GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-manual/-/merge_requests/15' \
+    GL_PIPE_COUNT=1 GL_STATUS=skipped GL_PIPE_ID=88 GL_JOB_ID=89 GL_JOB_STATUS=manual BULK_CI_TIMEOUT=3)"
+check "watch-ci gitlab: skipped + job manuel -> pass (choix de process, pas un échec CI)" \
+    "$(ci_block "$outglm" | cut -f1-2)" "gl-manual${tab}pass"
+
+mk_watch_repo_gitlab gl-timeout
+outglt="$(run_watch_gl gl-timeout GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-timeout/-/merge_requests/16' \
+    GL_PIPE_COUNT=1 GL_STATUS=running BULK_CI_TIMEOUT=1 BULK_CI_GRACE=0 BULK_CI_POLL_INTERVAL=1)"
+check "watch-ci gitlab: non-terminal past BULK_CI_TIMEOUT -> timeout" \
+    "$(ci_block "$outglt" | cut -f1-2)" "gl-timeout${tab}timeout"
+
+# FR-0023-47 : `ci status --wait` peut mentir sur son propre stdout (aucune garantie
+# GitLab dessus) — le verdict doit suivre exclusivement le pipeline de la MR via
+# `_gl_status`, jamais ce flux.
+mk_watch_repo_gitlab gl-wait-contradicts
+outglwc="$(run_watch_gl gl-wait-contradicts GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-wait-contradicts/-/merge_requests/23' \
+    GL_PIPE_COUNT=1 GL_STATUS=success GL_CI_STATUS_STDOUT=failed BULK_CI_TIMEOUT=3)"
+check "FR-0023-47: verdict suit le pipeline de la MR, jamais le stdout de ci status --wait" \
+    "$(ci_block "$outglwc" | cut -f1-2)" "gl-wait-contradicts${tab}pass"
+
+# FR-0023-49 : `no-ci` tranché AVANT tout wait — liste de pipelines vide confirmée,
+# aucun `ci status --wait` appelé.
+mk_watch_repo_gitlab gl-noci
+: > "$T/gl.log"
+outglnc="$(run_watch_gl gl-noci GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-noci/-/merge_requests/17' \
+    GL_PIPE_COUNT=0 BULK_CI_TIMEOUT=3)"
+check "watch-ci gitlab: empty pipeline list -> no-ci" "$(ci_block "$outglnc")" \
+    "gl-noci${tab}no-ci${tab}https://gitlab.example.com/g/gl-noci/-/merge_requests/17${tab}-"
+check "watch-ci gitlab: no-ci never calls ci status --wait" \
+    "$(grep -c 'glab ci status --wait' "$T/gl.log")" 0
+
+# Re-probe de grâce (review bloquante #1) : le pipeline de MR n'apparaît qu'au
+# second appel (course post-`mr create`, décisive sous Merged Results Pipelines
+# #1017) -> jamais `no-ci`, le watch doit continuer et voir le vrai verdict.
+mk_watch_repo_gitlab gl-grace-recovers
+pcseqf="$T/gl-pipecount-seq.txt"; printf '0\n1\n' > "$pcseqf"
+outglgr="$(run_watch_gl gl-grace-recovers GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-grace-recovers/-/merge_requests/26' \
+    GL_PIPE_COUNT_SEQ_FILE="$pcseqf" GL_STATUS=success BULK_CI_TIMEOUT=3 BULK_CI_GRACE=0)"
+check "no-ci grace re-probe: un pipeline qui apparaît après coup n'est jamais no-ci" \
+    "$(ci_block "$outglgr" | cut -f1-2)" "gl-grace-recovers${tab}pass"
+
+# `iid` illisible (URL de forme inattendue) -> `timeout`, jamais `no-ci` (review
+# importante #2 : `no-ci` est traité comme `pass` côté parent, un cas non
+# tranché ne doit jamais y atterrir).
+mk_watch_repo_gitlab gl-bad-url
+outglbu="$(run_watch_gl gl-bad-url GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-bad-url/-/nothing-here' \
+    BULK_CI_TIMEOUT=3)"
+check "unparseable MR URL (no iid) -> timeout, never no-ci" \
+    "$(ci_block "$outglbu" | cut -f1-2)" "gl-bad-url${tab}timeout"
+
+# FR-0023-49 (négatif) : un appel de comptage qui échoue rend une chaîne VIDE, pas
+# "0" — ce cas ne doit jamais dégrader en `no-ci` silencieux, sinon un GitLab
+# injoignable serait faussement rapporté comme "pas de CI".
+mk_watch_repo_gitlab gl-count-ambiguous
+: > "$T/gl.log"
+outglca="$(run_watch_gl gl-count-ambiguous GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-count-ambiguous/-/merge_requests/24' \
+    GL_STATUS='' BULK_CI_TIMEOUT=1 BULK_CI_GRACE=0 BULK_CI_POLL_INTERVAL=1)"
+check "FR-0023-49: un comptage ambigu (chaîne vide) n'est jamais traité comme no-ci" \
+    "$(ci_block "$outglca" | cut -f1-2)" "gl-count-ambiguous${tab}timeout"
+check "FR-0023-49: un comptage ambigu attend quand même (appelle ci status --wait)" \
+    "$(grep -c 'glab ci status --wait' "$T/gl.log")" 1
+
+# FR-0023-50 (négatif) : job `failed` introuvable -> log_path = `-`, jamais un chemin.
+mk_watch_repo_gitlab gl-fail-nolog
+outglfn="$(run_watch_gl gl-fail-nolog GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-fail-nolog/-/merge_requests/18' \
+    GL_PIPE_COUNT=1 GL_STATUS=failed GL_PIPE_ID=99 BULK_CI_TIMEOUT=3)"
+check "watch-ci gitlab: fail without a recoverable job -> log_path -" \
+    "$(ci_block "$outglfn" | cut -f4)" "-"
+
+# IMP-0023-27 : erreur `glab` ambiguë (statut jamais terminal, `--wait` sans le
+# marqueur « unknown flag ») -> jamais `pass`, verdict `timeout`.
+mk_watch_repo_gitlab gl-ambiguous
+outgla="$(run_watch_gl gl-ambiguous GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-ambiguous/-/merge_requests/19' \
+    GL_PIPE_COUNT=1 GL_STATUS='' GL_WAIT_RC=1 BULK_CI_TIMEOUT=1 BULK_CI_GRACE=0 BULK_CI_POLL_INTERVAL=1)"
+check "IMP-0023-27: ambiguous glab error never yields pass" \
+    "$(ci_block "$outgla" | cut -f1-2)" "gl-ambiguous${tab}timeout"
+
+# NFR-0023-20/22 (miroir de `kilo` côté GitHub) : `--wait` hang au-delà du budget,
+# `_bounded_cmd` le tue -> `timeout`, jamais un hang réel du script de test.
+mk_watch_repo_gitlab gl-wait-hang
+outglwh="$(run_watch_gl gl-wait-hang GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-wait-hang/-/merge_requests/25' \
+    GL_PIPE_COUNT=1 GL_WAIT_SLEEP=4 GL_STATUS=running BULK_CI_TIMEOUT=1 BULK_CI_GRACE=0 BULK_CI_POLL_INTERVAL=1)"
+check "watch-ci gitlab: --wait hang past BULK_CI_TIMEOUT is killed -> timeout" \
+    "$(ci_block "$outglwh" | cut -f1-2)" "gl-wait-hang${tab}timeout"
+
+# Poll fallback (`--wait` cassé/indisponible, « unknown flag ») : converge vers un
+# statut terminal via le poll, jamais bloqué à `timeout` par construction (NFR-0023-22).
+mk_watch_repo_gitlab gl-fallback
+seqf="$T/gl-status-seq.txt"; printf 'running\nrunning\nsuccess\n' > "$seqf"
+outglfb="$(run_watch_gl gl-fallback GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-fallback/-/merge_requests/21' \
+    GL_PIPE_COUNT=1 GL_WAIT_STDERR='unknown flag: --wait' GL_STATUS_SEQ_FILE="$seqf" \
+    BULK_CI_TIMEOUT=5 BULK_CI_GRACE=0 BULK_CI_POLL_INTERVAL=0)"
+check "poll fallback converges past 'running' to the real terminal status" \
+    "$(ci_block "$outglfb" | cut -f1-2)" "gl-fallback${tab}pass"
+
+# NFR-0023-21 : sans `--watch-ci`, aucun appel `glab ci`/`glab api`, pas de bloc CI.
+mk_watch_repo_gitlab gl-nowatch
+: > "$T/gl.log"
+plan_gnw="$("$SCRIPT" plan --root "$T" --repo gl-nowatch 2>&1)"
+fp_gnw="$(printf '%s' "$plan_gnw" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: gl-nowatch\n' "$fp_gnw" > "$T/m_gl-nowatch.tsv"
+out_gnw="$(env GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-nowatch/-/merge_requests/22' \
+    PATH="$glbin:$PATH" "$SCRIPT" apply --root "$T" --repo gl-nowatch --messages "$T/m_gl-nowatch.tsv" 2>&1)"
+check "no --watch-ci (gitlab) -> no === CI block" "$(printf '%s' "$out_gnw" | grep -c '^=== CI ')" 0
+check "no --watch-ci (gitlab) -> no glab ci/api call" \
+    "$(grep -cE 'glab (ci|api)' "$T/gl.log")" 0
+
+# IMP-0023-28 : `_mr_iid` insensible au nombre de (sous-)groupes et au host — le
+# `iid` réellement transmis à l'API est vérifié dans le log du stub, pas deviné.
+mk_watch_repo_gitlab gl-iid-simple
+: > "$T/gl.log"
+run_watch_gl gl-iid-simple GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.com/group/gl-iid-simple/-/merge_requests/101' \
+    GL_PIPE_COUNT=1 GL_STATUS=success BULK_CI_TIMEOUT=3 >/dev/null
+# 2 appels attendus (count + status), même iid réutilisé sur les deux — pas 1.
+check "IMP-0023-28: iid parsed from a single-group URL" \
+    "$(grep -c 'merge_requests/101/pipelines' "$T/gl.log")" 2
+
+mk_watch_repo_gitlab gl-iid-subgroup
+: > "$T/gl.log"
+run_watch_gl gl-iid-subgroup GL_LOG="$T/gl.log" \
+    GL_MR_URL='https://gitlab.com/group/subgroup/gl-iid-subgroup/-/merge_requests/202' \
+    GL_PIPE_COUNT=1 GL_STATUS=success BULK_CI_TIMEOUT=3 >/dev/null
+check "IMP-0023-28: iid parsed from a nested-subgroup URL" \
+    "$(grep -c 'merge_requests/202/pipelines' "$T/gl.log")" 2
+
+mk_watch_repo_gitlab gl-iid-host
+: > "$T/gl.log"
+run_watch_gl gl-iid-host GL_LOG="$T/gl.log" \
+    GL_MR_URL='https://git.example.com/g/sub1/sub2/gl-iid-host/-/merge_requests/303' \
+    GL_PIPE_COUNT=1 GL_STATUS=success BULK_CI_TIMEOUT=3 >/dev/null
+check "IMP-0023-28: iid parsed on a custom host, deep subgroup path" \
+    "$(grep -c 'merge_requests/303/pipelines' "$T/gl.log")" 2
+
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"
