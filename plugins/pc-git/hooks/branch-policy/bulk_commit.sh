@@ -23,6 +23,9 @@ BULK_CI_TIMEOUT="${BULK_CI_TIMEOUT:-900}"
 # Délai avant l'unique re-probe « des checks existent-ils ? » — couvre la course entre
 # `gh pr create` et l'enregistrement des workflows. Un seul deuxième essai, pas une boucle.
 BULK_CI_GRACE="${BULK_CI_GRACE:-10}"
+# Borne des appels `gh` courts du watch (probe des checks, `run list`, `run view`) —
+# distincte de `BULK_CI_TIMEOUT` qui borne le `--watch` lui-même. Overridable pour les tests.
+BULK_CI_PROBE_TIMEOUT="${BULK_CI_PROBE_TIMEOUT:-60}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESOLVE_POLICY="$SCRIPT_DIR/resolve_policy.py"
@@ -249,66 +252,93 @@ open_pr() {
 # Opt-in (NFR-0023-18) : sans `--watch-ci`, aucun de ces appels n'a lieu.
 #
 # Pas de boucle de polling maison : `gh pr checks --watch --fail-fast` EST la
-# primitive (elle boucle et sort à la première défaite). Autour, juste un
-# watchdog bash — `timeout(1)` n'est pas partout (absent de macOS). Le stdout du
-# `--watch` est un affichage live (cadres ANSI) : jeté, seul l'exit code compte.
-#
-# `no-ci` est tranché AVANT tout watch (une PR sans check ferait tourner `--watch`
-# jusqu'au timeout). GitLab est hors scope : `glab` n'a pas d'équivalent `--watch`.
+# primitive (elle boucle et sort à la première défaite). GitLab est hors scope :
+# `glab` n'a pas d'équivalent `--watch`.
 
-# Nombre de checks sur la PR : un entier, ou -1 si `gh` n'a pas pu répondre.
-_ci_check_count() {
-    local url="$1" repo="$2" out
-    out="$( (cd "$repo" && gh pr checks "$url" --json state --jq 'length' 2>&1) || true )"
-    case "$out" in
-        *[!0-9]*|'')
-            printf '%s' "$out" | grep -qi 'no checks' && { printf '0'; return; }
-            printf -- '-1' ;;
-        *) printf '%s' "$out" ;;
-    esac
+# `_bounded_gh <dir> <secs> <gh-args…>` : lance `gh` dans `<dir>`, borné à `<secs>`
+# (watchdog bash — `timeout(1)` absent de macOS). stdout/stderr séparés dans
+# `$_BGH_OUT` / `$_BGH_ERR` (globals — bash ne rend pas deux valeurs). Exit :
+# 0 = ok · 124 = borne atteinte · sinon celui de `gh`. Chaque appel `gh` du watch
+# passe par ici — sinon un appel API bloqué (`--json`, `run list`, `run view`)
+# ferait hang `$(watch_ci …)` bien au-delà du timeout annoncé.
+#
+# Sous-shells `&` redirigés hors du pipe de `$(…)` (fichiers / `/dev/null`) sinon
+# la substitution de commande reste bloquée tant qu'un `sleep` tient le fd stdout.
+# `exec gh` : `$pid` EST le process `gh`, le watchdog le tue directement. `wdflag`
+# retiré au retour : un `sleep` orphelin réveillé plus tard ne tire alors aucun
+# `kill` (le PID pourrait être recyclé). `pkill -P` peut manquer (busybox) —
+# `|| true`, au pire un `sleep` orphelin inoffensif.
+_BGH_OUT=""
+_BGH_ERR=""
+_bounded_gh() {
+    local dir="$1" secs="$2"; shift 2
+    local outf errf wdflag pid wd rc
+    outf="$(mktemp "${TMPDIR:-/tmp}/bgh_out.XXXXXX")"
+    errf="$(mktemp "${TMPDIR:-/tmp}/bgh_err.XXXXXX")"
+    wdflag="$(mktemp "${TMPDIR:-/tmp}/bgh_wd.XXXXXX")"
+    ( cd "$dir" && exec gh "$@" ) >"$outf" 2>"$errf" &
+    pid=$!
+    ( sleep "$secs"; [ -e "$wdflag" ] && kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    wd=$!
+    if wait "$pid" 2>/dev/null; then rc=0; else rc=$?; fi
+    rm -f "$wdflag"
+    pkill -P "$wd" 2>/dev/null || true
+    kill -TERM "$wd" 2>/dev/null || true
+    wait "$wd" 2>/dev/null || true
+    [ "$rc" = "143" ] && rc=124   # tué par le watchdog (SIGTERM) → borne atteinte
+    _BGH_OUT="$(cat "$outf")"; _BGH_ERR="$(cat "$errf")"
+    rm -f "$outf" "$errf"
+    return "$rc"
+}
+
+# Nombre de checks sur la PR : un entier, `0` si `gh` dit « no checks », `-1` sinon.
+# stderr (warnings `gh`) n'entre jamais dans le parse numérique (finding review #3).
+_check_count() {
+    local dir="$1" url="$2" n
+    _bounded_gh "$dir" "$BULK_CI_PROBE_TIMEOUT" pr checks "$url" --json state --jq 'length' || true
+    printf '%s' "$_BGH_ERR" | grep -qi 'no checks' && { printf '0'; return; }
+    n="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1)"
+    printf '%s' "${n:--1}"
 }
 
 watch_ci() {
     local repo="$1" branch="$2" url="$3"
-    local count rc started elapsed logf runid ghpid wdpid wdflag
+    local count rc started elapsed logf runid
 
-    count="$(_ci_check_count "$url" "$repo")"
+    # `no-ci` tranché AVANT tout watch (une PR sans check tournerait jusqu'au timeout).
+    # `BULK_CI_GRACE` : une seule re-probe, la course post-`gh pr create` (cli/cli#7401).
+    count="$(_check_count "$repo" "$url")"
     if [ "$count" = "0" ]; then
         sleep "$BULK_CI_GRACE"
-        count="$(_ci_check_count "$url" "$repo")"
+        count="$(_check_count "$repo" "$url")"
     fi
     [ "$count" = "0" ] && { printf 'no-ci\t%s\t-\n' "$url"; return 0; }
 
-    # Watchdog : `gh … --watch` borné par un kill différé. Les deux sous-shells sont
-    # `>/dev/null 2>&1` — sinon, sous `$(watch_ci …)`, la substitution de commande
-    # resterait bloquée jusqu'à la fin du `sleep` (il tiendrait le fd stdout du pipe).
-    # `exec gh` : `$ghpid` EST le process gh, donc le watchdog le tue directement.
-    # `wdflag` : si le `sleep` s'orpheline malgré le cleanup, il se réveille bien plus
-    # tard et un `kill -TERM "$ghpid"` frapperait un PID recyclé. Le flag retiré ici
-    # neutralise ce tir différé — le `sleep` orphelin ne tue alors plus rien.
-    wdflag="$(mktemp "${TMPDIR:-/tmp}/bulk_ci_wd.XXXXXX")"
     started=$SECONDS
-    ( cd "$repo" && exec gh pr checks "$url" --watch --fail-fast --interval 15 ) >/dev/null 2>&1 &
-    ghpid=$!
-    ( sleep "$BULK_CI_TIMEOUT"; [ -e "$wdflag" ] && kill -TERM "$ghpid" 2>/dev/null ) >/dev/null 2>&1 &
-    wdpid=$!
-    if wait "$ghpid" 2>/dev/null; then rc=0; else rc=$?; fi
-    rm -f "$wdflag"
-    pkill -P "$wdpid" 2>/dev/null || true
-    kill -TERM "$wdpid" 2>/dev/null || true
-    wait "$wdpid" 2>/dev/null || true
+    if _bounded_gh "$repo" "$BULK_CI_TIMEOUT" pr checks "$url" --watch --fail-fast --interval 15
+    then rc=0; else rc=$?; fi
     elapsed=$((SECONDS - started))
 
-    [ "$elapsed" -ge "$BULK_CI_TIMEOUT" ] && { printf 'timeout\t%s\t-\n' "$url"; return 0; }
+    # « no checks » arrivé tard malgré la re-probe : `--watch` sort non-zéro mais
+    # stderr le dit → `no-ci`, jamais `fail` (finding review #2 ; `gh` sort 1 ou 16
+    # sans check selon la version — cli/cli#9691).
+    if printf '%s' "$_BGH_ERR" | grep -qi 'no checks'; then
+        printf 'no-ci\t%s\t-\n' "$url"; return 0
+    fi
+    if [ "$rc" = "124" ] || [ "$elapsed" -ge "$BULK_CI_TIMEOUT" ]; then
+        printf 'timeout\t%s\t-\n' "$url"; return 0
+    fi
     [ "$rc" -eq 0 ] && { printf 'pass\t%s\t-\n' "$url"; return 0; }
 
-    # fail : extrait du log de la dernière run de la branche, plafonné.
+    # fail : extrait borné du log de la dernière run. `log_path` peut rester `-` si
+    # aucune run n'est retrouvée — `references/ci-reaction.md` § `fail` couvre ce cas.
     logf="$(mktemp "${TMPDIR:-/tmp}/bulk_ci_fail.XXXXXX")"
-    runid="$( (cd "$repo" && gh run list --branch "$branch" --limit 1 \
-        --json databaseId --jq '.[0].databaseId' 2>/dev/null) || true )"
+    _bounded_gh "$repo" "$BULK_CI_PROBE_TIMEOUT" run list --branch "$branch" --limit 1 \
+        --json databaseId --jq '.[0].databaseId' || true
+    runid="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1)"
     if [ -n "$runid" ]; then
-        (cd "$repo" && gh run view "$runid" --log-failed 2>/dev/null || true) \
-            | tail -80 > "$logf"
+        _bounded_gh "$repo" "$((BULK_CI_PROBE_TIMEOUT * 2))" run view "$runid" --log-failed || true
+        printf '%s' "$_BGH_OUT" | tail -80 > "$logf"
     fi
     [ -s "$logf" ] || { rm -f "$logf"; logf="-"; }
     printf 'fail\t%s\t%s\n' "$url" "$logf"

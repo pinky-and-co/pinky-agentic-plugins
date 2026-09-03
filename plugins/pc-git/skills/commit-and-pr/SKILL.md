@@ -126,7 +126,7 @@ Derive nothing.**
 | `verdict` | Meaning | `log_path` |
 |---|---|---|
 | `pass` | every check green | `-` |
-| `fail` | a check failed (`--fail-fast` stopped the watch) | path to an ~80-line extract of `gh run view --log-failed` |
+| `fail` | a check failed (`--fail-fast` stopped the watch) | path to an ~80-line extract of `gh run view --log-failed`, or `-` if the failing run could not be retrieved |
 | `no-ci` | PR open, repo has no checks — **not** a pass, nothing was waited for | `-` |
 | `timeout` | CI still running after 15 min/PR — verdict unknown, PR is open | `-` |
 

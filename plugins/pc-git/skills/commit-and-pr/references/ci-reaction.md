@@ -16,7 +16,9 @@ wait for. Treat it like `pass`: the PR is open, hand back to the user.
 
 ## `fail` — decide which kind before touching anything
 
-Read the extract at `log_path` (tail of `gh run view --log-failed`, ~80 lines).
+Read the extract at `log_path` (tail of `gh run view --log-failed`, ~80 lines). If `log_path` is
+`-`, the watch saw a red check but the failing run could not be fetched — open the PR's checks tab
+yourself before reacting; do not guess from the check name alone.
 
 - **Dictated by the tool.** The failing step names the file, the line, and the remedy —
   `ruff`, `mypy`, `mdformat`, `prettier`, a formatter's `--check`. The fix is mechanical and

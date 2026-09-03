@@ -160,22 +160,28 @@ check "RESULTS golf = direct commit, exact pushed-nopr state" \
 check "golf: no PR attempted on a direct commit" \
     "$(grep -c '^gh pr create' "$GH_LOG")" 0
 
-# ── --watch-ci : les 4 verdicts (carte session-babysitte-la-ci-de-sa-pr) ──────
-# Stub `gh` piloté par env : nombre de checks, exit code du --watch, sleep éventuel.
-# Le --watch réel prend jusqu'à 15 min : ici le stub rend la main tout de suite (ou
-# dort quelques secondes pour le cas timeout, avec BULK_CI_TIMEOUT rabaissé).
+# ── --watch-ci : les verdicts + les régressions de review (carte session-babysitte) ──
+# Stub `gh` piloté par env. stdout et stderr SÉPARÉS : `GH_CI_JSON_STDERR` /
+# `GH_CI_WATCH_STDERR` simulent un warning ou un « no checks » sur stderr sans polluer
+# le parse numérique (findings review #2/#3). `GH_CI_COUNT` non défini = stdout vide.
 cibin="$T/cibin"; mkdir -p "$cibin"
 cat > "$cibin/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "$GH_LOG"
 case "$*" in
-  "pr view"*)                       exit 1 ;;
-  "pr create"*)                     echo "https://github.com/x/${GH_REPO}/pull/1"; exit 0 ;;
-  *"pr checks"*"--json state"*)      echo "${GH_CI_COUNT:-1}"; exit 0 ;;
-  *"pr checks"*"--watch"*)           [ -n "${GH_CI_WATCH_SLEEP:-}" ] && sleep "$GH_CI_WATCH_SLEEP"
-                                     exit "${GH_CI_WATCH_RC:-0}" ;;
-  "run list"*)                       echo "424242"; exit 0 ;;
-  "run view"*)                       printf 'ruff.....F\nmod.py:1:1: F401 unused import\n'; exit 0 ;;
+  "pr view"*)                    exit 1 ;;
+  "pr create"*)                  echo "https://github.com/x/${GH_REPO}/pull/1"; exit 0 ;;
+  *"pr checks"*"--json state"*)
+      [ -n "${GH_CI_JSON_SLEEP:-}" ] && sleep "$GH_CI_JSON_SLEEP"
+      [ -n "${GH_CI_JSON_STDERR:-}" ] && printf '%s\n' "$GH_CI_JSON_STDERR" >&2
+      [ -n "${GH_CI_COUNT+x}" ] && printf '%s\n' "$GH_CI_COUNT"
+      exit "${GH_CI_JSON_RC:-0}" ;;
+  *"pr checks"*"--watch"*)
+      [ -n "${GH_CI_WATCH_SLEEP:-}" ] && sleep "$GH_CI_WATCH_SLEEP"
+      [ -n "${GH_CI_WATCH_STDERR:-}" ] && printf '%s\n' "$GH_CI_WATCH_STDERR" >&2
+      exit "${GH_CI_WATCH_RC:-0}" ;;
+  "run list"*)                   echo "424242"; exit 0 ;;
+  "run view"*)                   printf 'ruff.....F\nmod.py:1:1: F401 unused import\n'; exit 0 ;;
 esac
 exit 0
 EOF
@@ -239,6 +245,37 @@ mk_watch_repo kilo
 outk="$(run_watch kilo GH_CI_COUNT=2 GH_CI_WATCH_RC=0 GH_CI_WATCH_SLEEP=4 BULK_CI_TIMEOUT=1 BULK_CI_GRACE=0)"
 check "watch-ci: timeout verdict (cols 1-2)" \
     "$(ci_block "$outk" | cut -f1-2)" "kilo${tab}timeout"
+
+# ── Régressions review (2026-09-03) ──────────────────────────────────────────
+
+# #2 — « no checks » arrivé tard : le probe JSON échoue SANS dire « no checks »
+# (count -> -1, la voie rapide no-ci est sautée), puis --watch sort non-zéro AVEC
+# « no checks » sur stderr → verdict `no-ci`, jamais `fail\t<url>\t-`.
+mk_watch_repo lima
+outl="$(run_watch lima GH_CI_JSON_RC=1 GH_CI_JSON_STDERR='could not resolve to a Repository' \
+    GH_CI_WATCH_RC=1 GH_CI_WATCH_STDERR="no checks reported on the 'feature/lima' branch" \
+    BULK_CI_TIMEOUT=3 BULK_CI_GRACE=0)"
+check "watch-ci #2: late 'no checks' on --watch stderr -> no-ci, not fail" \
+    "$(ci_block "$outl")" "lima${tab}no-ci${tab}https://github.com/x/lima/pull/1${tab}-"
+
+# #3 — stdout dit « 0 » mais stderr porte un warning `gh` : le warning ne doit PAS
+# entrer dans le parse (sinon count -> -1 -> voie rapide sautée -> --watch inutile).
+: > "$GH_LOG"
+mk_watch_repo mike
+outm="$(run_watch mike GH_CI_COUNT=0 GH_CI_JSON_STDERR='warning: token scope' BULK_CI_GRACE=0)"
+check "watch-ci #3: count 0 + stderr warning -> no-ci (stderr not merged into parse)" \
+    "$(ci_block "$outm")" "mike${tab}no-ci${tab}https://github.com/x/mike/pull/1${tab}-"
+check "watch-ci #3: never entered --watch" \
+    "$(grep -c 'pr checks .*--watch' "$GH_LOG")" 0
+
+# #1 — un appel `gh` court qui bloque (ici le probe JSON) est borné, il ne fait pas
+# hang `$(watch_ci …)` : probe borné à 1s vs stub qui dort 4s -> count indéterminé ->
+# --watch (RC 0) -> pass. Le test qui se termine EST la preuve de la borne.
+mk_watch_repo november
+outn="$(run_watch november GH_CI_JSON_SLEEP=4 GH_CI_WATCH_RC=0 \
+    BULK_CI_PROBE_TIMEOUT=1 BULK_CI_TIMEOUT=3 BULK_CI_GRACE=0)"
+check "watch-ci #1: a stalled short gh call is time-bounded, no hang" \
+    "$(ci_block "$outn" | cut -f1-2)" "november${tab}pass"
 
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"
