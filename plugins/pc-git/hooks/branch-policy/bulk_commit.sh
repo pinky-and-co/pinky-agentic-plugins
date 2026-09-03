@@ -26,6 +26,10 @@ BULK_CI_GRACE="${BULK_CI_GRACE:-10}"
 # Borne des appels `gh` courts du watch (probe des checks, `run list`, `run view`) —
 # distincte de `BULK_CI_TIMEOUT` qui borne le `--watch` lui-même. Overridable pour les tests.
 BULK_CI_PROBE_TIMEOUT="${BULK_CI_PROBE_TIMEOUT:-60}"
+# Intervalle du poll de secours GitLab (`_gl_poll_fallback`) — fixe au sens de
+# NFR-0023-22 (pas adaptatif), overridable pour ne pas payer 15s réelles par cas
+# de test qui traverse le fallback.
+BULK_CI_POLL_INTERVAL="${BULK_CI_POLL_INTERVAL:-15}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESOLVE_POLICY="$SCRIPT_DIR/resolve_policy.py"
@@ -247,39 +251,44 @@ open_pr() {
 }
 
 # ── watch CI (`--watch-ci`) ───────────────────────────────────────────────────
-# Après l'ouverture d'une PR GitHub, attend le verdict CI et l'émet en UNE ligne
+# Après l'ouverture d'une PR/MR, attend le verdict CI et l'émet en UNE ligne
 # machine `<verdict>\t<url>\t<log|->` — verdict ∈ pass | fail | no-ci | timeout.
 # Opt-in (NFR-0023-18) : sans `--watch-ci`, aucun de ces appels n'a lieu.
 #
-# Pas de boucle de polling maison : `gh pr checks --watch --fail-fast` EST la
-# primitive (elle boucle et sort à la première défaite). GitLab est hors scope :
-# `glab` n'a pas d'équivalent `--watch`.
+# GitHub : pas de boucle de polling maison — `gh pr checks --watch --fail-fast`
+# EST la primitive (elle boucle et sort à la première défaite).
+# GitLab : `glab` n'a pas d'équivalent fiable (`glab ci status --wait` bloque
+# mais son exit-code n'est pas fiable — gitlab-org/cli#7915 — et casse sur une
+# branche de MR avec Merged Results Pipelines — #1017) → le verdict est lu par
+# l'API du pipeline de la MR, jamais dérivé de l'exit-code de `--wait`.
 
-# `_bounded_gh <dir> <secs> <gh-args…>` : lance `gh` dans `<dir>`, borné à `<secs>`
-# (watchdog bash — `timeout(1)` absent de macOS). stdout/stderr séparés dans
-# `$_BGH_OUT` / `$_BGH_ERR` (globals — bash ne rend pas deux valeurs). Exit :
-# 0 = ok · 124 = borne atteinte · sinon celui de `gh`. Chaque appel `gh` du watch
-# passe par ici — sinon un appel API bloqué (`--json`, `run list`, `run view`)
-# ferait hang `$(watch_ci …)` bien au-delà du timeout annoncé.
+# `_bounded_cmd <bin> <dir> <secs> <args…>` : lance `<bin>` (`gh` ou `glab`) dans
+# `<dir>`, borné à `<secs>` (watchdog bash — `timeout(1)` absent de macOS).
+# stdout/stderr séparés dans `$_BCMD_OUT` / `$_BCMD_ERR` (globals — bash ne rend
+# pas deux valeurs). Exit : 0 = ok · 124 = borne atteinte · sinon celui de `<bin>`.
+# Chaque appel `gh`/`glab` du watch passe par ici — sinon un appel API bloqué
+# ferait hang `$(_watch_ci_github …)`/`$(_watch_ci_gitlab …)` bien au-delà du
+# timeout annoncé. Portée : uniquement les appels DU WATCH — `open_pr` appelle
+# `gh`/`glab` (view/create) hors de `_bounded_cmd`, préexistant, hors scope ici.
 #
 # Sous-shells `&` redirigés hors du pipe de `$(…)` (fichiers / `/dev/null`) sinon
 # la substitution de commande reste bloquée tant qu'un `sleep` tient le fd stdout.
-# `exec gh` : `$pid` EST le process `gh`, le watchdog le tue directement. `wdflag`
-# retiré au retour : un `sleep` orphelin réveillé plus tard ne tire alors aucun
-# `kill` (le PID pourrait être recyclé). `pkill -P` peut manquer (busybox) —
+# `exec <bin>` : `$pid` EST le process `<bin>`, le watchdog le tue directement.
+# `wdflag` retiré au retour : un `sleep` orphelin réveillé plus tard ne tire alors
+# aucun `kill` (le PID pourrait être recyclé). `pkill -P` peut manquer (busybox) —
 # `|| true`, au pire un `sleep` orphelin inoffensif.
-_BGH_OUT=""
-_BGH_ERR=""
-_bounded_gh() {
-    local dir="$1" secs="$2"; shift 2
+_BCMD_OUT=""
+_BCMD_ERR=""
+_bounded_cmd() {
+    local bin="$1" dir="$2" secs="$3"; shift 3
     local outf errf wdflag pid wd rc
-    outf="$(mktemp "${TMPDIR:-/tmp}/bgh_out.XXXXXX")"
-    errf="$(mktemp "${TMPDIR:-/tmp}/bgh_err.XXXXXX")"
-    wdflag="$(mktemp "${TMPDIR:-/tmp}/bgh_wd.XXXXXX")"
-    ( cd "$dir" && exec gh "$@" ) >"$outf" 2>"$errf" &
+    outf="$(mktemp "${TMPDIR:-/tmp}/bcmd_out.XXXXXX")"
+    errf="$(mktemp "${TMPDIR:-/tmp}/bcmd_err.XXXXXX")"
+    wdflag="$(mktemp "${TMPDIR:-/tmp}/bcmd_wd.XXXXXX")"
+    ( cd "$dir" && exec "$bin" "$@" ) >"$outf" 2>"$errf" &
     pid=$!
-    # `pkill -P` avant le `kill` : tant que `gh` vit, ses éventuels enfants (ou, en
-    # test, le `sleep` du stub) sont visibles ; après, ils sont reparentés à init.
+    # `pkill -P` avant le `kill` : tant que `<bin>` vit, ses éventuels enfants (ou,
+    # en test, le `sleep` du stub) sont visibles ; après, ils sont reparentés à init.
     ( sleep "$secs"
       [ -e "$wdflag" ] || exit 0
       pkill -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null ) >/dev/null 2>&1 &
@@ -290,7 +299,7 @@ _bounded_gh() {
     kill -TERM "$wd" 2>/dev/null || true
     wait "$wd" 2>/dev/null || true
     [ "$rc" = "143" ] && rc=124   # tué par le watchdog (SIGTERM) → borne atteinte
-    _BGH_OUT="$(cat "$outf")"; _BGH_ERR="$(cat "$errf")"
+    _BCMD_OUT="$(cat "$outf")"; _BCMD_ERR="$(cat "$errf")"
     rm -f "$outf" "$errf"
     return "$rc"
 }
@@ -299,15 +308,15 @@ _bounded_gh() {
 # stderr (warnings `gh`) n'entre jamais dans le parse numérique (finding review #3).
 _check_count() {
     local dir="$1" url="$2" n
-    _bounded_gh "$dir" "$BULK_CI_PROBE_TIMEOUT" pr checks "$url" --json state --jq 'length' || true
-    printf '%s' "$_BGH_ERR" | grep -qi 'no checks' && { printf '0'; return; }
+    _bounded_cmd gh "$dir" "$BULK_CI_PROBE_TIMEOUT" pr checks "$url" --json state --jq 'length' || true
+    printf '%s' "$_BCMD_ERR" | grep -qi 'no checks' && { printf '0'; return; }
     # `|| true` : `grep` sans match / `head` SIGPIPE sortent non-zéro — inoffensif
     # aujourd'hui (errexit désarmé dans `$(…)`), pas si un jour `inherit_errexit`.
-    n="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1 || true)"
+    n="$(printf '%s' "$_BCMD_OUT" | grep -oE '[0-9]+' | head -1 || true)"
     printf '%s' "${n:--1}"
 }
 
-watch_ci() {
+_watch_ci_github() {
     local repo="$1" branch="$2" url="$3"
     local count rc started elapsed logf runid
 
@@ -321,14 +330,14 @@ watch_ci() {
     [ "$count" = "0" ] && { printf 'no-ci\t%s\t-\n' "$url"; return 0; }
 
     started=$SECONDS
-    if _bounded_gh "$repo" "$BULK_CI_TIMEOUT" pr checks "$url" --watch --fail-fast --interval 15
+    if _bounded_cmd gh "$repo" "$BULK_CI_TIMEOUT" pr checks "$url" --watch --fail-fast --interval 15
     then rc=0; else rc=$?; fi
     elapsed=$((SECONDS - started))
 
     # « no checks » arrivé tard malgré la re-probe : `--watch` sort non-zéro mais
     # stderr le dit → `no-ci`, jamais `fail` (finding review #2 ; `gh` sort 1 ou 16
     # sans check selon la version — cli/cli#9691).
-    if printf '%s' "$_BGH_ERR" | grep -qi 'no checks'; then
+    if printf '%s' "$_BCMD_ERR" | grep -qi 'no checks'; then
         printf 'no-ci\t%s\t-\n' "$url"; return 0
     fi
     if [ "$rc" = "124" ] || [ "$elapsed" -ge "$BULK_CI_TIMEOUT" ]; then
@@ -339,15 +348,166 @@ watch_ci() {
     # fail : extrait borné du log de la dernière run. `log_path` peut rester `-` si
     # aucune run n'est retrouvée — `references/ci-reaction.md` § `fail` couvre ce cas.
     logf="$(mktemp "${TMPDIR:-/tmp}/bulk_ci_fail.XXXXXX")"
-    _bounded_gh "$repo" "$BULK_CI_PROBE_TIMEOUT" run list --branch "$branch" --limit 1 \
+    _bounded_cmd gh "$repo" "$BULK_CI_PROBE_TIMEOUT" run list --branch "$branch" --limit 1 \
         --json databaseId --jq '.[0].databaseId' || true
-    runid="$(printf '%s' "$_BGH_OUT" | grep -oE '[0-9]+' | head -1 || true)"
+    runid="$(printf '%s' "$_BCMD_OUT" | grep -oE '[0-9]+' | head -1 || true)"
     if [ -n "$runid" ]; then
-        _bounded_gh "$repo" "$((BULK_CI_PROBE_TIMEOUT * 2))" run view "$runid" --log-failed || true
-        printf '%s' "$_BGH_OUT" | tail -80 > "$logf"
+        _bounded_cmd gh "$repo" "$((BULK_CI_PROBE_TIMEOUT * 2))" run view "$runid" --log-failed || true
+        printf '%s' "$_BCMD_OUT" | tail -80 > "$logf"
     fi
     [ -s "$logf" ] || { rm -f "$logf"; logf="-"; }
     printf 'fail\t%s\t%s\n' "$url" "$logf"
+}
+
+# ── watch CI — GitLab ─────────────────────────────────────────────────────────
+# `iid` de la MR, extrait de son URL (`…/-/merge_requests/<iid>`) — insensible au
+# nombre de (sous-)groupes devant, IMP-0023-28.
+_mr_iid() {
+    printf '%s' "$1" | grep -oE 'merge_requests/[0-9]+' | grep -oE '[0-9]+' | tail -1
+}
+
+# Nombre de pipelines DE LA MR (jamais de branche) : `0` si la liste est vide,
+# vide si l'appel échoue (auth, projet introuvable, JSON illisible…) — distinct
+# de `0`, jamais traité comme `no-ci` (FR-0023-49 : `no-ci` n'est tranché que
+# sur une liste vide confirmée, pas sur une erreur).
+# `glab api` n'a pas de `--jq` (flag inexistant sur `glab` réel, ex. 1.116.0 —
+# testé en direct, `ERROR: Unknown flag: --jq` ; masqué jusqu'ici par un stub de
+# test trop permissif) : le filtrage passe par le vrai binaire `jq` sur la
+# sortie JSON brute. `jq` absent ou JSON illisible → `_BCMD_OUT` vide en sortie,
+# donc `count`/`status` vides, donc `timeout` en bout de chaîne — même
+# dégradation que les autres causes « statut illisible » déjà documentées.
+_gl_pipeline_count() {
+    local repo="$1" iid="$2"
+    _bounded_cmd glab "$repo" "$BULK_CI_PROBE_TIMEOUT" \
+        api "projects/:id/merge_requests/${iid}/pipelines" || true
+    # `grep -oE` en aval de `jq` : ne fait pas confiance aveuglément à un champ
+    # numérique venu de l'API, même déjà filtré.
+    printf '%s' "$_BCMD_OUT" | jq -r 'length' 2>/dev/null | grep -oE '[0-9]+' | head -1
+}
+
+# `status` du dernier pipeline DE LA MR (`.[0]`, jamais `glab ci status` — #1017).
+# Chaîne vide si l'appel échoue ou si le pipeline n'a pas (encore) de statut
+# (`// empty` — `jq -r` rendrait sinon la chaîne littérale `null`).
+_gl_status() {
+    local repo="$1" iid="$2"
+    _bounded_cmd glab "$repo" "$BULK_CI_PROBE_TIMEOUT" \
+        api "projects/:id/merge_requests/${iid}/pipelines" || true
+    printf '%s' "$_BCMD_OUT" | jq -r '.[0].status // empty' 2>/dev/null | tr -d '[:space:]'
+}
+
+# Boucle de secours si `--wait` est indisponible/cassé, ou hang sur un statut
+# non-terminal : poll intervalle fixe 15s, plafonné à `BULK_CI_TIMEOUT` depuis
+# `$3`, PUIS une seule re-probe de grâce (NFR-0023-22 — pas une primitive
+# réutilisable, ce chemin est le seul appelant).
+_gl_poll_fallback() {
+    local repo="$1" iid="$2" started="$3" status elapsed
+    while :; do
+        status="$(_gl_status "$repo" "$iid")"
+        case "$status" in
+            success|failed|canceled|skipped|manual) printf '%s' "$status"; return 0 ;;
+        esac
+        elapsed=$((SECONDS - started))
+        [ "$elapsed" -lt "$BULK_CI_TIMEOUT" ] || break
+        sleep "$BULK_CI_POLL_INTERVAL"
+    done
+    sleep "$BULK_CI_GRACE"
+    _gl_status "$repo" "$iid"
+}
+
+# `skipped` au niveau pipeline recouvre deux cas indiscernables sans regarder les
+# jobs : aucune CI réelle (vrai `no-ci`) et un gate manuel jamais déclenché — un
+# choix de process, pas un échec CI (FR-0023-48). GitLab n'expose jamais
+# `status: "manual"` au niveau pipeline pour ce cas (confirmé sur witness réel,
+# repo `pinky-ci-watch-witness` MR `!3` : pipeline `skipped`, job `manual`) —
+# seul le job le porte, d'où ce détour par `…/pipelines/<id>/jobs`.
+_gl_has_manual_job() {
+    local repo="$1" iid="$2" pid
+    _bounded_cmd glab "$repo" "$BULK_CI_PROBE_TIMEOUT" \
+        api "projects/:id/merge_requests/${iid}/pipelines" || true
+    pid="$(printf '%s' "$_BCMD_OUT" | jq -r '.[0].id // empty' 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+    [ -n "$pid" ] || return 1
+    _bounded_cmd glab "$repo" "$BULK_CI_PROBE_TIMEOUT" \
+        api "projects/:id/pipelines/${pid}/jobs" || true
+    printf '%s' "$_BCMD_OUT" | jq -e '[.[] | select(.status=="manual")] | length > 0' \
+        >/dev/null 2>&1
+}
+
+# Extrait de trace (≤80 lignes) du premier job `failed` du pipeline de la MR.
+# `-` si le pipeline, le job ou la trace ne sont pas retrouvables (FR-0023-50).
+_gl_fail_log() {
+    local repo="$1" iid="$2" pid jid logf
+    _bounded_cmd glab "$repo" "$BULK_CI_PROBE_TIMEOUT" \
+        api "projects/:id/merge_requests/${iid}/pipelines" || true
+    pid="$(printf '%s' "$_BCMD_OUT" | jq -r '.[0].id // empty' 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+    [ -n "$pid" ] || { printf -- '-'; return; }
+    _bounded_cmd glab "$repo" "$BULK_CI_PROBE_TIMEOUT" \
+        api "projects/:id/pipelines/${pid}/jobs" || true
+    jid="$(printf '%s' "$_BCMD_OUT" | jq -r '[.[]|select(.status=="failed")][0].id // empty' 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+    [ -n "$jid" ] || { printf -- '-'; return; }
+    logf="$(mktemp "${TMPDIR:-/tmp}/bulk_ci_fail_gl.XXXXXX")"
+    _bounded_cmd glab "$repo" "$((BULK_CI_PROBE_TIMEOUT * 2))" \
+        api "projects/:id/jobs/${jid}/trace" || true
+    printf '%s' "$_BCMD_OUT" | tail -80 > "$logf"
+    [ -s "$logf" ] || { rm -f "$logf"; logf="-"; }
+    printf '%s' "$logf"
+}
+
+_watch_ci_gitlab() {
+    local repo="$1" url="$2"
+    local iid count started status logf
+
+    iid="$(_mr_iid "$url")"
+    # `iid` illisible (URL de forme inattendue) : ce n'est ni « pas de pipeline »
+    # ni un statut terminal — `timeout`, jamais `no-ci` (review bloquante #2 :
+    # `no-ci` est traité comme `pass` côté parent, un cas non tranché ne doit
+    # jamais y atterrir).
+    [ -n "$iid" ] || { printf 'timeout\t%s\t-\n' "$url"; return 0; }
+
+    # `no-ci` tranché AVANT tout wait/poll : liste de pipelines vide confirmée,
+    # jamais sur un appel en échec (FR-0023-49). Re-probe de grâce avant de
+    # conclure : même course post-`mr create` que côté GitHub (cli/cli#7401),
+    # et déterminante ici sous « Merged Results Pipelines » (#1017) où le
+    # pipeline de MR n'existe qu'après l'événement MR — review bloquante #1.
+    count="$(_gl_pipeline_count "$repo" "$iid")"
+    if [ "$count" = "0" ]; then
+        sleep "$BULK_CI_GRACE"
+        count="$(_gl_pipeline_count "$repo" "$iid")"
+    fi
+    [ "$count" = "0" ] && { printf 'no-ci\t%s\t-\n' "$url"; return 0; }
+
+    started=$SECONDS
+    _bounded_cmd glab "$repo" "$BULK_CI_TIMEOUT" ci status --wait >/dev/null 2>&1 || true
+    # L'exit-code de `--wait` n'est jamais fiable (gitlab-org/cli#7915) : on relit
+    # toujours le `status` par l'API plutôt que de s'y fier.
+    if printf '%s' "$_BCMD_ERR" | grep -qi 'unknown flag\|unknown command'; then
+        status="$(_gl_poll_fallback "$repo" "$iid" "$started")"
+    else
+        status="$(_gl_status "$repo" "$iid")"
+        case "$status" in
+            success|failed|canceled|skipped|manual) : ;;
+            # `--wait` borné par `_bounded_cmd` peut revenir avant un statut
+            # terminal (hang sur `manual`/`blocked`, erreur `glab` ambiguë) :
+            # une dernière poll de secours avant de conclure (IMP-0023-27).
+            *) status="$(_gl_poll_fallback "$repo" "$iid" "$started")" ;;
+        esac
+    fi
+
+    case "$status" in
+        success) printf 'pass\t%s\t-\n' "$url" ;;
+        manual)  printf 'pass\t%s\t-\n' "$url" ;;
+        failed|canceled)
+            logf="$(_gl_fail_log "$repo" "$iid")"
+            printf 'fail\t%s\t%s\n' "$url" "$logf" ;;
+        skipped)
+            if _gl_has_manual_job "$repo" "$iid"; then
+                printf 'pass\t%s\t-\n' "$url"
+            else
+                printf 'no-ci\t%s\t-\n' "$url"
+            fi ;;
+        # statut vide/non-terminal persistant (auth KO, projet introuvable…) :
+        # jamais `pass` par défaut (IMP-0023-27).
+        *) printf 'timeout\t%s\t-\n' "$url" ;;
+    esac
 }
 
 # ── apply ─────────────────────────────────────────────────────────────────────
@@ -448,16 +608,16 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
         # compté comme partiel, jamais dans le ✅.
         [ "$state" = "pushed-prfailed" ] && partial=$((partial + 1)) || ok=$((ok + 1))
 
-        # `--watch-ci` : seulement pour une PR GitHub réellement ouverte. GitLab est
-        # hors scope (`glab` n'a pas de `--watch`) — pas de ligne CI pour ces repos.
+        # `--watch-ci` : seulement pour une PR/MR réellement ouverte.
         if [ "$watchci" = "yes" ] && [ "$state" = "pushed-pr" ] && [ "$url" != "-" ]; then
+            printf '      ⏳ watching CI (watch ≤%ss/PR + bounded probes)…\n' "$BULK_CI_TIMEOUT"
             case "$(git -C "$repo" remote get-url origin 2>/dev/null || true)" in
-                *gitlab*) : ;;
-                *)
-                    printf '      ⏳ watching CI (watch ≤%ss/PR + bounded probes)…\n' "$BULK_CI_TIMEOUT"
+                *gitlab*)
                     ci_results+=("$(printf '%s\t%s' "$name" \
-                        "$(watch_ci "$repo" "$branch" "$url")")")
-                    ;;
+                        "$(_watch_ci_gitlab "$repo" "$url")")") ;;
+                *)
+                    ci_results+=("$(printf '%s\t%s' "$name" \
+                        "$(_watch_ci_github "$repo" "$branch" "$url")")") ;;
             esac
         fi
     done < <(discover_repos "$root")
