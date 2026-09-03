@@ -14,6 +14,23 @@ Cursor…), no tool-specific mechanics (no slash-command name, no literal model 
 GitHub Flow — the resolved value the skills rely on
 lives in `.claude/settings.pinky.json`, this is orientation only.
 
+## Plugin versioning
+
+Every plugin stays at `0.1.0` until it is actually released. A feature does not bump anything —
+the version moves at a release, not at a merge. Nothing here is published yet, so a version number
+that tracks development effort just counts commits.
+
+The cost is not cosmetic: a plugin shipping a status line is wired into `~/.claude/settings.json`
+through an absolute path carrying its version (`statusLine` has no plugin-manifest slot). Bumping
+lands a new cache directory while the old one survives, so the wired path stays valid and silently
+serves the previous build — no error, no signal. `pinky install --plugin <name>` re-points it.
+
+Refreshing the *content* of a version already in the cache is a separate step: `claude plugin
+install`/`update` fills a cache directory only when it is absent, so editing a plugin without
+bumping leaves the installed copy stale. Delete
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` and re-run the install to pick the
+working tree up.
+
 ## Naming glossary
 
 - **Plugin** — a folder under `plugins/<name>/` with its own `.claude-plugin/plugin.json`,

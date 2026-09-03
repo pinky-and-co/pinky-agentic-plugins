@@ -167,157 +167,100 @@ def test_count_subagents_missing_inputs_is_none():
     assert sl._count_subagents("/x.jsonl", "") is None
 
 
-# --- _headroom_savings ---------------------------------------------------------------------
+# --- Headroom net indicator -----------------------------------------------------------------
 
-import json as _json  # noqa: E402
-from datetime import datetime as _dt  # noqa: E402
-from datetime import timezone as _tz  # noqa: E402
+import pytest as _pytest  # noqa: E402
 
 
-def _write_ledger(path, events):
-    # real ledger events always carry `client`; default it so fixtures stay terse
-    rows = [{"client": "claude-code", **e} for e in events]
-    path.write_text("\n".join(_json.dumps(e) for e in rows) + "\n", encoding="utf-8")
+def _stats(saved, lost, before, busts=0):
+    """A minimal `/stats` payload shaped like the proxy's, keyed only where the code reads."""
+    return {
+        "cost": {"total_compression_tokens_saved": saved},
+        "prefix_cache": {"totals": {"bust_write_tokens": lost, "bust_count": busts}},
+        "summary": {"compression": {"total_tokens_before": before}},
+    }
 
 
-def test_headroom_savings_aggregates_only_events_after_session_start(tmp_path):
-    ledger = tmp_path / "savings_events.jsonl"
-    _write_ledger(
-        ledger,
-        [
-            {
-                "ts": "2026-09-03T09:00:00+00:00",
-                "before": 9999,
-                "saved": 9999,
-            },  # before
-            {"ts": "2026-09-03T12:30:00+00:00", "before": 20000, "saved": 6000},
-            {"ts": "2026-09-03T12:45:00+00:00", "before": 10000, "saved": 2000},
-        ],
-    )
-    session_start = _dt(2026, 9, 3, 12, 0, 0, tzinfo=_tz.utc)
-    # (6000 + 2000) / (20000 + 10000) = 26.66…%, 8000 tokens
-    assert sl._headroom_savings(session_start, ledger_path=str(ledger)) == (
-        8000 / 30000 * 100,
-        8000,
+@_pytest.fixture(autouse=True)
+def _no_live_proxy(monkeypatch):
+    """Never let the suite reach a real Headroom proxy — a developer running one would otherwise
+    see different results from CI."""
+    monkeypatch.setattr(sl, "_headroom_stats", lambda: None)
+
+
+def test_headroom_net_is_savings_minus_cache_busts():
+    assert sl._headroom_net(_stats(101_634, 388_415, 15_658_746, busts=4)) == (
+        -286_781,
+        _pytest.approx(1.8317, rel=1e-3),
+        4,
     )
 
 
-def test_headroom_savings_none_when_ledger_absent(tmp_path):
-    session_start = _dt(2026, 9, 3, 12, 0, 0, tzinfo=_tz.utc)
-    assert (
-        sl._headroom_savings(session_start, ledger_path=str(tmp_path / "nope.jsonl"))
-        is None
+def test_headroom_net_is_positive_when_compression_outweighs_busts():
+    net, percent, busts = sl._headroom_net(_stats(1_400_000, 64_000, 11_000_000))
+    assert net == 1_336_000
+    assert percent == _pytest.approx(12.145, rel=1e-3)
+    assert busts == 0
+
+
+def test_headroom_net_none_when_proxy_is_unreachable():
+    assert sl._headroom_net(None) is None
+
+
+@_pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"summary": {}},
+        {"cost": {}},
+        {"cost": {"total_compression_tokens_saved": "x"}},
+    ],
+    ids=["empty", "summary-only", "cost-only", "type-poisoned"],
+)
+def test_headroom_net_none_on_incomplete_or_poisoned_payload(payload):
+    assert sl._headroom_net(payload) is None
+
+
+def test_headroom_net_none_when_it_exactly_breaks_even():
+    # No line beats a line saying "0" — the reader learns nothing from a wash.
+    assert sl._headroom_net(_stats(500, 500, 1000, busts=1)) is None
+
+
+def test_fmt_headroom_line_reads_as_a_gain_when_positive():
+    line = _strip_ansi(sl._fmt_headroom_line(1_336_000, 12.145, 0))
+    assert "🤑" in line and "12%" in line and "1336k tokens saved" in line
+    assert "lost" not in line and "bust" not in line
+
+
+def test_fmt_headroom_line_reads_as_a_loss_when_negative():
+    line = _strip_ansi(sl._fmt_headroom_line(-286_781, 1.8317, 4))
+    assert "💸" in line and "1.8%" in line and "286k tokens lost" in line
+    assert "4 cache busts" in line
+
+
+def test_fmt_headroom_line_singularises_a_lone_bust():
+    assert "1 cache bust" in _strip_ansi(sl._fmt_headroom_line(-10_000, 1.0, 1))
+    assert "1 cache busts" not in _strip_ansi(sl._fmt_headroom_line(-10_000, 1.0, 1))
+
+
+def test_build_lines_renders_the_headroom_row_when_the_proxy_answers(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_headroom_stats", lambda: _stats(1_400_000, 64_000, 11_000_000)
     )
-
-
-def test_headroom_savings_none_when_no_event_in_window(tmp_path):
-    ledger = tmp_path / "savings_events.jsonl"
-    _write_ledger(
-        ledger, [{"ts": "2026-09-03T09:00:00+00:00", "before": 5000, "saved": 500}]
-    )
-    session_start = _dt(2026, 9, 3, 12, 0, 0, tzinfo=_tz.utc)
-    assert sl._headroom_savings(session_start, ledger_path=str(ledger)) is None
-
-
-def test_headroom_savings_skips_malformed_lines_but_keeps_good_ones(tmp_path):
-    ledger = tmp_path / "savings_events.jsonl"
-    ledger.write_text(
-        "not json at all\n"
-        '{"ts": "no-a-date", "before": 1, "saved": 1}\n'
-        '{"ts": "2026-09-03T12:10:00+00:00", "before": 4000, "saved": 1000, "client": "claude-code"}\n',
-        encoding="utf-8",
-    )
-    session_start = _dt(2026, 9, 3, 12, 0, 0, tzinfo=_tz.utc)
-    assert sl._headroom_savings(session_start, ledger_path=str(ledger)) == (25.0, 1000)
-
-
-def test_headroom_savings_none_when_window_has_only_zero_saves(tmp_path):
-    ledger = tmp_path / "savings_events.jsonl"
-    _write_ledger(
-        ledger, [{"ts": "2026-09-03T12:10:00+00:00", "before": 4000, "saved": 0}]
-    )
-    session_start = _dt(2026, 9, 3, 12, 0, 0, tzinfo=_tz.utc)
-    assert sl._headroom_savings(session_start, ledger_path=str(ledger)) is None
-
-
-def test_headroom_savings_ignores_events_from_other_clients(tmp_path):
-    ledger = tmp_path / "savings_events.jsonl"
-    _write_ledger(
-        ledger,
-        [
-            {
-                "ts": "2026-09-03T12:30:00+00:00",
-                "before": 9000,
-                "saved": 9000,
-                "client": "codex",
-            },
-            {"ts": "2026-09-03T12:31:00+00:00", "before": 4000, "saved": 1000},
-        ],
-    )
-    session_start = _dt(2026, 9, 3, 12, 0, 0, tzinfo=_tz.utc)
-    assert sl._headroom_savings(session_start, ledger_path=str(ledger)) == (25.0, 1000)
-
-
-def test_headroom_savings_reads_only_the_tail_of_a_large_ledger(tmp_path):
-    # 400 ancient filler lines then one in-window event — with a small tail window the seek lands
-    # mid-line, the partial first line is dropped, and only the trailing event is counted.
-    ledger = tmp_path / "savings_events.jsonl"
-    filler = _json.dumps(
-        {
-            "ts": "2020-01-01T00:00:00+00:00",
-            "before": 5000,
-            "saved": 5000,
-            "client": "claude-code",
-        }
-    )
-    tail = _json.dumps(
-        {
-            "ts": "2026-09-03T12:30:00+00:00",
-            "before": 8000,
-            "saved": 2000,
-            "client": "claude-code",
-        }
-    )
-    ledger.write_text("\n".join([filler] * 400 + [tail]) + "\n", encoding="utf-8")
-    session_start = _dt(2026, 9, 3, 12, 0, 0, tzinfo=_tz.utc)
-    assert sl._headroom_savings(
-        session_start, ledger_path=str(ledger), tail_bytes=2000
-    ) == (25.0, 2000)
-
-
-def test_build_lines_renders_headroom_segment_when_session_has_savings(
-    tmp_path, monkeypatch
-):
-    import datetime as dt_mod
-
-    class _FixedDatetime(dt_mod.datetime):
-        @classmethod
-        def now(cls):
-            return cls(2026, 8, 12, 18, 0, 0)
-
-    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
-    ledger = tmp_path / "savings_events.jsonl"
-    _write_ledger(
-        ledger,
-        [
-            # a full day either side of the fixed "now" — outcome is tz-independent
-            {"ts": "2026-08-11T18:00:00+00:00", "before": 100000, "saved": 100000},
-            {"ts": "2026-08-13T18:00:00+00:00", "before": 40000, "saved": 12000},
-        ],
-    )
-    monkeypatch.setattr(sl, "_HEADROOM_LEDGER", str(ledger))
-
     data = {
         "session_id": "s",
         "cost": {"total_cost_usd": 1.0, "total_duration_ms": 0},
         "context_window": {"used_percentage": 10, "total_input_tokens": 0},
     }
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "🗜 Headroom 30% (-12k tok)" in stripped[6]
+    assert any(
+        "Headroom 🤑 12%" in ln and "1336k tokens saved" in ln for ln in stripped
+    )
+    # its own row, never appended to the context-window row
+    assert not any("Context window" in ln and "Headroom" in ln for ln in stripped)
 
 
-def test_build_lines_omits_headroom_segment_without_ledger(tmp_path, monkeypatch):
-    monkeypatch.setattr(sl, "_HEADROOM_LEDGER", str(tmp_path / "absent.jsonl"))
+def test_build_lines_omits_the_headroom_row_when_the_proxy_is_down():
     stripped = [
         _strip_ansi(ln) for ln in sl.build_lines({"cost": {"total_duration_ms": 0}})
     ]
