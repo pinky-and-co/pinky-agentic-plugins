@@ -144,6 +144,7 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       └── commit-and-pr/
 │   │           ├── references/
+│   │           │   ├── ci-reaction.md
 │   │           │   └── commit-convention.md
 │   │           └── SKILL.md
 │   ├── pc-kanban/

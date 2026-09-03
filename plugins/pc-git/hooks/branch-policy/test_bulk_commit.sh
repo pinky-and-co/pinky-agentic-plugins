@@ -133,6 +133,13 @@ check "Co-Authored-By trailer in the commit" \
 check "Claude-Session trailer derived from the bridge id" \
     "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Claude-Session: https://claude.ai/code/session_TESTBRIDGE$')" 1
 
+# NFR-0023-18 : le run foxtrot ci-dessus n'a PAS `--watch-ci` — aucun bloc CI, et
+# `gh pr checks` n'a jamais été appelé.
+check "no --watch-ci -> no === CI block" \
+    "$(printf '%s' "$outfox" | grep -c '^=== CI ')" 0
+check "no --watch-ci -> gh pr checks never called" \
+    "$(grep -c 'pr checks' "$GH_LOG")" 0
+
 # ── pr-na : docs-only sur la branche d'intégration, remote résolu → commit direct, zéro PR ──
 gbare="$T/golf-origin.git"
 git init -q --bare -b main "$gbare"
@@ -152,6 +159,127 @@ check "RESULTS golf = direct commit, exact pushed-nopr state" \
     "$golf_block" "golf${tab}pushed-nopr${tab}-"
 check "golf: no PR attempted on a direct commit" \
     "$(grep -c '^gh pr create' "$GH_LOG")" 0
+
+# ── --watch-ci : les verdicts + les régressions de review (carte session-babysitte) ──
+# Stub `gh` piloté par env. stdout et stderr SÉPARÉS : `GH_CI_JSON_STDERR` /
+# `GH_CI_WATCH_STDERR` simulent un warning ou un « no checks » sur stderr sans polluer
+# le parse numérique (findings review #2/#3). `GH_CI_COUNT` non défini = stdout vide.
+cibin="$T/cibin"; mkdir -p "$cibin"
+cat > "$cibin/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh $*" >> "$GH_LOG"
+case "$*" in
+  "pr view"*)                    exit 1 ;;
+  "pr create"*)                  echo "https://github.com/x/${GH_REPO}/pull/1"; exit 0 ;;
+  *"pr checks"*"--json state"*)
+      [ -n "${GH_CI_JSON_SLEEP:-}" ] && sleep "$GH_CI_JSON_SLEEP"
+      [ -n "${GH_CI_JSON_STDERR:-}" ] && printf '%s\n' "$GH_CI_JSON_STDERR" >&2
+      [ -n "${GH_CI_COUNT+x}" ] && printf '%s\n' "$GH_CI_COUNT"
+      exit "${GH_CI_JSON_RC:-0}" ;;
+  *"pr checks"*"--watch"*)
+      [ -n "${GH_CI_WATCH_SLEEP:-}" ] && sleep "$GH_CI_WATCH_SLEEP"
+      [ -n "${GH_CI_WATCH_STDERR:-}" ] && printf '%s\n' "$GH_CI_WATCH_STDERR" >&2
+      exit "${GH_CI_WATCH_RC:-0}" ;;
+  "run list"*)                   echo "424242"; exit 0 ;;
+  "run view"*)                   printf 'ruff.....F\nmod.py:1:1: F401 unused import\n'; exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "$cibin/gh"
+
+mk_watch_repo() {   # NAME → repo poussé sur `main`, checkout d'une feature branch, un .py stagé
+    local n="$1" b="$T/$1-origin.git"
+    git init -q --bare -b main "$b"
+    mkdir -p "$T/$n" && git -C "$T/$n" init -q -b main
+    git -C "$T/$n" remote add origin "$b"
+    git -C "$T/$n" commit -q --allow-empty -m init
+    git -C "$T/$n" push -q -u origin main
+    git -C "$T/$n" remote set-head origin main
+    git -C "$T/$n" checkout -q -b "feature/$n"
+    printf 'def x():\n    return 1\n' > "$T/$n/mod_$n.py"
+}
+
+run_watch() {   # NAME  KEY=VAL...  → stdout de `apply --watch-ci` sur ce repo
+    local n="$1"; shift
+    local plan fp
+    plan="$("$SCRIPT" plan --root "$T" --repo "$n" 2>&1)"
+    fp="$(printf '%s' "$plan" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+    printf '%s\t✨ feat: %s\n' "$fp" "$n" > "$T/m_$n.tsv"
+    env "$@" GH_REPO="$n" PATH="$cibin:$PATH" \
+        "$SCRIPT" apply --root "$T" --repo "$n" --messages "$T/m_$n.tsv" --watch-ci 2>&1
+}
+
+ci_block() { printf '%s' "$1" | awk '/^=== CI /{f=1;next} /^=== END CI/{f=0} f'; }
+
+# pass : des checks, --watch exit 0. (`BULK_CI_TIMEOUT` bas : le stub rend la main
+# tout de suite, inutile d'armer un watchdog de 15 min pendant les tests.)
+mk_watch_repo hotel
+outh="$(run_watch hotel GH_CI_COUNT=2 GH_CI_WATCH_RC=0 BULK_CI_TIMEOUT=3)"
+check "watch-ci: pass verdict, exact line" \
+    "$(ci_block "$outh")" "hotel${tab}pass${tab}https://github.com/x/hotel/pull/1${tab}-"
+check "watch-ci: === END CI marker emitted" \
+    "$(printf '%s' "$outh" | grep -c '^=== END CI$')" 1
+
+# fail : --watch exit non nul → verdict fail + chemin d'extrait de log.
+mk_watch_repo india
+outi="$(run_watch india GH_CI_COUNT=2 GH_CI_WATCH_RC=1 BULK_CI_TIMEOUT=3)"
+ib="$(ci_block "$outi")"
+check "watch-ci: fail verdict + url (cols 1-3)" \
+    "$(printf '%s' "$ib" | cut -f1-3)" "india${tab}fail${tab}https://github.com/x/india/pull/1"
+check "watch-ci: fail carries a log-extract path" \
+    "$(printf '%s' "$ib" | cut -f4 | grep -c '^/')" 1
+check "watch-ci: the log extract is non-empty" \
+    "$([ -s "$(printf '%s' "$ib" | cut -f4)" ] && echo yes || echo no)" yes
+
+# no-ci : zéro check → jamais de --watch, jamais `pass`.
+: > "$GH_LOG"
+mk_watch_repo juliett
+outj="$(run_watch juliett GH_CI_COUNT=0 BULK_CI_GRACE=0)"
+check "watch-ci: no-ci verdict (never pass)" \
+    "$(ci_block "$outj")" "juliett${tab}no-ci${tab}https://github.com/x/juliett/pull/1${tab}-"
+check "watch-ci: no-ci never enters --watch" \
+    "$(grep -c 'pr checks .*--watch' "$GH_LOG")" 0
+
+# timeout : le --watch dépasse la fenêtre (rabaissée à 1s) → verdict timeout, jamais un faux pass.
+mk_watch_repo kilo
+outk="$(run_watch kilo GH_CI_COUNT=2 GH_CI_WATCH_RC=0 GH_CI_WATCH_SLEEP=4 BULK_CI_TIMEOUT=1 BULK_CI_GRACE=0)"
+check "watch-ci: timeout verdict (cols 1-2)" \
+    "$(ci_block "$outk" | cut -f1-2)" "kilo${tab}timeout"
+
+# ── Régressions review (2026-09-03) ──────────────────────────────────────────
+
+# #2 — « no checks » arrivé tard : le probe JSON échoue SANS dire « no checks »
+# (count -> -1, la voie rapide no-ci est sautée), puis --watch sort non-zéro AVEC
+# « no checks » sur stderr → verdict `no-ci`, jamais `fail\t<url>\t-`.
+mk_watch_repo lima
+outl="$(run_watch lima GH_CI_JSON_RC=1 GH_CI_JSON_STDERR='could not resolve to a Repository' \
+    GH_CI_WATCH_RC=1 GH_CI_WATCH_STDERR="no checks reported on the 'feature/lima' branch" \
+    BULK_CI_TIMEOUT=3 BULK_CI_GRACE=0)"
+check "watch-ci #2: late 'no checks' on --watch stderr -> no-ci, not fail" \
+    "$(ci_block "$outl")" "lima${tab}no-ci${tab}https://github.com/x/lima/pull/1${tab}-"
+
+# #3 — stdout dit « 0 » mais stderr porte un warning `gh` : le warning ne doit PAS
+# entrer dans le parse (sinon count -> -1 -> voie rapide sautée -> --watch inutile).
+: > "$GH_LOG"
+mk_watch_repo mike
+outm="$(run_watch mike GH_CI_COUNT=0 GH_CI_JSON_STDERR='warning: token scope' BULK_CI_GRACE=0)"
+check "watch-ci #3: count 0 + stderr warning -> no-ci (stderr not merged into parse)" \
+    "$(ci_block "$outm")" "mike${tab}no-ci${tab}https://github.com/x/mike/pull/1${tab}-"
+check "watch-ci #3: never entered --watch" \
+    "$(grep -c 'pr checks .*--watch' "$GH_LOG")" 0
+
+# #1 — un appel `gh` court qui bloque (ici le probe JSON) est borné : probe borné à
+# 1s vs stub qui dort 9s. Sans la borne le run durerait ≥9s ; avec, ~1s. On mesure
+# le mur, pas juste le verdict. Probe tué → count indéterminé → `--watch` (RC 0) → pass.
+mk_watch_repo november
+t0=$SECONDS
+outn="$(run_watch november GH_CI_JSON_SLEEP=9 GH_CI_WATCH_RC=0 \
+    BULK_CI_PROBE_TIMEOUT=1 BULK_CI_TIMEOUT=3 BULK_CI_GRACE=0)"
+dt=$((SECONDS - t0))
+check "watch-ci #1: stalled probe bounded, verdict still reached" \
+    "$(ci_block "$outn" | cut -f1-2)" "november${tab}pass"
+check "watch-ci #1: bound fired — wall time well under the 9s stall" \
+    "$([ "$dt" -lt 7 ] && echo yes || echo no)" yes
 
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"

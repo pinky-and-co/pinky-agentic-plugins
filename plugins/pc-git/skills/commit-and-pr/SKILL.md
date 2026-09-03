@@ -85,12 +85,17 @@ correct, not a shortcut.
 ## Step 3 — Apply
 
 ```
-${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> [--repo <target>]
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> [--repo <target>] [--watch-ci]
 ```
 
 Pass the **same `--repo <target>`** you resolved in Step 1 — omit it only for `--all` / `all of
 them`. Add `--dry-run` first if the plan looked surprising — it prints what each repo would get,
 touching nothing, and emits **no `=== RESULTS` block** (run the real apply for that).
+
+Pass **`--watch-ci` only when the invocation asked for it** (the parent wants the CI verdict, not
+just "PR opened"). It makes the script chain `gh pr checks --watch --fail-fast` on each GitHub PR it
+opened — up to 15 min per PR — and append a `=== CI` block. Without the flag the script never calls
+`gh pr checks` and the run ends at PR creation, exactly as before. GitLab MRs are not watched.
 
 ## Step 4 — Report what the script reported
 
@@ -111,3 +116,21 @@ filled the script's silence with a guess; the block exists so there is no silenc
 Never flatten `commit-nopush`/`pushed-prfailed` into `failed`, and never report `pushed-pr` for a
 repo the block did not. A run that claims success while leaving work on the floor is worse than one
 that fails loudly.
+
+## Step 5 — Report the CI verdicts (only when `--watch-ci` was passed)
+
+With `--watch-ci` the script appends a second block, `=== CI` … `=== END CI`, one tab-separated
+line per PR it watched — `<repo>\t<verdict>\t<url>\t<log_path|->`. **Reproduce those lines too.
+Derive nothing.**
+
+| `verdict` | Meaning | `log_path` |
+|---|---|---|
+| `pass` | every check green | `-` |
+| `fail` | a check failed (`--fail-fast` stopped the watch) | path to an ~80-line extract of `gh run view --log-failed`, or `-` if the failing run could not be retrieved |
+| `no-ci` | PR open, repo has no checks — **not** a pass, nothing was waited for | `-` |
+| `timeout` | CI still running after 15 min/PR — verdict unknown, PR is open | `-` |
+
+Do **not** fix anything here — this skill runs in a fork without the code context. Hand the block
+back to the parent. If any line is `fail`, tell the parent to read
+`${CLAUDE_PLUGIN_ROOT}/skills/commit-and-pr/references/ci-reaction.md` and that the log extract is
+at the path in column 4.
