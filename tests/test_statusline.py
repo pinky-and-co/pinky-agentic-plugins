@@ -175,8 +175,11 @@ import pytest as _pytest  # noqa: E402
 def _stats(saved, lost, before, busts=0):
     """A minimal `/stats` payload shaped like the proxy's, keyed only where the code reads."""
     return {
-        "cost": {"total_compression_tokens_saved": saved},
-        "prefix_cache": {"totals": {"bust_write_tokens": lost, "bust_count": busts}},
+        "compression_vs_cache": {
+            "tokens_saved_by_compression": saved,
+            "tokens_lost_to_cache_bust": lost,
+            "cache_bust_count": busts,
+        },
         "summary": {"compression": {"total_tokens_before": before}},
     }
 
@@ -212,10 +215,13 @@ def test_headroom_net_none_when_proxy_is_unreachable():
     [
         {},
         {"summary": {}},
-        {"cost": {}},
-        {"cost": {"total_compression_tokens_saved": "x"}},
+        {"compression_vs_cache": {}},
+        {
+            "compression_vs_cache": {"tokens_saved_by_compression": "x"},
+            "summary": {"compression": {"total_tokens_before": 1000}},
+        },
     ],
-    ids=["empty", "summary-only", "cost-only", "type-poisoned"],
+    ids=["empty", "summary-only", "compression-only", "type-poisoned"],
 )
 def test_headroom_net_none_on_incomplete_or_poisoned_payload(payload):
     assert sl._headroom_net(payload) is None
@@ -254,7 +260,8 @@ def test_build_lines_renders_the_headroom_row_when_the_proxy_answers(monkeypatch
     }
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
     assert any(
-        "Headroom 🤑 12%" in ln and "1336k tokens saved" in ln for ln in stripped
+        "Headroom 🤑" in ln and "12%" in ln and "1336k tokens saved" in ln
+        for ln in stripped
     )
     # its own row, never appended to the context-window row
     assert not any("Context window" in ln and "Headroom" in ln for ln in stripped)
