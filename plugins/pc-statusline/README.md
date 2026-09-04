@@ -6,7 +6,8 @@ value (no language, no name, no path baked in).
 
 ## What it shows
 
-**Main session** (`scripts/statusline.py`) — four rows plus a conditional rate-limit banner:
+**Main session** (`scripts/statusline.py`) — four core rows, the first of which turns into a
+`⚠ RATE LIMIT` banner above 90 % usage, plus a fifth Headroom row while its proxy is up:
 
 1. Claude Code version (and, above 90 %, a `⚠ RATE LIMIT` banner with reset times)
 1. model · effort · fast/normal · advisor model (when `--advisor` is active) · thinking · output style
@@ -26,8 +27,8 @@ mutates the cached prefix and invalidates it — the tokens that would have been
 get re-sent instead. The row reports **the difference**, never the gross figure:
 
 ```
-Headroom 🤑 12%   ·  1336k tokens saved                    ← green, paying for itself
-Headroom 💸 1.8%  ·  286k tokens lost  ·  4 cache busts    ← red, costing more than it saves
+Headroom 🤑  ·  12% savings  ·  1336k tokens saved                       ← green, paying for itself
+Headroom 💸  ·  1.8% losses  ·  286k tokens lost  ·  4 cache busts       ← red, costing more than it saves
 ```
 
 The percentage is the net against what the session would have sent uncompressed, so it reads as
