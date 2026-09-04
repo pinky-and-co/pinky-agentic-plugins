@@ -113,11 +113,13 @@ context, never the `.vtt`. Delete the `.vtt` files after reading the clean text.
    not hardcode a path:
 
    ```bash
-   python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-chantiers
+   python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-chantiers --full
    ```
 
-   That prints each board's `INDEX.md` plus its chantier list. Then, for the chantiers the video's
-   topic touches, read the active cards:
+   `--full` is required here — the relevance verdict needs the full Statut prose, not the bounded
+   default `/chantier` uses for orientation (which caps each Statut cell); omitting it would
+   silently starve this verdict of context. That prints each board's `INDEX.md` verbatim plus its
+   chantier list. Then, for the chantiers the video's topic touches, read the active cards:
 
    ```bash
    ls <board-root>/CHANTIER*/3-in-progress/ <board-root>/CHANTIER*/2-selected-for-dev/

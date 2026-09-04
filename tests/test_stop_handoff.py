@@ -410,5 +410,89 @@ class TestUnreviewedDoneCards(unittest.TestCase):
             self.assertEqual(sh.unreviewed_done_cards(kb), ([], 0))
 
 
+class TestBoundedBoardLines(unittest.TestCase):
+    def _board(self, tmp: str, index_body: str) -> Path:
+        kb = Path(tmp) / "_KANBAN"
+        kb.mkdir(parents=True, exist_ok=True)
+        (kb / "INDEX.md").write_text(index_body, encoding="utf-8")
+        return kb
+
+    def _chantier(self, kb: Path, chantier: str, **counts: int) -> None:
+        for col, n in counts.items():
+            d = kb / f"CHANTIER{chantier}-slug" / col
+            d.mkdir(parents=True, exist_ok=True)
+            for i in range(n):
+                (d / f"card{i}.md").write_text("x", encoding="utf-8")
+
+    def test_drops_preamble_keeps_table_and_caps_long_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            long_status = "x" * 210
+            index = (
+                "# Preamble\n\nOnboarding prose, a topology diagram, a convention section.\n\n"
+                "## Board\n\n"
+                "| # | Chantier (objectif) | Statut |\n"
+                "|---|---------------------|--------|\n"
+                f"| 0001 | Un chantier | {long_status} |\n"
+            )
+            kb = self._board(tmp, index)
+            self._chantier(
+                kb,
+                "0001",
+                **{
+                    "0-ideas": 1,
+                    "1-todo": 0,
+                    "2-selected-for-dev": 0,
+                    "3-in-progress": 0,
+                    "4-done": 2,
+                },
+            )
+
+            lines = sh.bounded_board_lines(kb)
+
+            self.assertEqual(
+                lines,
+                [
+                    "| # | Chantier (objectif) | Statut |",
+                    "|---|---------------------|--------|",
+                    f"| 0001 | Un chantier | {'x' * 200}… (+10 car.) |",
+                    "  cards: 1/0/0/0/2",
+                ],
+            )
+            self.assertNotIn("Preamble", "\n".join(lines))
+
+    def test_short_status_untouched_and_unmatched_chantier_counts_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            index = (
+                "## Board\n\n"
+                "| # | Chantier (objectif) | Statut |\n"
+                "|---|---------------------|--------|\n"
+                "| 0002 | Autre chantier | ⚪ |\n"
+            )
+            kb = self._board(tmp, index)
+
+            lines = sh.bounded_board_lines(kb)
+
+            self.assertEqual(
+                lines,
+                [
+                    "| # | Chantier (objectif) | Statut |",
+                    "|---|---------------------|--------|",
+                    "| 0002 | Autre chantier | ⚪ |",
+                    "  cards: 0/0/0/0/0",
+                ],
+            )
+
+    def test_missing_index_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            kb.mkdir()
+            self.assertEqual(sh.bounded_board_lines(kb), [])
+
+    def test_no_board_table_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = self._board(tmp, "# Just a preamble, no table at all.\n")
+            self.assertEqual(sh.bounded_board_lines(kb), [])
+
+
 if __name__ == "__main__":
     unittest.main()
