@@ -173,12 +173,21 @@ import pytest as _pytest  # noqa: E402
 
 
 def _stats(saved, lost, before, busts=0):
-    """A minimal `/stats` payload shaped like the proxy's, keyed only where the code reads."""
+    """A minimal `/stats` payload shaped like the proxy's, keyed only where the code reads.
+
+    `compression_vs_cache` nests under `prefix_cache` in the real payload (verified live against a
+    running proxy 2026-09-04) — not at the top level. Getting this nesting wrong here would hide a
+    wrong read path in the code the same way it did in production: a lookup that never resolves
+    falls back through `or 0` on both sides, which reads as "nothing to report" rather than as an
+    error, so nothing fails loudly.
+    """
     return {
-        "compression_vs_cache": {
-            "tokens_saved_by_compression": saved,
-            "tokens_lost_to_cache_bust": lost,
-            "cache_bust_count": busts,
+        "prefix_cache": {
+            "compression_vs_cache": {
+                "tokens_saved_by_compression": saved,
+                "tokens_lost_to_cache_bust": lost,
+                "cache_bust_count": busts,
+            }
         },
         "summary": {"compression": {"total_tokens_before": before}},
     }
@@ -215,9 +224,11 @@ def test_headroom_net_none_when_proxy_is_unreachable():
     [
         {},
         {"summary": {}},
-        {"compression_vs_cache": {}},
+        {"prefix_cache": {"compression_vs_cache": {}}},
         {
-            "compression_vs_cache": {"tokens_saved_by_compression": "x"},
+            "prefix_cache": {
+                "compression_vs_cache": {"tokens_saved_by_compression": "x"}
+            },
             "summary": {"compression": {"total_tokens_before": 1000}},
         },
     ],
