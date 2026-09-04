@@ -294,10 +294,10 @@ def _headroom_net(stats: dict | None = None) -> tuple[int, float, int] | None:
     if not isinstance(stats, dict):
         return None
 
-    saved = _safe_get(stats, "cost.total_compression_tokens_saved") or 0
-    lost = _safe_get(stats, "prefix_cache.totals.bust_write_tokens") or 0
+    saved = _safe_get(stats, "compression_vs_cache.tokens_saved_by_compression") or 0
+    lost = _safe_get(stats, "compression_vs_cache.tokens_lost_to_cache_bust") or 0
     before = _safe_get(stats, "summary.compression.total_tokens_before") or 0
-    busts = _safe_get(stats, "prefix_cache.totals.bust_count") or 0
+    busts = _safe_get(stats, "compression_vs_cache.cache_bust_count") or 0
     if not isinstance(saved, int) or not isinstance(lost, int) or not before:
         return None
 
@@ -318,11 +318,11 @@ def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
     amount_txt = f"{amount // 1000}k" if amount >= 1000 else str(amount)
     pct_txt = f"{percent:.1f}%" if percent < 10 else f"{percent:.0f}%"
     if net > 0:
-        colour, face, verb = GREEN, "🤑", "saved"
+        colour, face, verb, name = GREEN, "🤑", "saved", "savings"
     else:
-        colour, face, verb = RED, "💸", "lost"
+        colour, face, verb, name = RED, "💸", "lost", "losses"
     bust_txt = f"{SEP}{busts} cache bust{'s' if busts != 1 else ''}" if busts else ""
-    return f"Headroom {face} {colour}{pct_txt}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
+    return f"Headroom {face}{SEP}{colour}{pct_txt} {name}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
 
 
 def _short_model(model_id):
