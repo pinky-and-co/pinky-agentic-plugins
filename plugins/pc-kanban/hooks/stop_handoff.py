@@ -292,13 +292,26 @@ def _board_table_lines(index_text: str) -> list[str]:
     return table
 
 
+_UNESCAPED_PIPE_RE = re.compile(r"(?<!\\)\|")
+
+
+def _split_table_row(line: str) -> list[str]:
+    """Split a markdown table row on `|`, treating a `\\|` (GFM's own escape for a literal pipe
+    inside a cell) as cell content rather than a column delimiter — a naive `line.split("|")`
+    shifts every cell after the first escaped pipe, so a cap or an id lookup targets the wrong
+    field. Splitting only on unescaped pipes and rejoining the result with `"|"` reproduces the
+    original line exactly, since no split point ever falls inside an escaped pipe.
+    """
+    return _UNESCAPED_PIPE_RE.split(line)
+
+
 def _cap_row_status(line: str) -> str:
     """Cap a data row's Statut cell (the last `|`-delimited one) to `MAX_STATUS_CHARS`.
 
     A data row is identified by a 4-digit chantier id in its first cell — the header and
     separator rows have no Statut prose to cap and pass through unchanged.
     """
-    cells = line.split("|")
+    cells = _split_table_row(line)
     if len(cells) < 4 or not cells[1].strip().isdigit():
         return line
     stripped = cells[-2].strip()
@@ -347,7 +360,7 @@ def bounded_board_lines(kanban: Path) -> list[str]:
     }
     out: list[str] = []
     for line in table:
-        cells = line.split("|")
+        cells = _split_table_row(line)
         chantier_id = cells[1].strip() if len(cells) >= 4 else ""
         out.append(_cap_row_status(line))
         if chantier_id.isdigit():

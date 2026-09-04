@@ -488,6 +488,37 @@ class TestBoundedBoardLines(unittest.TestCase):
             kb.mkdir()
             self.assertEqual(sh.bounded_board_lines(kb), [])
 
+    def test_escaped_pipe_in_status_cell_does_not_shift_columns(self):
+        # A `\|` inside a code span (GFM's own escaping convention for a literal pipe in a table
+        # cell) must not count as a column delimiter — splitting on it shifts every cell after it,
+        # so a naive cap targets the wrong field instead of the real Statut tail. The tail is kept
+        # long enough (> MAX_STATUS_CHARS) to force the capping path — a short cell hides this bug
+        # entirely, since an uncapped row is returned verbatim regardless of how it was split.
+        with tempfile.TemporaryDirectory() as tmp:
+            content = "🟢 actif — `pinky docs serve\\|status\\|uninstall`. " + "x" * 220
+            index = (
+                "## Board\n\n"
+                "| # | Chantier (objectif) | Statut |\n"
+                "|---|---------------------|--------|\n"
+                f"| 0027 | Live-docs | {content} |\n"
+            )
+            kb = self._board(tmp, index)
+
+            lines = sh.bounded_board_lines(kb)
+
+            # content is 269 chars: capped to the first 200 + the omitted-count marker, computed
+            # independently here rather than re-deriving it from the function under test.
+            omitted = len(content) - 200
+            self.assertEqual(
+                lines,
+                [
+                    "| # | Chantier (objectif) | Statut |",
+                    "|---|---------------------|--------|",
+                    f"| 0027 | Live-docs | {content[:200]}… (+{omitted} car.) |",
+                    "  cards: 0/0/0/0/0",
+                ],
+            )
+
     def test_no_board_table_returns_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             kb = self._board(tmp, "# Just a preamble, no table at all.\n")
