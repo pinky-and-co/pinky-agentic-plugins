@@ -294,10 +294,18 @@ def _headroom_net(stats: dict | None = None) -> tuple[int, float, int] | None:
     if not isinstance(stats, dict):
         return None
 
-    saved = _safe_get(stats, "compression_vs_cache.tokens_saved_by_compression") or 0
-    lost = _safe_get(stats, "compression_vs_cache.tokens_lost_to_cache_bust") or 0
+    saved = (
+        _safe_get(
+            stats, "prefix_cache.compression_vs_cache.tokens_saved_by_compression"
+        )
+        or 0
+    )
+    lost = (
+        _safe_get(stats, "prefix_cache.compression_vs_cache.tokens_lost_to_cache_bust")
+        or 0
+    )
     before = _safe_get(stats, "summary.compression.total_tokens_before") or 0
-    busts = _safe_get(stats, "compression_vs_cache.cache_bust_count") or 0
+    busts = _safe_get(stats, "prefix_cache.compression_vs_cache.cache_bust_count") or 0
     if not isinstance(saved, int) or not isinstance(lost, int) or not before:
         return None
 
