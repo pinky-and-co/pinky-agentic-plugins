@@ -1,3 +1,18 @@
 {
-  "branch_workflow": "github flow"
+  "branch_workflow": "github flow",
+  "file_placement": [
+    {
+      "root": "plugins",
+      "root_dirs": ["hooks", "skills", "mcp", "scripts", "agents", ".claude-plugin"],
+      "root_files": ["README.md", ".mcp.json", "settings.json"],
+      "forbidden_dirs": ["commands"],
+      "reserved_dirs": { "scripts": "pc-statusline" },
+      "leaf_subdirs": {
+        "skills": {
+          "required_file": "SKILL.md",
+          "subdirs": ["scripts", "references", "examples", "templates", "assets", "evals"]
+        }
+      }
+    }
+  ]
 }

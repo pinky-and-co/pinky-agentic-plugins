@@ -77,6 +77,7 @@ pinky-agentic-plugins/
 │   │   │   ├── privacy_egress.py
 │   │   │   ├── read_cost.py
 │   │   │   ├── secret_patterns.py
+│   │   │   ├── structure_guard.py
 │   │   │   └── style_reminder.py
 │   │   ├── mcp/
 │   │   │   ├── model_adversarial.py
@@ -291,7 +292,9 @@ pinky-agentic-plugins/
 │   ├── test_statusline.py
 │   ├── test_statusline_common.py
 │   ├── test_stop_handoff.py
+│   ├── test_structure_guard.py
 │   └── test_subagent_statusline.py
+├── .commit_messages_tmp.txt
 ├── .darglint
 ├── .gitattributes
 ├── .gitignore
