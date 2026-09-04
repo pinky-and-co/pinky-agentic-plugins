@@ -63,6 +63,10 @@ MAX_AGENT_LOGS = 12
 # backlog visible as a number without pasting the whole of it on every `/chantier` intake.
 MAX_UNREVIEWED_DONE = 10
 
+# `--list-chantiers` (default mode) : same bounded-output guard, applied per Statut cell rather
+# than per listing — a chantier's whole narrative history tends to accrete there (see FR-0025-12).
+MAX_STATUS_CHARS = 200
+
 
 def read_event() -> dict:
     """Parse the hook JSON from stdin; tolerate an empty / malformed payload."""
@@ -262,6 +266,93 @@ def unreviewed_done_cards(kanban: Path) -> UnreviewedDone:
         flagged.append((date if isinstance(date, str) else "", card, tag))
     flagged.sort(key=lambda row: (row[0], row[1].name), reverse=True)
     return UnreviewedDone([(card, tag) for _, card, tag in flagged], mechanical)
+
+
+_KANBAN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress", "4-done")
+
+
+def _board_table_lines(index_text: str) -> list[str]:
+    """The `## Board` markdown table only — header, separator, rows.
+
+    `INDEX.md` carries onboarding prose above the table (preamble, topology, the column
+    convention) that the `kanban` skill's own docs already own — `--list-chantiers`'s default
+    mode drops it, keeping only what a session needs to orient (FR-0025-11).
+    """
+    lines = index_text.splitlines()
+    start = next(
+        (i for i, line in enumerate(lines) if line.lstrip().startswith("| #")), None
+    )
+    if start is None:
+        return []
+    table: list[str] = []
+    for line in lines[start:]:
+        if not line.lstrip().startswith("|"):
+            break
+        table.append(line)
+    return table
+
+
+def _cap_row_status(line: str) -> str:
+    """Cap a data row's Statut cell (the last `|`-delimited one) to `MAX_STATUS_CHARS`.
+
+    A data row is identified by a 4-digit chantier id in its first cell — the header and
+    separator rows have no Statut prose to cap and pass through unchanged.
+    """
+    cells = line.split("|")
+    if len(cells) < 4 or not cells[1].strip().isdigit():
+        return line
+    stripped = cells[-2].strip()
+    if len(stripped) <= MAX_STATUS_CHARS:
+        return line
+    omitted = len(stripped) - MAX_STATUS_CHARS
+    cells[-2] = f" {stripped[:MAX_STATUS_CHARS]}… (+{omitted} car.) "
+    return "|".join(cells)
+
+
+CARDS_LEGEND = "cards legend: " + "/".join(_KANBAN_COLUMNS)
+
+
+def _column_counts(chantier_dir: Path | None) -> str:
+    """`N/N/N/N/N` in `_KANBAN_COLUMNS` order (see `CARDS_LEGEND`), walked from the filesystem.
+
+    Positional rather than `col=N` per column (FR-0025-13's letter, not its exact rendering) —
+    one legend line for the whole invocation replaces a repeated label on every chantier row.
+    """
+    return "/".join(
+        str(sum(1 for _ in (chantier_dir / col).glob("*.md")) if chantier_dir else 0)
+        for col in _KANBAN_COLUMNS
+    )
+
+
+def bounded_board_lines(kanban: Path) -> list[str]:
+    """The bounded `--list-chantiers` default: table rows only, Statut capped, cards/column added.
+
+    Args:
+        kanban: a board root, as returned by `find_kanbans`.
+
+    Returns:
+        One line per table row (header/separator included, unchanged) plus, right after each
+        data row, a `  cards: N/N/N/N/N` line with that chantier's per-column card count — see
+        `CARDS_LEGEND` for the column order (FR-0025-13). `[]` when `INDEX.md` is missing or has
+        no `## Board` table.
+    """
+    index = kanban / "INDEX.md"
+    if not index.is_file():
+        return []
+    table = _board_table_lines(index.read_text(encoding="utf-8"))
+    ids_to_dirs = {
+        m.group(1): d
+        for d in kanban.glob("CHANTIER*")
+        if d.is_dir() and (m := re.match(r"CHANTIER(\d{4})-", d.name))
+    }
+    out: list[str] = []
+    for line in table:
+        cells = line.split("|")
+        chantier_id = cells[1].strip() if len(cells) >= 4 else ""
+        out.append(_cap_row_status(line))
+        if chantier_id.isdigit():
+            out.append(f"  cards: {_column_counts(ids_to_dirs.get(chantier_id))}")
+    return out
 
 
 def _git(cwd: Path, *args: str) -> str | None:
@@ -477,11 +568,20 @@ def main() -> int:
         return 0
 
     if "--list-chantiers" in sys.argv[1:]:
+        full = (
+            "--full" in sys.argv[1:]
+        )  # verbatim `INDEX.md` — `yt` needs the full status prose
+        if not full:
+            print(CARDS_LEGEND)
         for kanban in find_kanbans(Path(os.getcwd())):
             print(f"=== BOARD: {kanban}")
             index = kanban / "INDEX.md"
             if index.is_file():
-                print(index.read_text(encoding="utf-8").rstrip())
+                if full:
+                    print(index.read_text(encoding="utf-8").rstrip())
+                else:
+                    for line in bounded_board_lines(kanban):
+                        print(line)
             print("--- chantiers:")
             for d in sorted(kanban.glob("CHANTIER*")):
                 if d.is_dir():
