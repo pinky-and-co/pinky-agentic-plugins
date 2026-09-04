@@ -32,6 +32,23 @@ A card is a deliverable worth a multi-session handoff, never a micro-step (those
 *inside* the card). `0-ideas` → `1-todo` → `2-selected-for-dev` → `3-in-progress` → `4-done` →
 archive (`mv` between column directories).
 
+## The board's own table (`INDEX.md`)
+
+`INDEX.md` (one per board) carries a `## Board` markdown table — one row per chantier: id,
+objective, Statut. The Statut cell holds **a status, not a journal**: `⚪`, `🟢 actif`,
+`🔴 bloqué par 0015`, or `🟡 partiel` plus a one-line pointer to where the detail actually lives
+("détail story", a `1-todo`/`0-ideas` card name, an archive path). A PR number, a commit hash, or a
+date belongs in the chantier's own story or an ADR — never accreted into the cell itself, which is
+read verbatim by every session that orients on this chantier.
+
+**Cap: 200 characters per Statut cell.** `stop_handoff.py --list-chantiers`'s default (bounded)
+mode enforces this at read time — cells over the cap print truncated with a `… (+N car.)` marker —
+but that protects the pipe, not the source: the table itself stays readable in an editor only if
+the cells are kept short at write time too. Before trimming an over-cap cell, verify every PR/hash/
+date it carries is retrievable elsewhere (the chantier's story, or the PR/commit itself) — a board
+with no git history means a cut fact with nowhere else to live is a real loss, not just a shorter
+read.
+
 ## Card frontmatter
 
 YAML, one card = one file. The body stays markdown prose (`## Fini =`, `## Pourquoi`, narrative
