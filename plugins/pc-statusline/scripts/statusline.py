@@ -12,6 +12,7 @@ to separate them fully.
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -333,6 +334,45 @@ def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
     return f"Headroom {face}{SEP}{colour}{pct_txt} {name}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
 
 
+_GIT_TIMEOUT_S = 0.3
+
+
+def _repo_branch(start_dir):
+    """`"<basename(repo-root)> @ <branch>"` for the git repo `start_dir` sits in (or a subdir of),
+    or `None` outside a git repo / on any lookup failure — timeout, no git binary, detached-HEAD
+    edge cases. `CLAUDE_PROJECT_DIR` is often empty in Claude Code and `${CLAUDE_PROJECT_DIR}`-style
+    prompts don't render, so this is the one place a session can see at a glance which repo/branch
+    it is actually sitting in.
+
+    Shells out to `git -C <dir> ...` (`rev-parse --show-toplevel` + `symbolic-ref --short HEAD`) —
+    the same idiom `pc-git`'s own hooks already use, rather than hand-parsing `.git/HEAD` (worktrees,
+    packed-refs and detached HEAD are git's own problem to solve correctly, not this script's)."""
+    if not start_dir:
+        return None
+    try:
+        root = subprocess.run(
+            ["git", "-C", start_dir, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if root.returncode != 0:
+            return None
+        repo_root = root.stdout.strip()
+        branch = subprocess.run(
+            ["git", "-C", start_dir, "symbolic-ref", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        branch_name = branch.stdout.strip() if branch.returncode == 0 else "detached"
+        return f"{os.path.basename(repo_root)} @ {branch_name}"
+    except Exception:
+        return None
+
+
 def _short_model(model_id):
     """claude-opus-4-8 -> Opus 4.8, claude-sonnet-5 -> Sonnet 5, etc."""
     if not model_id:
@@ -357,9 +397,13 @@ def build_lines(data: dict) -> list[str]:
     lines: list[str] = []
 
     version = _safe_get(data, "version", "?")
-    # Row 0 carries only the version on the right; its left is an invisible anchor (see _BLANK),
-    # replaced by the rate-limit banner below when one fires.
-    line0_left_parts = [_BLANK]
+    # Row 0 carries the version on the right; its left shows the current repo/branch when the cwd
+    # sits in one (CLAUDE_PROJECT_DIR is often empty in Claude Code — this is the one place a
+    # session can see it), else an invisible anchor (see _BLANK). Either is replaced by the
+    # rate-limit banner below when one fires — a warning is more urgent than repo context.
+    repo_dir = _safe_get(data, "workspace.current_dir") or _safe_get(data, "cwd")
+    repo_branch = _repo_branch(repo_dir)
+    line0_left_parts = [f"📁 {repo_branch}"] if repo_branch else [_BLANK]
     line0_right_parts = [f"{DIM}v{version}{RESET}"]
     # ---------- Ligne 1 : version, modèle, effort, thinking, fast mode, output style ----------
     model = _safe_get(data, "model.display_name", "?")

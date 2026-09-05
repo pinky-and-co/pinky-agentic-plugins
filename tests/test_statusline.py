@@ -14,6 +14,7 @@ exist without shelling out) gets end-to-end oracles for the two cases that matte
 an empty one.
 """
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -420,3 +421,83 @@ def test_build_lines_no_rate_limit_line_below_threshold():
     data = {"rate_limits": {"five_hour": {"used_percentage": 50, "resets_at": None}}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
     assert not any("RATE LIMIT" in ln for ln in stripped)
+
+
+# --- _repo_branch — repo/branch segment (CLAUDE_PROJECT_DIR is often empty in Claude Code,
+# this is the one place a session can see which repo/branch it is sitting in) ------------------
+
+
+def _git(*args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def test_repo_branch_returns_basename_at_branch(tmp_path):
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    assert sl._repo_branch(str(repo)) == "my-repo @ main"
+
+
+def test_repo_branch_walks_up_from_a_nested_subdir(tmp_path):
+    repo = tmp_path / "my-repo"
+    nested = repo / "a" / "b"
+    nested.mkdir(parents=True)
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    assert sl._repo_branch(str(nested)) == "my-repo @ main"
+
+
+def test_repo_branch_none_outside_a_repo(tmp_path):
+    assert sl._repo_branch(str(tmp_path)) is None
+
+
+def test_repo_branch_none_on_falsy_input():
+    assert sl._repo_branch(None) is None
+    assert sl._repo_branch("") is None
+
+
+def test_build_lines_row0_shows_repo_branch_when_no_rate_limit_warning(tmp_path):
+    repo = tmp_path / "pinky-lib"
+    repo.mkdir()
+    _git("init", "-q", "-b", "feature/x", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    data = {"workspace": {"current_dir": str(repo)}}
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert "📁 pinky-lib @ feature/x" in stripped[0]
+
+
+def test_build_lines_row0_falls_back_to_blank_outside_a_repo(tmp_path):
+    data = {"workspace": {"current_dir": str(tmp_path)}}
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert "📁" not in stripped[0]
+
+
+def test_build_lines_row0_rate_limit_warning_takes_priority_over_repo_branch(tmp_path):
+    repo = tmp_path / "pinky-lib"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    data = {
+        "workspace": {"current_dir": str(repo)},
+        "rate_limits": {"five_hour": {"used_percentage": 95, "resets_at": None}},
+    }
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert "RATE LIMIT" in stripped[0]
+    assert "📁" not in stripped[0]
