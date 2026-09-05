@@ -123,6 +123,8 @@ pinky-agentic-plugins/
 │   ├── pc-git/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
+│   │   ├── agents/
+│   │   │   └── git-workflow.md
 │   │   ├── hooks/
 │   │   │   ├── branch-policy/
 │   │   │   │   ├── branch_guard.py
