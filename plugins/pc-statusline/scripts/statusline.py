@@ -80,8 +80,19 @@ def _safe_get(d, path, default=None):
     return cur if cur is not None else default
 
 
+def _hyperlink(text: str, url: str) -> str:
+    """Wrap `text` in an OSC 8 terminal hyperlink pointing at `url` — supported by most modern
+    terminals (iTerm2, kitty, wezterm, the VS Code integrated terminal…), silently inert (renders
+    as plain `text`) on ones that don't. `_visible_len` below must stay in sync with this format —
+    it treats the whole wrapper as zero-width, same as an SGR color code."""
+    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+
+
 def _visible_len(s: str):
-    """Text length excluding ANSI codes, for flex alignment."""
+    """Text length excluding ANSI codes, for flex alignment. Two escape kinds appear in this
+    file's output: SGR color codes (`ESC [ ... m`) and OSC 8 hyperlinks (`ESC ] ... ST`, `ST` being
+    either `ESC \\` or BEL `\\x07` — see `_hyperlink`). Both are zero-width; anything else starting
+    with `ESC` is skipped defensively, one character at a time, rather than counted as visible."""
     WIDE_RANGES = (
         (0x1100, 0x115F),
         (0x2300, 0x23FF),
@@ -96,23 +107,39 @@ def _visible_len(s: str):
     )
     ZERO_WIDTH_CODEPOINTS = {0x200D, 0xFE0E, 0xFE0F}  # ZWJ, VS15, VS16
 
-    out, in_escape = 0, False
-    for ch in s:
+    out = 0
+    i, n = 0, len(s)
+    while i < n:
+        ch = s[i]
         if ch == "\033":
-            in_escape = True
-            continue
-        if in_escape:
-            if ch == "m":
-                in_escape = False
+            nxt = s[i + 1] if i + 1 < n else ""
+            if nxt == "[":  # SGR: ESC [ ... m
+                j = i + 2
+                while j < n and s[j] != "m":
+                    j += 1
+                i = j + 1
+            elif nxt == "]":  # OSC 8: ESC ] ... (BEL | ESC \)
+                j = i + 2
+                while (
+                    j < n
+                    and s[j] != "\x07"
+                    and not (s[j] == "\033" and s[j + 1 : j + 2] == "\\")
+                ):
+                    j += 1
+                i = j + 1 if (j < n and s[j] == "\x07") else j + 2
+            else:
+                i += 1
             continue
 
         cp = ord(ch)
         if cp in ZERO_WIDTH_CODEPOINTS or unicodedata.combining(ch):
+            i += 1
             continue  # largeur 0 : se colle au caractère précédent
         if any(lo <= cp <= hi for lo, hi in WIDE_RANGES):
             out += 2
         else:
             out += 1
+        i += 1
     return out
 
 
@@ -397,13 +424,9 @@ def build_lines(data: dict) -> list[str]:
     lines: list[str] = []
 
     version = _safe_get(data, "version", "?")
-    # Row 0 carries the version on the right; its left shows the current repo/branch when the cwd
-    # sits in one (CLAUDE_PROJECT_DIR is often empty in Claude Code — this is the one place a
-    # session can see it), else an invisible anchor (see _BLANK). Either is replaced by the
-    # rate-limit banner below when one fires — a warning is more urgent than repo context.
-    repo_dir = _safe_get(data, "workspace.current_dir") or _safe_get(data, "cwd")
-    repo_branch = _repo_branch(repo_dir)
-    line0_left_parts = [f"📁 {repo_branch}"] if repo_branch else [_BLANK]
+    # Row 0 carries only the version on the right; its left is an invisible anchor (see _BLANK),
+    # replaced by the rate-limit banner below when one fires.
+    line0_left_parts = [_BLANK]
     line0_right_parts = [f"{DIM}v{version}{RESET}"]
     # ---------- Ligne 1 : version, modèle, effort, thinking, fast mode, output style ----------
     model = _safe_get(data, "model.display_name", "?")
@@ -432,8 +455,19 @@ def build_lines(data: dict) -> list[str]:
         f"🎨 {style}{RESET}",
     ]
 
-    # ---------- Ligne 2 : session id (courte), session name, heure de début ----------
+    # ---------- Ligne 2 : session id (courte, en lien vers le transcript), heure de début,
+    # repo/branche courants à droite ----------
     session_id = _safe_get(data, "session_id", "?")
+    short_session_id = (
+        session_id[:8] if session_id and session_id != "?" else session_id
+    )
+    # Court pour la lecture ; le lien porte l'id complet pour un outil de recherche par session
+    # (ex. le transcript lui-même) — le texte affiché n'a plus besoin d'être long pour ça.
+    session_txt = (
+        _hyperlink(short_session_id, f"file://{transcript_path}")
+        if transcript_path
+        else short_session_id
+    )
 
     duration_ms = _safe_get(data, "cost.total_duration_ms", 0) or 0
     start_dt = datetime.now() - timedelta(milliseconds=duration_ms)
@@ -441,16 +475,22 @@ def build_lines(data: dict) -> list[str]:
     subagent_count = _count_subagents(transcript_path, session_id)
 
     line2_left_parts: list[str] = [
-        f"{MAGENTA}Session 🆔 {session_id}{RESET}",
+        f"{MAGENTA}Session 🆔 {session_txt}{RESET}",
         f"🕐 Started at {start_txt}{RESET}",
     ]
-    line2_right_parts: list[str] = (
-        [
+
+    # CLAUDE_PROJECT_DIR est souvent vide dans Claude Code — c'est le seul endroit où une session
+    # voit dans quel repo/branche elle travaille réellement.
+    repo_dir = _safe_get(data, "workspace.current_dir") or _safe_get(data, "cwd")
+    repo_branch = _repo_branch(repo_dir)
+
+    line2_right_parts: list[str] = []
+    if repo_branch:
+        line2_right_parts.append(f"📁 {repo_branch}")
+    if subagent_count:
+        line2_right_parts.append(
             f"{CYAN}🧬 {subagent_count} subagent{'s' if subagent_count > 1 else ''}{RESET}"
-        ]
-        if subagent_count
-        else []
-    )
+        )
 
     # ---------- Line 3 : context bar + hit cache performance ----------
     pct = _safe_get(data, "context_window.used_percentage", 0) or 0

@@ -292,7 +292,8 @@ def test_build_lines_omits_the_headroom_row_when_the_proxy_is_down():
 def _strip_ansi(line: str) -> str:
     import re
 
-    return re.sub(r"\033\[[0-9;]*m", "", line)
+    line = re.sub(r"\033\[[0-9;]*m", "", line)  # SGR color codes
+    return re.sub(r"\033\]8;;[^\033]*\033\\", "", line)  # OSC 8 hyperlink wrapper
 
 
 def test_build_lines_oracle_empty_payload_still_renders_the_full_skeleton():
@@ -465,7 +466,7 @@ def test_repo_branch_none_on_falsy_input():
     assert sl._repo_branch("") is None
 
 
-def test_build_lines_row0_shows_repo_branch_when_no_rate_limit_warning(tmp_path):
+def test_build_lines_row2_shows_repo_branch_on_the_right(tmp_path):
     repo = tmp_path / "pinky-lib"
     repo.mkdir()
     _git("init", "-q", "-b", "feature/x", cwd=repo)
@@ -476,16 +477,18 @@ def test_build_lines_row0_shows_repo_branch_when_no_rate_limit_warning(tmp_path)
     _git("commit", "-q", "-m", "x", cwd=repo)
     data = {"workspace": {"current_dir": str(repo)}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "📁 pinky-lib @ feature/x" in stripped[0]
+    assert "📁 pinky-lib @ feature/x" in stripped[4]
 
 
-def test_build_lines_row0_falls_back_to_blank_outside_a_repo(tmp_path):
+def test_build_lines_row2_omits_repo_branch_outside_a_repo(tmp_path):
     data = {"workspace": {"current_dir": str(tmp_path)}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "📁" not in stripped[0]
+    assert "📁" not in stripped[4]
 
 
-def test_build_lines_row0_rate_limit_warning_takes_priority_over_repo_branch(tmp_path):
+def test_build_lines_row2_repo_branch_coexists_with_subagent_count(
+    tmp_path, monkeypatch
+):
     repo = tmp_path / "pinky-lib"
     repo.mkdir()
     _git("init", "-q", "-b", "main", cwd=repo)
@@ -494,10 +497,40 @@ def test_build_lines_row0_rate_limit_warning_takes_priority_over_repo_branch(tmp
     (repo / "f.txt").write_text("x")
     _git("add", ".", cwd=repo)
     _git("commit", "-q", "-m", "x", cwd=repo)
-    data = {
-        "workspace": {"current_dir": str(repo)},
-        "rate_limits": {"five_hour": {"used_percentage": 95, "resets_at": None}},
-    }
+    monkeypatch.setattr(sl, "_count_subagents", lambda *_: 2)
+    data = {"workspace": {"current_dir": str(repo)}, "transcript_path": "/t.jsonl"}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "RATE LIMIT" in stripped[0]
-    assert "📁" not in stripped[0]
+    assert "📁 pinky-lib @ main" in stripped[4]
+    assert "2 subagents" in stripped[4]
+
+
+# --- _hyperlink / short session id -----------------------------------------------------------
+
+
+def test_hyperlink_wraps_text_in_osc8():
+    assert (
+        sl._hyperlink("abc", "file:///x") == "\033]8;;file:///x\033\\abc\033]8;;\033\\"
+    )
+
+
+def test_visible_len_treats_a_hyperlink_as_zero_width():
+    assert sl._visible_len(sl._hyperlink("abc", "file:///some/long/path")) == 3
+
+
+def test_build_lines_session_id_is_shortened_to_8_chars():
+    data = {"session_id": "0123456789abcdef"}
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert "Session 🆔 01234567" in stripped[4]
+    assert "0123456789abcdef" not in stripped[4]
+
+
+def test_build_lines_session_id_links_to_the_transcript_when_available():
+    data = {"session_id": "0123456789abcdef", "transcript_path": "/tmp/x/session.jsonl"}
+    lines = sl.build_lines(data)
+    assert "\033]8;;file:///tmp/x/session.jsonl\033\\01234567" in lines[4]
+
+
+def test_build_lines_session_id_plain_without_transcript_path():
+    data = {"session_id": "0123456789abcdef"}
+    lines = sl.build_lines(data)
+    assert "\033]8;;" not in lines[4]
