@@ -362,14 +362,18 @@ def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
 
 
 _GIT_TIMEOUT_S = 0.3
+# A feature-branch name is unbounded (this very branch, "feature/statusline-repo-branch", is 30
+# chars on its own) and shares a row with other content — capped so one long branch name never
+# dominates the whole line's width.
+_REPO_BRANCH_MAX_LEN = 28
 
 
 def _repo_branch(start_dir):
     """`"<basename(repo-root)> @ <branch>"` for the git repo `start_dir` sits in (or a subdir of),
-    or `None` outside a git repo / on any lookup failure — timeout, no git binary, detached-HEAD
-    edge cases. `CLAUDE_PROJECT_DIR` is often empty in Claude Code and `${CLAUDE_PROJECT_DIR}`-style
-    prompts don't render, so this is the one place a session can see at a glance which repo/branch
-    it is actually sitting in.
+    truncated to `_REPO_BRANCH_MAX_LEN` chars (ellipsis) when longer — or `None` outside a git repo
+    / on any lookup failure: timeout, no git binary, detached-HEAD edge cases. `CLAUDE_PROJECT_DIR`
+    is often empty in Claude Code and `${CLAUDE_PROJECT_DIR}`-style prompts don't render, so this is
+    the one place a session can see at a glance which repo/branch it is actually sitting in.
 
     Shells out to `git -C <dir> ...` (`rev-parse --show-toplevel` + `symbolic-ref --short HEAD`) —
     the same idiom `pc-git`'s own hooks already use, rather than hand-parsing `.git/HEAD` (worktrees,
@@ -395,7 +399,10 @@ def _repo_branch(start_dir):
             check=False,
         )
         branch_name = branch.stdout.strip() if branch.returncode == 0 else "detached"
-        return f"{os.path.basename(repo_root)} @ {branch_name}"
+        combo = f"{os.path.basename(repo_root)} @ {branch_name}"
+        if len(combo) > _REPO_BRANCH_MAX_LEN:
+            combo = combo[: _REPO_BRANCH_MAX_LEN - 1] + "…"
+        return combo
     except Exception:
         return None
 
