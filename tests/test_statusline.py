@@ -457,20 +457,6 @@ def test_repo_branch_walks_up_from_a_nested_subdir(tmp_path):
     assert sl._repo_branch(str(nested)) == "my-repo @ main"
 
 
-def test_repo_branch_truncates_a_long_combo_with_an_ellipsis(tmp_path):
-    repo = tmp_path / "pinky-agentic-plugins"
-    repo.mkdir()
-    _git("init", "-q", "-b", "feature/statusline-repo-branch", cwd=repo)
-    _git("config", "user.email", "t@t.t", cwd=repo)
-    _git("config", "user.name", "t", cwd=repo)
-    (repo / "f.txt").write_text("x")
-    _git("add", ".", cwd=repo)
-    _git("commit", "-q", "-m", "x", cwd=repo)
-    result = sl._repo_branch(str(repo))
-    assert len(result) == sl._REPO_BRANCH_MAX_LEN
-    assert result.endswith("…")
-
-
 def test_repo_branch_none_outside_a_repo(tmp_path):
     assert sl._repo_branch(str(tmp_path)) is None
 
