@@ -180,10 +180,16 @@ discovered — read it on a workspace that mounts more than one.
 
 `_AGENT_LOG/` (next to `_KANBAN/`) is the async narrative channel between sessions/agents sharing an
 org — what a session did, cross-chantier, that no single card's handoff would hold. One file per
-`(date, agent)`, append-only, filename `YYYY-MM-DD_<agent-identity>.md` — `<agent-identity>` is
-`git config user.name` (already declared for real reasons, no separate value to maintain). Read the
-recent entries at session start alongside the board; write into the org whose board carries the
-chantier worked on. Never log secrets, credentials or internal URLs.
+`(date, agent)`, append-only, filename `YYYY-MM-DD_<tool>-<agent-identity>.md`. `<agent-identity>` is
+`git config user.name` (already declared for real reasons, no separate value to maintain). `<tool>`
+names which agentic tool wrote the entry — needed because more than one tool can share the same git
+identity and write to the same log. **Derive it from the running tool's own environment, never
+hardcode one tool's name**: for Claude Code, `$AI_AGENT` (e.g. `claude-code_2-1-261_agent` → the
+segment before the first `_`); another tool exposes its own equivalent variable. This file is
+tool-agnostic by policy (see the marketplace's own `CLAUDE.md`) — a skill that only ever wrote
+`claude-code-` would silently mislabel every entry from any other tool. Read the recent entries at
+session start alongside the board; write into the org whose board carries the chantier worked on.
+Never log secrets, credentials or internal URLs.
 
 ## Boundaries
 

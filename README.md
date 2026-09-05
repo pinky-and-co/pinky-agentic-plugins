@@ -294,7 +294,6 @@ pinky-agentic-plugins/
 │   ├── test_stop_handoff.py
 │   ├── test_structure_guard.py
 │   └── test_subagent_statusline.py
-├── .commit_messages_tmp.txt
 ├── .darglint
 ├── .gitattributes
 ├── .gitignore
