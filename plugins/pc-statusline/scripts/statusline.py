@@ -12,6 +12,8 @@ to separate them fully.
 
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -79,8 +81,19 @@ def _safe_get(d, path, default=None):
     return cur if cur is not None else default
 
 
+def _hyperlink(text: str, url: str) -> str:
+    """Wrap `text` in an OSC 8 terminal hyperlink pointing at `url` — supported by most modern
+    terminals (iTerm2, kitty, wezterm, the VS Code integrated terminal…), silently inert (renders
+    as plain `text`) on ones that don't. `_visible_len` below must stay in sync with this format —
+    it treats the whole wrapper as zero-width, same as an SGR color code."""
+    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+
+
 def _visible_len(s: str):
-    """Text length excluding ANSI codes, for flex alignment."""
+    """Text length excluding ANSI codes, for flex alignment. Two escape kinds appear in this
+    file's output: SGR color codes (`ESC [ ... m`) and OSC 8 hyperlinks (`ESC ] ... ST`, `ST` being
+    either `ESC \\` or BEL `\\x07` — see `_hyperlink`). Both are zero-width; anything else starting
+    with `ESC` is skipped defensively, one character at a time, rather than counted as visible."""
     WIDE_RANGES = (
         (0x1100, 0x115F),
         (0x2300, 0x23FF),
@@ -95,23 +108,39 @@ def _visible_len(s: str):
     )
     ZERO_WIDTH_CODEPOINTS = {0x200D, 0xFE0E, 0xFE0F}  # ZWJ, VS15, VS16
 
-    out, in_escape = 0, False
-    for ch in s:
+    out = 0
+    i, n = 0, len(s)
+    while i < n:
+        ch = s[i]
         if ch == "\033":
-            in_escape = True
-            continue
-        if in_escape:
-            if ch == "m":
-                in_escape = False
+            nxt = s[i + 1] if i + 1 < n else ""
+            if nxt == "[":  # SGR: ESC [ ... m
+                j = i + 2
+                while j < n and s[j] != "m":
+                    j += 1
+                i = j + 1
+            elif nxt == "]":  # OSC 8: ESC ] ... (BEL | ESC \)
+                j = i + 2
+                while (
+                    j < n
+                    and s[j] != "\x07"
+                    and not (s[j] == "\033" and s[j + 1 : j + 2] == "\\")
+                ):
+                    j += 1
+                i = j + 1 if (j < n and s[j] == "\x07") else j + 2
+            else:
+                i += 1
             continue
 
         cp = ord(ch)
         if cp in ZERO_WIDTH_CODEPOINTS or unicodedata.combining(ch):
+            i += 1
             continue  # largeur 0 : se colle au caractère précédent
         if any(lo <= cp <= hi for lo, hi in WIDE_RANGES):
             out += 2
         else:
             out += 1
+        i += 1
     return out
 
 
@@ -333,6 +362,115 @@ def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
     return f"Headroom {face}{SEP}{colour}{pct_txt} {name}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
 
 
+_GIT_TIMEOUT_S = 0.3
+
+
+def _repo_branch(start_dir):
+    """`"<basename(repo-root)> @ <branch>"` for the git repo `start_dir` sits in (or a subdir of),
+    or `None` outside a git repo / on any lookup failure: timeout, no git binary, detached-HEAD
+    edge cases. `CLAUDE_PROJECT_DIR` is often empty in Claude Code and `${CLAUDE_PROJECT_DIR}`-style
+    prompts don't render, so this is the one place a session can see at a glance which repo/branch
+    it is actually sitting in. Untruncated — it has its own row, nothing else to crowd.
+
+    Shells out to `git -C <dir> ...` (`rev-parse --show-toplevel` + `symbolic-ref --short HEAD`) —
+    the same idiom `pc-git`'s own hooks already use, rather than hand-parsing `.git/HEAD` (worktrees,
+    packed-refs and detached HEAD are git's own problem to solve correctly, not this script's)."""
+    if not start_dir:
+        return None
+    try:
+        root = subprocess.run(
+            ["git", "-C", start_dir, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if root.returncode != 0:
+            return None
+        repo_root = root.stdout.strip()
+        branch = subprocess.run(
+            ["git", "-C", start_dir, "symbolic-ref", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        branch_name = branch.stdout.strip() if branch.returncode == 0 else "detached"
+        return f"{os.path.basename(repo_root)} @ {branch_name}"
+    except Exception:
+        return None
+
+
+_FORGE_REMOTE_RE = re.compile(r"^(?:git@|https://|http://)([^:/]+)[:/](.+?)(?:\.git)?$")
+
+
+def _forge_repo_slug(remote_url: str):
+    """`(hostname, "org/repo")` from a git remote URL, SSH or HTTPS form — or `None` if the URL
+    doesn't match either shape."""
+    m = _FORGE_REMOTE_RE.match(remote_url.strip())
+    return (m.group(1), m.group(2)) if m else None
+
+
+def _repo_url(start_dir):
+    """URL of the current branch's page on GitHub/GitLab for the repo `start_dir` sits in, or the
+    repo's root page when the branch has no upstream yet (a fresh local branch has no remote tree
+    to link to — the branch-specific URL would 404), or `None` outside a repo / no `origin` remote
+    / an unrecognised forge / any lookup failure. Matched by "github"/"gitlab" appearing in the
+    remote's hostname, which covers both the public services and the common self-hosted case."""
+    if not start_dir:
+        return None
+    try:
+        remote = subprocess.run(
+            ["git", "-C", start_dir, "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if remote.returncode != 0:
+            return None
+        slug = _forge_repo_slug(remote.stdout)
+        if not slug:
+            return None
+        host, path = slug
+        if "github" in host:
+            base, tree_sep = f"https://{host}/{path}", "tree"
+        elif "gitlab" in host:
+            base, tree_sep = f"https://{host}/{path}", "-/tree"
+        else:
+            return None
+
+        upstream = subprocess.run(
+            [
+                "git",
+                "-C",
+                start_dir,
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{u}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if upstream.returncode != 0:
+            return base  # no upstream — the branch tree page would 404, link the repo instead
+        branch = subprocess.run(
+            ["git", "-C", start_dir, "symbolic-ref", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if branch.returncode != 0:
+            return base
+        return f"{base}/{tree_sep}/{branch.stdout.strip()}"
+    except Exception:
+        return None
+
+
 def _short_model(model_id):
     """claude-opus-4-8 -> Opus 4.8, claude-sonnet-5 -> Sonnet 5, etc."""
     if not model_id:
@@ -388,8 +526,19 @@ def build_lines(data: dict) -> list[str]:
         f"🎨 {style}{RESET}",
     ]
 
-    # ---------- Ligne 2 : session id (courte), session name, heure de début ----------
+    # ---------- Ligne 2 : session id (courte, en lien vers le transcript), heure de début,
+    # nombre de subagents à droite ----------
     session_id = _safe_get(data, "session_id", "?")
+    short_session_id = (
+        session_id[:8] if session_id and session_id != "?" else session_id
+    )
+    # Court pour la lecture ; le lien porte l'id complet pour un outil de recherche par session
+    # (ex. le transcript lui-même) — le texte affiché n'a plus besoin d'être long pour ça.
+    session_txt = (
+        _hyperlink(short_session_id, f"file://{transcript_path}")
+        if transcript_path
+        else short_session_id
+    )
 
     duration_ms = _safe_get(data, "cost.total_duration_ms", 0) or 0
     start_dt = datetime.now() - timedelta(milliseconds=duration_ms)
@@ -397,7 +546,7 @@ def build_lines(data: dict) -> list[str]:
     subagent_count = _count_subagents(transcript_path, session_id)
 
     line2_left_parts: list[str] = [
-        f"{MAGENTA}Session 🆔 {session_id}{RESET}",
+        f"{MAGENTA}Session 🆔 {session_txt}{RESET}",
         f"🕐 Started at {start_txt}{RESET}",
     ]
     line2_right_parts: list[str] = (
@@ -407,6 +556,20 @@ def build_lines(data: dict) -> list[str]:
         if subagent_count
         else []
     )
+
+    # ---------- Ligne repo/branche (entre session et context window), en lien vers le repo —
+    # CLAUDE_PROJECT_DIR est souvent vide dans Claude Code, c'est le seul endroit où une session
+    # voit dans quel repo/branche elle travaille réellement. Ligne omise hors d'un repo. ----------
+    repo_dir = _safe_get(data, "workspace.current_dir") or _safe_get(data, "cwd")
+    repo_branch = _repo_branch(repo_dir)
+    repo_line_left_parts: list[str] = []
+    if repo_branch:
+        repo_url = _repo_url(repo_dir)
+        repo_txt = f"📁 {repo_branch}"
+        repo_line_left_parts.append(
+            _hyperlink(repo_txt, repo_url) if repo_url else repo_txt
+        )
+    repo_line_right_parts: list[str] = []
 
     # ---------- Line 3 : context bar + hit cache performance ----------
     pct = _safe_get(data, "context_window.used_percentage", 0) or 0
@@ -462,6 +625,7 @@ def build_lines(data: dict) -> list[str]:
         [
             (line1_left_parts, line1_right_parts),
             (line2_left_parts, line2_right_parts),
+            (repo_line_left_parts, repo_line_right_parts),
             (line3_left_parts, line3_right_parts),
             (line4_left_parts, line4_right_parts),
         ]
@@ -476,6 +640,11 @@ def build_lines(data: dict) -> list[str]:
     lines.append(_SPACER_ROW)
     lines.append(_render_flex(line2_left_parts, line2_right_parts, right_edge))
     lines.append(_SPACER_ROW)
+    if repo_line_left_parts:
+        lines.append(
+            _render_flex(repo_line_left_parts, repo_line_right_parts, right_edge)
+        )
+        lines.append(_SPACER_ROW)
     lines.append(_render_flex(line3_left_parts, line3_right_parts, right_edge))
     lines.append(_SPACER_ROW)
     if line4_left_parts:
