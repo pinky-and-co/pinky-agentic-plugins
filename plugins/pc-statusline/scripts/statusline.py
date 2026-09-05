@@ -12,6 +12,7 @@ to separate them fully.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -407,6 +408,76 @@ def _repo_branch(start_dir):
         return None
 
 
+_FORGE_REMOTE_RE = re.compile(r"^(?:git@|https://|http://)([^:/]+)[:/](.+?)(?:\.git)?$")
+
+
+def _forge_repo_slug(remote_url: str):
+    """`(hostname, "org/repo")` from a git remote URL, SSH or HTTPS form — or `None` if the URL
+    doesn't match either shape."""
+    m = _FORGE_REMOTE_RE.match(remote_url.strip())
+    return (m.group(1), m.group(2)) if m else None
+
+
+def _repo_url(start_dir):
+    """URL of the current branch's page on GitHub/GitLab for the repo `start_dir` sits in, or the
+    repo's root page when the branch has no upstream yet (a fresh local branch has no remote tree
+    to link to — the branch-specific URL would 404), or `None` outside a repo / no `origin` remote
+    / an unrecognised forge / any lookup failure. Matched by "github"/"gitlab" appearing in the
+    remote's hostname, which covers both the public services and the common self-hosted case."""
+    if not start_dir:
+        return None
+    try:
+        remote = subprocess.run(
+            ["git", "-C", start_dir, "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if remote.returncode != 0:
+            return None
+        slug = _forge_repo_slug(remote.stdout)
+        if not slug:
+            return None
+        host, path = slug
+        if "github" in host:
+            base, tree_sep = f"https://{host}/{path}", "tree"
+        elif "gitlab" in host:
+            base, tree_sep = f"https://{host}/{path}", "-/tree"
+        else:
+            return None
+
+        upstream = subprocess.run(
+            [
+                "git",
+                "-C",
+                start_dir,
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{u}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if upstream.returncode != 0:
+            return base  # no upstream — the branch tree page would 404, link the repo instead
+        branch = subprocess.run(
+            ["git", "-C", start_dir, "symbolic-ref", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            check=False,
+        )
+        if branch.returncode != 0:
+            return base
+        return f"{base}/{tree_sep}/{branch.stdout.strip()}"
+    except Exception:
+        return None
+
+
 def _short_model(model_id):
     """claude-opus-4-8 -> Opus 4.8, claude-sonnet-5 -> Sonnet 5, etc."""
     if not model_id:
@@ -463,7 +534,7 @@ def build_lines(data: dict) -> list[str]:
     ]
 
     # ---------- Ligne 2 : session id (courte, en lien vers le transcript), heure de début,
-    # repo/branche courants à droite ----------
+    # nombre de subagents à droite ----------
     session_id = _safe_get(data, "session_id", "?")
     short_session_id = (
         session_id[:8] if session_id and session_id != "?" else session_id
@@ -485,19 +556,27 @@ def build_lines(data: dict) -> list[str]:
         f"{MAGENTA}Session 🆔 {session_txt}{RESET}",
         f"🕐 Started at {start_txt}{RESET}",
     ]
+    line2_right_parts: list[str] = (
+        [
+            f"{CYAN}🧬 {subagent_count} subagent{'s' if subagent_count > 1 else ''}{RESET}"
+        ]
+        if subagent_count
+        else []
+    )
 
-    # CLAUDE_PROJECT_DIR est souvent vide dans Claude Code — c'est le seul endroit où une session
-    # voit dans quel repo/branche elle travaille réellement.
+    # ---------- Ligne repo/branche (entre session et context window), en lien vers le repo —
+    # CLAUDE_PROJECT_DIR est souvent vide dans Claude Code, c'est le seul endroit où une session
+    # voit dans quel repo/branche elle travaille réellement. Ligne omise hors d'un repo. ----------
     repo_dir = _safe_get(data, "workspace.current_dir") or _safe_get(data, "cwd")
     repo_branch = _repo_branch(repo_dir)
-
-    line2_right_parts: list[str] = []
+    repo_line_left_parts: list[str] = []
     if repo_branch:
-        line2_right_parts.append(f"📁 {repo_branch}")
-    if subagent_count:
-        line2_right_parts.append(
-            f"{CYAN}🧬 {subagent_count} subagent{'s' if subagent_count > 1 else ''}{RESET}"
+        repo_url = _repo_url(repo_dir)
+        repo_txt = f"📁 {repo_branch}"
+        repo_line_left_parts.append(
+            _hyperlink(repo_txt, repo_url) if repo_url else repo_txt
         )
+    repo_line_right_parts: list[str] = []
 
     # ---------- Line 3 : context bar + hit cache performance ----------
     pct = _safe_get(data, "context_window.used_percentage", 0) or 0
@@ -553,6 +632,7 @@ def build_lines(data: dict) -> list[str]:
         [
             (line1_left_parts, line1_right_parts),
             (line2_left_parts, line2_right_parts),
+            (repo_line_left_parts, repo_line_right_parts),
             (line3_left_parts, line3_right_parts),
             (line4_left_parts, line4_right_parts),
         ]
@@ -567,6 +647,11 @@ def build_lines(data: dict) -> list[str]:
     lines.append(_SPACER_ROW)
     lines.append(_render_flex(line2_left_parts, line2_right_parts, right_edge))
     lines.append(_SPACER_ROW)
+    if repo_line_left_parts:
+        lines.append(
+            _render_flex(repo_line_left_parts, repo_line_right_parts, right_edge)
+        )
+        lines.append(_SPACER_ROW)
     lines.append(_render_flex(line3_left_parts, line3_right_parts, right_edge))
     lines.append(_SPACER_ROW)
     if line4_left_parts:

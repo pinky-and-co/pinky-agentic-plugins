@@ -480,7 +480,9 @@ def test_repo_branch_none_on_falsy_input():
     assert sl._repo_branch("") is None
 
 
-def test_build_lines_row2_shows_repo_branch_on_the_right(tmp_path):
+def test_build_lines_shows_repo_branch_on_its_own_row_between_session_and_context(
+    tmp_path,
+):
     repo = tmp_path / "pinky-lib"
     repo.mkdir()
     _git("init", "-q", "-b", "feature/x", cwd=repo)
@@ -491,16 +493,18 @@ def test_build_lines_row2_shows_repo_branch_on_the_right(tmp_path):
     _git("commit", "-q", "-m", "x", cwd=repo)
     data = {"workspace": {"current_dir": str(repo)}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "📁 pinky-lib @ feature/x" in stripped[4]
+    assert "📁 pinky-lib @ feature/x" in stripped[6]
+    assert "Context window" in stripped[8]  # pushed down by one row + its spacer
 
 
-def test_build_lines_row2_omits_repo_branch_outside_a_repo(tmp_path):
+def test_build_lines_omits_the_repo_row_entirely_outside_a_repo(tmp_path):
     data = {"workspace": {"current_dir": str(tmp_path)}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "📁" not in stripped[4]
+    assert not any("📁" in ln for ln in stripped)
+    assert "Context window" in stripped[6]  # no repo row inserted, index unchanged
 
 
-def test_build_lines_row2_repo_branch_coexists_with_subagent_count(
+def test_build_lines_repo_row_independent_of_subagent_count_on_the_session_row(
     tmp_path, monkeypatch
 ):
     repo = tmp_path / "pinky-lib"
@@ -514,8 +518,120 @@ def test_build_lines_row2_repo_branch_coexists_with_subagent_count(
     monkeypatch.setattr(sl, "_count_subagents", lambda *_: 2)
     data = {"workspace": {"current_dir": str(repo)}, "transcript_path": "/t.jsonl"}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "📁 pinky-lib @ main" in stripped[4]
-    assert "2 subagents" in stripped[4]
+    assert "2 subagents" in stripped[4]  # session row, untouched
+    assert "📁 pinky-lib @ main" in stripped[6]  # its own row
+
+
+# --- _forge_repo_slug / _repo_url -- link on the repo/branch row -----------------------------
+
+
+def test_forge_repo_slug_parses_ssh_and_https():
+    assert sl._forge_repo_slug("git@github.com:acme/api.git") == (
+        "github.com",
+        "acme/api",
+    )
+    assert sl._forge_repo_slug("https://gitlab.com/acme/api.git") == (
+        "gitlab.com",
+        "acme/api",
+    )
+    assert sl._forge_repo_slug("https://github.com/acme/api") == (
+        "github.com",
+        "acme/api",
+    )
+
+
+def test_forge_repo_slug_none_on_unparseable_url():
+    assert sl._forge_repo_slug("not a url") is None
+
+
+def test_repo_url_github_branch_tree_when_pushed(tmp_path):
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    repo = tmp_path / "clone"
+    _git("clone", "-q", str(origin), str(repo), cwd=tmp_path)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    _git("checkout", "-q", "-b", "feature/x", cwd=repo)
+    _git("push", "-q", "-u", "origin", "feature/x", cwd=repo)
+    _git("remote", "set-url", "origin", "git@github.com:acme/api.git", cwd=repo)
+    assert sl._repo_url(str(repo)) == "https://github.com/acme/api/tree/feature/x"
+
+
+def test_repo_url_gitlab_uses_dash_tree(tmp_path):
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    repo = tmp_path / "clone"
+    _git("clone", "-q", str(origin), str(repo), cwd=tmp_path)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    _git("push", "-q", "-u", "origin", "HEAD", cwd=repo)
+    _git("remote", "set-url", "origin", "git@gitlab.com:acme/api.git", cwd=repo)
+    branch = subprocess.run(
+        ["git", "-C", str(repo), "symbolic-ref", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert sl._repo_url(str(repo)) == f"https://gitlab.com/acme/api/-/tree/{branch}"
+
+
+def test_repo_url_falls_back_to_repo_root_without_upstream(tmp_path):
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    _git("remote", "add", "origin", "git@github.com:acme/api.git", cwd=repo)
+    assert sl._repo_url(str(repo)) == "https://github.com/acme/api"
+
+
+def test_repo_url_none_without_an_origin_remote(tmp_path):
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    assert sl._repo_url(str(repo)) is None
+
+
+def test_repo_url_none_on_unrecognised_forge(tmp_path):
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    _git("remote", "add", "origin", "git@bitbucket.org:acme/api.git", cwd=repo)
+    assert sl._repo_url(str(repo)) is None
+
+
+def test_build_lines_repo_row_wraps_in_a_hyperlink_when_a_forge_url_resolves(tmp_path):
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    _git("remote", "add", "origin", "git@github.com:acme/api.git", cwd=repo)
+    data = {"workspace": {"current_dir": str(repo)}}
+    lines = sl.build_lines(data)
+    assert "\033]8;;https://github.com/acme/api\033\\📁 my-repo @ main" in lines[6]
 
 
 # --- _hyperlink / short session id -----------------------------------------------------------
