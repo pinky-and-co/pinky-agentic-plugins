@@ -194,11 +194,18 @@ def _stats(saved, lost, before, busts=0):
     }
 
 
+_REAL_PROXY_GET = sl._proxy_get  # captured before the autouse fixture stubs it
+
+
 @_pytest.fixture(autouse=True)
 def _no_live_proxy(monkeypatch):
-    """Never let the suite reach a real Headroom proxy — a developer running one would otherwise
-    see different results from CI."""
-    monkeypatch.setattr(sl, "_headroom_stats", lambda: None)
+    """Never let the suite reach a real compression proxy — a developer running Headroom or Kompact
+    would otherwise see different results from CI. Stubbed at `_proxy_get` (the single network
+    seam) so `_headroom_stats` / `_kompact_stats` stay real and their URL+cache wiring is still
+    testable. Also clears `ANTHROPIC_BASE_URL` so the probe-narrowing shortcut doesn't pick up the
+    dev's own wrapped shell."""
+    monkeypatch.setattr(sl, "_proxy_get", lambda *a, **k: None)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
 
 
 def test_headroom_net_is_savings_minus_cache_busts():
@@ -284,6 +291,206 @@ def test_build_lines_omits_the_headroom_row_when_the_proxy_is_down():
         _strip_ansi(ln) for ln in sl.build_lines({"cost": {"total_duration_ms": 0}})
     ]
     assert not any("Headroom" in ln for ln in stripped)
+
+
+# --- _fmt_headroom_line oracle (pins "pure refactor" — substring asserts above let ordering drift)
+
+
+def test_fmt_headroom_line_oracle_positive():
+    assert _strip_ansi(sl._fmt_headroom_line(1_336_000, 12.145, 0)) == (
+        "Headroom 🤑  ·  12% savings  ·  1336k tokens saved"
+    )
+
+
+def test_fmt_headroom_line_oracle_negative_with_busts():
+    assert _strip_ansi(sl._fmt_headroom_line(-286_781, 1.8317, 4)) == (
+        "Headroom 💸  ·  1.8% losses  ·  286k tokens lost  ·  4 cache busts"
+    )
+
+
+# --- Kompact figure + proxy-agnostic selection -------------------------------------------
+
+
+def _kompact_payload(saved, processed):
+    """A minimal `/api/metrics` payload shaped like Kompact's, keyed only where the code reads.
+
+    Kompact reports gross `total_tokens_saved` and has no cache-bust field — the schema was
+    captured live 2026-09-05 (`curl http://localhost:7878/api/metrics`).
+    """
+    return {
+        "summary": {
+            "total_tokens_saved": saved,
+            "total_tokens_processed": processed,
+        }
+    }
+
+
+def test_kompact_gross_is_saved_over_processed():
+    assert sl._kompact_gross(_kompact_payload(120_000, 1_000_000)) == (
+        120_000,
+        _pytest.approx(12.0),
+    )
+
+
+def test_kompact_gross_none_when_processed_is_zero_but_saved_positive():
+    # The divide-by-zero guard, isolated: saved > 0, processed == 0 (would raise without the guard,
+    # and the `saved <= 0` branch does not cover this case).
+    assert sl._kompact_gross(_kompact_payload(100, 0)) is None
+
+
+def test_kompact_gross_none_on_fresh_proxy_all_zero():
+    assert sl._kompact_gross(_kompact_payload(0, 0)) is None
+
+
+def test_kompact_gross_none_when_nothing_compressed_yet():
+    assert sl._kompact_gross(_kompact_payload(0, 50_000)) is None
+
+
+def test_kompact_gross_none_when_proxy_unreachable():
+    assert sl._kompact_gross(None) is None
+
+
+@_pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"summary": {}},
+        {"summary": {"total_tokens_saved": "x", "total_tokens_processed": 1000}},
+        {"summary": {"total_tokens_saved": 1000, "total_tokens_processed": "x"}},
+    ],
+    ids=["empty", "summary-empty", "saved-poisoned", "processed-poisoned"],
+)
+def test_kompact_gross_none_on_incomplete_or_poisoned_payload(payload):
+    assert sl._kompact_gross(payload) is None
+
+
+def test_fmt_kompact_line_oracle_is_neutral_and_never_claims_a_sign():
+    # Separate oracle from Headroom's: Kompact's figure is gross, so the line must not borrow the
+    # 🤑/💸 + saved/lost wording — a shared oracle would pass while the Kompact line misleads.
+    assert _strip_ansi(sl._fmt_kompact_line(120_000, 12.0)) == (
+        "Kompact 🗜️  ·  12% compressed  ·  120k tokens gross"
+    )
+
+
+def test_fmt_kompact_line_oracle_sub_ten_percent_keeps_one_decimal():
+    assert _strip_ansi(sl._fmt_kompact_line(400, 3.6)) == (
+        "Kompact 🗜️  ·  3.6% compressed  ·  400 tokens gross"
+    )
+
+
+def test_kompact_adapter_renders_the_line_when_its_proxy_answers(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_kompact_stats", lambda: _kompact_payload(120_000, 1_000_000)
+    )
+    assert sl._kompact_adapter() == sl._fmt_kompact_line(120_000, 12.0)
+
+
+def test_kompact_adapter_none_when_its_proxy_is_down():
+    assert sl._kompact_adapter() is None  # _no_live_proxy stubs _kompact_stats to None
+
+
+def test_headroom_adapter_renders_the_line_when_its_proxy_answers(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_headroom_stats", lambda: _stats(1_400_000, 64_000, 11_000_000)
+    )
+    assert "Headroom 🤑" in _strip_ansi(sl._headroom_adapter() or "")
+
+
+def test_compression_proxy_prefers_headroom_when_both_answer(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_headroom_stats", lambda: _stats(1_400_000, 64_000, 11_000_000)
+    )
+    monkeypatch.setattr(
+        sl, "_kompact_stats", lambda: _kompact_payload(120_000, 1_000_000)
+    )
+    line = _strip_ansi(sl._compression_proxy_stats() or "")
+    assert line.startswith("Headroom") and "Kompact" not in line
+
+
+def test_compression_proxy_finds_kompact_when_headroom_is_down(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_kompact_stats", lambda: _kompact_payload(120_000, 1_000_000)
+    )
+    assert _strip_ansi(sl._compression_proxy_stats() or "").startswith("Kompact")
+
+
+def test_compression_proxy_none_when_nothing_runs():
+    assert sl._compression_proxy_stats() is None
+
+
+def test_env_base_url_narrows_the_probe_to_the_named_port(monkeypatch):
+    # ANTHROPIC_BASE_URL on Kompact's port -> the Headroom adapter is never called, even though it
+    # would answer. The shortcut narrows the probe to the one named proxy.
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:7878")
+
+    def _boom():
+        raise AssertionError(
+            "Headroom adapter probed despite ANTHROPIC_BASE_URL naming :7878"
+        )
+
+    monkeypatch.setattr(sl, "_headroom_adapter", _boom)
+    monkeypatch.setattr(
+        sl, "_kompact_stats", lambda: _kompact_payload(120_000, 1_000_000)
+    )
+    assert _strip_ansi(sl._compression_proxy_stats() or "").startswith("Kompact")
+
+
+def test_daemon_case_probe_still_finds_kompact_without_env(monkeypatch):
+    # `kompact service` runs as a launchd daemon: proxy up, ANTHROPIC_BASE_URL absent from the
+    # `claude` process -> the probe (not the env shortcut) must still find it.
+    monkeypatch.setattr(sl, "_kompact_stats", lambda: _kompact_payload(90_000, 900_000))
+    assert _strip_ansi(sl._compression_proxy_stats() or "").startswith("Kompact")
+
+
+def test_unknown_env_port_falls_back_to_the_full_probe(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:9999")
+    monkeypatch.setattr(sl, "_kompact_stats", lambda: _kompact_payload(90_000, 900_000))
+    assert _strip_ansi(sl._compression_proxy_stats() or "").startswith("Kompact")
+
+
+def test_each_proxy_stats_call_passes_its_own_url_and_cache_pair(monkeypatch):
+    # One function (`_proxy_get`), two callers, two constant pairs — a swapped constant
+    # (`_KOMPACT_STATS_URL` paired with `_HEADROOM_CACHE`) is otherwise silent.
+    seen = []
+    monkeypatch.setattr(sl, "_proxy_get", lambda url, cache: seen.append((url, cache)))
+    sl._headroom_stats()
+    sl._kompact_stats()
+    assert seen == [
+        (sl._HEADROOM_STATS_URL, sl._HEADROOM_CACHE),
+        (sl._KOMPACT_STATS_URL, sl._KOMPACT_CACHE),
+    ]
+
+
+def test_proxy_get_returns_none_on_a_malformed_http_response(monkeypatch, tmp_path):
+    # A proxy that crashes mid-response raises http.client.HTTPException — NOT an OSError. It must
+    # degrade to None, never propagate and blank the bar (main() would print the bare fallback).
+    import http.client
+
+    def _boom(*_a, **_k):
+        raise http.client.BadStatusLine("garbage")
+
+    monkeypatch.setattr(
+        sl, "_proxy_get", _REAL_PROXY_GET
+    )  # undo the autouse stub for this one
+    monkeypatch.setattr(sl.urllib.request, "urlopen", _boom)
+    assert sl._proxy_get("http://127.0.0.1:7878/x", str(tmp_path / "c.json")) is None
+
+
+def test_build_lines_renders_the_kompact_row_on_its_own_line(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_kompact_stats", lambda: _kompact_payload(120_000, 1_000_000)
+    )
+    data = {
+        "session_id": "s",
+        "cost": {"total_cost_usd": 1.0, "total_duration_ms": 0},
+        "context_window": {"used_percentage": 10, "total_input_tokens": 0},
+    }
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    # last content row (row 8: line0..line3 + 4 spacers, then the proxy row)
+    assert "Kompact 🗜" in stripped[8] and "12% compressed" in stripped[8]
+    assert "120k tokens gross" in stripped[8]
+    assert not any("Headroom" in ln for ln in stripped)
+    assert not any("Context window" in ln and "Kompact" in ln for ln in stripped)
 
 
 # --- build_lines() end-to-end oracles -------------------------------------------------------

@@ -17,8 +17,9 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
-import urllib.error
+import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from _common import (
@@ -47,18 +48,29 @@ RED_BG = "\033[41;30m"  # red background, white text ->  "alert" effect
 
 SEP = f"  {GREY}·{RESET}  "
 
-# Headroom (optional third-party tool, headroomlabs-ai/headroom) proxies requests through a local
-# port and serves live counters there. Nothing listens when Headroom is not running — the line then
-# never renders. Scope is the proxy's own lifetime, which `headroom wrap claude` ties to one Claude
-# Code session.
+# Un proxy de compression (Headroom, Kompact…) écoute sur un port local et y sert des compteurs
+# live. Lequel tourne — s'il y en a un — est découvert, jamais supposé : la statusline sonde les
+# endpoints connus et prend le premier qui répond. `ANTHROPIC_BASE_URL`, quand il nomme un port
+# connu, est un raccourci qui saute la sonde — jamais l'inverse : `kompact service` tourne en
+# daemon launchd sans cette variable dans le process `claude`, et une sonde-en-repli le raterait en
+# silence. Rien n'écoute quand aucun proxy ne tourne — la ligne ne s'affiche alors pas.
+_PROXY_HTTP_TIMEOUT_S = 0.15
+_PROXY_CACHE_TTL_S = 5.0
+# La statusline se repeint à chaque tour : chaque appel HTTP est borné ET mémoïsé (un fichier de
+# cache par proxy), un proxy pendu coûte un timeout, pas un par peinture.
 _HEADROOM_STATS_URL = "http://127.0.0.1:8787/stats"
-# A status line repaints on every turn, so the HTTP call is both hard-bounded and memoized: a hung
-# proxy costs one timeout, not one per paint.
-_HEADROOM_HTTP_TIMEOUT_S = 0.15
-_HEADROOM_CACHE_TTL_S = 5.0
-_HEADROOM_CACHE = os.path.join(
-    tempfile.gettempdir(), f"pc-statusline-headroom-{os.getuid()}.json"
-)
+_KOMPACT_STATS_URL = "http://127.0.0.1:7878/api/metrics"
+
+
+def _proxy_cache_path(label: str) -> str:
+    """Per-proxy memo file: a slow proxy costs one timeout every `_PROXY_CACHE_TTL_S`, not one per paint."""
+    return os.path.join(
+        tempfile.gettempdir(), f"pc-statusline-{label}-{os.getuid()}.json"
+    )
+
+
+_HEADROOM_CACHE = _proxy_cache_path("headroom")
+_KOMPACT_CACHE = _proxy_cache_path("kompact")
 
 # Minimum blank gap between a row's left and right groups, and the gutter added past the widest
 # natural row to place the shared right-hand column.
@@ -270,35 +282,47 @@ def _get_advisor_model(transcript_path, tail_bytes=16384):
         return None
 
 
-def _headroom_stats() -> dict | None:
-    """Raw Headroom proxy counters, memoized on disk for `_HEADROOM_CACHE_TTL_S`.
+def _proxy_get(url: str, cache_path: str) -> dict | None:
+    """Decoded JSON from a local proxy's stats endpoint, memoized on disk for `_PROXY_CACHE_TTL_S`.
 
-    Returns the decoded `/stats` payload, or None when the proxy is down, slow or unreadable —
-    every failure mode is the same answer, because a status line has nothing useful to say about
-    a tool that is not running.
+    Returns None when the proxy is down, slow or unreadable — every failure mode is the same
+    answer, because a status line has nothing useful to say about a tool that is not running.
     """
     try:
-        cached = os.path.getmtime(_HEADROOM_CACHE)
-        if (datetime.now().timestamp() - cached) < _HEADROOM_CACHE_TTL_S:
-            with open(_HEADROOM_CACHE, encoding="utf-8") as handle:
+        cached = os.path.getmtime(cache_path)
+        if (datetime.now().timestamp() - cached) < _PROXY_CACHE_TTL_S:
+            with open(cache_path, encoding="utf-8") as handle:
                 return json.load(handle)
     except (OSError, ValueError):
-        pass  # no cache yet, or a torn write from a concurrent paint — refetch
+        pass  # pas de cache, ou écriture déchirée par une peinture concurrente — on refetch
 
     try:
-        with urllib.request.urlopen(  # nosec B310 — the URL is the module constant above, a hardcoded http:// loopback address; no caller input reaches it, so no file:/ or custom scheme is reachable
-            _HEADROOM_STATS_URL, timeout=_HEADROOM_HTTP_TIMEOUT_S
+        with urllib.request.urlopen(  # nosec B310 — url is one of the module constants above, a hardcoded http:// loopback address; no caller input reaches it, so no file:/ or custom scheme is reachable
+            url, timeout=_PROXY_HTTP_TIMEOUT_S
         ) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+    except Exception:
+        # Même contrat « ne lève jamais » que les autres helpers du fichier : un hoquet du proxy
+        # (corps tronqué, `http.client.HTTPException` qui n'est PAS un `OSError`) doit dégrader à
+        # « pas de ligne », jamais blanchir tout le bandeau.
         return None
 
     try:
-        with open(_HEADROOM_CACHE, "w", encoding="utf-8") as handle:
+        with open(cache_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
     except OSError:
-        pass  # an unwritable temp dir costs a refetch per paint, never a missing line
+        pass  # un temp dir non inscriptible coûte un refetch par peinture, jamais une ligne manquante
     return payload
+
+
+def _headroom_stats() -> dict | None:
+    """Raw Headroom `/stats` payload, or None when its proxy is not answering."""
+    return _proxy_get(_HEADROOM_STATS_URL, _HEADROOM_CACHE)
+
+
+def _kompact_stats() -> dict | None:
+    """Raw Kompact `/api/metrics` payload, or None when its proxy is not answering."""
+    return _proxy_get(_KOMPACT_STATS_URL, _KOMPACT_CACHE)
 
 
 def _headroom_net(stats: dict | None = None) -> tuple[int, float, int] | None:
@@ -360,6 +384,90 @@ def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
         colour, face, verb, name = RED, "💸", "lost", "losses"
     bust_txt = f"{SEP}{busts} cache bust{'s' if busts != 1 else ''}" if busts else ""
     return f"Headroom {face}{SEP}{colour}{pct_txt} {name}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
+
+
+def _kompact_gross(stats: dict | None = None) -> tuple[int, float] | None:
+    """Kompact's compression figure as `(tokens, percent)` — gross, not a net.
+
+    Kompact reports `total_tokens_saved` gross: it has no visibility into the Anthropic prefix
+    cache it invalidates by rewriting the prompt (its `store` counters are Kompact's own cache, a
+    different thing). So this is the tokens it removed before send, and the reader must cross-read
+    line 3's `Cache hit` to see what that cost. The name is `_gross`, never `_net`, so no future
+    change bolts a sign onto a figure that cannot carry one. Returns None when the proxy is down,
+    has served nothing yet, or reports a non-positive volume.
+    """
+    stats = _kompact_stats() if stats is None else stats
+    if not isinstance(stats, dict):
+        return None
+
+    saved = _safe_get(stats, "summary.total_tokens_saved")
+    processed = _safe_get(stats, "summary.total_tokens_processed")
+    if not isinstance(saved, int) or not isinstance(processed, (int, float)):
+        return None
+    if (
+        saved <= 0 or processed <= 0
+    ):  # `processed == 0` sur le 1er tour de chaque session
+        return None
+    return (saved, saved / processed * 100)
+
+
+def _fmt_kompact_line(tokens: int, percent: float) -> str:
+    """The Kompact row: compression volume, stated plainly as gross.
+
+    No 🤑/💸 and no saved/lost verb — Kompact does not measure the cache-bust cost, so the line
+    must not imply a sign it cannot back. `gross` is the honest word; the net picture is line 3.
+    """
+    amount_txt = f"{tokens // 1000}k" if tokens >= 1000 else str(tokens)
+    pct_txt = f"{percent:.1f}%" if percent < 10 else f"{percent:.0f}%"
+    # 🗜 (U+1F5DC) has Emoji_Presentation=No — VS16 forces the wide glyph `_visible_len` assumes.
+    return (
+        f"Kompact 🗜️{SEP}{CYAN}{pct_txt} compressed{SEP}{amount_txt} tokens gross{RESET}"
+    )
+
+
+def _headroom_adapter() -> str | None:
+    """The rendered Headroom row, or None when its proxy is not answering."""
+    net = _headroom_net()
+    return _fmt_headroom_line(*net) if net is not None else None
+
+
+def _kompact_adapter() -> str | None:
+    """The rendered Kompact row, or None when its proxy is not answering."""
+    gross = _kompact_gross()
+    return _fmt_kompact_line(*gross) if gross is not None else None
+
+
+def _compression_proxy_stats() -> str | None:
+    """The active compression proxy's rendered row, or None when none is running.
+
+    Discovery is a probe of the known proxies in order — first that answers wins. `ANTHROPIC_BASE_URL`,
+    when it names a port a known proxy listens on, narrows the probe to that one proxy; it never
+    suppresses the probe, because `kompact service` runs as a launchd daemon with no such variable
+    in the `claude` process.
+    """
+    # (stats URL, adapter) en ordre de sonde. Construit ici, pas au scope module : un tuple
+    # module-level capturerait les objets fonction d'origine et un test qui monkeypatche un
+    # adaptateur par nom ne prouverait rien. Le port du raccourci `ANTHROPIC_BASE_URL` est dérivé
+    # de l'URL — une seule source de vérité.
+    adapters: tuple[tuple[str, Callable[[], str | None]], ...] = (
+        (_HEADROOM_STATS_URL, _headroom_adapter),
+        (_KOMPACT_STATS_URL, _kompact_adapter),
+    )
+    try:
+        env_port = urllib.parse.urlsplit(os.environ.get("ANTHROPIC_BASE_URL", "")).port
+    except ValueError:
+        env_port = None
+    known_ports = {urllib.parse.urlsplit(url).port for url, _ in adapters}
+    if env_port in known_ports:
+        adapters = tuple(
+            a for a in adapters if urllib.parse.urlsplit(a[0]).port == env_port
+        )
+
+    for _, adapter in adapters:
+        line = adapter()
+        if line is not None:
+            return line
+    return None
 
 
 _GIT_TIMEOUT_S = 0.3
@@ -599,12 +707,12 @@ def build_lines(data: dict) -> list[str]:
     ]
     line3_right_parts: list[str] = [f"💲 {cost:.2f} (API-equiv)"]
 
-    # ---------- Optional line : Headroom, only while its proxy is up ----------
+    # ---------- Optional line : the active compression proxy, only while one is up ----------
     line4_left_parts: list[str] = []
     line4_right_parts: list[str] = []
-    headroom = _headroom_net()
-    if headroom:
-        line4_left_parts.append(_fmt_headroom_line(*headroom))
+    proxy_line = _compression_proxy_stats()
+    if proxy_line:
+        line4_left_parts.append(proxy_line)
 
     # ---------- Optional line : rate limits > 90% ----------
     warnings = []
