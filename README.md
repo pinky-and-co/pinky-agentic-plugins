@@ -304,7 +304,6 @@ pinky-agentic-plugins/
 ├── AGENTS.md
 ├── ATTRIBUTIONS.md
 ├── CLAUDE.md
-├── commit_messages.txt
 ├── CREDITS
 ├── NOTICE
 ├── pyproject.toml

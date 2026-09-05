@@ -24,10 +24,6 @@ spawn a subagent per repo — the script handles every repo in one pass, in unde
 
 ## Step 1 — Resolve the scope (read-only), then plan
 
-**An empty `args` is not a missing instruction — it is the default case this very step already
-defines.** Run the `discover` command below as your first tool call, before writing anything. Never
-pause to ask what the task is: nothing has been read yet, so there is nothing to ask about.
-
 **Never run `plan` unfiltered to "see what's there"** — `plan` stages (`git add -A`) every repo it
 scans. Discover the scope with the read-only subcommand first:
 
