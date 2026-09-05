@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Write, AskUserQuestion
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Write
 ---
 
 # Commit + push + PR/MR
@@ -24,6 +24,9 @@ spawn a subagent per repo — the script handles every repo in one pass, in unde
 
 ## Step 1 — Resolve the scope (read-only), then plan
 
+**`args` is required — a repo name or `--all`.** A blind invocation cannot reliably resolve its own
+scope; report that a target is required and stop, before any tool call, rather than guessing at one.
+
 **Never run `plan` unfiltered to "see what's there"** — `plan` stages (`git add -A`) every repo it
 scans. Discover the scope with the read-only subcommand first:
 
@@ -37,17 +40,10 @@ It prints one dirty-repo basename per line, stages nothing. From that list + the
   all, so it is stale (a moved workspace is the usual cause). Say the root is wrong and stop —
   "nothing to commit" and "I looked in the wrong place" are not the same answer.
 - **empty list, exit 0** → "nothing to commit", stop.
-- **argument names one repo** → target = that repo.
+- **`args` names a repo not in the list** → say so, stop. Never guess a closest match.
+- **`args` names one repo from the list** → target = that repo.
 - **`--all`** → target = *whole root* (no `--repo`). `--all` is never passed to the script; it just
   means "omit `--repo`".
-- **no argument, one line** → target = that repo.
-- **no argument, more than one line** → never sweep (an unqualified run once committed 7 unrelated
-  dirty repos and reported PRs that were never opened). `AskUserQuestion`:
-  1. "One specific repo, or all of them?" → `just one` / `all of them` / `stop`.
-  2. if `just one`: offer the first 4 basenames plus `none of these`; on `none of these`, ask again
-     with the next 4, until one is picked.
-
-  `all of them` *is* the consent for a whole-root run. `stop` → do nothing.
 
 Then plan the resolved target:
 
