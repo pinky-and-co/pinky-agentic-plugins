@@ -17,6 +17,10 @@ consent already exists.)
 
 ## Step 1 — Identify the target(s)
 
+**An empty `args` is not a missing instruction — this step's own branching below already defines
+what it means.** Run the command right below as your first tool call, before writing anything.
+Never pause to ask what the task is: nothing has been read yet, so there is nothing to ask about.
+
 ```
 git -C "${CLAUDE_PROJECT_DIR}" rev-parse --is-inside-work-tree
 ```

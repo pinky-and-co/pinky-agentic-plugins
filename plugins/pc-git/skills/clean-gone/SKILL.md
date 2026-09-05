@@ -13,6 +13,9 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_g
 Being invoked is the confirmation — this only touches branches the remote has already deleted
 (post-merge or otherwise), never anything with unpushed or unmerged work. No confirmation needed.
 
+An empty `args` is not a missing instruction — it means the whole root. Run the command below as
+your first tool call, before writing anything. Never pause to ask what the task is.
+
 `scripts/bulk_clean_gone.sh` owns everything deterministic: `fetch --prune` before ever reading
 `[gone]` status (a branch deleted on GitHub/GitLab stays invisible locally until this runs),
 switching off a branch before deleting it, pulling the base branch once landed there, and removing
