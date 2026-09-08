@@ -72,7 +72,6 @@ pinky-agentic-plugins/
 │   │   │   ├── inject_policies.py
 │   │   │   ├── keychain.py
 │   │   │   ├── load_secrets.py
-│   │   │   ├── notify_reload.py
 │   │   │   ├── pending_gate.py
 │   │   │   ├── pending_user_action.py
 │   │   │   ├── plugin_scope_lib.py

@@ -117,18 +117,6 @@
           }
         ]
       }
-    ],
-    "ConfigChange": [
-      {
-        "matcher": "local_settings",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/notify_reload.py"]
-          }
-        ]
-      }
     ]
   }
 }
