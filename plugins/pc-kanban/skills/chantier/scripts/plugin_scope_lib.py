@@ -31,6 +31,7 @@ SessionStart ascend and the CwdChanged descend: a plugin scoped to
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -63,25 +64,66 @@ def is_ancestor_or_equal(parent: Path, child: Path) -> bool:
         return False
 
 
-def matching_plugin_ids(path: Path, installed: dict | None = None) -> list[str]:
-    """Return every `plugin@marketplace` id whose *project*-scoped install
-    (any entry) has a `projectPath` that is `path` or an ancestor of it.
+def _project_paths(install_entries: list[dict]) -> list[Path]:
+    """The `projectPath` of every `scope: "project"` entry — the only scope
+    that is path-restricted, so the only one a cwd descent looks at."""
+    return [
+        Path(entry["projectPath"])
+        for entry in install_entries
+        if entry.get("scope") == "project" and entry.get("projectPath")
+    ]
 
-    `scope: "user"` entries are skipped on purpose: they are already active
-    workspace-wide, never subject to the cwd-gating problem this hook exists
-    to work around. Only `scope: "project"` entries are path-restricted.
+
+def matching_plugin_ids(
+    path: Path,
+    installed: dict | None = None,
+    *,
+    open_path: Path | None = None,
+) -> list[str]:
+    """Return every `plugin@marketplace` id a descent into `path` should
+    discover and enable: one whose `scope: "project"` install has a
+    `projectPath` that is `path` or an ancestor of it.
+
+    Two plugin-level exclusions (a plugin is dropped whole, not per entry):
+
+    - A plugin with any `scope: "user"` entry is already active
+      workspace-wide, so a descent never needs to enable it.
+    - When `open_path` is given, a plugin whose `projectPath` is `open_path`
+      or an ancestor of it already applied from session start — the
+      SessionStart ascend handled it, re-enabling here is noise. The ascend
+      itself omits `open_path`, because those are exactly what it wants.
     """
     installed = installed if installed is not None else load_installed_plugins()
     matches = []
     for plugin_id, install_entries in installed.get("plugins", {}).items():
-        for entry in install_entries:
-            if entry.get("scope") != "project":
-                continue
-            project_path = entry.get("projectPath")
-            if project_path and is_ancestor_or_equal(Path(project_path), path):
-                matches.append(plugin_id)
-                break  # one matching entry is enough for this plugin
+        if any(entry.get("scope") == "user" for entry in install_entries):
+            continue
+        project_paths = _project_paths(install_entries)
+        if open_path is not None and any(
+            is_ancestor_or_equal(pp, open_path) for pp in project_paths
+        ):
+            continue
+        if any(is_ancestor_or_equal(pp, path) for pp in project_paths):
+            matches.append(plugin_id)
     return matches
+
+
+def settings_local_plugin_ids(open_path: Path) -> list[str]:
+    """Every plugin id present in `enabledPlugins` of the session's
+    `settings.local.json` (the file `claude plugin enable -s local` writes),
+    on or off, sorted. Absent or unreadable file → empty list.
+
+    Presence, not truthiness: a plugin already listed there — even disabled —
+    has been decided for this session, so a descent leaves it alone rather
+    than flipping it back on.
+    """
+    settings_local = Path(open_path) / ".claude" / "settings.local.json"
+    try:
+        data = json.loads(settings_local.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    enabled = data.get("enabledPlugins", {})
+    return sorted(enabled) if isinstance(enabled, dict) else []
 
 
 # --- Activation --------------------------------------------------------------
@@ -89,10 +131,20 @@ def matching_plugin_ids(path: Path, installed: dict | None = None) -> list[str]:
 
 @dataclass(frozen=True)
 class EnableResult:
-    """Outcome of one `claude plugin enable -s local <id>` call."""
+    """Outcome of one `claude plugin enable -s local <id>` call.
+
+    `already_enabled` splits the one non-zero exit the caller must not treat
+    as a failure — the plugin is on already — from every real error.
+    """
 
     success: bool
+    already_enabled: bool
     stderr: str
+
+
+# `claude plugin enable` refuse un plugin déjà actif ("... is already enabled
+# at local scope") : ce n'est pas un échec pour nous, juste rien à faire.
+_ALREADY_ENABLED_RE = re.compile(r"already enabled", re.IGNORECASE)
 
 
 def enable_plugin_local(plugin_id: str) -> EnableResult:
@@ -107,9 +159,12 @@ def enable_plugin_local(plugin_id: str) -> EnableResult:
             timeout=15,
             check=False,
         )
-        return EnableResult(result.returncode == 0, result.stderr.strip())
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return EnableResult(False, str(exc))
+        return EnableResult(False, False, str(exc))
+    stderr = result.stderr.strip()
+    if result.returncode == 0:
+        return EnableResult(True, False, stderr)
+    return EnableResult(False, bool(_ALREADY_ENABLED_RE.search(stderr)), stderr)
 
 
 # --- Per-session state (which plugin ids we've already activated) -----------

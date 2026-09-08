@@ -296,7 +296,8 @@ pinky-agentic-plugins/
 │   ├── test_statusline_common.py
 │   ├── test_stop_handoff.py
 │   ├── test_structure_guard.py
-│   └── test_subagent_statusline.py
+│   ├── test_subagent_statusline.py
+│   └── test_sync_plugin_scope.py
 ├── .darglint
 ├── .gitattributes
 ├── .gitignore

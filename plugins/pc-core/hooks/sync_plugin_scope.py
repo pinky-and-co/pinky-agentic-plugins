@@ -10,7 +10,10 @@ Ascend at SessionStart, descend at CwdChanged, restore at SessionEnd:
   repo touched), then activate every project-scoped plugin whose projectPath
   is an ancestor of (or equal to) the session's starting cwd.
 - CwdChanged: same matching, against the *new* cwd, additive only — never
-  deactivates a plugin a previous position already turned on.
+  deactivates a plugin a previous position already turned on. Passes the
+  session's open path so the match drops what the SessionStart ascend
+  already covered (projectPath at or above the open dir) and what
+  settings.local.json already lists.
 - SessionEnd: restore settings.local.json to exactly what backup_settings_local
   captured, and drop the per-session state file.
 
@@ -38,6 +41,7 @@ from plugin_scope_lib import (
     matching_plugin_ids,
     restore_settings_local,
     save_state,
+    settings_local_plugin_ids,
 )
 
 
@@ -45,19 +49,51 @@ def settings_local_for(project_dir: str) -> Path:
     return Path(project_dir) / ".claude" / "settings.local.json"
 
 
-def activate_for_path(path: Path, state: dict) -> list[str]:
+def session_open_path(state: dict) -> Path | None:
+    """The directory the session opened in — the one `claude plugin enable -s
+    local` resolves against. Recovered from the settings.local.json path
+    handle_session_start already stored (`<open>/.claude/settings.local.json`),
+    falling back to CLAUDE_PROJECT_DIR when that run left nothing (it always
+    runs first, so this is belt-and-braces)."""
+    stored = state.get("settings_local_path")
+    if stored:
+        return Path(stored).parent.parent
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    return Path(env) if env else None
+
+
+def activate_for_path(
+    path: Path, state: dict, *, open_path: Path | None = None
+) -> list[str]:
     """Enable every not-yet-activated matching plugin for `path`. Returns the
     plugin ids newly enabled this call (empty if nothing new — cheap to call
-    on every CwdChanged, most of which won't match anything new)."""
+    on every CwdChanged, most of which won't match anything new).
+
+    `open_path` is the session's open directory (the CwdChanged descent
+    passes it, the SessionStart ascend does not): it narrows the match to
+    plugins genuinely below the session root and seeds the skip-set with
+    what settings.local.json already lists, so an id already on is never
+    handed to `claude plugin enable` a second time.
+    """
     already = set(state["activated"])
+    if open_path is not None:
+        already.update(settings_local_plugin_ids(open_path))
     newly_enabled = []
-    for plugin_id in matching_plugin_ids(path):
+    for plugin_id in matching_plugin_ids(path, open_path=open_path):
         if plugin_id in already:
             continue
         result = enable_plugin_local(plugin_id)
         if result.success:
             already.add(plugin_id)
             newly_enabled.append(plugin_id)
+        elif result.already_enabled:
+            # déjà actif au scope local : rien à faire, on le note pour ne pas
+            # ré-essayer (et ré-avertir) au prochain cd.
+            already.add(plugin_id)
+            print(
+                f"sync_plugin_scope: {plugin_id} already enabled at local scope — skipped",
+                file=sys.stderr,
+            )
         else:
             print(
                 f"sync_plugin_scope: failed to enable {plugin_id}: {result.stderr}",
@@ -101,7 +137,9 @@ def handle_cwd_changed(payload: dict) -> None:
         return  # defensive — cwd is a common field but guard anyway
 
     state = load_state(session_id)
-    newly_enabled = activate_for_path(Path(new_cwd), state)
+    newly_enabled = activate_for_path(
+        Path(new_cwd), state, open_path=session_open_path(state)
+    )
     save_state(session_id, state)
 
     if newly_enabled:
