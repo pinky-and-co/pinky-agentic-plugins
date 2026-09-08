@@ -8,8 +8,9 @@ toggled through one `permission-change` skill.
 
 Being invoked is the confirmation: `commit` and `commit-and-pr` do not pause to propose and wait
 before acting — an explicit invocation is already consent. The gitmoji emoji/type table lives in
-`skills/{commit,commit-and-pr}/references/commit-convention.md`; both skills read it before
-choosing an emoji, never relying on generic training-data knowledge of gitmoji.dev.
+the `commit-convention` skill (`plugins/pc-git/skills/commit-convention/SKILL.md`); both `commit`
+and `commit-and-pr` read it before choosing an emoji, never relying on generic training-data
+knowledge of gitmoji.dev.
 
 ## Skills
 

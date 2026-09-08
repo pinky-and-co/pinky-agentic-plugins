@@ -1,4 +1,10 @@
-# commit-convention.md — Commit convention
+---
+name: commit-convention
+description: Reference knowledge for the gitmoji + Conventional-Commits-based commit message format shared by the `commit` and `commit-and-pr` skills — read before writing any commit message.
+user-invocable: false
+---
+
+# commit-convention — Commit convention
 
 Reference knowledge base for the gitmoji commit convention used across all repos.
 
@@ -9,29 +15,28 @@ ______________________________________________________________________
 - [ ] Step 1: Analyse the diff (staged files, nature of changes)
 - [ ] Step 2: Identify the primary change — if multiple logical groups, split into one commit per group
 - [ ] Step 3: Choose **emoji + type** from the table below
-- [ ] Step 4: Propose the full command(s):
+- [ ] Step 4: Run commit(s)
   ```bash
-  git commit -m "<emoji> <type>: <description>"
+  git commit -m "<emoji> <type>[!]: <description>"
   ```
-- [ ] Step 5: **Wait for confirmation before running anything.**
-- [ ] Step 6: Once confirmed, run commit(s) in the proposed order.
-- [ ] Step 7: If the commit is blocked by a hook — diagnose the error and propose a fix before retrying.
+- [ ] Step 5: If the commit is blocked by a hook — diagnose the error and propose a fix before retrying.
 
 ______________________________________________________________________
 
 ## 2. Format
 
 ```
-<emoji> <type>: <description> [<issue-ref>]
+<emoji> <type>[!]: <description> [<issue-ref>]
 ```
 
 - **emoji + type**: see table below — one emoji determines one type
 - **description**: required, min 3 chars, English.
 - **issue-ref**: optional, end of message — `Closes: #42` or `Refs: #42`
+- **`!`**: optional, right after `type`, before the colon — marks a breaking change (see below)
 
 ### Emoji ↔ Type table
 
-> Source: [gitmoji.dev](https://gitmoji.dev) by [carloscuesta](https://github.com/carloscuesta/gitmoji/tree/master) — maps each emoji to a semantic type and enforces the `<emoji> <type>: <description>` format.
+> Source: [gitmoji.dev](https://gitmoji.dev) by [carloscuesta](https://github.com/carloscuesta/gitmoji/tree/master) (MIT) — maps each emoji to a semantic type.
 
 | Emoji | Type | Usage |
 |-------|------|-------|
@@ -111,23 +116,34 @@ ______________________________________________________________________
 | 💸 | chore | Add sponsorships or financial-related changes |
 | 🚀 | release | Deploy / release |
 | 🔖 | release | Release / version tags |
-| 💥 | breaking | Introduce breaking changes |
-| 💾 | save | WIP savepoint — always with [skip ci] |
 
-### Special `save` rule
+## Breaking changes
 
-Reserved for in-progress savepoints. Describes **what is saved**, not what was done.
-`[skip ci]` is **mandatory**.
+Per the Conventional Commits specification, a breaking change is a **modifier on top of any type**, not a type of its own.
+
+Signal it either way (or both):
+
+- **`!`** right after `type`, before the `:` — e.g. `♻️ refactor!: rename upload_packages signature`
+- **`BREAKING CHANGE: <description>`** as the last block of the message (blank line before it). The
+  token is case-sensitive — always uppercase `BREAKING CHANGE`, never
+  `Breaking change` / `breaking change`. This exact casing is what tooling (e.g. semantic-release)
+  keys off for a major bump; get it wrong and it's silently ignored.
+
+  The spec (§16) also accepts `BREAKING-CHANGE:` with a hyphen as a synonym. The hook here
+  deliberately narrows that to the space form only — one house style, one thing to check — so a
+  hyphenated footer is rejected even though it is spec-valid.
 
 ```
-💾 save: <what is being saved> [skip ci]
+♻️ refactor!: rename upload_packages signature
+
+BREAKING CHANGE: upload_packages now takes (bucket, key) instead of (path).
 ```
 
 ## Gotchas
 
 - **Multiple unrelated changes in one diff** → propose one commit per logical group, never merge them
-- **`save` without `[skip ci]`** → mandatory, always — missing it triggers CI for a WIP savepoint
 - **Emoji chosen before reading the diff fully** → read everything before picking the emoji, late changes often shift the type
+- **`BREAKING CHANGE:` in the wrong case** → `Breaking change:`/`breaking change:` is not recognized by tooling — always exactly `BREAKING CHANGE:`
 
 ### Valid examples
 
@@ -139,6 +155,5 @@ Reserved for in-progress savepoints. Describes **what is saved**, not what was d
 ♻️ refactor: extract stage upload logic
 🔧 chore: add ruff pre-commit hook
 ⬆️ build: upgrade snowflake to 1.12.0
-💥 breaking: rename upload_packages signature
-💾 save: packages.py zip logic in progress [skip ci]
+♻️ refactor!: rename upload_packages signature
 ```
