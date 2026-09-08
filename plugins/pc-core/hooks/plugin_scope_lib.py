@@ -15,12 +15,15 @@ to it — read-only, same posture as policy_lib.load_policies() toward
 .claude/settings.pinky.json: parse, never mutate the source.
 
 Exactly one settings.local.json is in play per session, not one per repo
-touched: `claude plugin enable -s local` resolves "local" against
-CLAUDE_PROJECT_DIR, fixed at session launch and inherited unchanged by every
-subprocess a hook spawns — the same value inject_policies.py already reads
-via `os.environ.get("CLAUDE_PROJECT_DIR", ...)`. It is never recomputed from
-a deeper cwd mid-session, so a single backup/restore at that one path is
-correct — no per-repo backup dict needed.
+touched — but that is the caller's doing, not the CLI's: `claude plugin
+enable -s local` resolves "local" against the *current working directory*
+of the process that runs it, exactly like `claude plugin install --scope
+project`. `enable_plugin_local` therefore takes a `cwd` and the callers
+pass the session's open directory (CLAUDE_PROJECT_DIR, fixed at launch)
+every time, so every write lands in that one `<open>/.claude/
+settings.local.json` and SessionEnd restores just that path. Run it from a
+deeper cwd and you scatter a settings.local.json into each repo visited,
+none of them cleaned up.
 
 Ancestor-or-equal matching (not exact-path matching) is used for both the
 SessionStart ascend and the CwdChanged descend: a plugin scoped to
@@ -147,13 +150,17 @@ class EnableResult:
 _ALREADY_ENABLED_RE = re.compile(r"already enabled", re.IGNORECASE)
 
 
-def enable_plugin_local(plugin_id: str) -> EnableResult:
-    """Run `claude plugin enable -s local <plugin_id>`, inheriting the calling
-    process's environment (including CLAUDE_PROJECT_DIR) unchanged — that
-    inherited value, not any explicit cwd, is what "local" resolves against."""
+def enable_plugin_local(plugin_id: str, *, cwd: Path) -> EnableResult:
+    """Run `claude plugin enable -s local <plugin_id>` from `cwd` — "local"
+    resolves against that directory, so it decides which `.claude/
+    settings.local.json` gets the `enabledPlugins` entry. Callers pass the
+    session's open directory so every write lands in the same one file (see
+    the module docstring). Same `cwd=` pattern as `pinky`'s own
+    `plugin_install.enable_at_project`."""
     try:
         result = subprocess.run(
             ["claude", "plugin", "enable", "-s", "local", plugin_id],
+            cwd=cwd,
             capture_output=True,
             text=True,
             timeout=15,

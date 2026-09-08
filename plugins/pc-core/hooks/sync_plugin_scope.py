@@ -63,26 +63,26 @@ def session_open_path(state: dict) -> Path | None:
 
 
 def activate_for_path(
-    path: Path, state: dict, *, open_path: Path | None = None
+    path: Path, state: dict, *, session_dir: Path, descent: bool
 ) -> list[str]:
     """Enable every not-yet-activated matching plugin for `path`. Returns the
     plugin ids newly enabled this call (empty if nothing new — cheap to call
     on every CwdChanged, most of which won't match anything new).
 
-    `open_path` is the session's open directory (the CwdChanged descent
-    passes it, the SessionStart ascend does not): it narrows the match to
-    plugins genuinely below the session root and seeds the skip-set with
-    what settings.local.json already lists, so an id already on is never
-    handed to `claude plugin enable` a second time.
+    `session_dir` is the directory the session opened in: `claude plugin
+    enable -s local` is always run from there, so every write lands in that
+    one settings.local.json, and its `enabledPlugins` seed the skip-set.
+    `descent=True` (CwdChanged) additionally drops plugins whose projectPath
+    is at or above `session_dir` — the SessionStart ascend already handled
+    those; `descent=False` (the ascend) keeps them.
     """
-    already = set(state["activated"])
-    if open_path is not None:
-        already.update(settings_local_plugin_ids(open_path))
+    already = set(state["activated"]) | set(settings_local_plugin_ids(session_dir))
     newly_enabled = []
-    for plugin_id in matching_plugin_ids(path, open_path=open_path):
+    exclude_above = session_dir if descent else None
+    for plugin_id in matching_plugin_ids(path, open_path=exclude_above):
         if plugin_id in already:
             continue
-        result = enable_plugin_local(plugin_id)
+        result = enable_plugin_local(plugin_id, cwd=session_dir)
         if result.success:
             already.add(plugin_id)
             newly_enabled.append(plugin_id)
@@ -112,7 +112,12 @@ def handle_session_start(payload: dict) -> None:
     state["settings_local_path"] = str(settings_local)
     state["existed"] = backup_settings_local(settings_local, session_id)
 
-    newly_enabled = activate_for_path(Path(payload.get("cwd", project_dir)), state)
+    newly_enabled = activate_for_path(
+        Path(payload.get("cwd", project_dir)),
+        state,
+        session_dir=Path(project_dir),
+        descent=False,
+    )
     save_state(session_id, state)
 
     output: dict = {
@@ -137,8 +142,11 @@ def handle_cwd_changed(payload: dict) -> None:
         return  # defensive — cwd is a common field but guard anyway
 
     state = load_state(session_id)
+    session_dir = session_open_path(state)
+    if session_dir is None:
+        return  # sans le path d'ouverture on ne peut pas viser le bon settings.local.json
     newly_enabled = activate_for_path(
-        Path(new_cwd), state, open_path=session_open_path(state)
+        Path(new_cwd), state, session_dir=session_dir, descent=True
     )
     save_state(session_id, state)
 

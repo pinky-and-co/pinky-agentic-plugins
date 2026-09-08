@@ -63,7 +63,7 @@ def main() -> int:
         for plugin_id in matching_plugin_ids(Path(raw_path), open_path=open_path):
             if plugin_id in already or plugin_id in newly_enabled:
                 continue
-            result = enable_plugin_local(plugin_id)
+            result = enable_plugin_local(plugin_id, cwd=open_path)
             if result.success:
                 newly_enabled.append(plugin_id)
             elif result.already_enabled:

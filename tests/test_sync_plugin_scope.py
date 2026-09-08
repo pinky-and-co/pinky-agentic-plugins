@@ -41,7 +41,7 @@ class _Base(unittest.TestCase):
         psl.INSTALLED_PLUGINS_PATH = self.installed
 
         # every enable_plugin_local call recorded; outcome set per test
-        self.enable_calls: list[str] = []
+        self.enable_calls: list[tuple[str, Path]] = []
         self._enable_outcome = psl.EnableResult(True, False, "")
         self._orig_enable = sps.enable_plugin_local
         sps.enable_plugin_local = self._fake_enable
@@ -51,8 +51,8 @@ class _Base(unittest.TestCase):
         sps.enable_plugin_local = self._orig_enable
         self._tmp.cleanup()
 
-    def _fake_enable(self, plugin_id: str) -> psl.EnableResult:
-        self.enable_calls.append(plugin_id)
+    def _fake_enable(self, plugin_id: str, *, cwd: Path) -> psl.EnableResult:
+        self.enable_calls.append((plugin_id, cwd))
         return self._enable_outcome
 
     def _write_installed(self, plugins: dict) -> None:
@@ -68,7 +68,10 @@ class _Base(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             newly = sps.activate_for_path(
-                self.open_path / "ops", state, open_path=self.open_path
+                self.open_path / "ops",
+                state,
+                session_dir=self.open_path,
+                descent=True,
             )
         return newly, state, err.getvalue()
 
@@ -83,7 +86,7 @@ class TestActivateForPath(_Base):
             }
         )
         newly, state, _ = self._run()
-        self.assertEqual(self.enable_calls, ["pc-snow@mp"])
+        self.assertEqual(self.enable_calls, [("pc-snow@mp", self.open_path)])
         self.assertEqual(newly, ["pc-snow@mp"])
         self.assertEqual(state["activated"], ["pc-snow@mp"])
 
