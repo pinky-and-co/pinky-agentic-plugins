@@ -100,6 +100,12 @@ class SuiteIdentity:
         feeds — the block becomes unavailable rather than rendered empty. Same reversal as
         ADR-0058 → 0062: what is not declared does not exist.
 
+        Args:
+            data: the parsed `docs_identity.json` mapping.
+
+        Returns:
+            The `SuiteIdentity` built from `data`.
+
         Raises:
             KeyError: when a structurally required field is missing (see ``_REQUIRED``).
         """
@@ -110,7 +116,10 @@ class SuiteIdentity:
             )
         seqs = ("pitch_paragraphs", "pitch_pills")
         return cls(
-            **{
+            **{  # type: ignore[arg-type]  # mypy can't verify a **dict unpack field-by-field
+                # against SuiteIdentity's per-field types; the ternary above already keys the
+                # tuple-vs-str split off `seqs`, so runtime shape is correct — mypy's gap, not a
+                # real defect.
                 k: tuple(data.get(k) or ()) if k in seqs else (data.get(k) or "")
                 for k in cls._FIELDS
             }
