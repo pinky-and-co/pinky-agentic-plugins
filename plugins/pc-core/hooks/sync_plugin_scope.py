@@ -15,15 +15,15 @@ Ascend at SessionStart, descend at CwdChanged, restore at SessionEnd:
   already covered (projectPath at or above the open dir) and what
   settings.local.json already lists.
 - SessionEnd: restore settings.local.json to exactly what backup_settings_local
-  captured, and drop the per-session state file.
+  captured, drop the per-session state file, and clear the pending queue.
 
 Registered as a single script across three hook events in hooks.json (see
 hooks.json.snippet.json) rather than three files — one entry to maintain,
 dispatch on `hook_event_name` from stdin.
 
-No attempt is made to run /reload-plugins from here — hooks have no
-extension point for it. See notify_reload.py for the FileChanged-driven
-reminder instead.
+Newly-activated plugins need `/reload-plugins`, which no hook can run. The
+request goes into pending_user_action's queue; pending_gate turns the next
+tool call into a permission `ask` carrying it, so it can't scroll away.
 """
 
 import json
@@ -32,7 +32,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from notify_helpers import notify
+from pending_user_action import clear_all as clear_pending
+from pending_user_action import require
 from plugin_scope_lib import (
     backup_settings_local,
     clear_state,
@@ -120,19 +121,19 @@ def handle_session_start(payload: dict) -> None:
     )
     save_state(session_id, state)
 
-    output: dict = {
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-        }
-    }
     if newly_enabled:
-        message = (
-            f"{len(newly_enabled)} new plugin{'s' if len(newly_enabled) > 1 else ''} activated!"
-            + "\n🚀 Run /reload-plugins  for the change to take effect in this session."
-        )
-        output.update(notify("Claude Code", message))
+        require(session_id, "reload-plugins", _reload_message(newly_enabled))
 
-    print(json.dumps(output))
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart"}}))
+
+
+def _reload_message(newly_enabled: list[str]) -> str:
+    n = len(newly_enabled)
+    return (
+        f"/reload-plugins  — {n} plugin{'s' if n > 1 else ''} "
+        f"activé{'s' if n > 1 else ''} ({', '.join(newly_enabled)}), "
+        "à charger pour cette session"
+    )
 
 
 def handle_cwd_changed(payload: dict) -> None:
@@ -151,15 +152,10 @@ def handle_cwd_changed(payload: dict) -> None:
     save_state(session_id, state)
 
     if newly_enabled:
-        # CwdChanged has no additionalContext / decision control (context-only
-        # events per the hooks reference) — systemMessage is the visible channel,
-        # notify() also handles desktop-notification delivery across terminals.
-        message = (
-            f"{len(newly_enabled)} new plugin{'s' if len(newly_enabled) > 1 else ''} activated!"
-            + "\n🚀 Run /reload-plugins  for the change to take effect in this session."
-        )
-        output: dict = notify("Claude Code", message)
-        print(json.dumps(output))
+        # CwdChanged est context-only (aucun contrôle de décision) : on met la
+        # demande dans la file pending_user_action, que pending_gate transforme
+        # en `ask` bloquant au prochain tool call — pas une notif éphémère.
+        require(session_id, "reload-plugins", _reload_message(newly_enabled))
 
 
 def handle_session_end(payload: dict) -> None:
@@ -171,6 +167,7 @@ def handle_session_end(payload: dict) -> None:
             Path(settings_local_path), session_id, state.get("existed")
         )
     clear_state(session_id)
+    clear_pending(session_id)
 
 
 def main() -> None:

@@ -72,13 +72,18 @@ pinky-agentic-plugins/
 │   │   │   ├── inject_policies.py
 │   │   │   ├── keychain.py
 │   │   │   ├── load_secrets.py
+│   │   │   ├── notify_reload.py
+│   │   │   ├── pending_gate.py
+│   │   │   ├── pending_user_action.py
+│   │   │   ├── plugin_scope_lib.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
 │   │   │   ├── privacy_egress.py
 │   │   │   ├── read_cost.py
 │   │   │   ├── secret_patterns.py
 │   │   │   ├── structure_guard.py
-│   │   │   └── style_reminder.py
+│   │   │   ├── style_reminder.py
+│   │   │   └── sync_plugin_scope.py
 │   │   ├── mcp/
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
@@ -161,6 +166,7 @@ pinky-agentic-plugins/
 │   │       │   ├── scripts/
 │   │       │   │   ├── activate_plugins_for_repos.py
 │   │       │   │   ├── archive_card.sh
+│   │       │   │   ├── pending_user_action.py
 │   │       │   │   ├── plugin_scope_lib.py
 │   │       │   │   └── resolve_repos.sh
 │   │       │   └── SKILL.md
@@ -285,6 +291,7 @@ pinky-agentic-plugins/
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
 │   ├── test_model_panel.py
+│   ├── test_pending_gate.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
 │   ├── test_privacy_egress.py

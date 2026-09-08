@@ -23,6 +23,7 @@ from pathlib import Path
 HOOKS = Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"
 sys.path.insert(0, str(HOOKS))
 
+import pending_user_action as pua  # noqa: E402
 import plugin_scope_lib as psl  # noqa: E402
 import sync_plugin_scope as sps  # noqa: E402
 
@@ -172,6 +173,53 @@ class TestSessionOpenPath(unittest.TestCase):
         finally:
             if prev is not None:
                 os.environ["CLAUDE_PROJECT_DIR"] = prev
+
+
+class TestHandleCwdChanged(unittest.TestCase):
+    """The CwdChanged handler queues a /reload-plugins pending action when —
+    and only when — activate_for_path reports something newly enabled."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self._orig_psl_dir, psl.STATE_DIR = psl.STATE_DIR, root / "scope"
+        self._orig_pua_dir, pua.STATE_DIR = pua.STATE_DIR, root / "pending"
+        self.session = "sess-cwd"
+        self.open_path = root / "ws"
+        (self.open_path / "sub").mkdir(parents=True)
+        psl.save_state(
+            self.session,
+            {
+                "activated": [],
+                "settings_local_path": str(
+                    self.open_path / ".claude" / "settings.local.json"
+                ),
+                "existed": False,
+            },
+        )
+        self._orig_activate = sps.activate_for_path
+
+    def tearDown(self):
+        psl.STATE_DIR = self._orig_psl_dir
+        pua.STATE_DIR = self._orig_pua_dir
+        sps.activate_for_path = self._orig_activate
+        self._tmp.cleanup()
+
+    def _payload(self):
+        return {"session_id": self.session, "cwd": str(self.open_path / "sub")}
+
+    def test_newly_enabled_queues_reload_plugins(self):
+        sps.activate_for_path = lambda *a, **k: ["pc-snow@mp", "pc-pypi@mp"]
+        sps.handle_cwd_changed(self._payload())
+        queue = pua.pending(self.session)
+        self.assertIn("reload-plugins", queue)
+        self.assertIn("pc-snow@mp", queue["reload-plugins"])
+        self.assertIn("/reload-plugins", queue["reload-plugins"])
+
+    def test_nothing_new_queues_nothing(self):
+        sps.activate_for_path = lambda *a, **k: []
+        sps.handle_cwd_changed(self._payload())
+        self.assertEqual(pua.pending(self.session), {})
 
 
 if __name__ == "__main__":
