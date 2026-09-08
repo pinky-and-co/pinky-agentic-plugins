@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Write
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write
 ---
 
 # Commit + push + PR/MR
