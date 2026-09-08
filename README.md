@@ -10,8 +10,8 @@ Public Claude Code plugin marketplace — generic, reusable workspace mechanics 
 
 <div align="center">
 
-![CI](https://github.com/pinky-and-co/pinky-agentic-plugins/actions/workflows/ci.yml/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/pinky-agentic-plugins)
+![CI](https://github.com/pinky-and-co/pinky-agentic-plugins-reviewer/actions/workflows/ci.yml/badge.svg)
+![PyPI](https://img.shields.io/pypi/v/pinky-agentic-plugins-reviewer)
 ![Code style](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)
 [![prek](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/j178/prek/master/docs/assets/badge-v0.json)](https://github.com/j178/prek)
 
@@ -50,7 +50,7 @@ claude plugin install pc-core@pinky-agentic-plugins
 <summary>Show the directory tree</summary>
 
 ```text
-pinky-agentic-plugins/
+pinky-agentic-plugins-reviewer/
 ├── .claude/
 │   ├── settings.json
 │   └── settings.pinky.json
