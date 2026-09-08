@@ -2,7 +2,7 @@
 name: chantier
 description: Resume a chantier — load its story, cards and in-progress handoff from the kanban boards visible to this session, then report state and take the next card. Use when the user says "resume chantier NNNN", "reprends le chantier", or names a chantier id/slug.
 argument-hint: "<chantier-id-or-slug-substring> [free-text instruction]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(ls:*), Bash(find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh:*), Bash(mv:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(ls:*), Bash(find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh:*), Bash(mv:*), Read, Edit, AskUserQuestion
 ---
 
 # Chantier
@@ -113,10 +113,27 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     bash "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh" <workspace-root> <slug...>
     ```
     0 or >1 local clones for a slug is reported on stderr with a nonzero exit — stop and say so,
-     never guess which clone. Then freeze to the resolved paths **plus every kanban board root**
-    (`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-kanbans`, itself multi-board
-    aware — this workspace has more than one), so the session stays able to maintain cards/handoffs
-    while frozen:
+     never guess which clone. Then activate the plugins those resolved repos need, **before**
+    freezing — `claude plugin enable -s local` writes to `settings.local.json` at the workspace
+    root, which is not necessarily among the paths about to be frozen, so activating after freezing
+    risks the write itself being blocked by the freeze it would need to survive:
+    ```bash
+    python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py" <resolved-repo-paths...>
+    ```
+    Non-empty output (one plugin id per line) means something was newly enabled — its skills/LSP/MCP
+    aren't available until `/reload-plugins` runs, and step 8's execution depends on them. Stop here:
+    no freeze yet, no Session name, no Grill gate. Emit only:
+    ```
+    🔌 Next step: reload plugins before this card's work can use them.
+    /reload-plugins
+    ```
+    Re-running this chantier next turn finds the card already in `3-in-progress/` (resume-directly
+    branch) and lands back on this same bullet — the newly-enabled ids are now in `enabledPlugins`,
+    so this step finds nothing left to activate and falls through to freezing below. Empty output on
+    the first pass → nothing to activate, continue directly. Then freeze to the resolved paths
+    **plus every kanban board root** (`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py"
+    --list-kanbans`, itself multi-board aware — this workspace has more than one), so the session
+    stays able to maintain cards/handoffs while frozen:
     ```bash
     python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" --root <workspace-root> freeze <resolved-repo-paths...> <kanban-board-roots...>
     ```

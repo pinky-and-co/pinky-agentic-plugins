@@ -52,6 +52,7 @@ claude plugin install pc-core@pinky-agentic-plugins
 ```text
 pinky-agentic-plugins/
 ├── .claude/
+│   ├── .guard-state.json
 │   ├── settings.json
 │   └── settings.pinky.json
 ├── .claude-plugin/
@@ -159,7 +160,9 @@ pinky-agentic-plugins/
 │   │   └── skills/
 │   │       ├── chantier/
 │   │       │   ├── scripts/
+│   │       │   │   ├── activate_plugins_for_repos.py
 │   │       │   │   ├── archive_card.sh
+│   │       │   │   ├── plugin_scope_lib.py
 │   │       │   │   └── resolve_repos.sh
 │   │       │   └── SKILL.md
 │   │       ├── grill/
