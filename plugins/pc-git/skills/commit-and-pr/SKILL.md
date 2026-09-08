@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Read, Write
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write
 ---
 
 # Commit + push + PR/MR
@@ -66,8 +66,9 @@ strategy plus whether the guard requires a feature branch. A group whose fingerp
 
 ## Step 2 — One message per GROUP, not per repo
 
-**Read** `references/commit-convention.md` — it is the source of truth for the emoji/type table;
-training-data gitmoji knowledge is not. Judge grouping and wording from the diff the group shows.
+**Read** `${CLAUDE_PLUGIN_ROOT}/skills/commit-convention/SKILL.md` — it is the source of truth for
+the emoji/type table and the breaking-change format. Judge grouping and wording from the diff the
+group shows.
 
 Write one tab-separated line per group to a scratch file:
 

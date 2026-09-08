@@ -27,9 +27,9 @@ serves the previous build — no error, no signal. `pinky install --plugin <name
 
 Refreshing the *content* of a version already in the cache is a separate step: `claude plugin
 install`/`update` fills a cache directory only when it is absent, so editing a plugin without
-bumping leaves the installed copy stale. Delete
-`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` and re-run the install to pick the
-working tree up.
+bumping leaves the installed copy stale. `pinky install --plugin <name> --force` clears
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` before fetching, so the working tree
+is picked up in the same command — no more manual `rm -rf` + separate re-run.
 
 ## Naming glossary
 

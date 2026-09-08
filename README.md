@@ -142,13 +142,12 @@ pinky-agentic-plugins-reviewer/
 │   │       │   │   └── bulk_clean_gone.sh
 │   │       │   └── SKILL.md
 │   │       ├── commit/
-│   │       │   ├── references/
-│   │       │   │   └── commit-convention.md
 │   │       │   └── SKILL.md
-│   │       └── commit-and-pr/
-│   │           ├── references/
-│   │           │   ├── ci-reaction.md
-│   │           │   └── commit-convention.md
+│   │       ├── commit-and-pr/
+│   │       │   ├── references/
+│   │       │   │   └── ci-reaction.md
+│   │       │   └── SKILL.md
+│   │       └── commit-convention/
 │   │           └── SKILL.md
 │   ├── pc-kanban/
 │   │   ├── .claude-plugin/

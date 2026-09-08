@@ -61,8 +61,8 @@ fi
 1. `git -C <repo> status`, `git -C <repo> diff HEAD`, `git -C <repo> log --oneline -5`.
 2. Known noise files (`.DS_Store`, etc.) never go in a commit — add them to `.gitignore` silently,
   no confirmation needed for this specific action.
-3. **Read** `references/commit-convention.md` — it is the source of truth for the emoji/type table,
-  not what training data recalls about gitmoji.dev in general.
+3. **Read** `${CLAUDE_PLUGIN_ROOT}/skills/commit-convention/SKILL.md` — it is the source of truth for
+  the emoji/type table and the breaking-change format.
 4. Trust your own judgment on grouping and message wording, same as you would writing prose — you
   write better commit messages than a manually-specified rule would produce. Genuinely unrelated
   changes still deserve separate commits; that's a normal editorial call, not a special procedure.
