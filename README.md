@@ -275,6 +275,7 @@ pinky-agentic-plugins/
 │       ├── validate_frontmatter.py
 │       └── validate_plugins_strict.py
 ├── tests/
+│   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
 │   ├── test_branch_guard.py
 │   ├── test_guard.py
