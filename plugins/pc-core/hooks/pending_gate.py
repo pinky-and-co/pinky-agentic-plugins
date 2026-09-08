@@ -47,7 +47,13 @@ def main_with_payload(payload: dict) -> None:
 
 
 def main() -> None:
-    main_with_payload(json.load(sys.stdin))
+    # Fail open, always. This is a matcher-less PreToolUse hook — a raised
+    # exception here would block *every* tool call. A bad payload, a broken
+    # import, a missing queue file: none of that is worth locking the session.
+    try:
+        main_with_payload(json.load(sys.stdin))
+    except Exception:
+        print("{}")
 
 
 if __name__ == "__main__":

@@ -63,6 +63,30 @@ class TestPendingGate(unittest.TestCase):
         self.assertEqual(pua.pending(self.session), {})
         self.assertEqual(self._run(), {})
 
+    def _main(self, stdin_text: str) -> str:
+        out = io.StringIO()
+        sys.stdin = io.StringIO(stdin_text)
+        try:
+            with redirect_stdout(out):
+                gate.main()
+        finally:
+            sys.stdin = sys.__stdin__
+        return out.getvalue().strip()
+
+    def test_main_fails_open_on_a_broken_payload(self):
+        # matcher-less PreToolUse: any raise here blocks every tool call
+        self.assertEqual(self._main("not json"), "{}")
+
+    def test_main_fails_open_when_surface_raises(self):
+        def boom(_session_id):
+            raise RuntimeError("queue backend down")
+
+        orig, gate.surface = gate.surface, boom
+        try:
+            self.assertEqual(self._main('{"session_id": "x"}'), "{}")
+        finally:
+            gate.surface = orig
+
 
 if __name__ == "__main__":
     unittest.main()
