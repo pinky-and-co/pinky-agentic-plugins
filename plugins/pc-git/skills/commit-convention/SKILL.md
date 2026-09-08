@@ -124,14 +124,14 @@ Per the Conventional Commits specification, a breaking change is a **modifier on
 Signal it either way (or both):
 
 - **`!`** right after `type`, before the `:` — e.g. `♻️ refactor!: rename upload_packages signature`
-- **`BREAKING CHANGE: <description>`** as the last block of the message (blank line before it). The
-  token is case-sensitive — always uppercase `BREAKING CHANGE`, never
-  `Breaking change` / `breaking change`. This exact casing is what tooling (e.g. semantic-release)
-  keys off for a major bump; get it wrong and it's silently ignored.
+- **`BREAKING CHANGE: <description>`** as the last block of the message (blank line before it).
+  One form only: both words uppercase, a single space between them. That exact casing is what
+  downstream tooling (e.g. semantic-release) keys off for a major bump.
 
-  The spec (§16) also accepts `BREAKING-CHANGE:` with a hyphen as a synonym. The hook here
-  deliberately narrows that to the space form only — one house style, one thing to check — so a
-  hyphenated footer is rejected even though it is spec-valid.
+  The spec (§16) also allows `BREAKING-CHANGE:` with a hyphen as a synonym; this house style does
+  not. The `commit-msg` hook rejects any near-miss at the start of a line — the hyphen form, a
+  miscased `Breaking change:` — rather than letting it pass as body text, so a footer that
+  wouldn't trigger the bump never slips through unnoticed.
 
 ```
 ♻️ refactor!: rename upload_packages signature
@@ -143,7 +143,8 @@ BREAKING CHANGE: upload_packages now takes (bucket, key) instead of (path).
 
 - **Multiple unrelated changes in one diff** → propose one commit per logical group, never merge them
 - **Emoji chosen before reading the diff fully** → read everything before picking the emoji, late changes often shift the type
-- **`BREAKING CHANGE:` in the wrong case** → `Breaking change:`/`breaking change:` is not recognized by tooling — always exactly `BREAKING CHANGE:`
+- **`BREAKING CHANGE:` in the wrong case or hyphenated** → `Breaking change:` / `BREAKING-CHANGE:` are rejected by the `commit-msg` hook — always exactly `BREAKING CHANGE:` (space, both words uppercase)
+- **`💾 save`** → a human-only WIP savepoint (`💾 save: … [skip ci]`), enforced by the `commit-msg` hook; agents never write it
 
 ### Valid examples
 
