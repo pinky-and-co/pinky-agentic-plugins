@@ -23,12 +23,12 @@ dev = ["pytest"]
 
 # ── uv ───────────────────────────────────────────────────────────────────────
 [tool.uv]
-# Fenêtre de cooldown contre une dépendance fraîchement compromise republiée sur PyPI (chantier
-# 0024) : `uv lock`/`uv sync` ignorent tout paquet uploadé après cette date. Fenêtre glissante de
-# 3 jours — avancée manuellement avant tout `uv lock` (discipline documentée dans l'AGENTS.md de
-# `pinky-bootstrap`, pas de job planifié). Enregistrée dans `uv.lock` : `grep exclude-newer
-# uv.lock` dit exactement quelle fenêtre a produit le lock courant.
-exclude-newer = "2026-08-24T00:00:00Z"
+required-version = ">=0.9.17"
+# Fenêtre de cooldown (chantier 0024) : `uv lock` ignore tout paquet publié depuis moins
+# de 3 jours — protège la résolution contre une dépendance fraîchement compromise
+# republiée sur PyPI. Durée relative : uv la résout au lock, `grep exclude-newer-span
+# uv.lock` dit la fenêtre appliquée. Posée par `pinky distribute`, jamais éditée à la main.
+exclude-newer = "3 days"
 
 # No package to build (see the `[project]` comment) — bypass-selection tells hatchling not to
 # error looking for one, so `pip install -e . --group dev` still succeeds (it only needs to land
