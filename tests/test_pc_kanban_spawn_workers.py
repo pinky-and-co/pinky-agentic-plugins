@@ -17,7 +17,6 @@ and the spawn (`subprocess.run`) are the fakes.
 import contextlib
 import io
 import os
-import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -234,17 +233,17 @@ class TestMain(unittest.TestCase):
         rc, out, _ = self._run("--dry-run", "0099", "my-card")
         self.assertEqual(rc, 0)
         self.assertEqual(self.spawned, [])
-        expected = "".join(
-            shlex.join(
-                sw.build_spawn_command(
-                    "cmux", sw.SpawnTarget(s, Path(p)), "0099", "my-card", "opus"
-                )
-            )
-            + "\n"
-            for s, p in (("org/one", "/clones/one"), ("org/two", "/clones/two"))
+        # hand-pinned, not computed from build_spawn_command — this asserts the whole dry-run
+        # surface (one shlex-joined `cmux` line per repo), independent of the builders.
+        self.assertEqual(
+            out,
+            "cmux new-workspace --cwd /clones/one --command "
+            '\'claude --name one-my-card --model "opus[1m]" '
+            '"/pc-kanban:chantier 0099 my-card"\'\n'
+            "cmux new-workspace --cwd /clones/two --command "
+            '\'claude --name two-my-card --model "opus[1m]" '
+            '"/pc-kanban:chantier 0099 my-card"\'\n',
         )
-        self.assertEqual(out, expected)
-        self.assertIn('--model "opus[1m]"', out)
 
     def test_scan_root_is_the_boards_workspace_root(self):
         self._run("--dry-run", "0099", "my-card")

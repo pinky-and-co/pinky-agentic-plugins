@@ -48,8 +48,10 @@ _SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 # the card `model:` alias -> the `claude --model` value the worker boots on. The card decides the
 # tier, verbatim — a `haiku` card runs on haiku, not "at least haiku". `[1m]` is the long-context
 # variant, used wherever it exists so a big card does not compact mid-work; `haiku` has none (the
-# `haiku[1m]` alias is a hard 400). `fable[1m]` is assumed (fable is 1M-native; unverified — a
-# fable run would confirm). A value not in this map is a malformed card and aborts the spawn.
+# `haiku[1m]` alias is a hard 400, measured 2026-09-09). `fable[1m]` is assumed (fable is
+# 1M-native) — if it 400s like haiku's, `claude` prints the error in the fresh terminal and the
+# worker never starts: a loud failure, not a silent wrong model. A value not in this map is a
+# malformed card and aborts the spawn before any command is built.
 _MODEL_ARG = {
     "haiku": "haiku",
     "sonnet": "sonnet[1m]",
