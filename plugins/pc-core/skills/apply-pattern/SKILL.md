@@ -52,12 +52,12 @@ For each target:
   patch that applies cleanly to the wrong place is worse than one that fails.
 - **Never fix anything else you notice.** Out-of-pattern problems get reported, not repaired. One
   pass, one change.
-- ~~**Never commit.**~~ **New in FR-0025-23:** Commit and open a PR/MR for each successful target (✅
-  or ⚠️). Invoke `bulk_commit.sh apply` once per target with a commit message derived from the
-  pattern (e.g., the witness's commit message, or a generic convention message). Capture the PR/MR
-  URL from the script's `=== RESULTS` block (column `pr_url`). On failure or `❌` states, no commit.
+- ~~**Never commit.**~~ **New:** Commit and open a PR/MR for each successful target (✅ or ⚠️).
+  Invoke `bulk_commit.sh apply` once per target with a commit message derived from the pattern
+  (e.g., the witness's commit message, or a generic convention message). Capture the PR/MR URL
+  from the script's `=== RESULTS` block (column `pr_url`). On failure or `❌` states, no commit.
 
-## Step 2.5 — Commit and open PR/MR (if applied)
+## Step 2 (continued) — Commit and open PR/MR (if applied)
 
 For each target where the pattern **was successfully applied** (✅ or ⚠️):
 
@@ -121,7 +121,7 @@ line each, keeping states distinct:
 | ⏭️ | already had the change, nothing to do |
 | ❌ | not applied — the target diverges too much for the pattern to mean anything here |
 
-**Script outcome** (from Step 2.5, when pattern was applied):
+**Script outcome** (from step 2 continued, when pattern was applied):
 
 | Script state | Meaning | Next step |
 |---|---|---|
@@ -167,9 +167,9 @@ Each one signals distinct human actions:
 A run that claims success while hiding a `commit-nopush` or `pushed-prfailed` is worse than one that
 reports it explicitly.
 
-## Step 4 — Aggregate PR/MR URLs (FR-0025-23)
+## Step 4 — Aggregate PR/MR URLs
 
-After reporting all targets, aggregate the PR/MR URLs from step 2.5 for visibility:
+After reporting all targets, aggregate the PR/MR URLs from step 2 (continued) for visibility:
 
 ```
 === PR/MR URLs (exhaustive)
@@ -184,6 +184,3 @@ This list appears in **two places** (doublet intentional):
 
 A target that failed commit/push/PR has `state` = `failed` and `url` = `-` (never omitted). This
 helps distinguish "no PR opened" (explicit) from "no PR listed" (silent data loss).
-
-The card `chantier 0025/worker-remonte-pr-links` (FR-0025-23) depends on this reporting. See
-`story.md` § « Décisions actées via grill (session 2026-09-09, 3ᵉ passe) ».
