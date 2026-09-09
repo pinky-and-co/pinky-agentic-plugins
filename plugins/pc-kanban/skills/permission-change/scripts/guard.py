@@ -15,10 +15,20 @@ this **single script** that reads it. The script is dual-mode:
   - **Outside-scope guard, ALWAYS ON** → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target
     sits outside the project root, every `--add-dir`/`/add-dir` directory (read live from the
     event's `workspace.added_dirs` field — a common field the harness fills on every hook call,
-    no state file needed), and every declared `permissions.additionalDirectories` entry returns
-    ``permissionDecision: "deny"``. Read-visibility (Claude Code natively loads ancestor
-    `CLAUDE.md` files as context) is not write authorization — this guard makes that boundary
-    mechanical instead of relying on the agent to remember it.
+    no state file needed), and every declared `permissions.additionalDirectories` entry is
+    stopped. Read-visibility (Claude Code natively loads ancestor `CLAUDE.md` files as context)
+    is not write authorization — this guard makes that boundary mechanical instead of relying on
+    the agent to remember it. Two carve-outs (FR-0025-27/28):
+    - **Board dirs are always writable** — the card and agent-log directories of every kanban
+      board mounted on this machine (`stop_handoff.py --list-kanbans` / `--list-agent-log-dirs`),
+      whatever the session root. An orchestrator or a repo-scoped worker session must still be
+      able to maintain the boards. This carve-out also clears `freeze` (a whitelist lock), but
+      not an explicit `deny` — deny-listing a board dir is a deliberate choice and wins.
+    - **Outside every git repo → ``ask``, never a silent ``deny``.** A target that is out of
+      scope *and* sits in no git repo at all (`~/.config/...`, a scratch dir) returns
+      ``permissionDecision: "ask"``. Only a target that lands inside *another* git repo is a
+      hard ``deny`` (a repo-scoped session has no business writing another repo). If board
+      resolution fails, every out-of-scope write degrades to ``ask`` rather than fail closed.
   - `careful` on  → a destructive `Bash` command returns ``permissionDecision: "ask"`` (interactive
     confirm; the user clears it with one keystroke). Never a silent denial — careful is a speed bump.
   - `freeze`  set → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target sits **outside** the
@@ -50,9 +60,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
 # crashes with UnicodeEncodeError. Reconfigure standalone, since this script runs as a subprocess
@@ -304,6 +316,75 @@ def outside_scope_violation(event: dict, target: str, root: Path) -> str | None:
     )
 
 
+_OUT_OF_SCOPE_ASK = (
+    "`{target}` is outside this session's project root, every added directory, and every git "
+    "repo on this machine. Confirm if this write is intended; otherwise cancel — nothing in "
+    "scope has asked for it."
+)
+
+_STOP_HANDOFF = Path(__file__).resolve().parents[3] / "hooks" / "stop_handoff.py"
+
+
+class BoardDirs(NamedTuple):
+    """Result of `board_dirs`. `dirs` are the mounted boards' card + agent-log directories;
+    `resolved` is False when the lookup subprocess failed — a caller then degrades an
+    out-of-scope write to `ask`, never a silent `deny`."""
+
+    dirs: list[Path]
+    resolved: bool
+
+
+def board_dirs(event: dict, root: Path) -> BoardDirs:
+    """Card + agent-log directories of every kanban board mounted on this machine — writable
+    from any session root (FR-0025-27).
+
+    Resolved through `stop_handoff.py`'s own CLI (`--list-kanbans` + `--list-agent-log-dirs`),
+    the one place board resolution lives.
+    """
+    cwd = event.get("cwd") or str(root)
+    dirs: list[Path] = []
+    ok = True
+    for mode in ("--list-kanbans", "--list-agent-log-dirs"):
+        try:
+            out = subprocess.run(
+                [sys.executable, str(_STOP_HANDOFF), mode],
+                capture_output=True,
+                text=True,
+                timeout=3,  # a plain directory listing; two of these + the git check stay < 10s
+                cwd=cwd,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+            continue
+        if out.returncode != 0:
+            ok = False
+            continue
+        for line in out.stdout.splitlines():
+            line = line.strip()
+            if line:
+                dirs.append(Path(line).resolve())
+    return BoardDirs(dirs, ok)
+
+
+def in_git_repo(target: str, root: Path) -> bool:
+    """True when `target` resolves inside some real git repo. Splits the out-of-scope guard:
+    a target in another repo is a hard `deny`, one in no repo at all is an `ask` (FR-0025-28)."""
+    tgt = Path(target)
+    tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(tgt.parent), "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        return out.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def frozen_violation(target: str, freeze_dirs: list[str], root: Path) -> str | None:
     """Return the frozen scope a target escapes, or None when it is inside one (or no freeze).
 
@@ -375,10 +456,8 @@ def decide(event: dict, root: Path) -> dict | None:
             if message:
                 return _decision("deny", message)
 
-            message = outside_scope_violation(event, target, root)
-            if message:
-                return _decision("deny", message)
-
+            # `deny` is an explicit blocklist — it wins even over a board dir, and it is a cheap
+            # local check, so it runs before the board carve-out's subprocess.
             if state.get("deny"):
                 scope = denied_violation(target, state["deny"], root)
                 if scope:
@@ -388,9 +467,36 @@ def decide(event: dict, root: Path) -> dict | None:
                         f"Lift it with `/permission-change deny off`.",
                     )
 
+            # Board dirs resolve lazily and once — the subprocess only runs when a guard would
+            # otherwise fire (an out-of-scope target, or a freeze escape), and both paths share
+            # the one resolution.
+            memo: list[BoardDirs] = []
+
+            def board() -> BoardDirs:
+                if not memo:
+                    memo.append(board_dirs(event, root))
+                return memo[0]
+
+            def on_board() -> bool:
+                tgt = Path(target)
+                tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
+                return any(tgt == d or tgt.is_relative_to(d) for d in board().dirs)
+
+            message = outside_scope_violation(event, target, root)
+            if message:
+                if on_board():
+                    return None
+                if (
+                    not board().resolved
+                ):  # resolution failed — never fail closed (advisor #3)
+                    return _decision("ask", _OUT_OF_SCOPE_ASK.format(target=target))
+                if in_git_repo(target, root):
+                    return _decision("deny", message)
+                return _decision("ask", _OUT_OF_SCOPE_ASK.format(target=target))
+
             if state.get("freeze"):
                 scope = frozen_violation(target, state["freeze"], root)
-                if scope:
+                if scope and not on_board():
                     return _decision(
                         "deny",
                         f"freeze: edits are locked to `{scope}`; `{target}` is outside it. "

@@ -136,6 +136,22 @@ class TestDecide(unittest.TestCase):
             }
             self.assertIsNone(bg.decide(event, root))
 
+    def test_target_in_no_git_repo_is_not_guarded(self):
+        """FR-0025-29 — the exact shape that misfired: the session's project dir is a repo on
+        a permanent branch, but the write targets a sibling path (`_KANBAN/…`) that is inside
+        no git repo. `resolve_repo_root` falls back to the project dir, and without the guard
+        the target inherits `main` and gets denied."""
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)  # not a git repo
+            repo = self._repo(workspace, "main", "github flow")
+            outside = workspace / "_KANBAN" / "CHANTIER0025" / "card.md"
+            outside.parent.mkdir(parents=True)
+            event = {
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(outside)},
+            }
+            self.assertIsNone(bg.decide(event, repo))
+
 
 class TestMainEndToEnd(unittest.TestCase):
     """Real subprocess calls — same invocation shape Claude Code uses (JSON payload on stdin)."""

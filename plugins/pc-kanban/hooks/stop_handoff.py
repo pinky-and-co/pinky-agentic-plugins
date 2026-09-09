@@ -206,6 +206,13 @@ def find_kanbans(start: Path) -> list[Path]:
     return found
 
 
+def agent_log_dir(kanban: Path) -> Path:
+    """The cross-agent journal directory paired with a board's `_KANBAN/` — its sibling today
+    (`consolider-agent-log-sous-kanban` may move it under `_KANBAN/`). Defined once so a consumer
+    resolving where agent logs live never hardcodes the sibling-vs-child choice."""
+    return kanban.parent / "_AGENT_LOG"
+
+
 def inprogress_cards(kanban: Path) -> list[Path]:
     """Every card currently in a chantier's `3-in-progress/` column."""
     return sorted(kanban.glob("CHANTIER*/3-in-progress/*.md"))
@@ -580,6 +587,14 @@ def main() -> int:
             print(kanban)
         return 0
 
+    if "--list-agent-log-dirs" in sys.argv[1:]:
+        # The path, not the contents — a consumer building a write allow-list (guard.py,
+        # FR-0025-27) needs the directory even before the first journal entry creates it,
+        # so this is deliberately unfiltered by `is_dir()` unlike `--list-agent-logs`.
+        for kanban in find_kanbans(Path(os.getcwd())):
+            print(agent_log_dir(kanban))
+        return 0
+
     if "--list-chantiers" in sys.argv[1:]:
         full = (
             "--full" in sys.argv[1:]
@@ -620,7 +635,7 @@ def main() -> int:
 
     if "--list-agent-logs" in sys.argv[1:]:
         for kanban in find_kanbans(Path(os.getcwd())):
-            log_dir = kanban.parent / "_AGENT_LOG"
+            log_dir = agent_log_dir(kanban)
             if not log_dir.is_dir():
                 continue
             recent = sorted(
