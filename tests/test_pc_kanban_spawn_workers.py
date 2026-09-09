@@ -16,6 +16,7 @@ get whole-output oracles; the two subprocess boundaries (`_hook`, `resolve_paths
 import contextlib
 import io
 import os
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -74,20 +75,27 @@ class TestBuildClaudeCommand(unittest.TestCase):
     def test_sonnet_card_gets_opus_advisor(self):
         self.assertEqual(
             sw.build_claude_command("api-fix", "0025", "fix", "sonnet", "opus"),
-            'claude --name "api-fix" --model sonnet --advisor opus '
+            "claude --name api-fix --model sonnet --advisor opus "
             '"/pc-kanban:chantier 0025 fix"',
         )
 
     def test_opus_card_has_no_advisor(self):
         self.assertEqual(
             sw.build_claude_command("x-y", "0009", "y", "opus", None),
-            'claude --name "x-y" --model opus "/pc-kanban:chantier 0009 y"',
+            'claude --name x-y --model opus "/pc-kanban:chantier 0009 y"',
         )
 
     def test_no_model_leaves_model_flag_off(self):
         self.assertEqual(
             sw.build_claude_command("x-y", "0009", "y", "", None),
-            'claude --name "x-y" "/pc-kanban:chantier 0009 y"',
+            'claude --name x-y "/pc-kanban:chantier 0009 y"',
+        )
+
+    def test_a_dollar_or_quote_in_the_name_is_neutralised(self):
+        # `name` carries an unconstrained repo basename; shlex.quote must make it inert.
+        got = sw.build_claude_command('a"$(x)', "0009", "y", "opus", None)
+        self.assertEqual(
+            got, 'claude --name \'a"$(x)\' --model opus "/pc-kanban:chantier 0009 y"'
         )
 
 
@@ -101,7 +109,7 @@ class TestBuildSpawnCommand(unittest.TestCase):
                 "--cwd",
                 "/ws/bootstrap/pinky-bootstrap",
                 "--command",
-                'claude --name "pinky-bootstrap-spawn-x" --model sonnet --advisor opus '
+                "claude --name pinky-bootstrap-spawn-x --model sonnet --advisor opus "
                 '"/pc-kanban:chantier 0025 spawn-x"',
             ],
         )
@@ -119,7 +127,7 @@ class TestBuildManualLine(unittest.TestCase):
         self.assertEqual(
             sw.build_manual_line(_BOOTSTRAP, "0025", "spawn-x", "opus"),
             "cd /ws/bootstrap/pinky-bootstrap && "
-            'claude --name "pinky-bootstrap-spawn-x" --model opus '
+            "claude --name pinky-bootstrap-spawn-x --model opus "
             '"/pc-kanban:chantier 0025 spawn-x"',
         )
 
@@ -200,21 +208,23 @@ class TestMain(unittest.TestCase):
             rc = sw.main(list(args))
         return rc, out.getvalue(), err.getvalue()
 
-    def test_dry_run_prints_both_command_lines_and_spawns_nothing(self):
+    def test_dry_run_prints_shlex_joined_spawn_command_per_repo_and_spawns_nothing(
+        self,
+    ):
         rc, out, _ = self._run("--dry-run", "0099", "my-card")
         self.assertEqual(rc, 0)
         self.assertEqual(self.spawned, [])
-        line_one = (
-            "cmux new-workspace --cwd /clones/one --command "
-            '\'claude --name "one-my-card" --model sonnet --advisor opus '
-            '"/pc-kanban:chantier 0099 my-card"\''
+        expected = "".join(
+            shlex.join(
+                sw.build_spawn_command(
+                    "cmux", sw.SpawnTarget(s, Path(p)), "0099", "my-card", "sonnet"
+                )
+            )
+            + "\n"
+            for s, p in (("org/one", "/clones/one"), ("org/two", "/clones/two"))
         )
-        line_two = (
-            "cmux new-workspace --cwd /clones/two --command "
-            '\'claude --name "two-my-card" --model sonnet --advisor opus '
-            '"/pc-kanban:chantier 0099 my-card"\''
-        )
-        self.assertEqual(out, f"{line_one}\n{line_two}\n")
+        self.assertEqual(out, expected)
+        self.assertIn("--advisor opus", out)
 
     def test_scan_root_is_the_boards_workspace_root(self):
         self._run("--dry-run", "0099", "my-card")
@@ -233,8 +243,8 @@ class TestMain(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(self.spawned, [])
         self.assertIn("open a worker session yourself", out)
-        self.assertIn('cd /clones/one && claude --name "one-my-card"', out)
-        self.assertIn('cd /clones/two && claude --name "two-my-card"', out)
+        self.assertIn("cd /clones/one && claude --name one-my-card", out)
+        self.assertIn("cd /clones/two && claude --name two-my-card", out)
 
     def test_card_without_repos_aborts(self):
         self.hook_stdout["--card-repos"] = ""

@@ -205,10 +205,14 @@ def build_claude_command(
         advisor: the `--advisor` model, or None to leave it off.
 
     Returns:
-        One shell string — for a sonnet card:
-        claude --name "api-fix" --model sonnet --advisor opus "/pc-kanban:chantier 0025 fix"
+        One POSIX shell string — for a sonnet card:
+        claude --name pinky-bootstrap-fix --model sonnet --advisor opus "/pc-kanban:chantier 0025 fix"
     """
-    parts = ["claude", "--name", f'"{name}"']
+    # `name` carries a repo basename that nothing upstream constrains → shlex.quote it. The
+    # slash-command arg only ever holds a `[0-9]{3,4}` id and a `_SLUG_RE` slug (validated in
+    # main, before we get here) — no `"`/`$`/backslash possible, so a plain double-quote is
+    # enough and keeps the line readable. `model`/`advisor` are our own frozenset literals.
+    parts = ["claude", "--name", shlex.quote(name)]
     if model:
         parts += ["--model", model]
     if advisor:
