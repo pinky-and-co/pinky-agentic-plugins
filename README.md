@@ -326,6 +326,7 @@ pinky-agentic-plugins/
 ├── NOTICE
 ├── pyproject.toml
 ├── README.md
+├── TEST_WITNESS.txt
 └── uv.lock
 ```
 
