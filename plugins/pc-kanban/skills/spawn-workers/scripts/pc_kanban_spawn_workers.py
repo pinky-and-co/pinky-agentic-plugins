@@ -45,10 +45,18 @@ _USAGE = "Usage: pc_kanban_spawn_workers.py [--dry-run] <chantier-id> <card-slug
 _ID_RE = re.compile(r"[0-9]{3,4}")
 _SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
-# the card `model:` aliases (skill `kanban`); anything else is a malformed card, not a model to
-# pass through — validated so a stray value can't ride into the shell string `claude` boots with.
-_KNOWN_MODELS = frozenset({"haiku", "sonnet", "opus", "fable"})
-# advisor = one model tier above the card's floor; `opus` and `fable` are already the ceiling.
+# the card `model:` alias -> the `claude --model` value the worker boots on. The card decides the
+# tier, verbatim — a `haiku` card runs on haiku, not "at least haiku". `[1m]` is the long-context
+# variant, used wherever it exists so a big card does not compact mid-work; `haiku` has none (the
+# `haiku[1m]` alias is a hard 400). `fable[1m]` is assumed (fable is 1M-native; unverified — a
+# fable run would confirm). A value not in this map is a malformed card and aborts the spawn.
+_MODEL_ARG = {
+    "haiku": "haiku",
+    "sonnet": "sonnet[1m]",
+    "opus": "opus[1m]",
+    "fable": "fable[1m]",
+}
+# advisor = one model tier above the card's model; `opus` and `fable` are already the ceiling.
 _ADVISOR_ABOVE = {"haiku": "sonnet", "sonnet": "opus"}
 
 _HOOK = Path(__file__).resolve().parents[3] / "hooks" / "stop_handoff.py"
@@ -75,6 +83,19 @@ def multiplexer() -> str | None:
     if os.environ.get("WMUX_SURFACE_ID"):
         return "wmux"
     return None
+
+
+def model_arg(card_model: str) -> str | None:
+    """The `claude --model` value for a card whose `model:` is `card_model` — or None if none.
+
+    Args:
+        card_model: the card's `model:` alias (`haiku` / `sonnet` / `opus` / `fable`), or "".
+
+    Returns:
+        `haiku` / `sonnet[1m]` / `opus[1m]` / `fable[1m]` — the card's tier as its long-context
+        variant where one exists. None for "" or an unknown alias (no `--model` passed).
+    """
+    return _MODEL_ARG.get(card_model)
 
 
 def advisor_for(model: str) -> str | None:
@@ -193,7 +214,7 @@ def resolve_paths(workspace_root: Path, slugs: list[str]) -> list[SpawnTarget]:
 
 
 def build_claude_command(
-    name: str, chantier_id: str, slug: str, model: str, advisor: str | None
+    name: str, chantier_id: str, slug: str, card_model: str
 ) -> str:
     """The `claude` invocation a worker session boots with, as one shell string.
 
@@ -201,28 +222,31 @@ def build_claude_command(
         name: the session display name, `<repo>-<slug>`.
         chantier_id: the four-digit chantier number.
         slug: the card filename without ".md".
-        model: the card's `model:` floor; "" leaves `--model` off (`claude`'s own default).
-        advisor: the `--advisor` model, or None to leave it off.
+        card_model: the card's `model:` alias, or "" — `--model` / `--advisor` are derived
+            from it (`model_arg`, `advisor_for`), not passed as-is.
 
     Returns:
         One POSIX shell string — for a sonnet card:
-        claude --name pinky-bootstrap-fix --model sonnet --advisor opus "/pc-kanban:chantier 0025 fix"
+        claude --name pinky-bootstrap-fix --model "sonnet[1m]" --advisor "opus" "/pc-kanban:chantier 0025 fix"
     """
-    # `name` carries a repo basename that nothing upstream constrains → shlex.quote it. The
-    # slash-command arg only ever holds a `[0-9]{3,4}` id and a `_SLUG_RE` slug (validated in
-    # main, before we get here) — no `"`/`$`/backslash possible, so a plain double-quote is
-    # enough and keeps the line readable. `model`/`advisor` are our own frozenset literals.
+    # A multiplexer types this line into a fresh shell. `name` holds an unconstrained repo
+    # basename → shlex.quote (single-quote) neutralises `$`/backtick/quote. Everything else —
+    # the `[1m]` model variant (a glob bracket zsh would choke on unquoted), the advisor alias,
+    # the slash-command arg — is a value from our own literal maps or a regex-validated id/slug,
+    # so a plain double-quote is enough and keeps the line readable inside an outer shlex.join.
     parts = ["claude", "--name", shlex.quote(name)]
+    model = model_arg(card_model)
     if model:
-        parts += ["--model", model]
+        parts += ["--model", f'"{model}"']
+    advisor = advisor_for(card_model)
     if advisor:
-        parts += ["--advisor", advisor]
+        parts += ["--advisor", f'"{advisor}"']
     parts.append(f'"/pc-kanban:chantier {chantier_id} {slug}"')
     return " ".join(parts)
 
 
 def build_spawn_command(
-    mux: str, target: SpawnTarget, chantier_id: str, slug: str, model: str
+    mux: str, target: SpawnTarget, chantier_id: str, slug: str, card_model: str
 ) -> list[str]:
     """Build the `<mux> new-workspace` argv for one repo of a card.
 
@@ -231,19 +255,19 @@ def build_spawn_command(
         target: the repo slug and its resolved local path.
         chantier_id: the four-digit chantier number.
         slug: the card filename without ".md".
-        model: the card's `model:` floor.
+        card_model: the card's `model:` alias.
 
     Returns:
         The full argv list, ready for subprocess.run without a shell. The workspace name is
         left to the multiplexer, which adopts the `claude --name` value.
     """
     name = f"{target.slug.split('/')[-1]}-{slug}"
-    inner = build_claude_command(name, chantier_id, slug, model, advisor_for(model))
+    inner = build_claude_command(name, chantier_id, slug, card_model)
     return [mux, "new-workspace", "--cwd", str(target.path), "--command", inner]
 
 
 def build_manual_line(
-    target: SpawnTarget, chantier_id: str, slug: str, model: str
+    target: SpawnTarget, chantier_id: str, slug: str, card_model: str
 ) -> str:
     """The `cd <path> && claude ...` line a user runs when no multiplexer is available.
 
@@ -251,14 +275,14 @@ def build_manual_line(
         target: the repo slug and its resolved local path.
         chantier_id: the four-digit chantier number.
         slug: the card filename without ".md".
-        model: the card's `model:` floor.
+        card_model: the card's `model:` alias.
 
     Returns:
         One shell line — the repo path (shell-quoted), then `&&`, then the build_claude_command
         string.
     """
     name = f"{target.slug.split('/')[-1]}-{slug}"
-    claude = build_claude_command(name, chantier_id, slug, model, advisor_for(model))
+    claude = build_claude_command(name, chantier_id, slug, card_model)
     return f"cd {shlex.quote(str(target.path))} && {claude}"
 
 
@@ -297,10 +321,11 @@ def main(argv: list[str]) -> int:
         raise SystemExit(
             f"spawn-workers: card '{slug}' declares no repos: — nothing to spawn"
         )
-    model = _hook("--card-model", str(card_path), allow_empty=True)
-    if model and model not in _KNOWN_MODELS:
+    card_model = _hook("--card-model", str(card_path), allow_empty=True)
+    if card_model and card_model not in _MODEL_ARG:
         raise SystemExit(
-            f"spawn-workers: card '{slug}' has model: {model!r} — not one of {sorted(_KNOWN_MODELS)}"
+            f"spawn-workers: card '{slug}' has model: {card_model!r} — "
+            f"not one of {sorted(_MODEL_ARG)}"
         )
 
     slugs = select_repos(declared, wanted)
@@ -313,11 +338,11 @@ def main(argv: list[str]) -> int:
             f"{len(targets)} repo(s):"
         )
         for target in targets:
-            print(build_manual_line(target, chantier_id, slug, model))
+            print(build_manual_line(target, chantier_id, slug, card_model))
         return 0
 
     for target in targets:
-        command = build_spawn_command(mux, target, chantier_id, slug, model)
+        command = build_spawn_command(mux, target, chantier_id, slug, card_model)
         if dry_run:
             print(shlex.join(command))
             continue

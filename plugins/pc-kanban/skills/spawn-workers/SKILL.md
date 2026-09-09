@@ -26,11 +26,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
    own workspace root (`_KANBAN`'s parent) — derived, not configured.
 3. Builds the worker's `claude` invocation:
    ```
-   claude --name "<repo>-<slug>" --model <card model> [--advisor <one tier up>] "/pc-kanban:chantier <id> <slug>"
+   claude --name "<repo>-<slug>" --model <tier> --advisor <one tier up> "/pc-kanban:chantier <id> <slug>"
    ```
-   `--advisor` is `sonnet` for a `haiku` card, `opus` for a `sonnet` card, and absent for `opus` /
-   `fable` (already the ceiling). `claude --name` names the session (`ListAgents` discovery); the
-   cmux/wmux workspace adopts that name, so no separate workspace-name flag.
+   - `--model` is the card's `model:` tier **verbatim** (the card decides — a `haiku` card runs
+     haiku, never "at least haiku"), as its long-context `[1m]` variant where one exists
+     (`sonnet[1m]`, `opus[1m]`, `fable[1m]`) so a big card does not compact mid-work; `haiku` has
+     no `[1m]` (the alias is a hard 400). A `model:` not in `{haiku,sonnet,opus,fable}` aborts.
+   - `--advisor` is `sonnet` for a `haiku` card, `opus` for a `sonnet` card, absent for `opus` /
+     `fable` (already the ceiling).
+   - `claude --name` names the session (`ListAgents` discovery); the cmux/wmux workspace adopts
+     that name, so no separate workspace-name flag.
 4. Then, per repo:
    - **Inside cmux / wmux** (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID` set) →
      `<mux> new-workspace --cwd <path> --command '<the claude line>'`.

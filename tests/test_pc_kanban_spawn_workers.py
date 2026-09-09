@@ -5,12 +5,13 @@
 Defines "done": given `<chantier-id> <card-slug> [repo-slug...]`, the script resolves the card, its
 `repos:` and its `model:` through stop_handoff.py's CLI, resolves each slug to a local clone
 (resolve_repos.sh), then per repo either runs `<mux> new-workspace` (inside cmux/wmux) or prints a
-`cd ... && claude ...` line (outside both). The `claude` invocation carries `--model <card model>`
-and `--advisor <one tier up>` (none for opus/fable). `[1m]` is never emitted.
+`cd ... && claude ...` line (outside both). The `claude` line carries the card's tier verbatim as
+`--model "<tier>[1m]"` (double-quoted — zsh globs an unquoted `[1m]`; plain `haiku`, no 1m variant)
+and `--advisor` one tier above (`haiku`->sonnet, `sonnet`->opus, none for opus/fable).
 
-`build_claude_command` / `build_spawn_command` / `build_manual_line` / `advisor_for` are pure and
-get whole-output oracles; the two subprocess boundaries (`_hook`, `resolve_paths`) and the spawn
-(`subprocess.run`) are the fakes.
+`build_claude_command` / `build_spawn_command` / `build_manual_line` / `model_arg` / `advisor_for`
+are pure and get whole-output oracles; the two subprocess boundaries (`_hook`, `resolve_paths`)
+and the spawn (`subprocess.run`) are the fakes.
 """
 
 import contextlib
@@ -36,6 +37,18 @@ import pc_kanban_spawn_workers as sw  # noqa: E402
 _BOOTSTRAP = sw.SpawnTarget(
     "pinky-and-co/pinky-bootstrap", Path("/ws/bootstrap/pinky-bootstrap")
 )
+
+
+class TestModelArg(unittest.TestCase):
+    def test_tier_verbatim_as_the_1m_variant_where_one_exists(self):
+        self.assertEqual(sw.model_arg("haiku"), "haiku")
+        self.assertEqual(sw.model_arg("sonnet"), "sonnet[1m]")
+        self.assertEqual(sw.model_arg("opus"), "opus[1m]")
+        self.assertEqual(sw.model_arg("fable"), "fable[1m]")
+
+    def test_empty_or_unknown_yields_no_model(self):
+        self.assertIsNone(sw.model_arg(""))
+        self.assertIsNone(sw.model_arg("gpt-4"))
 
 
 class TestAdvisorFor(unittest.TestCase):
@@ -72,44 +85,52 @@ class TestMultiplexer(unittest.TestCase):
 
 
 class TestBuildClaudeCommand(unittest.TestCase):
-    def test_sonnet_card_gets_opus_advisor(self):
+    def test_sonnet_card(self):
         self.assertEqual(
-            sw.build_claude_command("api-fix", "0025", "fix", "sonnet", "opus"),
-            "claude --name api-fix --model sonnet --advisor opus "
+            sw.build_claude_command("api-fix", "0025", "fix", "sonnet"),
+            'claude --name api-fix --model "sonnet[1m]" --advisor "opus" '
             '"/pc-kanban:chantier 0025 fix"',
         )
 
-    def test_opus_card_has_no_advisor(self):
+    def test_haiku_card_runs_haiku_never_sonnet(self):
         self.assertEqual(
-            sw.build_claude_command("x-y", "0009", "y", "opus", None),
-            'claude --name x-y --model opus "/pc-kanban:chantier 0009 y"',
+            sw.build_claude_command("x-y", "0009", "y", "haiku"),
+            'claude --name x-y --model "haiku" --advisor "sonnet" '
+            '"/pc-kanban:chantier 0009 y"',
         )
 
-    def test_no_model_leaves_model_flag_off(self):
+    def test_opus_card_no_advisor(self):
         self.assertEqual(
-            sw.build_claude_command("x-y", "0009", "y", "", None),
+            sw.build_claude_command("x-y", "0009", "y", "opus"),
+            'claude --name x-y --model "opus[1m]" "/pc-kanban:chantier 0009 y"',
+        )
+
+    def test_no_model_declared_is_a_bare_boot(self):
+        self.assertEqual(
+            sw.build_claude_command("x-y", "0009", "y", ""),
             'claude --name x-y "/pc-kanban:chantier 0009 y"',
         )
 
     def test_a_dollar_or_quote_in_the_name_is_neutralised(self):
         # `name` carries an unconstrained repo basename; shlex.quote must make it inert.
-        got = sw.build_claude_command('a"$(x)', "0009", "y", "opus", None)
+        got = sw.build_claude_command('a"$(x)', "0009", "y", "opus")
         self.assertEqual(
-            got, 'claude --name \'a"$(x)\' --model opus "/pc-kanban:chantier 0009 y"'
+            got,
+            'claude --name \'a"$(x)\' --model "opus[1m]" "/pc-kanban:chantier 0009 y"',
         )
 
 
 class TestBuildSpawnCommand(unittest.TestCase):
     def test_cmux_argv_is_pinned_whole(self):
         self.assertEqual(
-            sw.build_spawn_command("cmux", _BOOTSTRAP, "0025", "spawn-x", "sonnet"),
+            sw.build_spawn_command("cmux", _BOOTSTRAP, "0025", "spawn-x", "opus"),
             [
                 "cmux",
                 "new-workspace",
                 "--cwd",
                 "/ws/bootstrap/pinky-bootstrap",
                 "--command",
-                "claude --name pinky-bootstrap-spawn-x --model sonnet --advisor opus "
+                'claude --name pinky-bootstrap-spawn-x --model "opus[1m]" '
                 '"/pc-kanban:chantier 0025 spawn-x"',
             ],
         )
@@ -118,16 +139,15 @@ class TestBuildSpawnCommand(unittest.TestCase):
         cmux = sw.build_spawn_command("cmux", _BOOTSTRAP, "0025", "spawn-x", "haiku")
         wmux = sw.build_spawn_command("wmux", _BOOTSTRAP, "0025", "spawn-x", "haiku")
         self.assertEqual(wmux, ["wmux", *cmux[1:]])
-        self.assertIn("--advisor", wmux[-1])
-        self.assertIn("sonnet", wmux[-1])
+        self.assertIn('--model "haiku" --advisor "sonnet"', wmux[-1])
 
 
 class TestBuildManualLine(unittest.TestCase):
     def test_cd_then_claude(self):
         self.assertEqual(
-            sw.build_manual_line(_BOOTSTRAP, "0025", "spawn-x", "opus"),
+            sw.build_manual_line(_BOOTSTRAP, "0025", "spawn-x", "sonnet"),
             "cd /ws/bootstrap/pinky-bootstrap && "
-            "claude --name pinky-bootstrap-spawn-x --model opus "
+            'claude --name pinky-bootstrap-spawn-x --model "sonnet[1m]" --advisor "opus" '
             '"/pc-kanban:chantier 0025 spawn-x"',
         )
 
@@ -172,7 +192,7 @@ class TestMain(unittest.TestCase):
         self.hook_stdout = {
             "--card-path": f"{self.card_path}\n",
             "--card-repos": "org/one\norg/two\n",
-            "--card-model": "sonnet\n",
+            "--card-model": "opus\n",
         }
         self._saved_env = {
             k: os.environ.pop(k, None) for k in ("CMUX_SURFACE_ID", "WMUX_SURFACE_ID")
@@ -217,14 +237,14 @@ class TestMain(unittest.TestCase):
         expected = "".join(
             shlex.join(
                 sw.build_spawn_command(
-                    "cmux", sw.SpawnTarget(s, Path(p)), "0099", "my-card", "sonnet"
+                    "cmux", sw.SpawnTarget(s, Path(p)), "0099", "my-card", "opus"
                 )
             )
             + "\n"
             for s, p in (("org/one", "/clones/one"), ("org/two", "/clones/two"))
         )
         self.assertEqual(out, expected)
-        self.assertIn("--advisor opus", out)
+        self.assertIn('--model "opus[1m]"', out)
 
     def test_scan_root_is_the_boards_workspace_root(self):
         self._run("--dry-run", "0099", "my-card")
@@ -246,6 +266,12 @@ class TestMain(unittest.TestCase):
         self.assertIn("cd /clones/one && claude --name one-my-card", out)
         self.assertIn("cd /clones/two && claude --name two-my-card", out)
 
+    def test_haiku_card_boots_haiku_not_sonnet(self):
+        self.hook_stdout["--card-model"] = "haiku\n"
+        _, out, _ = self._run("--dry-run", "0099", "my-card")
+        self.assertIn('--model "haiku" --advisor "sonnet"', out)
+        self.assertNotIn('--model "sonnet', out)
+
     def test_card_without_repos_aborts(self):
         self.hook_stdout["--card-repos"] = ""
         with self.assertRaises(SystemExit) as cm:
@@ -264,10 +290,10 @@ class TestMain(unittest.TestCase):
             self._run("0099", "my-card")
         self.assertIn("stale", str(cm.exception))
 
-    def test_no_1m_variant_ever_emitted(self):
-        self.hook_stdout["--card-model"] = "sonnet\n"
+    def test_haiku_1m_alias_never_emitted(self):
+        self.hook_stdout["--card-model"] = "haiku\n"
         _, out, _ = self._run("--dry-run", "0099", "my-card")
-        self.assertNotIn("[1m]", out)
+        self.assertNotIn("haiku[1m]", out)
 
     def test_too_few_args_is_usage_error(self):
         rc, _, err = self._run("0099")
