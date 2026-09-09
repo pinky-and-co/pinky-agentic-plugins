@@ -205,6 +205,10 @@ The git-repo boundary is the role boundary — the session is bound to its repo,
   declared**. A session opened inside a repo is a worker and the hook leaves it alone. To run an
   unfrozen session at a board root, `permission-change freeze off` (it returns next SessionStart).
 
+Spawning workers for a selected card is skill `spawn-workers` — one `cmux new-workspace` per entry
+of the card's `repos:`, each booting into `/pc-kanban:chantier`. Multi-repo cards relay
+sequentially between workers; see `references/finishing-a-card.md` § "Relaying a multi-repo card".
+
 ## Boundaries
 
 - Durable facts (user profile, conventions, contract constraints) live in the agent's persistent

@@ -182,6 +182,10 @@ pinky-agentic-plugins/
 │   │       │   ├── scripts/
 │   │       │   │   └── guard.py
 │   │       │   └── SKILL.md
+│   │       ├── spawn-workers/
+│   │       │   ├── scripts/
+│   │       │   │   └── pc_kanban_spawn_workers.py
+│   │       │   └── SKILL.md
 │   │       └── yt/
 │   │           └── SKILL.md
 │   ├── pc-privacy/
@@ -292,6 +296,7 @@ pinky-agentic-plugins/
 │   ├── test_model_adversarial.py
 │   ├── test_model_panel.py
 │   ├── test_orchestrator_freeze.py
+│   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pending_gate.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py

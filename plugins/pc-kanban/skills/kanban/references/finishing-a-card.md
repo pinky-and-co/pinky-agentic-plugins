@@ -105,3 +105,33 @@ bloqué") and propose nothing; do not lower the bar to fill a slot.
 On explicit user OK: `mv` the chosen card into `2-selected-for-dev`. On silence or "not now": do
 nothing — the proposal is not a commitment, and repeating it unprompted next turn is not this
 skill's job either.
+
+### Relaying a multi-repo card
+
+A card with 2+ entries in `repos:` is worked by one worker session per repo, spawned by the
+orchestrator through skill `spawn-workers` (one `cmux new-workspace` per repo). Most such cards are
+the `pinky-agentic-plugins` + `pinky-bootstrap` pair, where the flow is **sequential** (bootstrap is
+the vendored source, plugins the copy) — the orchestrator spawns only the first, and each worker
+relays to the next once its own part of `Fini =` is reached:
+
+- **Spawn the next repo** — `/pc-kanban:spawn-workers <chantier-id> <card-slug> <next-repo-slug>`
+  (the single slug filter). Inside cmux/wmux it opens the workspace; outside any multiplexer it
+  prints the `cd … && claude …` line to run. Or, if a worker for that repo is already listed by
+  `ListAgents`, `SendMessage` it a bare trigger ("prends le relais sur `<card-slug>`").
+- **Work state travels in the card's handoff block, never in the message.** The narrative handoff on
+  the `3-in-progress` card is the single source of what is done and what is left; the inter-session
+  message carries only the trigger. A relay that puts state in the message loses it the moment the
+  receiving session compacts.
+- The receiving worker runs `/pc-kanban:chantier`, finds the card already in `3-in-progress`
+  (resume-directly branch), reads the handoff, and continues.
+
+### Abandoning a multi-repo card
+
+If a multi-repo card is dropped mid-flight (superseded, blocked, wrong approach):
+
+1. Close every spawned worker's cmux workspace — a `new-workspace` with nothing running in it is not
+   auto-reaped, and an orphan named `<repo>-<slug>` misleads the next `ListAgents`.
+2. `mv` the card back to the column it came from (`2-selected-for-dev` or `1-todo`), and reset
+   `status:` to match.
+3. Note the abandonment and why in the card's handoff block, so a later pickup does not re-derive
+   the same dead end.

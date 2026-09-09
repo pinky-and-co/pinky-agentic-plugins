@@ -130,7 +130,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     Re-running this chantier next turn finds the card already in `3-in-progress/` (resume-directly
     branch) and lands back on this same bullet — the newly-enabled ids are now in `enabledPlugins`,
     so this step finds nothing left to activate and falls through to freezing below. Empty output on
-    the first pass → nothing to activate, continue directly. Then freeze to the resolved paths
+    the first pass → nothing to activate, continue directly.
+
+    A worker session already scoped to the card's repo (worker/orchestrator model, skill `kanban`
+    § Session write-scope) has that repo's plugins ambient, so this call finds nothing to enable —
+    empty output, no `/reload-plugins`. It stays wired in because the legacy one-session-many-repos
+    model still coexists during the transition, where the resolved repos are not the session's cwd
+    and the activation is real.
+
+    Then freeze to the resolved paths
     **plus every kanban board root** (`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py"
     --list-kanbans`, itself multi-board aware — this workspace has more than one), so the session
     stays able to maintain cards/handoffs while frozen:

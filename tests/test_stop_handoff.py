@@ -563,5 +563,79 @@ class TestListAgentLogDirsCLI(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), str(board / "_AGENT_LOG"))
 
 
+class TestCardCLI(unittest.TestCase):
+    """`--card-path` / `--card-repos` — card resolution exposed for spawn-workers (FR-0025-19)."""
+
+    SCRIPT = str(
+        Path(__file__).parent.parent
+        / "plugins"
+        / "pc-kanban"
+        / "hooks"
+        / "stop_handoff.py"
+    )
+
+    def _run(self, board, *args):
+        return subprocess.run(
+            [sys.executable, self.SCRIPT, *args],
+            capture_output=True,
+            text=True,
+            cwd=board.parent,
+            env={
+                **os.environ,
+                "KANBAN_ROOTS": str(board.parent),
+                "CLAUDE_PROJECT_DIR": str(board.parent),
+            },
+            check=False,
+        )
+
+    def _board_with_card(self, tmp):
+        col = Path(tmp) / "ws" / "_KANBAN" / "CHANTIER0099-demo" / "2-selected-for-dev"
+        col.mkdir(parents=True)
+        (col / "my-card.md").write_text(
+            "---\nrepos: [org/one, org/two]\nsert: null\n---\n# my-card\n",
+            encoding="utf-8",
+        )
+        return Path(tmp) / "ws" / "_KANBAN", col / "my-card.md"
+
+    def test_card_path_prints_the_single_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board, card = self._board_with_card(tmp)
+            r = self._run(board, "--card-path", "0099", "my-card")
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(r.stdout.strip(), str(card))
+
+    def test_card_path_missing_is_exit_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board, _ = self._board_with_card(tmp)
+            r = self._run(board, "--card-path", "0099", "nope")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("matched 0 cards", r.stderr)
+
+    def test_card_path_ambiguous_is_exit_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board, _ = self._board_with_card(tmp)
+            dup = board / "CHANTIER0099-demo" / "1-todo"
+            dup.mkdir(parents=True)
+            (dup / "my-card.md").write_text("---\nrepos: [org/one]\n---\n")
+            r = self._run(board, "--card-path", "0099", "my-card")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("matched 2 cards", r.stderr)
+
+    def test_card_repos_lists_slugs_one_per_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board, card = self._board_with_card(tmp)
+            r = self._run(board, "--card-repos", str(card))
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(r.stdout, "org/one\norg/two\n")
+
+    def test_card_repos_empty_when_none_declared(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board, card = self._board_with_card(tmp)
+            card.write_text("---\nsert: null\n---\n# my-card\n", encoding="utf-8")
+            r = self._run(board, "--card-repos", str(card))
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(r.stdout, "")
+
+
 if __name__ == "__main__":
     unittest.main()
