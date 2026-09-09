@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""policy_lib — shared resolution for `.claude/settings.pinky.json` in a multi-repo workspace.
+"""Shared resolution for `.claude/settings.pinky.json` in a multi-repo workspace.
 
 Never declared in `hooks.json` and never invoked by a skill's DCI directly — it is a pure
 dependency, imported by four callers that each have their own entry point:

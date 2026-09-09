@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from policy_lib import load_policies, resolve_repo_root  # noqa: E402
+from pc_git_policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 
 def main() -> int:

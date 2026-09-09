@@ -320,24 +320,24 @@ repos:
         stages: [pre-commit]
 
   # Card `decouper-pc-core-en-pc-git-et-pc-kanban.md` (chantier 0023): a plugin split across two
-  # plugins can vendor a small shared utility (policy_lib.py, secret_patterns.py) since neither
-  # plugin can import the other's files at runtime. This hook catches a hand-edited copy drifting
-  # from the pinky-bootstrap source instead of letting the next `pinky distribute` silently
-  # overwrite it.
+  # plugins can vendor a small shared utility (policy_lib, secret_patterns, plugin_scope_lib,
+  # pending_user_action) since neither plugin can import the other's files at runtime. This hook
+  # catches a hand-edited copy drifting from the pinky-bootstrap source instead of letting the next
+  # `pinky distribute` silently overwrite it.
   - repo: local
     hooks:
       - id: check-vendor-checksum
         name: "[VENDOR] Vendored file matches its source checksum"
         entry: python scripts/hooks/check_vendor_checksum.py
         language: python
-        files: \.vendor-manifest\.json$|hooks/(policy_lib|secret_patterns)\.py$
+        files: \.vendor-manifest\.json$|(hooks|scripts)/(pc_git_policy_lib|pc_kanban_secret_patterns|pc_kanban_plugin_scope_lib|pc_kanban_pending_user_action|policy_lib|secret_patterns|plugin_scope_lib|pending_user_action)\.py$
         pass_filenames: false
         stages: [pre-commit]
 
   # ── Same quality floor as the `python` extra's src/-scoped hooks, for a plugin repo's own
   # Python — plugins/*/hooks/ (inject_policies.py and siblings) AND plugins/*/mcp/ (an MCP
-  # server's own Python, e.g. pc-core's mcp/server.py) — both are hand-authored by this repo, not
-  # distributed. scripts/hooks/ is DISTRIBUTED, not authored by this repo (DISTRIBUTED_PATHS): a
+  # server's own Python, e.g. pc-core's mcp/pc_core_server.py) — both are hand-authored by this
+  # repo, not distributed. scripts/hooks/ is DISTRIBUTED, not authored by this repo (DISTRIBUTED_PATHS): a
   # finding there can only be fixed by the provider (pinky-workspace/core/hooks/), never by this
   # consumer — editing it locally is overwritten by the next distribute(). Blocking this repo's
   # commits on code it structurally cannot fix is broken regardless of whether the check is an
@@ -353,18 +353,12 @@ repos:
         types: [python]
         args: [--ignore-missing-imports]
         files: ^plugins/[^/]+/(hooks|mcp)/
-        # mypy errors "Duplicate module named X" the moment one invocation sees two same-named
-        # files under sibling plugins/*/ dirs with no __init__.py — and `--explicit-package-bases`
-        # can't disambiguate (plugin dir names carry hyphens, invalid as module path components,
-        # so a MYPYPATH per plugin isn't clean either). Two such collisions, each excluded down to
-        # one canonical copy:
-        #   - hooks/(policy_lib|secret_patterns).py — vendored, byte-identical (check-vendor-checksum
-        #     guarantees it), so mypy on the pc-core copy covers every other.
-        #   - mcp/server.py — every plugin's MCP entrypoint is named server.py (harness convention);
-        #     they are thin @m.tool() wrappers, not identical. Keep pc-core's under mypy; the rest
-        #     are covered by the plugin author's local run. Proper fix = per-plugin mypy invocation
-        #     (CHANTIER0024).
-        exclude: ^plugins/(pc-git|pc-kanban)/hooks/(policy_lib|secret_patterns)\.py$|^plugins/(?!pc-core/)[^/]+/mcp/server\.py$
+        # No `exclude:` for same-basename collisions: mypy hard-errors "Duplicate module named X"
+        # the moment one invocation sees two same-named files under sibling plugins/*/ dirs with no
+        # __init__.py (plugin names carry hyphens, so no clean package path or MYPYPATH). Every such
+        # file is instead named for its plugin at the source — `pc-core` keeps the bare name, each
+        # consumer's vendored/entrypoint copy is `pc_<plugin>_<name>.py` (VENDOR_MAP for the shared
+        # libs, `<plugin>_server.py` for MCP entrypoints).
         require_serial: true
 
   - repo: https://github.com/PyCQA/bandit
