@@ -72,13 +72,17 @@ pinky-agentic-plugins/
 │   │   │   ├── inject_policies.py
 │   │   │   ├── keychain.py
 │   │   │   ├── load_secrets.py
+│   │   │   ├── pending_gate.py
+│   │   │   ├── pending_user_action.py
+│   │   │   ├── plugin_scope_lib.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
 │   │   │   ├── privacy_egress.py
 │   │   │   ├── read_cost.py
 │   │   │   ├── secret_patterns.py
 │   │   │   ├── structure_guard.py
-│   │   │   └── style_reminder.py
+│   │   │   ├── style_reminder.py
+│   │   │   └── sync_plugin_scope.py
 │   │   ├── mcp/
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
@@ -159,7 +163,10 @@ pinky-agentic-plugins/
 │   │   └── skills/
 │   │       ├── chantier/
 │   │       │   ├── scripts/
+│   │       │   │   ├── activate_plugins_for_repos.py
 │   │       │   │   ├── archive_card.sh
+│   │       │   │   ├── pending_user_action.py
+│   │       │   │   ├── plugin_scope_lib.py
 │   │       │   │   └── resolve_repos.sh
 │   │       │   └── SKILL.md
 │   │       ├── grill/
@@ -273,6 +280,7 @@ pinky-agentic-plugins/
 │       ├── validate_frontmatter.py
 │       └── validate_plugins_strict.py
 ├── tests/
+│   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
 │   ├── test_branch_guard.py
 │   ├── test_guard.py
@@ -282,6 +290,7 @@ pinky-agentic-plugins/
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
 │   ├── test_model_panel.py
+│   ├── test_pending_gate.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
 │   ├── test_privacy_egress.py
@@ -294,7 +303,8 @@ pinky-agentic-plugins/
 │   ├── test_statusline_common.py
 │   ├── test_stop_handoff.py
 │   ├── test_structure_guard.py
-│   └── test_subagent_statusline.py
+│   ├── test_subagent_statusline.py
+│   └── test_sync_plugin_scope.py
 ├── .darglint
 ├── .gitattributes
 ├── .gitignore
