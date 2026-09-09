@@ -595,6 +595,33 @@ def main() -> int:
             print(agent_log_dir(kanban))
         return 0
 
+    if sys.argv[1:2] == ["--card-path"]:
+        # Resolve a card by chantier id + slug through the SAME board resolution as the hook,
+        # for a consumer that must not reimplement the glob (spawn-workers, FR-0025-19). Prints
+        # the one match; 0 or >1 is a stderr message and exit 1, never a guess.
+        cid, slug = sys.argv[2], sys.argv[3]
+        hits = [
+            c
+            for kanban in find_kanbans(Path(os.getcwd()))
+            for c in kanban.glob(f"CHANTIER{cid}-*/[0-4]-*/{slug}.md")
+        ]
+        if len(hits) != 1:
+            print(
+                f"stop_handoff: '{slug}' in chantier {cid} matched {len(hits)} cards",
+                file=sys.stderr,
+            )
+            return 1
+        print(hits[0])
+        return 0
+
+    if sys.argv[1:2] == ["--card-repos"]:
+        # A card's declared repo slugs, one per line (empty output = none). Same parser the
+        # hook uses for its own repo-scope match — no second frontmatter reader downstream.
+        text = Path(sys.argv[2]).read_text(encoding="utf-8")
+        for slug in card_repos(text) or []:
+            print(slug)
+        return 0
+
     if "--list-chantiers" in sys.argv[1:]:
         full = (
             "--full" in sys.argv[1:]
