@@ -95,7 +95,9 @@ def relative_target(target: str, repo_root: Path) -> str:
     try:
         return str(tgt.relative_to(repo_root.resolve()))
     except ValueError:
-        return target  # outside the repo entirely — won't match any glob, stays guarded
+        # `decide()` already bails out (returns None) for a target in no git repo, so this
+        # branch is a defensive fallback only — a helper must never raise.
+        return target
 
 
 def is_unguarded(rel_path: str) -> bool:
@@ -127,6 +129,16 @@ def decide(event: dict, root: Path) -> dict | None:
         return None
 
     repo_root = resolve_repo_root(str(root), target)
+
+    # `resolve_repo_root` falls back to `root` when `target` is in no git repo at all
+    # (`pc_git_policy_lib.py`). A guard keyed on branch names has nothing to enforce outside a
+    # repo — without this check, such a target inherits the fallback repo's branch and gets
+    # denied whenever that repo happens to sit on a permanent branch.
+    tgt = Path(target)
+    tgt = (tgt if tgt.is_absolute() else repo_root / tgt).resolve()
+    if not tgt.is_relative_to(repo_root.resolve()):
+        return None
+
     branch = current_branch(repo_root)
     if not branch:
         return None  # not a usable git repo, or detached HEAD — nothing to enforce

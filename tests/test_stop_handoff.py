@@ -525,5 +525,43 @@ class TestBoundedBoardLines(unittest.TestCase):
             self.assertEqual(sh.bounded_board_lines(kb), [])
 
 
+class TestAgentLogDir(unittest.TestCase):
+    def test_sibling_of_the_board_kanban(self):
+        self.assertEqual(sh.agent_log_dir(Path("/ws/_KANBAN")), Path("/ws/_AGENT_LOG"))
+
+
+class TestListAgentLogDirsCLI(unittest.TestCase):
+    SCRIPT = str(
+        Path(__file__).parent.parent
+        / "plugins"
+        / "pc-kanban"
+        / "hooks"
+        / "stop_handoff.py"
+    )
+
+    def test_prints_the_dir_even_when_it_does_not_exist_yet(self):
+        """The allow-list consumer (guard.py, FR-0025-27) needs the path before the first
+        journal entry creates it — so this mode, unlike `--list-agent-logs`, never filters
+        on `is_dir()`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            board = Path(tmp) / "ws"
+            (board / "_KANBAN").mkdir(parents=True)
+            # deliberately do NOT create ws/_AGENT_LOG
+            result = subprocess.run(
+                [sys.executable, self.SCRIPT, "--list-agent-log-dirs"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env={
+                    **os.environ,
+                    "KANBAN_ROOTS": str(board),
+                    "CLAUDE_PROJECT_DIR": str(board),
+                },
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.strip(), str(board / "_AGENT_LOG"))
+
+
 if __name__ == "__main__":
     unittest.main()

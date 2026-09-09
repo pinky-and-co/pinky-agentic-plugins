@@ -3,9 +3,12 @@
 python3 -m unittest discover tests
 """
 
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(
@@ -45,6 +48,89 @@ class TestGeneratedTreeViolation(unittest.TestCase):
         self.assertIsNotNone(
             g.generated_tree_violation(".claude/plugins/cache/x.json", self.root)
         )
+
+
+class TestBoardDirCarveOut(unittest.TestCase):
+    """FR-0025-27/28 — board card + agent-log dirs stay writable from any session root; a
+    write that is out of scope AND in no git repo asks instead of a silent deny."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        self.ws = self.base / "ws"
+        (self.ws / "_KANBAN" / "CHANTIER0025" / "3-in-progress").mkdir(parents=True)
+        self.session_root = self.base / "repo"
+        self.session_root.mkdir()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _env(self):
+        return unittest.mock.patch.dict(
+            os.environ,
+            {
+                "KANBAN_ROOTS": str(self.ws),
+                "CLAUDE_PROJECT_DIR": str(self.session_root),
+            },
+        )
+
+    def _decide(self, target, root=None):
+        root = root or self.session_root
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target)},
+            "cwd": str(root),
+        }
+        return g.decide(event, root)
+
+    def test_card_write_allowed_from_a_foreign_session_root(self):
+        card = self.ws / "_KANBAN" / "CHANTIER0025" / "3-in-progress" / "x.md"
+        with self._env():
+            self.assertIsNone(self._decide(card))
+
+    def test_agent_log_write_allowed_before_the_dir_exists(self):
+        entry = (
+            self.ws / "_AGENT_LOG" / "2026-09-09_claude.md"
+        )  # _AGENT_LOG not created
+        with self._env():
+            self.assertIsNone(self._decide(entry))
+
+    def test_out_of_scope_non_repo_target_asks(self):
+        target = self.base / "elsewhere" / "config.toml"
+        target.parent.mkdir()
+        with self._env():
+            decision = self._decide(target)
+        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_out_of_scope_other_repo_target_denies(self):
+        other = self.base / "otherrepo"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        with self._env():
+            decision = self._decide(other / "app.py")
+        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_board_resolution_failure_degrades_to_ask_not_deny(self):
+        other = self.base / "otherrepo"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        with unittest.mock.patch.object(
+            g, "board_dirs", return_value=g.BoardDirs([], False)
+        ):
+            decision = self._decide(other / "app.py")
+        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_freeze_does_not_block_a_board_card_under_the_session_root(self):
+        g.save_state(
+            g.state_path(self.ws),
+            {"careful": False, "freeze": [str(self.ws / "src")], "deny": []},
+        )
+        card = self.ws / "_KANBAN" / "CHANTIER0025" / "3-in-progress" / "x.md"
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"KANBAN_ROOTS": str(self.ws), "CLAUDE_PROJECT_DIR": str(self.ws)},
+        ):
+            self.assertIsNone(self._decide(card, root=self.ws))
 
 
 if __name__ == "__main__":
