@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""plugin_scope_lib — resolve which installed plugins apply to a given cwd, and
+"""Resolve which installed plugins apply to a given cwd, and
 drive their activation via the official `claude plugin enable -s local` CLI.
 
 Why not hand-edit settings.local.json: `claude plugin enable -s local <id>` is

@@ -1,6 +1,6 @@
 {
   "pc-privacy": {
     "command": "uv",
-    "args": ["run", "--script", "${CLAUDE_PLUGIN_ROOT}/mcp/server.py"]
+    "args": ["run", "--script", "${CLAUDE_PLUGIN_ROOT}/mcp/pc_privacy_server.py"]
   }
 }

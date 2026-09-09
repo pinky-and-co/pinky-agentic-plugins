@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""secret_patterns — the one secret-shape detector, shared by every hook that needs it.
+"""The one secret-shape detector, shared by every hook that needs it.
 
 Extracted from `stop_handoff.py` (2026-08-19): `privacy_egress.py` needed the same detection and
 was importing it sideways from a hook it has nothing to do with (kanban handoff vs read-time

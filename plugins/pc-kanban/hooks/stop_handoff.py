@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent))
-from secret_patterns import scrub  # noqa: E402
+from pc_kanban_secret_patterns import scrub  # noqa: E402
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
 # crashes with UnicodeEncodeError. Same fix as setup/__init__.py, applied here because this script

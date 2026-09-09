@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pending_user_action — a session-scoped queue of actions only the user can do.
+"""A session-scoped queue of actions only the user can do.
 
 Some things a hook or a skill needs done can only be done by the user: a
 slash command the CLI parses *before* a turn (`/reload-plugins`, `/rename`,
