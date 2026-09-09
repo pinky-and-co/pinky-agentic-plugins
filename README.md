@@ -158,6 +158,7 @@ pinky-agentic-plugins/
 │   │   │   └── plugin.json
 │   │   ├── hooks/
 │   │   │   ├── hooks.json
+│   │   │   ├── orchestrator_freeze.py
 │   │   │   ├── pc_kanban_secret_patterns.py
 │   │   │   └── stop_handoff.py
 │   │   └── skills/
@@ -290,6 +291,7 @@ pinky-agentic-plugins/
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
 │   ├── test_model_panel.py
+│   ├── test_orchestrator_freeze.py
 │   ├── test_pending_gate.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py

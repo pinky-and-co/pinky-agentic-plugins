@@ -191,6 +191,20 @@ tool-agnostic by policy (see the marketplace's own `CLAUDE.md`) — a skill that
 session start alongside the board; write into the org whose board carries the chantier worked on.
 Never log secrets, credentials or internal URLs.
 
+## Session write-scope — worker vs orchestrator
+
+The git-repo boundary is the role boundary — the session is bound to its repo, or it is not:
+
+- **Worker** — cwd **inside a git repo**, taking cards and editing code. Its freeze is a
+  **per-session toggle**: `/chantier` step 7 resolves the card's `repos:` and calls
+  `permission-change freeze <repos> <board roots>` at intake. No card taken, no freeze.
+- **Orchestrator** — a session opened **outside any git repo** (workspace root, a repo group), for
+  board curation and spawning workers; it never edits code. The `orchestrator_freeze.py`
+  SessionStart hook detects this (cwd in no git repo, at least one board mounted) and freezes
+  writes to the mounted boards' card + agent-log dirs with `careful` on — **derived, not
+  declared**. A session opened inside a repo is a worker and the hook leaves it alone. To run an
+  unfrozen session at a board root, `permission-change freeze off` (it returns next SessionStart).
+
 ## Boundaries
 
 - Durable facts (user profile, conventions, contract constraints) live in the agent's persistent
