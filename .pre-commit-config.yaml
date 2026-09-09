@@ -334,67 +334,12 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-  # ── Same quality floor as the `python` extra's src/-scoped hooks, for a plugin repo's own
-  # Python — plugins/*/hooks/ (inject_policies.py and siblings) AND plugins/*/mcp/ (an MCP
-  # server's own Python, e.g. pc-core's mcp/pc_core_server.py) — both are hand-authored by this
-  # repo, not distributed. scripts/hooks/ is DISTRIBUTED, not authored by this repo (DISTRIBUTED_PATHS): a
-  # finding there can only be fixed by the provider (pinky-workspace/core/hooks/), never by this
-  # consumer — editing it locally is overwritten by the next distribute(). Blocking this repo's
-  # commits on code it structurally cannot fix is broken regardless of whether the check is an
-  # aggregate score (interrogate) or a per-occurrence finding (mypy/bandit/darglint/check-typed-api)
-  # — same reasoning, all five hooks.
-  - repo: local
-    hooks:
-      - id: mypy
-        name: mypy
-        entry: mypy
-        language: python
-        additional_dependencies: ["mypy==2.0.0"]
-        types: [python]
-        args: [--ignore-missing-imports]
-        files: ^plugins/[^/]+/(hooks|mcp)/
-        # No `exclude:` for same-basename collisions: mypy hard-errors "Duplicate module named X"
-        # the moment one invocation sees two same-named files under sibling plugins/*/ dirs with no
-        # __init__.py (plugin names carry hyphens, so no clean package path or MYPYPATH). Every such
-        # file is instead named for its plugin at the source — `pc-core` keeps the bare name, each
-        # consumer's vendored/entrypoint copy is `pc_<plugin>_<name>.py` (VENDOR_MAP for the shared
-        # libs, `<plugin>_server.py` for MCP entrypoints).
-        require_serial: true
-
-  - repo: https://github.com/PyCQA/bandit
-    rev: "1.9.4"
-    hooks:
-      - id: bandit
-        pass_filenames: false
-        args: [-r, plugins/, -ll]
-        files: ^plugins/[^/]+/(hooks|mcp)/
-
-  - repo: local
-    hooks:
-      - id: interrogate
-        name: "[DOCSTRING] Coverage"
-        entry: interrogate
-        language: python
-        additional_dependencies: ["interrogate==1.7.0"]
-        pass_filenames: false
-        args: [plugins/, --ignore-init-method, --ignore-magic, --ignore-module, --ignore-private]
-        files: ^plugins/[^/]+/(hooks|mcp)/
-
-  - repo: local
-    hooks:
-      - id: darglint
-        name: "[DOCSTRING] Args/Returns match"
-        entry: darglint
-        language: python
-        additional_dependencies: ["darglint==1.8.1"]
-        types: [python]
-        files: ^plugins/[^/]+/(hooks|mcp)/
-
-  - repo: local
-    hooks:
-      - id: check-typed-api
-        name: "[TYPED-API] No raw dict/tuple/set in public annotations"
-        entry: python scripts/hooks/check_typed_api.py
-        language: python
-        types: [python]
-        files: ^plugins/[^/]+/(hooks|mcp)/
+  # No mypy/bandit/interrogate/darglint/check-typed-api here any more: they were a narrower copy
+  # (`^plugins/[^/]+/(hooks|mcp)/`) of the `python` extra's src/-scoped hooks, added while that extra
+  # was hardcoded to `^src/` and therefore inert on a `plugins/` layout. Since `_py_lint_roots`
+  # derives the scope (2026-09), the `python` extra resolves to `^plugins/` for a plugin repo — a
+  # strict superset that also covers `skills/<name>/scripts/` — so this copy was pure duplication
+  # (every hook ran twice per commit) and its `bandit` was the one place workspace-wide `--skip B108`
+  # did not apply. Assumption: a plugin repo carries a `pyproject.toml` (both do today), which is
+  # what activates the `python` extra; a future plugin repo without one would get `python-lint`
+  # (ruff only) and need this revisited.
