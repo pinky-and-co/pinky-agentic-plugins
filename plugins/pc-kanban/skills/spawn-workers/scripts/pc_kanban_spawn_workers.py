@@ -52,17 +52,20 @@ class SpawnTarget(NamedTuple):
     path: Path
 
 
-def _hook(*args: str) -> str:
+def _hook(*args: str, allow_empty: bool = False) -> str:
     """Run a `stop_handoff.py` CLI mode and return its stdout, aborting on a non-zero exit.
 
     Args:
         args: the mode flag and its operands, e.g. ("--card-path", "0025", "my-slug").
+        allow_empty: accept empty stdout as a valid answer (a card with no `repos:`).
 
     Returns:
         The command's stdout, stripped of the trailing newline.
 
     Raises:
-        SystemExit: the hook exited non-zero (its stderr is forwarded).
+        SystemExit: the hook exited non-zero, or returned nothing while a value was
+            expected — an installed copy predating these CLI modes exits 0 with no output
+            rather than erroring, and that skew must be loud, not a downstream traceback.
     """
     proc = subprocess.run(
         [sys.executable, str(_HOOK), *args],
@@ -72,7 +75,13 @@ def _hook(*args: str) -> str:
     )
     if proc.returncode != 0:
         raise SystemExit(f"spawn-workers: {proc.stderr.strip()}")
-    return proc.stdout.rstrip("\n")
+    out = proc.stdout.rstrip("\n")
+    if not out and not allow_empty:
+        raise SystemExit(
+            f"spawn-workers: `stop_handoff.py {args[0]}` returned nothing — the installed "
+            "pc-kanban is likely stale (run: pinky install --plugin pc-kanban --force)"
+        )
+    return out
 
 
 def board_workspace_root(card_path: Path) -> Path:
@@ -196,7 +205,11 @@ def main(argv: list[str]) -> int:
         )
 
     card_path = Path(_hook("--card-path", chantier_id, slug))
-    declared = [s for s in _hook("--card-repos", str(card_path)).splitlines() if s]
+    declared = [
+        s
+        for s in _hook("--card-repos", str(card_path), allow_empty=True).splitlines()
+        if s
+    ]
     if not declared:
         raise SystemExit(
             f"spawn-workers: card '{slug}' declares no repos: — nothing to spawn"

@@ -78,17 +78,24 @@ class TestBoardWorkspaceRoot(unittest.TestCase):
             sw.board_workspace_root(Path("/tmp/loose/c.md"))
 
 
+class _Result:
+    def __init__(self, stdout="", returncode=0, stderr=""):
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+
+
 class TestMain(unittest.TestCase):
     def setUp(self):
         self.card_path = (
             "/home/me/ws/_KANBAN/CHANTIER0099-demo/2-selected-for-dev/my-card.md"
         )
-        self.hook_replies = {
-            ("--card-path", "0099", "my-card"): self.card_path,
-            ("--card-repos", self.card_path): "org/one\norg/two",
+        # keyed by the stop_handoff.py mode flag; the real _hook() runs against this fake
+        # subprocess so its stale-copy guard is exercised too.
+        self.hook_stdout = {
+            "--card-path": f"{self.card_path}\n",
+            "--card-repos": "org/one\norg/two\n",
         }
-        self._orig_hook = sw._hook
-        sw._hook = lambda *a: self.hook_replies[a]  # type: ignore[assignment]
         self._orig_resolve = sw.resolve_paths
         sw.resolve_paths = self._fake_resolve  # type: ignore[assignment]
         self.spawned: list[list[str]] = []
@@ -96,7 +103,6 @@ class TestMain(unittest.TestCase):
         sw.subprocess.run = self._fake_run  # type: ignore[assignment]
 
     def tearDown(self):
-        sw._hook = self._orig_hook  # type: ignore[assignment]
         sw.resolve_paths = self._orig_resolve  # type: ignore[assignment]
         sw.subprocess.run = self._orig_run  # type: ignore[assignment]
 
@@ -105,12 +111,10 @@ class TestMain(unittest.TestCase):
         return [sw.SpawnTarget(s, Path(f"/clones/{s.split('/')[-1]}")) for s in slugs]
 
     def _fake_run(self, argv, **_kwargs):
+        if argv[:2] == [sys.executable, str(sw._HOOK)]:
+            return _Result(stdout=self.hook_stdout.get(argv[2], ""))
         self.spawned.append(list(argv))
-
-        class _R:
-            returncode = 0
-
-        return _R()
+        return _Result()
 
     def _run(self, *args):
         out, err = io.StringIO(), io.StringIO()
@@ -144,10 +148,16 @@ class TestMain(unittest.TestCase):
         self.assertIn("/clones/two", self.spawned[0])
 
     def test_card_without_repos_aborts(self):
-        self.hook_replies[("--card-repos", self.card_path)] = ""
+        self.hook_stdout["--card-repos"] = ""
         with self.assertRaises(SystemExit) as cm:
             self._run("0099", "my-card")
         self.assertIn("no repos", str(cm.exception))
+
+    def test_empty_card_path_means_stale_install_not_a_traceback(self):
+        self.hook_stdout["--card-path"] = ""
+        with self.assertRaises(SystemExit) as cm:
+            self._run("0099", "my-card")
+        self.assertIn("stale", str(cm.exception))
 
     def test_too_few_args_is_usage_error(self):
         rc, _, err = self._run("0099")
