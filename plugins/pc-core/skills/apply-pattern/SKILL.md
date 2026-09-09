@@ -61,64 +61,111 @@ For each target:
 
 For each target where the pattern **was successfully applied** (✅ or ⚠️):
 
-1. **Derive a commit message** from the witness commit (if available) or use a generic description
-   of the pattern.
-2. **Invoke the commit + PR/MR script** (from `pc-git` plugin):
+1. **Stage the applied changes** (required by `bulk_commit.sh`):
+   ```bash
+   git -C <target-path> add -A
+   ```
+   The commit script only reads **already-staged** changes; Edit/Write alone does not stage.
+
+2. **Discover fingerprints and emit messages** (reuse the script's plan mode):
+   ```bash
+   ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan \
+     --root "${CLAUDE_PROJECT_DIR}" --repo <target-repo-basename>
+   ```
+   Parse the `=== GROUP <fingerprint>` line(s) and collect all fingerprints in this target's diff.
+
+3. **Derive commit messages** for each fingerprint (one message per unique diff group):
+   - Use the witness commit's message, or
+   - Generate a generic message from the pattern description (e.g., "Apply convention: <what changed>").
+   Write to a temp file, one tab-separated line per fingerprint:
+   ```
+   <fingerprint1>\t<message1>
+   <fingerprint2>\t<message2>
+   …
+   ```
+
+4. **Invoke the commit + PR/MR script** (from `pc-git` plugin):
    ```bash
    ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply \
      --root "${CLAUDE_PROJECT_DIR}" \
      --repo <target-repo-basename> \
-     --messages <(echo -e "<fingerprint>\t<commit-message>")
+     --messages <temp-file>
    ```
    - **`--root`** must be a workspace root (a folder containing multiple git repos as direct
      subdirectories). Use `${CLAUDE_PROJECT_DIR}`, which is set by the Claude Code harness.
    - **`--repo`** is the basename of the target repo (the folder name, e.g., `pinky-core`, not the
      full path).
-   - The script outputs a `=== RESULTS` block with one tab-separated line per repo:
-     `<repo>\t<state>\t<pr_url>`, where `state` ∈ {`pushed-pr`, `pushed-nopr`, `commit-nopush`,
-     `pushed-prfailed`, `failed`, `skipped`}.
-3. **Parse the `pr_url` column** from the results and the `state` column. Store both:
-   `results[<target>] = {"state": <state>, "url": <pr_url_or_dash>}`.
-4. **If the script fails** (nonzero exit), record it as `state: failed` with `url: -` and continue
-   to the next target.
 
-## Step 3 — Report, per target
+5. **Parse the `=== RESULTS` block** from the script's output. Each line is tab-separated:
+   `<repo>\t<state>\t<pr_url_or_dash>`, where `state` ∈ {`pushed-pr`, `pushed-nopr`,
+   `commit-nopush`, `pushed-prfailed`, `failed`, `skipped`}.
+   - Store both state and URL: `results[<target>] = {"state": <state>, "url": <pr_url_or_dash>}`.
+   - **Do NOT collapse or reinterpret states** — report the raw state verbatim. Each state
+     carries distinct information (e.g., `commit-nopush` means commit succeeded locally but push
+     failed; human must investigate; `pushed-prfailed` means commit+push succeeded but PR creation
+     failed; human must open PR by hand; `failed`/`skipped` mean nothing happened).
 
-One line each, with **status + PR/MR URL** (new in FR-0025-23). States:
+6. **If the script exits nonzero**, record it as an error and continue to the next target.
 
-| State | Meaning | PR URL |
+## Step 3 — Report, per target (pattern outcome + script outcome)
+
+Report **two dimensions** per target: did the pattern apply, and did the commit/PR succeed. One
+line each, keeping states distinct:
+
+**Pattern outcome** (from Step 2):
+
+| State | Meaning |
+|---|---|
+| ✅ | applied, matches the pattern |
+| ⚠️ | applied with a deviation — say which, in the same line |
+| ⏭️ | already had the change, nothing to do |
+| ❌ | not applied — the target diverges too much for the pattern to mean anything here |
+
+**Script outcome** (from Step 2.5, when pattern was applied):
+
+| Script state | Meaning | Next step |
 |---|---|---|
-| ✅ | applied, matches the pattern | URL from step 2.5 (`pushed-pr`) or `-` if commit failed |
-| ⚠️ | applied with a deviation — say which | URL from step 2.5 or `-` if commit failed |
-| ⏭️ | already had the change, nothing to do | `-` (no commit attempted) |
-| ❌ | not applied — pattern mismatch | `-` (no commit attempted) |
+| `pushed-pr` | commit + push + PR/MR created | PR is open, review/merge as usual |
+| `pushed-nopr` | commit + push to integration branch (unguarded), or `--no-pr` flag | no PR needed |
+| `commit-nopush` | commit succeeded, push failed | **human must investigate push failure** |
+| `pushed-prfailed` | commit + push succeeded, PR creation failed | **human must open PR by hand** |
+| `failed` | commit failed | changes remain staged, nothing lost |
+| `skipped` | no message matched this diff group's fingerprint | **re-run plan + supply missing message** |
 
-Format per line:
+Format per line (pattern outcome first, then script state + URL):
 
 ```
-<target> <state> <url_or_dash>
+<target> <pattern-state> <script-state> <pr_url_or_dash>
 ```
 
 Example:
 
 ```
-pinky-core ✅ https://github.com/pinky-and-co/pinky-core/pull/42
-pinky-tools ⚠️ (deviation: comment format) https://github.com/pinky-and-co/pinky-tools/pull/15
-pinky-ai ❌ -
+pinky-core ✅ pushed-pr https://github.com/pinky-and-co/pinky-core/pull/42
+pinky-tools ⚠️ (deviation: comment format) pushed-pr https://github.com/pinky-and-co/pinky-tools/pull/15
+pinky-ai ❌ - -
+pinky-lib ✅ commit-nopush -
+pinky-streamlit ✅ pushed-prfailed -
 ```
 
-End with a summary count and the commands to review the diffs:
+End with a summary and review commands:
 
 ```
 === Summary
-3 targets: 1 PR created, 1 PR created (deviation), 0 skipped, 1 not applied
+5 targets: 2 PR created, 1 deviation + PR, 1 commit-failed, 1 push-failed, 1 not applied
 
-=== Review each target diff (if needed, before they are merged)
-git -C <target> diff        # per target
+=== Review each target diff (if needed)
+git -C <target> diff        # per target (nothing committed on failed, staged on commit-nopush)
 ```
 
-❌ and ⏭️ are legitimate outcomes, not failures to hide. A target where the pattern does not fit is
-information the person needs; forcing it there is how a batch quietly corrupts a repo.
+**Critical:** Do NOT flatten or omit the script states (`commit-nopush`, `pushed-prfailed`, etc.).
+Each one signals distinct human actions:
+- `commit-nopush` / `pushed-prfailed` → investigate, decide how to proceed
+- `failed` / `skipped` → retry with fixes
+- `❌ / ⏭️` → legitimate, no action needed
+
+A run that claims success while hiding a `commit-nopush` or `pushed-prfailed` is worse than one that
+reports it explicitly.
 
 ## Step 4 — Aggregate PR/MR URLs (FR-0025-23)
 

@@ -1,2 +1,0 @@
-Test witness file for apply-pattern verification.
-This tests FR-0025-23: PR URL aggregation.
