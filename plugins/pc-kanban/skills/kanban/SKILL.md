@@ -56,8 +56,7 @@ handoff); frontmatter carries only what a script or a hook needs to resolve with
 
 ```yaml
 ---
-status: idea | todo | selected | in-progress | done
-date: YYYY-MM-DD       # meaning is implied by status — see table below
+date: YYYY-MM-DD       # meaning is implied by the column folder — see table below
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
@@ -66,15 +65,20 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
 ---
 ```
 
-- **`date`** — one field, meaning derived from `status`:
+The card's state **is** its column folder — there is no `status:` field to keep in sync. The
+mapping is bijective (`0-ideas` ↔ idea, `1-todo` ↔ todo, `2-selected-for-dev` ↔ selected,
+`3-in-progress` ↔ in-progress, `4-done` ↔ done); `live-docs` derives the displayed state from the
+folder name. A blocked card is not a state — it lives in `blocked_by:` plus a rendered badge.
 
-  | `status` | what `date` means |
+- **`date`** — one field, meaning derived from the column folder:
+
+  | column folder | what `date` means |
   |---|---|
-  | `idea` | surfaced |
-  | `todo` | scoped |
-  | `selected` | selected (moved into `2-selected-for-dev`) |
-  | `in-progress` | in progress since |
-  | `done` | done |
+  | `0-ideas` | surfaced |
+  | `1-todo` | scoped |
+  | `2-selected-for-dev` | selected |
+  | `3-in-progress` | in progress since |
+  | `4-done` | done |
 
   Set on creation; update only the value when a card moves column, never invent a second date field.
 
