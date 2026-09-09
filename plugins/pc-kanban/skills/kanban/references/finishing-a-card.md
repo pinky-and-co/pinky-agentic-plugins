@@ -115,8 +115,9 @@ the vendored source, plugins the copy) — the orchestrator spawns only the firs
 relays to the next once its own part of `Fini =` is reached:
 
 - **Spawn the next repo** — `/pc-kanban:spawn-workers <chantier-id> <card-slug> <next-repo-slug>`
-  (the single slug filter). Or, if a worker for that repo is already listed by `ListAgents`,
-  `SendMessage` it a bare trigger ("prends le relais sur `<card-slug>`").
+  (the single slug filter). Inside cmux/wmux it opens the workspace; outside any multiplexer it
+  prints the `cd … && claude …` line to run. Or, if a worker for that repo is already listed by
+  `ListAgents`, `SendMessage` it a bare trigger ("prends le relais sur `<card-slug>`").
 - **Work state travels in the card's handoff block, never in the message.** The narrative handoff on
   the `3-in-progress` card is the single source of what is done and what is left; the inter-session
   message carries only the trigger. A relay that puts state in the message loses it the moment the

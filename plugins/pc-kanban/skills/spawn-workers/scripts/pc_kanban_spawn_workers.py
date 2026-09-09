@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""pc_kanban_spawn_workers.py — one cmux workspace per repo of a kanban card.
+"""pc_kanban_spawn_workers.py — one worker session per repo of a kanban card.
 
 The orchestrator session (opened outside any git repo, board curation only) runs this to hand a
-selected card to worker sessions: one `cmux new-workspace` per entry of the card's `repos:`
-frontmatter, each scoped (`--cwd`) to the local clone, its workspace (`--name`) and Claude session
-(`claude -n`) both named `<repo>-<slug>`, booting straight into `/pc-kanban:chantier <id> <slug>`.
+selected card to worker sessions: one per entry of the card's `repos:` frontmatter, each scoped to
+the local clone, its Claude session named `<repo>-<slug>` (the workspace adopts that name), booting
+straight into `/pc-kanban:chantier <id> <slug>` on the card's declared `model:` — with an
+`--advisor` one tier above (never for `opus`/`fable`, already the ceiling).
 
-No dependency on the `pinky` CLI (FR-0025-20): card lookup, board resolution and `repos:` parsing
+- **Inside cmux / wmux** (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID`): `<mux> new-workspace --cwd <path>
+  --command '<claude ...>'`, one per repo.
+- **Outside any multiplexer**: prints a `cd <path> && claude ...` line per repo for the user to run,
+  and spawns nothing.
+
+No dependency on the `pinky` CLI (FR-0025-20): card lookup, board resolution, `repos:` and `model:`
 all go through `stop_handoff.py`'s CLI (same plugin, same pattern guard.py uses); slug->path
 resolution reuses `resolve_repos.sh` (sibling skill). The workspace root is derived from the board
 that holds the card — never a configured value.
@@ -14,8 +20,7 @@ that holds the card — never a configured value.
 Multi-repo cards (FR-0025-21) are sequential by convention: pass the single next `<repo-slug>` to
 spawn just that one. With no slug filter every repo of the card is spawned, in `repos:` order.
 
-`--dry-run` prints the exact `cmux` command line(s) without spawning anything — the only side-effect
--free way to demonstrate the resolution from a worker session.
+`--dry-run` prints the command line(s) without spawning anything.
 
 Python 3.11+, stdlib only.
 
@@ -24,6 +29,7 @@ Usage: pc_kanban_spawn_workers.py [--dry-run] <chantier-id> <card-slug> [<repo-s
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -33,11 +39,17 @@ from typing import NamedTuple
 
 _USAGE = "Usage: pc_kanban_spawn_workers.py [--dry-run] <chantier-id> <card-slug> [<repo-slug>...]"
 
-# `slug` and `chantier_id` end up inside the shell text cmux types into a fresh terminal
+# `slug` and `chantier_id` end up inside the shell text the multiplexer types into a fresh terminal
 # (`--command`) and inside a `glob()` pattern — constrain both to what a real card name uses so
 # neither a metacharacter nor a quote can ride through.
 _ID_RE = re.compile(r"[0-9]{3,4}")
 _SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+# the card `model:` aliases (skill `kanban`); anything else is a malformed card, not a model to
+# pass through — validated so a stray value can't ride into the shell string `claude` boots with.
+_KNOWN_MODELS = frozenset({"haiku", "sonnet", "opus", "fable"})
+# advisor = one model tier above the card's floor; `opus` and `fable` are already the ceiling.
+_ADVISOR_ABOVE = {"haiku": "sonnet", "sonnet": "opus"}
 
 _HOOK = Path(__file__).resolve().parents[3] / "hooks" / "stop_handoff.py"
 _RESOLVE_REPOS = (
@@ -52,12 +64,38 @@ class SpawnTarget(NamedTuple):
     path: Path
 
 
+def multiplexer() -> str | None:
+    """The terminal multiplexer this session runs under: 'cmux', 'wmux', or None.
+
+    Returns:
+        The binary name, keyed off `CMUX_SURFACE_ID` / `WMUX_SURFACE_ID`; None outside both.
+    """
+    if os.environ.get("CMUX_SURFACE_ID"):
+        return "cmux"
+    if os.environ.get("WMUX_SURFACE_ID"):
+        return "wmux"
+    return None
+
+
+def advisor_for(model: str) -> str | None:
+    """The `--advisor` model for a card whose floor is `model` — one tier up, or None at the top.
+
+    Args:
+        model: the card's `model:` alias (`haiku` / `sonnet` / `opus` / `fable`), or "".
+
+    Returns:
+        `sonnet` for a `haiku` card, `opus` for a `sonnet` card; None for `opus`, `fable`,
+        an empty string, or any unknown alias.
+    """
+    return _ADVISOR_ABOVE.get(model)
+
+
 def _hook(*args: str, allow_empty: bool = False) -> str:
     """Run a `stop_handoff.py` CLI mode and return its stdout, aborting on a non-zero exit.
 
     Args:
         args: the mode flag and its operands, e.g. ("--card-path", "0025", "my-slug").
-        allow_empty: accept empty stdout as a valid answer (a card with no `repos:`).
+        allow_empty: accept empty stdout as a valid answer (a card with no `repos:`/`model:`).
 
     Returns:
         The command's stdout, stripped of the trailing newline.
@@ -154,33 +192,74 @@ def resolve_paths(workspace_root: Path, slugs: list[str]) -> list[SpawnTarget]:
     return [SpawnTarget(slug, Path(p)) for slug, p in zip(slugs, paths, strict=True)]
 
 
-def build_spawn_command(target: SpawnTarget, chantier_id: str, slug: str) -> list[str]:
-    """Build the `cmux new-workspace` argv for one repo of a card.
+def build_claude_command(
+    name: str, chantier_id: str, slug: str, model: str, advisor: str | None
+) -> str:
+    """The `claude` invocation a worker session boots with, as one shell string.
+
+    Args:
+        name: the session display name, `<repo>-<slug>`.
+        chantier_id: the four-digit chantier number.
+        slug: the card filename without ".md".
+        model: the card's `model:` floor; "" leaves `--model` off (`claude`'s own default).
+        advisor: the `--advisor` model, or None to leave it off.
+
+    Returns:
+        One shell string — for a sonnet card:
+        claude --name "api-fix" --model sonnet --advisor opus "/pc-kanban:chantier 0025 fix"
+    """
+    parts = ["claude", "--name", f'"{name}"']
+    if model:
+        parts += ["--model", model]
+    if advisor:
+        parts += ["--advisor", advisor]
+    parts.append(f'"/pc-kanban:chantier {chantier_id} {slug}"')
+    return " ".join(parts)
+
+
+def build_spawn_command(
+    mux: str, target: SpawnTarget, chantier_id: str, slug: str, model: str
+) -> list[str]:
+    """Build the `<mux> new-workspace` argv for one repo of a card.
+
+    Args:
+        mux: the multiplexer binary, 'cmux' or 'wmux'.
+        target: the repo slug and its resolved local path.
+        chantier_id: the four-digit chantier number.
+        slug: the card filename without ".md".
+        model: the card's `model:` floor.
+
+    Returns:
+        The full argv list, ready for subprocess.run without a shell. The workspace name is
+        left to the multiplexer, which adopts the `claude --name` value.
+    """
+    name = f"{target.slug.split('/')[-1]}-{slug}"
+    inner = build_claude_command(name, chantier_id, slug, model, advisor_for(model))
+    return [mux, "new-workspace", "--cwd", str(target.path), "--command", inner]
+
+
+def build_manual_line(
+    target: SpawnTarget, chantier_id: str, slug: str, model: str
+) -> str:
+    """The `cd <path> && claude ...` line a user runs when no multiplexer is available.
 
     Args:
         target: the repo slug and its resolved local path.
         chantier_id: the four-digit chantier number.
         slug: the card filename without ".md".
+        model: the card's `model:` floor.
 
     Returns:
-        The full argv list, ready for subprocess.run without a shell.
+        One shell line — the repo path (shell-quoted), then `&&`, then the build_claude_command
+        string.
     """
     name = f"{target.slug.split('/')[-1]}-{slug}"
-    inner = f'claude -n "{name}" "/pc-kanban:chantier {chantier_id} {slug}"'
-    return [
-        "cmux",
-        "new-workspace",
-        "--cwd",
-        str(target.path),
-        "--name",
-        name,
-        "--command",
-        inner,
-    ]
+    claude = build_claude_command(name, chantier_id, slug, model, advisor_for(model))
+    return f"cd {shlex.quote(str(target.path))} && {claude}"
 
 
 def main(argv: list[str]) -> int:
-    """Parse args, resolve the card and its repos, then spawn (or print) one workspace each.
+    """Parse args, resolve the card, then spawn (or print) one worker per repo.
 
     Args:
         argv: command-line arguments without the program name.
@@ -214,12 +293,27 @@ def main(argv: list[str]) -> int:
         raise SystemExit(
             f"spawn-workers: card '{slug}' declares no repos: — nothing to spawn"
         )
+    model = _hook("--card-model", str(card_path), allow_empty=True)
+    if model and model not in _KNOWN_MODELS:
+        raise SystemExit(
+            f"spawn-workers: card '{slug}' has model: {model!r} — not one of {sorted(_KNOWN_MODELS)}"
+        )
 
     slugs = select_repos(declared, wanted)
     targets = resolve_paths(board_workspace_root(card_path), slugs)
+    mux = multiplexer()
+
+    if mux is None:
+        print(
+            f"# no cmux/wmux here — open a worker session yourself in each of the "
+            f"{len(targets)} repo(s):"
+        )
+        for target in targets:
+            print(build_manual_line(target, chantier_id, slug, model))
+        return 0
 
     for target in targets:
-        command = build_spawn_command(target, chantier_id, slug)
+        command = build_spawn_command(mux, target, chantier_id, slug, model)
         if dry_run:
             print(shlex.join(command))
             continue

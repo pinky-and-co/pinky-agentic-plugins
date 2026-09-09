@@ -1,17 +1,17 @@
 ---
 name: spawn-workers
-description: From the orchestrator session, open one cmux workspace per repo of a selected card — each a repo-scoped Claude worker booting into /pc-kanban:chantier. Use after a card is selected, to hand it to worker sessions; for a multi-repo card, pass the single next repo slug.
+description: From the orchestrator session, hand a selected card to one worker session per repo of its `repos:` — inside cmux/wmux it opens the workspaces, outside it prints the commands to run. Each worker boots into /pc-kanban:chantier on the card's `model:`. For a multi-repo card, pass the single next repo slug.
 argument-hint: "<chantier-id> <card-slug> [repo-slug...] [--dry-run]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py:*), Read
 model: haiku
 ---
 
-# spawn-workers — a cmux workspace per repo of a card
+# spawn-workers — a worker session per repo of a card
 
-The session is bound to its cmux workspace, which is bound to one repo (skill `kanban` § Session
-write-scope). So a card is worked by **one worker session per repo it touches**, not one wide
-session. This skill, run from the **orchestrator** (opened outside any git repo — board curation,
-selection, spawning; never edits code), opens those workspaces.
+The session is bound to its cmux/wmux workspace, which is bound to one repo (skill `kanban`
+§ Session write-scope). So a card is worked by **one worker session per repo it touches**, not one
+wide session. This skill, run from the **orchestrator** (opened outside any git repo — board
+curation, selection, spawning; never edits code), opens those sessions.
 
 ## What it does
 
@@ -19,21 +19,25 @@ selection, spawning; never edits code), opens those workspaces.
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py" <chantier-id> <card-slug> [repo-slug...]
 ```
 
-1. Finds `<card-slug>.md` in `CHANTIER<chantier-id>-*` across every mounted board.
-2. Reads its `repos:` frontmatter (reusing `stop_handoff.py` — no `pinky` CLI anywhere).
-3. Resolves each `org/repo` slug to its local clone (`chantier/scripts/resolve_repos.sh`, bounded
+1. Finds `<card-slug>.md` in `CHANTIER<chantier-id>-*` across every mounted board, and reads its
+   `repos:` and `model:` — all via `stop_handoff.py`'s CLI, no `pinky` CLI anywhere.
+2. Resolves each `org/repo` slug to its local clone (`chantier/scripts/resolve_repos.sh`, bounded
    `.git` scan; 0 or >1 clones for a slug → reported, never guessed). The scan root is the board's
    own workspace root (`_KANBAN`'s parent) — derived, not configured.
-4. Per repo, emits:
+3. Builds the worker's `claude` invocation:
    ```
-   cmux new-workspace --cwd <path> --name "<repo>-<slug>" \
-     --command 'claude -n "<repo>-<slug>" "/pc-kanban:chantier <chantier-id> <card-slug>"'
+   claude --name "<repo>-<slug>" --model <card model> [--advisor <one tier up>] "/pc-kanban:chantier <id> <slug>"
    ```
-   `--name` names the workspace (cmux sidebar); `claude -n` names the session (`ListAgents`
-   discovery). No `/rename` in the worker.
+   `--advisor` is `sonnet` for a `haiku` card, `opus` for a `sonnet` card, and absent for `opus` /
+   `fable` (already the ceiling). `claude --name` names the session (`ListAgents` discovery); the
+   cmux/wmux workspace adopts that name, so no separate workspace-name flag.
+4. Then, per repo:
+   - **Inside cmux / wmux** (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID` set) →
+     `<mux> new-workspace --cwd <path> --command '<the claude line>'`.
+   - **Outside any multiplexer** → prints `cd <path> && <the claude line>` for the user to run, and
+     spawns nothing.
 
-Pass `--dry-run` to print the command line(s) without spawning — the way to check resolution from a
-session that is not the orchestrator.
+Pass `--dry-run` to print the command line(s) without spawning.
 
 ## Multi-repo cards — sequential by convention
 

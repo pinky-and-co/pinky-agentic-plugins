@@ -622,6 +622,15 @@ def main() -> int:
             print(slug)
         return 0
 
+    if sys.argv[1:2] == ["--card-model"]:
+        # A card's `model:` floor (skill `kanban`), or empty if the card omits it. Same
+        # frontmatter reader as everything else here — spawn-workers passes it to `claude --model`.
+        fm = parse_frontmatter(Path(sys.argv[2]).read_text(encoding="utf-8")) or {}
+        model = fm.get("model")
+        if isinstance(model, str) and model:
+            print(model)
+        return 0
+
     if "--list-chantiers" in sys.argv[1:]:
         full = (
             "--full" in sys.argv[1:]
