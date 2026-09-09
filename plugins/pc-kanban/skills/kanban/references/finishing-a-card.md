@@ -131,7 +131,7 @@ If a multi-repo card is dropped mid-flight (superseded, blocked, wrong approach)
 
 1. Close every spawned worker's cmux workspace — a `new-workspace` with nothing running in it is not
    auto-reaped, and an orphan named `<repo>-<slug>` misleads the next `ListAgents`.
-2. `mv` the card back to the column it came from (`2-selected-for-dev` or `1-todo`), and reset
-   `status:` to match.
+2. `mv` the card back to the column it came from (`2-selected-for-dev` or `1-todo`) — the column
+   folder is the card's state, nothing else to reset.
 3. Note the abandonment and why in the card's handoff block, so a later pickup does not re-derive
    the same dead end.

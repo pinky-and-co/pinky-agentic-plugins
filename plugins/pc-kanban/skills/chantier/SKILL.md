@@ -83,8 +83,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
   `Agent(subagent_type: "fork")` never floors a model — never use it to "run
   something on haiku".
 7. **Take the card, if one is being taken** (already in `3-in-progress/` → resume directly; else the
-  FIRST card of `2-selected-for-dev/` → move it into `3-in-progress/`, set its `date` to today under
-  `status: in-progress`):
+  FIRST card of `2-selected-for-dev/` → move it into `3-in-progress/`, set its `date` to today):
    - **Parent context** — part of the "move it into `3-in-progress`" branch only: a card already
     resident there takes the "resume directly" branch above and never reaches this bullet, so
     nothing here needs a runtime first-time check. If `sert` is non-null, locate the parent card
