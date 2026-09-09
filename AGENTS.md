@@ -67,10 +67,12 @@ is picked up in the same command — no more manual `rm -rf` + separate re-run.
     exceptions — no plugin ships a script an agent shells out to. An agent needing deterministic
     work behind it is a signal to route that work through `mcp/` instead (below), not to invent an
     `agents/scripts/` folder with no precedent anywhere in the ecosystem.
-  - **`mcp/` holds one MCP server's implementation** (`mcp/server.py` + whatever sibling modules it
-    imports, e.g. `pc-core`'s `model_offline.py`/`model_adversarial.py`), declared via a `.mcp.json`
-    at the plugin root (`{"<server-name>": {"command": "uv", "args": ["run", "--script",
-    "${CLAUDE_PLUGIN_ROOT}/mcp/server.py"]}}`). This is the right layer whenever a tool needs to be
+  - **`mcp/` holds one MCP server's implementation** (`mcp/<plugin>_server.py` + whatever sibling
+    modules it imports, e.g. `pc-core`'s `model_offline.py`/`model_adversarial.py`), declared via a
+    `.mcp.json` at the plugin root (`{"<server-name>": {"command": "uv", "args": ["run", "--script",
+    "${CLAUDE_PLUGIN_ROOT}/mcp/<plugin>_server.py"]}}`). The entrypoint is named for its plugin, not
+    a bare `server.py`: mypy runs one invocation over every `plugins/*/` file and hard-errors on two
+    same-basename modules with no package path (plugin dirs carry hyphens). This is the right layer whenever a tool needs to be
     natively callable (by the main session or any subagent, no spawn) rather than wrapped in an
     agent that shells out and relays — see `deux-hooks-branche-et-cout-de-lecture`'s sibling
     decision, `agents-provider-routing-offline-adversarial` (2026-08-19): an agent that does no

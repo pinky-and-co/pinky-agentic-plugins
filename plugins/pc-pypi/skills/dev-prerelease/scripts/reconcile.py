@@ -44,6 +44,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 _BACKTICK = re.compile(r"`([^`]+)`")
 _ALL_CAPS = re.compile(
@@ -53,7 +54,16 @@ _CAPWORD = re.compile(r"[A-Z][A-Za-z0-9]*")  # class-shaped
 _SNAKE = re.compile(r"[a-z_][a-z0-9_]*")  # function/method-shaped
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
 
-DEFAULT_HEADER = ("feature", "module", "status")
+
+class Header(NamedTuple):
+    """The three lowercased column names a feature table's header row must match."""
+
+    feature: str
+    module: str
+    status: str
+
+
+DEFAULT_HEADER = Header("feature", "module", "status")
 
 
 @dataclass(frozen=True)
@@ -83,6 +93,13 @@ class ScanResult:
     residue: list[Row]
 
 
+class RowCheck(NamedTuple):
+    """One row's deterministic result: its divergences, and whether a stable claim is still open."""
+
+    findings: list[Finding]
+    has_residue: bool
+
+
 # --- table parsing -------------------------------------------------------------------------------
 
 # noms de colonne (lowercased) qui désignent le module de code, quel que soit l'ordre
@@ -91,7 +108,7 @@ _MODULE_COL_NAMES = {"module", "object", "resource", "component", "class", "file
 _DELIVERED_MARKS = ("✓", "✔")
 
 
-def _resolve_columns(header: tuple[str, str, str]) -> tuple[int, int, int]:
+def _resolve_columns(header: Header) -> tuple[int, int, int]:
     """Map a 3-column header to ``(feature_i, module_i, status_i)`` by column name, not position.
 
     ``| Feature | Module | Status |`` and ``| Object | Status | Notes |`` both parse — the second
@@ -136,9 +153,7 @@ def _norm_status(raw: str) -> str:
     return low
 
 
-def parse_feature_rows(
-    md: str, header: tuple[str, str, str] = DEFAULT_HEADER
-) -> list[Row]:
+def parse_feature_rows(md: str, header: Header = DEFAULT_HEADER) -> list[Row]:
     """Extract data rows from every 3-column table in `md` whose header matches `header`.
 
     Abstains on any other table shape: a feature doc is not standardised across libraries, so a row
@@ -243,7 +258,7 @@ def symbol_present(src: str, kind: str, name: str) -> bool:
     return re.search(pat, src, re.MULTILINE) is not None
 
 
-def check_row(row: Row, module_src: str | None) -> tuple[list[Finding], bool]:
+def check_row(row: Row, module_src: str | None) -> RowCheck:
     """Check one row against its module source.
 
     Args:
@@ -264,7 +279,7 @@ def check_row(row: Row, module_src: str | None) -> tuple[list[Finding], bool]:
                 f"module `{row.module}` has no source file",
             )
         )
-        return findings, False
+        return RowCheck(findings, False)
     for kind, name in extract_symbols(row.feature):
         present = symbol_present(module_src, kind, name)
         if row.status == "stable" and not present:
@@ -288,7 +303,7 @@ def check_row(row: Row, module_src: str | None) -> tuple[list[Finding], bool]:
     has_residue = row.status == "stable" and not any(
         f.kind == "stable-absent" for f in findings
     )
-    return findings, has_residue
+    return RowCheck(findings, has_residue)
 
 
 # --- package introspection ---------------------------------------------------------------------
@@ -470,7 +485,7 @@ def build_signature_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) ->
         sources: the path -> source map from `collect_sources`.
 
     Returns:
-        The brief text: the document, then one digest block per module with a public API.
+        The document, then one digest block per module with a public API.
     """
     api_header = (
         "--- API PUBLIQUE (signatures + 1re ligne de docstring ; ⚠ STUB = corps vide/trivial, "
@@ -588,7 +603,7 @@ def build_phase1_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) -> st
         sources: the path -> source map from `collect_sources`.
 
     Returns:
-        The brief text: the document, then every source file in path order.
+        The document, then every source file in path order.
     """
     parts = [f"--- TABLEAU DE FEATURES ({doc_rel}) ---\n{doc_md}"]
     for path in sorted(sources):
@@ -695,7 +710,7 @@ def normalize_manquants(model_output: str) -> list[str]:
 # --- MANQUANT post-filter ----------------------------------------------------------------------
 
 
-def _documented_modules(table_md: str, header: tuple[str, str, str]) -> set[str]:
+def _documented_modules(table_md: str, header: Header) -> set[str]:
     """The set of module names that already have a row in the recognised feature table.
 
     Args:
@@ -717,7 +732,7 @@ def _documented_modules(table_md: str, header: tuple[str, str, str]) -> set[str]
 def drop_already_documented(
     missing: list[str],
     table_md: str,
-    header: tuple[str, str, str] = DEFAULT_HEADER,
+    header: Header = DEFAULT_HEADER,
 ) -> list[str]:
     """Drop every MANQUANT finding whose capability is already in the table.
 
@@ -758,9 +773,7 @@ def drop_already_documented(
 # --- scan + CLI --------------------------------------------------------------------------------
 
 
-def scan(
-    repo: Path, features_rel: str, header: tuple[str, str, str] = DEFAULT_HEADER
-) -> ScanResult:
+def scan(repo: Path, features_rel: str, header: Header = DEFAULT_HEADER) -> ScanResult:
     """Run the deterministic grep pre-pass over a whole feature table.
 
     Args:
@@ -790,7 +803,7 @@ def scan(
 
 
 def not_applicable(
-    repo: Path, features_rel: str, header: tuple[str, str, str] = DEFAULT_HEADER
+    repo: Path, features_rel: str, header: Header = DEFAULT_HEADER
 ) -> str | None:
     """Why the deterministic reconcile does not apply to this repo, or None when it does.
 
@@ -886,10 +899,10 @@ def main(argv: list[str] | None = None) -> int:
         help="read the model reply on stdin, print the surviving MANQUANT findings",
     )
     args = ap.parse_args(argv)
-    parts = tuple(h.strip().lower() for h in args.features_header.split(","))
+    parts = [h.strip().lower() for h in args.features_header.split(",")]
     if len(parts) != 3:
         ap.error("--features-header needs exactly 3 comma-separated names")
-    header: tuple[str, str, str] = parts  # type: ignore[assignment]
+    header = Header(parts[0], parts[1], parts[2])
 
     repo: Path = args.repo
     reason = not_applicable(repo, args.features_doc, header)

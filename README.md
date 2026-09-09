@@ -87,8 +87,8 @@ pinky-agentic-plugins/
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
 │   │   │   ├── model_panel.py
-│   │   │   ├── review_complexity.py
-│   │   │   └── server.py
+│   │   │   ├── pc_core_server.py
+│   │   │   └── review_complexity.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
 │   │   │   │   └── SKILL.md
@@ -137,7 +137,7 @@ pinky-agentic-plugins/
 │   │   │   │   ├── resolve_policy.py
 │   │   │   │   └── test_bulk_commit.sh
 │   │   │   ├── hooks.json
-│   │   │   └── policy_lib.py
+│   │   │   └── pc_git_policy_lib.py
 │   │   └── skills/
 │   │       ├── branch-workflow/
 │   │       │   └── SKILL.md
@@ -158,15 +158,14 @@ pinky-agentic-plugins/
 │   │   │   └── plugin.json
 │   │   ├── hooks/
 │   │   │   ├── hooks.json
-│   │   │   ├── secret_patterns.py
+│   │   │   ├── pc_kanban_secret_patterns.py
 │   │   │   └── stop_handoff.py
 │   │   └── skills/
 │   │       ├── chantier/
 │   │       │   ├── scripts/
 │   │       │   │   ├── activate_plugins_for_repos.py
 │   │       │   │   ├── archive_card.sh
-│   │       │   │   ├── pending_user_action.py
-│   │       │   │   ├── plugin_scope_lib.py
+│   │       │   │   ├── pc_kanban_plugin_scope_lib.py
 │   │       │   │   └── resolve_repos.sh
 │   │       │   └── SKILL.md
 │   │       ├── grill/
@@ -188,7 +187,7 @@ pinky-agentic-plugins/
 │   │   │   └── plugin.json
 │   │   ├── mcp/
 │   │   │   ├── anonymize.py
-│   │   │   └── server.py
+│   │   │   └── pc_privacy_server.py
 │   │   ├── .mcp.json
 │   │   └── README.md
 │   ├── pc-pypi/

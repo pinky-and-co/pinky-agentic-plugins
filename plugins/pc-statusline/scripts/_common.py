@@ -36,7 +36,7 @@ def enable_ansi_on_windows() -> None:
     try:
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]  # Windows-only, guarded by os.name check above
         handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
         mode = ctypes.c_uint32()
         if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
@@ -53,7 +53,7 @@ def force_utf8_stdout() -> None:
     """Force UTF-8 on stdout (Windows consoles sometimes default to cp1252, which breaks emoji).
     `reconfigure()` has existed since Python 3.7; guarded because a redirected stream may lack it."""
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]  # absent only on a non-TextIOWrapper stream, caught below
     except Exception:
         pass
 

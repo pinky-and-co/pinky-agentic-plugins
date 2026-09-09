@@ -269,9 +269,9 @@ class TestSecretScrubImport(unittest.TestCase):
     def test_scrub_is_imported_from_secret_patterns_not_redefined(self):
         # stop_handoff.py must not carry its own copy — full coverage of the patterns
         # themselves lives in test_secret_patterns.py.
-        import secret_patterns
+        import pc_kanban_secret_patterns
 
-        self.assertIs(sh.scrub, secret_patterns.scrub)
+        self.assertIs(sh.scrub, pc_kanban_secret_patterns.scrub)
 
 
 class TestDeclaredKanbans(unittest.TestCase):

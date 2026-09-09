@@ -32,7 +32,7 @@ SCRIPTS = (
 )
 sys.path.insert(0, str(SCRIPTS))
 
-import plugin_scope_lib as psl  # noqa: E402
+import pc_kanban_plugin_scope_lib as psl  # noqa: E402
 import activate_plugins_for_repos as apr  # noqa: E402
 
 
