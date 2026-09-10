@@ -330,7 +330,7 @@ repos:
         name: "[VENDOR] Vendored file matches its source checksum"
         entry: python scripts/hooks/check_vendor_checksum.py
         language: python
-        files: \.vendor-manifest\.json$|(hooks|scripts)/(pc_git_policy_lib|pc_kanban_secret_patterns|pc_kanban_plugin_scope_lib|pc_kanban_pending_user_action|policy_lib|secret_patterns|plugin_scope_lib|pending_user_action)\.py$
+        files: \.vendor-manifest\.json$|(hooks|scripts)/(pc_git_policy_lib|pc_kanban_secret_patterns|pc_kanban_plugin_scope_lib|pc_kanban_spawn_plugin_scope_lib|pc_kanban_pending_user_action|policy_lib|secret_patterns|plugin_scope_lib|pending_user_action)\.py$
         pass_filenames: false
         stages: [pre-commit]
 

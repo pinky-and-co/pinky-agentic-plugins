@@ -7,6 +7,11 @@ the local clone, its Claude session named `<repo>-<slug>` (the workspace adopts 
 straight into `/pc-kanban:chantier <id> <slug>` on the card's declared `model:` — with an
 `--advisor` one tier above (never for `opus`/`fable`, already the ceiling).
 
+Per repo, before opening the worker: `enable_project_plugins` turns on — at project scope, in the
+target repo's *versioned* `.claude/settings.json` — every installed project-scoped plugin whose
+`projectPath` covers the repo, so the worker's boot `/pc-kanban:chantier` runs with them live and
+no `/reload-plugins` (FR-0025-52/53). Then:
+
 - **Inside cmux / wmux** (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID`): `<mux> new-workspace --cwd <path>
   --command '<claude ...>'`, one per repo.
 - **Outside any multiplexer**: prints a `cd <path> && claude ...` line per repo for the user to run,
@@ -14,13 +19,14 @@ straight into `/pc-kanban:chantier <id> <slug>` on the card's declared `model:` 
 
 No dependency on the `pinky` CLI (FR-0025-20): card lookup, board resolution, `repos:` and `model:`
 all go through `stop_handoff.py`'s CLI (same plugin, same pattern guard.py uses); slug->path
-resolution reuses `resolve_repos.sh` (sibling skill). The workspace root is derived from the board
-that holds the card — never a configured value.
+resolution reuses `resolve_repos.sh` (sibling skill); the project-scope enable shells out to
+`claude plugin` directly. The workspace root is derived from the board that holds the card — never
+a configured value.
 
 Multi-repo cards (FR-0025-21) are sequential by convention: pass the single next `<repo-slug>` to
 spawn just that one. With no slug filter every repo of the card is spawned, in `repos:` order.
 
-`--dry-run` prints the command line(s) without spawning anything.
+`--dry-run` previews the command line(s) and does nothing else — no spawn, no plugin enable.
 
 Python 3.11+, stdlib only.
 
@@ -36,6 +42,9 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pc_kanban_spawn_plugin_scope_lib import matching_plugin_ids
 
 _USAGE = "Usage: pc_kanban_spawn_workers.py [--dry-run] <chantier-id> <card-slug> [<repo-slug>...]"
 
@@ -288,6 +297,62 @@ def build_manual_line(
     return f"cd {shlex.quote(str(target.path))} && {claude}"
 
 
+def enable_project_plugins(repo: Path) -> list[str]:
+    """Enable, at project scope in `repo`, every installed project-scoped plugin whose
+    `projectPath` covers `repo` — so a worker session booting there has them live without
+    `/reload-plugins`. Writes the versioned `repo/.claude/settings.json` (`claude plugin
+    install --scope project`), never `settings.local.json`.
+
+    Each call is bounded and tried once: a failure is reported to stderr and skipped, never
+    retried — the worker's own `/reload-plugins` and the always-on `pc-autodiscovery` hook
+    stay as the fallback.
+
+    Args:
+        repo: absolute path to the target repo's worktree root.
+
+    Returns:
+        The plugin ids newly enabled by this call, in discovery order.
+    """
+    enabled: list[str] = []
+    for plugin_id in matching_plugin_ids(repo):
+        try:
+            proc = subprocess.run(
+                [
+                    "claude",
+                    "plugin",
+                    "install",
+                    plugin_id,
+                    "--scope",
+                    "project",
+                    "--yes",
+                ],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(
+                f"spawn-workers: enabling {plugin_id} in {repo}: {exc}", file=sys.stderr
+            )
+            continue
+        if proc.returncode == 0:
+            enabled.append(plugin_id)
+        else:
+            print(
+                f"spawn-workers: enabling {plugin_id} in {repo}: {proc.stderr.strip()}",
+                file=sys.stderr,
+            )
+    return enabled
+
+
+def _report_enabled(target: SpawnTarget, enabled: list[str]) -> None:
+    """Print a one-line summary of the plugins `enable_project_plugins` turned on for `target`."""
+    if enabled:
+        print(f"enabled -s project in {target.slug}: {', '.join(enabled)}")
+
+
 def main(argv: list[str]) -> int:
     """Parse args, resolve the card, then spawn (or print) one worker per repo.
 
@@ -340,10 +405,14 @@ def main(argv: list[str]) -> int:
             f"{len(targets)} repo(s):"
         )
         for target in targets:
+            if not dry_run:
+                _report_enabled(target, enable_project_plugins(target.path))
             print(build_manual_line(target, chantier_id, slug, card_model))
         return 0
 
     for target in targets:
+        if not dry_run:
+            _report_enabled(target, enable_project_plugins(target.path))
         command = build_spawn_command(mux, target, chantier_id, slug, card_model)
         if dry_run:
             print(shlex.join(command))

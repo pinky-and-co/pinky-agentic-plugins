@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/hooks/sync_plugin_scope.py — run with:
+"""Tests for plugins/pc-autodiscovery/hooks/sync_plugin_scope.py — run with:
 python3 -m unittest discover tests
 
 Defines "done" for the CwdChanged descent: `activate_for_path` enables a
@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-HOOKS = Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"
+HOOKS = Path(__file__).parent.parent / "plugins" / "pc-autodiscovery" / "hooks"
 sys.path.insert(0, str(HOOKS))
 
 import pending_user_action as pua  # noqa: E402

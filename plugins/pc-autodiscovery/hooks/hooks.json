@@ -1,0 +1,70 @@
+{
+  "description": "Always-on plugin autodiscovery, kept out of pc-core so it survives the very scenario it exists for (a session where pc-core is not loaded). Ascends at SessionStart / descends at CwdChanged / restores at SessionEnd to enable every project-scoped plugin matching the session's location; nudges a commit when the only uncommitted change is that activation; and turns the next tool call into a permission stop while a user-only slash command (/reload-plugins, /goal) is still pending — see sync_plugin_scope.py, settings_commit_nudge.py, pending_gate.py, clear_pending_queue.py.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/sync_plugin_scope.py"]
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/settings_commit_nudge.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/sync_plugin_scope.py"]
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/sync_plugin_scope.py"]
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/clear_pending_queue.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pending_gate.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
