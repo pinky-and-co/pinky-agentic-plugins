@@ -289,6 +289,7 @@ pinky-agentic-plugins/
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
 │   ├── test_branch_guard.py
+│   ├── test_bulk_commit_sh.py
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py
