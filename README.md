@@ -149,7 +149,8 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       ├── commit-and-pr/
 │   │       │   ├── references/
-│   │       │   │   └── ci-reaction.md
+│   │       │   │   ├── ci-reaction.md
+│   │       │   │   └── conflict-reaction.md
 │   │       │   └── SKILL.md
 │   │       └── commit-convention/
 │   │           └── SKILL.md
