@@ -53,7 +53,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
   - if the `--list-unreviewed-done` output names any card in **this chantier**: one line — the
     count (the output is already capped and `date:`-ordered, bulk is pre-convention history so do
     not paste it whole), then the newest one or two. Not blocking; the fix is a `reviewed (…)` line
-    on each, `n/a — mécanique` if there was nothing to review.
+    on each, `n/a — mechanical` if there was nothing to review.
   - if `4-done/` is non-empty: flag it and offer to fold + archive. Only after the user confirms
     the rationale is folded into the story/an ADR, archive via:
 ```bash
@@ -90,18 +90,18 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     (`<sert>.md`) in *this same chantier's* `4-done/` or, once archived, its own
     `_ARCHIVE/CHANTIER<this-chantier's-number>-done/YYYY-MM-DD_<sert>.md` — never glob other
     chantiers' archives.
-    - Parent found, `done`, and carries both a `## Fini =` and a `## Pourquoi` → append a managed
+    - Parent found, `done`, and carries both a `## Done when` and a `## Why` → append a managed
       block to the child's body:
       ```
       <!-- auto-parent:start -->
-      ## Contexte hérité de `<sert>`
-      <the parent's `## Fini =` section, verbatim>
-      <the parent's `## Pourquoi` section, verbatim>
+      ## Context inherited from `<sert>`
+      <the parent's `## Done when` section, verbatim>
+      <the parent's `## Why` section, verbatim>
       <!-- auto-parent:end -->
       ```
       Idempotent by construction — this bullet only ever runs once per card (see above) — never
       hand-edit between the markers on a later resume.
-    - Parent found but has no `## Pourquoi` → append the block with `## Fini =` only, same markers.
+    - Parent found but has no `## Why` → append the block with `## Done when` only, same markers.
     - Parent not `done` yet, not found (purged without archive), or `sert` orphaned → say so
       plainly, append nothing, and move on; never invent parent content.
     - A card ending up without this block (older cards, `sert: null`, parent unavailable) parses
@@ -159,49 +159,51 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     where `<card-slug>` is the card's filename without `.md`. The user pastes it (no turn), then
     the `/goal` line — or the grill routing — as the next message.
    - **Grill gate — before the goal.** Set the goal only when the card is execution-ready: its
-    `Fini =` is a concrete demonstrable state and its requirements are settled. **If the card still
-    carries open design questions** — a `## Pistes à explorer` / `## À trancher` / `## Questions
-    ouvertes` section, a "grill avant de coder" note, `exigences: []` on a card that is not a
-    single mechanical change, or a written *cause* the plan rests on (`verify-diagnosis`) — do
-    **not** emit the goal block. The grill can rewrite the `Fini =` out from under it, and an
+    `## Done when` is a concrete demonstrable state and its requirements are settled. **If the card
+    still carries open design questions** — a `## Options to explore` / `## To decide` /
+    `## Open questions` section, a "grill before coding" note, `requirements: []` on a card that is not
+    a single mechanical change, or a written *cause* the plan rests on (`verify-diagnosis`) — do
+    **not** emit the goal block. The grill can rewrite the `## Done when` out from under it, and an
     active Stop-hook goal fights a multi-turn interview: the session cannot yield while the user
     thinks between rounds, so the model loops re-answering "waiting for your input" while the hook
     re-fires (observed repeatedly). Instead, end the response by routing to `pc-kanban:grill`, and
-    say the goal is set from the rewritten `Fini =` once the grill converges. The **Session name**
-    bullet still applies — emit its `/rename` line just before that routing. Then skip the rest of
-    this bullet.
-   - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `Fini =` line;
+    say the goal is set from the rewritten `## Done when` once the grill converges. The **Session
+    name** bullet still applies — emit its `/rename` line just before that routing. Then skip the
+    rest of this bullet.
+   - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `## Done when` line;
     `sert: <parent>` → walk up to the root card (`sert: null`) this chain ultimately serves, and use
-     **its** `Fini =` line instead — the session may then work any card in that group, not just this
-    one. `/goal` is parsed at the CLI level, before the turn — it cannot be invoked from inside a
-    running skill's own text, so do not attempt to run it. Instead, end this skill's response with:
+     **its** `## Done when` line instead — the session may then work any card in that group, not
+    just this one. `/goal` is parsed at the CLI level, before the turn — it cannot be invoked from
+    inside a running skill's own text, so do not attempt to run it. Instead, end this skill's
+    response with:
 
     ```
     🎯 Next step: activate the goal for this card.
     /goal <condition>
     ```
 
-    where `<condition>` is the resolved `Fini =` line, phrased as a demonstrable state (a test
+    where `<condition>` is the resolved `## Done when` line, phrased as a demonstrable state (a test
     result, an exit code, a real diff) — `/goal`'s evaluator reads only the transcript, never a file
     or a command it would run itself.
     **Review clause.** If the card's work needs judgment reviewed — the same criterion as
-    `finishing-a-card.md` § "Reviewing before declaring `Fini =` met", i.e. anything beyond a purely
-    mechanical change — append to `<condition>`: `… et le diff final a été review par `adversarial`
-    ou `Agent(reviewer)`, findings traités, et la case `- [x] reviewed (<méthode>)` cochée sur la
-    card`. Naming the checkbox in the clause makes satisfying the goal and stamping the box one
-    action, not two — so the retroactive audit does not later flag a genuinely-reviewed card.
-    The decision is made pre-work, on `Fini =` and `exigences:` alone, so **when it is unclear,
-    include the clause** — a spurious clause on a card that turns out mechanical costs one
-    `- [x] reviewed (n/a — mécanique)` stamp at close; a missing clause on judgment work is the
+    `finishing-a-card.md` § "Reviewing before declaring the card done", i.e. anything beyond a
+    purely mechanical change — append to `<condition>`: `… and the final diff has been reviewed by
+    `adversarial` or `Agent(reviewer)`, findings addressed, and the `- [x] reviewed (<method>)` box
+    checked on the card`. Naming the checkbox in the clause makes satisfying the goal and stamping
+    the box one action, not two — so the retroactive audit does not later flag a genuinely-reviewed
+    card. The decision is made pre-work, on `## Done when` and `requirements:` alone, so **when it is
+    unclear, include the clause** — a spurious clause on a card that turns out mechanical costs one
+    `- [x] reviewed (n/a — mechanical)` stamp at close; a missing clause on judgment work is the
     expensive failure this card exists to stop. A card that is *obviously* mechanical (doc typo, a
-    rename, a one-line config) gets no clause and is closed with `- [x] reviewed (n/a — mécanique)`.
+    rename, a one-line config) gets no clause and is closed with `- [x] reviewed (n/a — mechanical)`.
     Add nothing after that block (the **Session name** `/rename`
     line goes just before it, never after): no "would you like me to…", no rephrasing — just the
     `/goal` line, ready to paste as the next message. If no `sert` is
     resolvable (orphan card, a cycle, no root found), say so explicitly instead of inventing a
     condition.
 8. Execute the card's work — or, if step 7's grill gate routed to `pc-kanban:grill`, run that
-  first, then set the goal (step 7's **Goal** bullet) from the converged `Fini =`, then execute.
+  first, then set the goal (step 7's **Goal** bullet) from the converged `## Done when`, then
+  execute.
 
 ## Rules
 

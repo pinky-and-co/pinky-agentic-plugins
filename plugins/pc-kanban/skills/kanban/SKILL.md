@@ -52,7 +52,7 @@ story.
 
 ## Card frontmatter
 
-YAML, one card = one file. The body stays markdown prose (`## Fini =`, `## Pourquoi`, narrative
+YAML, one card = one file. The body stays markdown prose (`## Done when`, `## Why`, narrative
 handoff); frontmatter carries only what a script or a hook needs to resolve without parsing prose.
 
 ```yaml
@@ -61,7 +61,7 @@ date: YYYY-MM-DD       # meaning is implied by the column folder — see table b
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
-exigences: []          # requirement ids this card traces to, e.g. [FR-0042-01]; [] = none
+requirements: []          # requirement ids this card traces to, e.g. [FR-0042-01]; [] = none
 blocked_by: <card-slug> | null         # a hard dependency, never a mere ordering preference
 ---
 ```
@@ -147,11 +147,11 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
 ## Finishing a card
 
 A session's capacity limit is the session itself — one card, or one `sert`-linked group, per
-session — and `/goal` is set from the group's **root** card, never the leaf. A `Fini =` line must
-therefore be demonstrable in the transcript, and the reviewer must not be the generator.
+session — and `/goal` is set from the group's **root** card, never the leaf. A `## Done when` line
+must therefore be demonstrable in the transcript, and the reviewer must not be the generator.
 
 See [references/finishing-a-card.md](references/finishing-a-card.md) for how the root is resolved
-and the reviewer preference order — read it when taking a card in, or before declaring `Fini =`.
+and the reviewer preference order — read it when taking a card in, or before declaring it done.
 
 ## Filiation as render, not list
 
@@ -161,7 +161,7 @@ on a parent card; if the render is wrong, a child's `sert` value is wrong, fix t
 
 `sert` has a second, orthogonal use: at intake (`/chantier` step 7, first move into
 `3-in-progress`), a non-null `sert` whose parent is `done` or already archived gets its
-`Fini =`/`Pourquoi` appended to the child as a managed block — content, not just grouping. See
+`## Done when` / `## Why` appended to the child as a managed block — content, not just grouping. See
 `chantier`'s SKILL.md § step 7 for the mechanism; this section only flags that the field now
 carries both.
 

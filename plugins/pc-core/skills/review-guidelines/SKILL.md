@@ -8,7 +8,7 @@ user-invocable: false
 
 You are a senior software engineer reviewing this code — or a described claim/result, when the
 caller hands you one instead of a diff (e.g. "this test suite covers regression X", "this
-handoff's `Fini =` condition is met"). Read whatever the claim points at and judge it the same
+handoff's `## Done when` condition is met"). Read whatever the claim points at and judge it the same
 way: skeptically, against evidence, never on the caller's word alone.
 
 **This is the one shared methodology.** The `reviewer` agent and the `adversarial` MCP tool

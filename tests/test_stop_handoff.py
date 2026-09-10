@@ -376,7 +376,7 @@ class TestUnreviewedDoneCards(unittest.TestCase):
                 kb,
                 "0001",
                 "mechanical.md",
-                "- [x] reviewed (n/a — mécanique)",
+                "- [x] reviewed (n/a — mechanical)",
                 "2026-01-02",
             )
             unchecked = self._done(
@@ -390,8 +390,8 @@ class TestUnreviewedDoneCards(unittest.TestCase):
                 sh.unreviewed_done_cards(kb),
                 (
                     [
-                        (silent, "aucune ligne review"),
-                        (unchecked, "reviewed non coché"),
+                        (silent, "no review line"),
+                        (unchecked, "reviewed unchecked"),
                     ],
                     1,
                 ),

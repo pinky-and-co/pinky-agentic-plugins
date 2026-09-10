@@ -59,7 +59,7 @@ sequential (bootstrap is the vendored source, plugins the copy). Do **not** spaw
 once for those:
 
 - Orchestrator spawns only the first: `spawn-workers <id> <slug> pinky-and-co/pinky-bootstrap`.
-- That worker, its part of `Fini =` reached, relays to the next — see
+- That worker, its part of `## Done when` reached, relays to the next — see
   `kanban/references/finishing-a-card.md` § "Relaying a multi-repo card". It re-runs this skill
   with the next slug, or `SendMessage`s a bare trigger to an already-listed worker session.
 

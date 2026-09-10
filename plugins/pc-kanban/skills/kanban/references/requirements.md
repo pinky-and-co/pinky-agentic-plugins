@@ -31,14 +31,14 @@ The family is a classification aid — it makes duplicates and conflicts visible
 gives `grill` five angles to sweep. It is not a filing duty: a family that produced nothing is absent
 from the table, and no requirement is invented to fill a row.
 
-**Table columns: `Id` · `Priorité` · `Énoncé` · `Critère de vérification`.**
+**Table columns: `Id` · `Priority` · `Statement` · `Verification criterion`.**
 
-- **Priorité** — `MUST` (the chantier fails without it) or `SHOULD` (wanted, tradeable). Two values
+- **Priority** — `MUST` (the chantier fails without it) or `SHOULD` (wanted, tradeable). Two values
   only; a third turns the column into a debate.
-- **Énoncé** — one active sentence, the actor named, one capability. No vague adjective or adverb
+- **Statement** — one active sentence, the actor named, one capability. No vague adjective or adverb
   ("fast", "user-friendly"), no unreachable absolute ("always", "zero bug"), no open end ("etc.",
   "and/or").
-- **Critère de vérification** — measurable and objective: a command, a test path, a threshold with
+- **Verification criterion** — measurable and objective: a command, a test path, a threshold with
   its range. "Verified by inspection" is acceptable; "obviously true" is not.
 
 The **rationale** — why the requirement is necessary — belongs in the story's prose above the table,

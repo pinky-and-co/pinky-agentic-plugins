@@ -51,7 +51,7 @@ class TestPendingGate(unittest.TestCase):
         self.assertIn("/reload-plugins", hso["permissionDecisionReason"])
 
     def test_goal_is_a_deny(self):
-        pua.require(self.session, "goal", "/goal Fini = X")
+        pua.require(self.session, "goal", "/goal done = X")
         self.assertEqual(
             self._run()["hookSpecificOutput"]["permissionDecision"], "deny"
         )
@@ -64,11 +64,11 @@ class TestPendingGate(unittest.TestCase):
 
     def test_deny_key_wins_over_an_ask_key_in_the_same_batch(self):
         pua.require(self.session, "rename", "/rename slug")
-        pua.require(self.session, "goal", "/goal Fini = X")
+        pua.require(self.session, "goal", "/goal done = X")
         hso = self._run()["hookSpecificOutput"]
         self.assertEqual(hso["permissionDecision"], "deny")
         self.assertIn("/rename slug", hso["permissionDecisionReason"])
-        self.assertIn("/goal Fini = X", hso["permissionDecisionReason"])
+        self.assertIn("/goal done = X", hso["permissionDecisionReason"])
 
     def test_deny_peeks_so_every_call_of_the_turn_is_denied(self):
         pua.require(self.session, "reload-plugins", "/reload-plugins")

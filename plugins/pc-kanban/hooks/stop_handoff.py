@@ -233,10 +233,10 @@ def unreviewed_done_cards(kanban: Path) -> UnreviewedDone:
         An `UnreviewedDone`. `.flagged` holds `(card_path, tag)` pairs ordered by the
         card's `date:` frontmatter descending — recent work first; `date:` is set at
         intake rather than close but stays stable where a sync drive rewrites mtime — a
-        missing `date:` sorting last, then by filename. `tag` is `reviewed non coché`
+        missing `date:` sorting last, then by filename. `tag` is `reviewed unchecked`
         when an unchecked `- [ ] reviewed (...)` line is present (review declared needed,
-        then skipped), or `aucune ligne review` when no such line exists. `.mechanical`
-        counts cards closed `- [x] reviewed (n/a — mécanique)`: a real method line keeps a
+        then skipped), or `no review line` when no such line exists. `.mechanical`
+        counts cards closed `- [x] reviewed (n/a — mechanical)`: a real method line keeps a
         card out of both buckets, this escape hatch stays a visible number so its rate
         cannot drift the way the un-mechanized convention did.
     """
@@ -253,9 +253,7 @@ def unreviewed_done_cards(kanban: Path) -> UnreviewedDone:
         if _REVIEWED_DONE_RE.search(text):
             continue
         tag = (
-            "reviewed non coché"
-            if _REVIEWED_OPEN_RE.search(text)
-            else "aucune ligne review"
+            "reviewed unchecked" if _REVIEWED_OPEN_RE.search(text) else "no review line"
         )
         fm = parse_frontmatter(text) or {}
         date = fm.get("date")
@@ -639,9 +637,9 @@ def main() -> int:
                 print(f"{card.relative_to(kanban)}  ({tag})")
             extra = len(flagged) - MAX_UNREVIEWED_DONE
             if extra > 0:
-                print(f"… (+{extra} de plus)")
+                print(f"… (+{extra} more)")
             if mechanical:
-                print(f"— {mechanical} fermées `reviewed (n/a — mécanique)`")
+                print(f"— {mechanical} closed `reviewed (n/a — mechanical)`")
             print()
         return 0
 
