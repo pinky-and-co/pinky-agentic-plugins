@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write
 ---
 
 # Commit + push + PR/MR
@@ -24,24 +24,46 @@ spawn a subagent per repo — the script handles every repo in one pass, in unde
 
 ## Step 1 — Resolve the scope (read-only), then plan
 
-**`args` is required — a repo name or `--all`.** A blind invocation cannot reliably resolve its own
-scope; report that a target is required and stop, before any tool call, rather than guessing at one.
+**Resolve the target before anything else:**
+
+- **An explicit argument** — a repo name or `--all` — always wins. Use it.
+- **No argument** → resolve by session location:
+
+  ```
+  git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
+  ```
+
+  - **Exit 0** → the session sits inside a repo (worker layout). Target = the basename of the
+    printed worktree root — no question. In a worker session `${CLAUDE_PROJECT_DIR}` *is* that
+    worktree root, so `--root "${CLAUDE_PROJECT_DIR}"` in every command below resolves to this same
+    repo. If the two ever differ (`${CLAUDE_PROJECT_DIR}` is a subdirectory — `discover` returns
+    `NO-REPOS-FOUND` though `--show-toplevel` succeeded), substitute the `--show-toplevel` path for
+    `${CLAUDE_PROJECT_DIR}` in **every** `--root` below.
+  - **Nonzero exit** → `${CLAUDE_PROJECT_DIR}` is not inside any git repo (orchestrator / workspace
+    layout). **Hard-fail before any tool call**: report that a target is required (a repo name or
+    `--all`) and stop — never guess one. Do not prompt for it: this skill runs `context: fork`, a
+    question has no channel back. On a mounted-board orchestrator session this hard-fail is the
+    second line behind `orchestrator_freeze.py`, which already freezes such a session out of the
+    repos; no code dependency is asserted between the two.
 
 **Never run `plan` unfiltered to "see what's there"** — `plan` stages (`git add -A`) every repo it
-scans. Discover the scope with the read-only subcommand first:
+scans. Confirm the resolved scope with the read-only subcommand first:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh discover --root "${CLAUDE_PROJECT_DIR}"
 ```
 
-It prints one dirty-repo basename per line, stages nothing. From that list + the argument:
+It prints one dirty-repo basename per line, stages nothing. Match it against the target resolved
+above:
 
 - **`NO-REPOS-FOUND`** (non-zero exit) → **do not report success**: no git repo under the root at
   all, so it is stale (a moved workspace is the usual cause). Say the root is wrong and stop —
   "nothing to commit" and "I looked in the wrong place" are not the same answer.
 - **empty list, exit 0** → "nothing to commit", stop.
-- **`args` names a repo not in the list** → say so, stop. Never guess a closest match.
-- **`args` names one repo from the list** → target = that repo.
+- **the resolved target is a repo name not in the list** → say so, stop. Never guess a closest
+  match.
+- **the resolved target is one repo from the list** (named explicitly, or resolved from the session
+  location) → target = that repo.
 - **`--all`** → target = *whole root* (no `--repo`). `--all` is never passed to the script; it just
   means "omit `--repo`".
 

@@ -20,6 +20,8 @@ that skill's body in full; it is the authoritative procedure, not optional backg
 - **"clean up branches" / "clean gone" / "remove merged branches"** → the `clean-gone` skill.
 
 Whichever one matches, its own Step 1 is your first action — no clarifying question before it.
-`commit`/`commit-and-pr` require a concrete target (a repo name or `--all`) in the prompt; if the
-prompt genuinely omits one, say so and stop, per those skills' own contract. `clean-gone` has no
-such requirement — no target named means the whole root.
+`commit`/`commit-and-pr` resolve their target the same way: an explicit repo name or `--all` in the
+prompt wins; with none, they fall back to the session location — `git -C "${CLAUDE_PROJECT_DIR}"
+rev-parse --show-toplevel` succeeds → that repo; it fails (session not inside a repo) → say a target
+is required and stop, per those skills' own contract. `clean-gone` has no such requirement — no
+target named means the whole root.

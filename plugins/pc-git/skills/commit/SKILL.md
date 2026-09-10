@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), AskUserQuestion, Read, Write
+allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Read, Write
 ---
 
 # Commit — gitmoji convention
@@ -17,12 +17,29 @@ consent already exists.)
 
 ## Step 1 — Identify the target(s)
 
-```
-git -C "${CLAUDE_PROJECT_DIR}" rev-parse --is-inside-work-tree
-```
+The target passed to Step 2 is **always an absolute worktree root**, never a bare name. Resolve it
+in this order:
 
-- Exit 0 → standalone layout. `${CLAUDE_PROJECT_DIR}` itself is the target.
-- Nonzero exit → workspace layout:
+1. **`--all`, or an argument naming several repos** → the bulk branch below.
+2. **An argument naming one repo** → resolve the name to a path via the same sweep the bulk branch
+   uses (below): the candidate whose basename matches the argument. No match → say so, stop. Then go
+   to Step 2 with that path.
+3. **No argument** → resolve by session location:
+
+   ```
+   git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
+   ```
+
+   - **Exit 0** → the session sits inside a repo (worker layout). The printed worktree root **is**
+     the target — no question. Go to Step 2 with that path.
+   - **Nonzero exit** → `${CLAUDE_PROJECT_DIR}` is not inside any git repo (orchestrator / workspace
+     layout). **Hard-fail before any state-changing call**: report that a target is required (a repo
+     name or `--all`) and stop. Do not prompt for it — this skill runs `context: fork`; a question
+     here has no channel back, the fork has already returned. On a mounted-board orchestrator
+     session this hard-fail is the second line behind `orchestrator_freeze.py`, which already
+     freezes such a session out of the repos; no code dependency is asserted between the two.
+
+**Bulk branch.** Discover the dirty repos:
 
 ```
 if command -v rg >/dev/null 2>&1; then
@@ -32,29 +49,25 @@ else
 fi
 ```
 
-  Each hit's grandparent directory is a candidate repo. `git -C <candidate> status --porcelain` per
-  candidate — non-empty = dirty.
+Each hit's grandparent directory is a candidate repo. `git -C <candidate> status --porcelain` per
+candidate — non-empty = dirty. Zero dirty → say so, stop. Then **do not spawn an agent per repo** —
+hand the whole lot to the script, which does every deterministic part in one sub-second pass:
 
-  - No argument → ask which repo (AskUserQuestion, options = the dirty list). Zero dirty → say so, stop.
-  - Argument names one repo → single-repo.
-  - Argument names several, or `--all` → bulk: **do not spawn an agent per repo.** Hand the whole
-    lot to the script, which does every deterministic part in one sub-second pass:
+```
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply  --root "${CLAUDE_PROJECT_DIR}" \
+    --messages <file> --no-pr
+```
 
-    ```
-    ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
-    ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply  --root "${CLAUDE_PROJECT_DIR}" \
-        --messages <file> --no-pr
-    ```
+The plan groups repos by **diff fingerprint** — the common case for `--all` is one identical
+distribution across many repos, so N repos share one diff and need one message. Write one
+tab-separated `<fingerprint><TAB><message>` line per group (Step 2's convention still applies to
+the wording), then apply. `--no-pr` because this skill stops at the commit; `commit-and-pr`
+is the one that opens the PR/MR.
 
-    The plan groups repos by **diff fingerprint** — the common case for `--all` is one identical
-    distribution across many repos, so N repos share one diff and need one message. Write one
-    tab-separated `<fingerprint><TAB><message>` line per group (Step 2's convention still applies to
-    the wording), then apply. `--no-pr` because this skill stops at the commit; `commit-and-pr`
-    is the one that opens the PR/MR.
-
-    Reproduce the script's `=== RESULTS` block verbatim (one `<repo>\t<state>\t-` line per repo;
-    `--no-pr` so `pr_url` is always `-`), keeping `commit-nopush` distinct from `failed` — the first
-    means the commit is there, the second that nothing was committed. Derive no state not in the block.
+Reproduce the script's `=== RESULTS` block verbatim (one `<repo>\t<state>\t-` line per repo;
+`--no-pr` so `pr_url` is always `-`), keeping `commit-nopush` distinct from `failed` — the first
+means the commit is there, the second that nothing was committed. Derive no state not in the block.
 
 ## Step 2 — Commit
 

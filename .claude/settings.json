@@ -1,5 +1,8 @@
 {
   "enabledPlugins": {
-    "skill-creator@claude-plugins-official": true
+    "skill-creator@claude-plugins-official": true,
+    "pc-core@pinky-agentic-plugins": true,
+    "pc-kanban@pinky-agentic-plugins": true,
+    "pc-git@pinky-agentic-plugins": true
   }
 }
