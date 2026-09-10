@@ -1,7 +1,7 @@
 ---
 name: commit-and-pr
 description: Commit, push, and open a PR (GitHub) or MR (GitLab) — full flow, auto end-to-end. Bulk mode (--all) handles every dirty repo in one deterministic pass.
-argument-hint: "<repository-to-commit> or --all"
+argument-hint: "<repository-to-commit> or --all [--no-watch-ci]"
 model: haiku
 context: fork
 agent: general-purpose
@@ -20,11 +20,18 @@ files into `.gitignore`, staging, grouping repos by diff fingerprint, resolving 
 applying the branch guard, committing, pushing, opening the PR/MR, and reporting per-stage outcomes.
 
 You do the one thing it cannot: **write the commit messages**. Nothing else. In particular, do not
-spawn a subagent per repo — the script handles every repo in one pass, in under a second.
+spawn a subagent per repo — the script handles every repo in one pass: commit/push/PR is under a
+second per repo, CI watching (on by default, see Step 3) adds real wall time on top of that.
 
 ## Step 1 — Resolve the scope (read-only), then plan
 
-**Resolve the target before anything else:**
+**First, strip a trailing `--no-watch-ci` from `args`** and remember whether it was there — Step 3
+acts on it. Match what *remains* against a repo name / `--all`: matching the raw string (e.g.
+`myrepo --no-watch-ci`) would never equal `--all` nor appear in `discover`'s output, so it would
+fall into the "not in the list" branch instead of resolving. CI watching is the default; this flag
+is an opt-*out*.
+
+**Then resolve the target:**
 
 - **An explicit argument** — a repo name or `--all` — always wins. Use it.
 - **No argument** → resolve by session location:
@@ -104,17 +111,24 @@ correct, not a shortcut.
 ## Step 3 — Apply
 
 ```
-${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> [--repo <target>] [--watch-ci]
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> [--repo <target>] [--no-watch-ci]
 ```
 
 Pass the **same `--repo <target>`** you resolved in Step 1 — omit it only for `--all` / `all of
 them`. Add `--dry-run` first if the plan looked surprising — it prints what each repo would get,
 touching nothing, and emits **no `=== RESULTS` block** (run the real apply for that).
 
-Pass **`--watch-ci` only when the invocation asked for it** (the parent wants the CI verdict, not
-just "PR/MR opened"). It makes the script watch CI on each PR/MR it opened — up to 15 min per PR/MR —
-and append a `=== CI` block. Without the flag the script never calls `gh pr checks`/`glab ci`/`glab
-api` and the run ends at PR/MR creation, exactly as before.
+**CI watching is on by default** — pass `--no-watch-ci` **if and only if Step 1 found it trailing
+`args`**; that parsed flag is the source of truth, not a fresh guess here. Left on, the script
+watches CI on each PR/MR it opened and appends a `=== CI` block; with `--no-watch-ci` it never calls
+`gh pr checks`/`glab ci`/`glab api` and the run ends at PR/MR creation. `--watch-ci` is still
+accepted (a no-op restating the default).
+
+Watching is **parallel, in batches of `BULK_CI_PARALLEL`** (default 4), not one PR after another —
+`--all` no longer pays up to 15 min × N repos sequentially; the ceiling is
+`⌈N / BULK_CI_PARALLEL⌉ × (BULK_CI_STARTUP_DELAY + BULK_CI_TIMEOUT)`, reached only if every repo in a
+batch stalls to the timeout. `BULK_CI_STARTUP_DELAY` (default 60s) is a fixed wait each watch takes
+before its first probe, to let CI register — that delay is expected, not a hang.
 
 - **GitHub** — chains `gh pr checks --watch --fail-fast`.
 - **GitLab** — `glab` has no equivalent primitive with a trustworthy exit code, so the script reads
@@ -133,18 +147,21 @@ filled the script's silence with a guess; the block exists so there is no silenc
 | `pushed-nopr` | committed + pushed straight to the integration branch (unguarded paths), or `--no-pr` | `-` |
 | `pushed-prfailed` | committed + pushed on a feature branch, but PR creation failed — **a human must open it** | `-` |
 | `commit-nopush` | committed locally, push failed — the commit is there, nothing lost | `-` |
+| `push-conflict` | committed locally, push rejected and the script's own fetch+rebase hit a real conflict — it already ran `rebase --abort`, the repo is clean | path to the list of conflicting files (not a URL) |
 | `skipped` | no message matched this group's fingerprint | `-` |
 | `failed` | branch or commit failed — changes remain staged, nothing lost | `-` |
 
-Never flatten `commit-nopush`/`pushed-prfailed` into `failed`, and never report `pushed-pr` for a
-repo the block did not. A run that claims success while leaving work on the floor is worse than one
-that fails loudly.
+Never flatten `commit-nopush`/`pushed-prfailed`/`push-conflict` into `failed`, and never report
+`pushed-pr` for a repo the block did not. A run that claims success while leaving work on the floor
+is worse than one that fails loudly. If any line is `push-conflict`, tell the parent to read
+`${CLAUDE_PLUGIN_ROOT}/skills/commit-and-pr/references/conflict-reaction.md` and that the
+conflicting-files list is at the path in column 3.
 
-## Step 5 — Report the CI verdicts (only when `--watch-ci` was passed)
+## Step 5 — Report the CI verdicts (skip only if `--no-watch-ci` was passed)
 
-With `--watch-ci` the script appends a second block, `=== CI` … `=== END CI`, one tab-separated
-line per PR/MR it watched — `<repo>\t<verdict>\t<url>\t<log_path|->`. **Reproduce those lines too.
-Derive nothing.**
+Unless `--no-watch-ci` was passed, the script appends a second block, `=== CI` … `=== END CI`, one
+tab-separated line per PR/MR it watched — `<repo>\t<verdict>\t<url>\t<log_path|->`. **Reproduce those
+lines too. Derive nothing.**
 
 | `verdict` | Meaning | `log_path` |
 |---|---|---|

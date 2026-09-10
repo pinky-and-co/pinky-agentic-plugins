@@ -12,6 +12,16 @@ SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bulk_commit.sh"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
+# Le watch CI attend `BULK_CI_STARTUP_DELAY` (défaut 60s en prod) avant sa 1ʳᵉ probe —
+# désarmé pour toute la suite, sinon chaque cas watch paierait 60s réelles.
+export BULK_CI_STARTUP_DELAY=0
+
+# Identité git pour les commits que `bulk_commit.sh` fait lui-même — un runner CI vierge
+# n'a aucun `user.name`/`user.email` global, `git commit` y échoue et tout le reste
+# (push, PR, watch) est sauté en cascade. Les repos de test sont jetables.
+export GIT_AUTHOR_NAME="bulk-commit-test" GIT_AUTHOR_EMAIL="test@test.invalid"
+export GIT_COMMITTER_NAME="bulk-commit-test" GIT_COMMITTER_EMAIL="test@test.invalid"
+
 fail=0
 check() {
     if [ "$2" = "$3" ]; then
@@ -113,7 +123,7 @@ printf '%s\t✨ feat: add g\n' "$fpfox" > "$T/mfox.tsv"
 # Un fork commit-and-pr hérite l'env du parent (vérifié 2026-09-02) : le trailer doit
 # donc être composé à partir de cette variable, jamais du system-reminder (absent d'un fork).
 export CLAUDE_CODE_BRIDGE_SESSION_ID="session_TESTBRIDGE"
-outfox="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo foxtrot --messages "$T/mfox.tsv" 2>&1)"
+outfox="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo foxtrot --messages "$T/mfox.tsv" --no-watch-ci 2>&1)"
 
 check "PR attempted from a pre-existing feature branch" \
     "$(grep -c '^gh pr create' "$GH_LOG")" 1
@@ -133,11 +143,11 @@ check "Co-Authored-By trailer in the commit" \
 check "Claude-Session trailer derived from the bridge id" \
     "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Claude-Session: https://claude.ai/code/session_TESTBRIDGE$')" 1
 
-# NFR-0023-18 : le run foxtrot ci-dessus n'a PAS `--watch-ci` — aucun bloc CI, et
-# `gh pr checks` n'a jamais été appelé.
-check "no --watch-ci -> no === CI block" \
+# FR-0025-42 : le run foxtrot ci-dessus porte `--no-watch-ci` (le watch est ON par
+# défaut désormais) — donc aucun bloc CI, et `gh pr checks` jamais appelé.
+check "--no-watch-ci -> no === CI block" \
     "$(printf '%s' "$outfox" | grep -c '^=== CI ')" 0
-check "no --watch-ci -> gh pr checks never called" \
+check "--no-watch-ci -> gh pr checks never called" \
     "$(grep -c 'pr checks' "$GH_LOG")" 0
 
 # ── pr-na : docs-only sur la branche d'intégration, remote résolu → commit direct, zéro PR ──
@@ -153,7 +163,7 @@ printf 'hello\n' > "$T/golf/README.md"                # chemin non gardé → HE
 plang="$("$SCRIPT" plan --root "$T" --repo golf 2>&1)"
 fpg="$(printf '%s' "$plang" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
 printf '%s\t📝 docs: readme\n' "$fpg" > "$T/mg.tsv"
-outg="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo golf --messages "$T/mg.tsv" 2>&1)"
+outg="$(PATH="$ghbin:$PATH" "$SCRIPT" apply --root "$T" --repo golf --messages "$T/mg.tsv" --no-watch-ci 2>&1)"
 golf_block="$(printf '%s' "$outg" | awk '/^=== RESULTS/{f=1;next} /^=== END RESULTS/{f=0} f')"
 check "RESULTS golf = direct commit, exact pushed-nopr state" \
     "$golf_block" "golf${tab}pushed-nopr${tab}-"
@@ -511,16 +521,17 @@ outglfb="$(run_watch_gl gl-fallback GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab
 check "poll fallback converges past 'running' to the real terminal status" \
     "$(ci_block "$outglfb" | cut -f1-2)" "gl-fallback${tab}pass"
 
-# NFR-0023-21 : sans `--watch-ci`, aucun appel `glab ci`/`glab api`, pas de bloc CI.
+# FR-0025-42 : avec `--no-watch-ci`, aucun appel `glab ci`/`glab api`, pas de bloc CI
+# (le watch est ON par défaut ; `--no-watch-ci` est l'opt-out).
 mk_watch_repo_gitlab gl-nowatch
 : > "$T/gl.log"
 plan_gnw="$("$SCRIPT" plan --root "$T" --repo gl-nowatch 2>&1)"
 fp_gnw="$(printf '%s' "$plan_gnw" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
 printf '%s\t✨ feat: gl-nowatch\n' "$fp_gnw" > "$T/m_gl-nowatch.tsv"
 out_gnw="$(env GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-nowatch/-/merge_requests/22' \
-    PATH="$glbin:$PATH" "$SCRIPT" apply --root "$T" --repo gl-nowatch --messages "$T/m_gl-nowatch.tsv" 2>&1)"
-check "no --watch-ci (gitlab) -> no === CI block" "$(printf '%s' "$out_gnw" | grep -c '^=== CI ')" 0
-check "no --watch-ci (gitlab) -> no glab ci/api call" \
+    PATH="$glbin:$PATH" "$SCRIPT" apply --root "$T" --repo gl-nowatch --messages "$T/m_gl-nowatch.tsv" --no-watch-ci 2>&1)"
+check "--no-watch-ci (gitlab) -> no === CI block" "$(printf '%s' "$out_gnw" | grep -c '^=== CI ')" 0
+check "--no-watch-ci (gitlab) -> no glab ci/api call" \
     "$(grep -cE 'glab (ci|api)' "$T/gl.log")" 0
 
 # IMP-0023-28 : `_mr_iid` insensible au nombre de (sous-)groupes et au host — le
@@ -548,6 +559,158 @@ run_watch_gl gl-iid-host GL_LOG="$T/gl.log" \
     GL_PIPE_COUNT=1 GL_STATUS=success BULK_CI_TIMEOUT=3 >/dev/null
 check "IMP-0023-28: iid parsed on a custom host, deep subgroup path" \
     "$(grep -c 'merge_requests/303/pipelines' "$T/gl.log")" 2
+
+# ════════════════════════════════════════════════════════════════════════════
+# Carte B — watch CI par défaut + recovery push-conflict (FR-0025-42..47, NFR-0025-07/08)
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── FR-0025-45/46 : les 3 branches de push_with_recovery, oracle sur la ligne RESULTS ──
+# Chaque cas : un repo sur `feature/X` dont `origin/feature/X` a divergé. `--no-pr`
+# pour que l'état RESULTS soit celui décidé par le push, sans dépendre d'un stub `gh`.
+
+rline() { printf '%s' "$1" | awk '/^=== RESULTS/{f=1;next} /^=== END RESULTS/{f=0} f'; }
+
+diverge_origin() {   # NAME  CONTENT  → pousse CONTENT dans f.txt sur origin/feature/NAME
+    local n="$1" content="$2" c
+    c="$(mktemp -d)"; git clone -q "$T/$n-origin.git" "$c/c"
+    # `-B … origin/…` : reprend la branche distante EXISTANTE (le HEAD du bare pointe
+    # `main`, non né → `git clone` ne checkoute rien ; un `checkout -b` créerait une
+    # branche orpheline dont le push divergerait au lieu d'avancer origin).
+    git -C "$c/c" checkout -q -B "feature/$n" "origin/feature/$n"
+    printf '%s' "$content" > "$c/c/f.txt"
+    git -C "$c/c" -c user.email=t@t -c user.name=t add -A
+    git -C "$c/c" -c user.email=t@t -c user.name=t commit -q -m "origin-side $n"
+    git -C "$c/c" push -q origin "feature/$n"
+    rm -rf "$c"
+}
+
+mk_pw_repo() {   # NAME  → repo poussé sur feature/NAME, avec un f.txt local à committer
+    local n="$1" b="$T/$1-origin.git"
+    git init -q --bare -b main "$b"
+    mkdir -p "$T/$n" && git -C "$T/$n" init -q -b main
+    git -C "$T/$n" remote add origin "$b"
+    printf 'base\n' > "$T/$n/f.txt"
+    git -C "$T/$n" -c user.email=t@t -c user.name=t add -A
+    git -C "$T/$n" -c user.email=t@t -c user.name=t commit -q -m init
+    git -C "$T/$n" checkout -q -b "feature/$n"
+    git -C "$T/$n" push -q -u origin "feature/$n"
+    git -C "$T/$n" remote set-head origin main 2>/dev/null || true
+}
+
+run_pw() {   # NAME  → apply --no-pr --no-watch-ci sur ce repo, rend stdout
+    local n="$1" plan fp
+    plan="$("$SCRIPT" plan --root "$T" --repo "$n" 2>&1)"
+    fp="$(printf '%s' "$plan" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+    printf '%s\t✨ feat: %s\n' "$fp" "$n" > "$T/m_pw_$n.tsv"
+    "$SCRIPT" apply --root "$T" --repo "$n" --messages "$T/m_pw_$n.tsv" --no-pr --no-watch-ci 2>&1
+}
+
+# (a) rebase propre + retry OK → poussé (pushed-nopr). L'origin ajoute une ligne en
+# tête de f.txt, le local en ajoute une en queue — zones disjointes, rebase sans conflit.
+mk_pw_repo pw-ok
+diverge_origin pw-ok $'ORIGIN\nbase\n'
+printf 'base\nLOCAL\n' > "$T/pw-ok/f.txt"
+out_pwok="$(run_pw pw-ok)"
+check "push_with_recovery (a): rebase clean + retry OK -> pushed-nopr" \
+    "$(rline "$out_pwok")" "pw-ok${tab}pushed-nopr${tab}-"
+
+# (b) rebase propre mais le retry échoue (hook pre-receive qui refuse) → commit-nopush.
+mk_pw_repo pw-retryfail
+diverge_origin pw-retryfail $'ORIGIN\nbase\n'
+printf 'base\nLOCAL\n' > "$T/pw-retryfail/f.txt"
+hookf="$T/pw-retryfail-origin.git/hooks/pre-receive"
+printf '#!/bin/sh\nexit 1\n' > "$hookf"; chmod +x "$hookf"
+out_pwrf="$(run_pw pw-retryfail)"
+check "push_with_recovery (b): rebase clean + retry fails -> commit-nopush" \
+    "$(rline "$out_pwrf")" "pw-retryfail${tab}commit-nopush${tab}-"
+
+# (c) rebase en conflit réel → push-conflict, colonne 3 = chemin (jamais une URL),
+# le fichier au chemin liste les fichiers unmerged, le repo est laissé propre.
+mk_pw_repo pw-conflict
+diverge_origin pw-conflict $'THEIRS\n'
+printf 'OURS\n' > "$T/pw-conflict/f.txt"
+out_pwc="$(run_pw pw-conflict)"
+pwc_line="$(rline "$out_pwc")"
+check "push_with_recovery (c): real rebase conflict -> push-conflict state" \
+    "$(printf '%s' "$pwc_line" | cut -f1-2)" "pw-conflict${tab}push-conflict"
+pwc_path="$(printf '%s' "$pwc_line" | cut -f3)"
+check "push-conflict col 3 is a filesystem path, not a URL" \
+    "$([ "${pwc_path#/}" != "$pwc_path" ] && ! printf '%s' "$pwc_path" | grep -q '://' && echo yes || echo no)" yes
+check "push-conflict col 3 file lists the unmerged path (f.txt)" \
+    "$(grep -c '^f\.txt$' "$pwc_path")" 1
+check "push-conflict leaves the repo clean (no rebase in progress)" \
+    "$([ -d "$T/pw-conflict/.git/rebase-merge" ] || [ -d "$T/pw-conflict/.git/rebase-apply" ] && echo dirty || echo clean)" clean
+check "push-conflict keeps the local commit (HEAD advanced past init)" \
+    "$(git -C "$T/pw-conflict" log --oneline | wc -l | tr -d ' ')" 2
+
+# ── FR-0025-42 (garde skill `commit`) : `--no-pr` force watch off — pas de bloc
+# `=== CI` vide même sans `--no-watch-ci` (le skill `commit` appelle toujours `--no-pr`).
+mk_watch_repo papa
+plan_p="$("$SCRIPT" plan --root "$T" --repo papa 2>&1)"
+fp_p="$(printf '%s' "$plan_p" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: papa\n' "$fp_p" > "$T/m_papa.tsv"
+outp="$(env GH_REPO=papa PATH="$cibin:$PATH" GH_CI_COUNT=2 BULK_CI_TIMEOUT=3 \
+    "$SCRIPT" apply --root "$T" --repo papa --messages "$T/m_papa.tsv" --no-pr 2>&1)"
+check "FR-0025-42: --no-pr suppresses the CI block (no empty === CI)" \
+    "$(printf '%s' "$outp" | grep -c '^=== CI ')" 0
+
+# ── FR-0025-42 : watch CI ON par défaut (aucun flag) → bloc === CI présent ──
+mk_watch_repo oscar
+plan_o="$("$SCRIPT" plan --root "$T" --repo oscar 2>&1)"
+fp_o="$(printf '%s' "$plan_o" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: oscar\n' "$fp_o" > "$T/m_oscar.tsv"
+outo="$(env GH_REPO=oscar PATH="$cibin:$PATH" GH_CI_COUNT=2 GH_CI_WATCH_RC=0 BULK_CI_TIMEOUT=3 \
+    "$SCRIPT" apply --root "$T" --repo oscar --messages "$T/m_oscar.tsv" 2>&1)"
+check "FR-0025-42: apply with NO flag -> === CI block present" \
+    "$(printf '%s' "$outo" | grep -c '^=== CI ')" 1
+check "FR-0025-42: default watch reaches a verdict" \
+    "$(ci_block "$outo" | cut -f1-2)" "oscar${tab}pass"
+
+# ── FR-0025-44 + NFR-0025-07 : watches en lots parallèles, oracle de concurrence ──
+# 6 repos, BULK_CI_PARALLEL=3 → au plus 3 watches simultanés, 2 lots. Chaque appel
+# `pr checks --watch` du stub inscrit "start <pid>" / "end <pid>" dans un journal ;
+# on reconstruit le nb max de watches actifs en parallèle. Pas d'assertion wall-clock.
+PROOT="$(mktemp -d)"
+concbin="$T/concbin"; mkdir -p "$concbin"
+cat > "$concbin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "pr view"*)   exit 1 ;;
+  "pr create"*) echo "https://github.com/x/${GH_REPO}/pull/1"; exit 0 ;;
+  *"pr checks"*"--json state"*) echo "1"; exit 0 ;;
+  *"pr checks"*"--watch"*)
+      echo "start $$" >> "$CONC_LOG"
+      sleep 0.5
+      echo "end $$" >> "$CONC_LOG"
+      exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "$concbin/gh"
+export CONC_LOG="$T/conc.log"; : > "$CONC_LOG"
+for n in c1 c2 c3 c4 c5 c6; do
+    b="$PROOT/$n-origin.git"; git init -q --bare -b main "$b"
+    mkdir -p "$PROOT/$n" && git -C "$PROOT/$n" init -q -b main
+    git -C "$PROOT/$n" remote add origin "$b"
+    git -C "$PROOT/$n" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+    git -C "$PROOT/$n" push -q -u origin main
+    git -C "$PROOT/$n" remote set-head origin main
+    git -C "$PROOT/$n" checkout -q -b "feature/$n"
+    printf 'def x():\n    return 1\n' > "$PROOT/$n/mod_$n.py"
+done
+planc="$("$SCRIPT" plan --root "$PROOT" 2>&1)"
+: > "$T/mc.tsv"
+for fp in $(printf '%s' "$planc" | grep -o 'GROUP [a-f0-9]\{12\}' | cut -d' ' -f2 | sort -u); do
+    printf '%s\t✨ feat: c\n' "$fp" >> "$T/mc.tsv"
+done
+env PATH="$concbin:$PATH" BULK_CI_PARALLEL=3 BULK_CI_TIMEOUT=5 \
+    "$SCRIPT" apply --root "$PROOT" --messages "$T/mc.tsv" >/dev/null 2>&1
+maxconc="$(awk '/^start/{c++; if(c>m)m=c} /^end/{c--} END{print m+0}' "$CONC_LOG")"
+nstart="$(grep -c '^start' "$CONC_LOG")"
+check "FR-0025-44: 6 watches all ran" "$nstart" 6
+check "NFR-0025-07: concurrency capped at BULK_CI_PARALLEL (3)" \
+    "$([ "$maxconc" -le 3 ] && [ "$maxconc" -ge 2 ] && echo ok || echo "got $maxconc")" ok
+rm -rf "$PROOT"
 
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"
