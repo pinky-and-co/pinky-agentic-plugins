@@ -17,9 +17,9 @@ Ascend at SessionStart, descend at CwdChanged, restore at SessionEnd:
 - SessionEnd: restore settings.local.json to exactly what backup_settings_local
   captured, drop the per-session state file, and clear the pending queue.
 
-Registered as a single script across three hook events in hooks.json (see
-hooks.json.snippet.json) rather than three files — one entry to maintain,
-dispatch on `hook_event_name` from stdin.
+Registered as a single script across three hook events in hooks.json rather
+than three files — one entry to maintain, dispatch on `hook_event_name`
+from stdin.
 
 Newly-activated plugins need `/reload-plugins`, which no hook can run. The
 request goes into pending_user_action's queue; pending_gate turns the next

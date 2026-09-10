@@ -36,13 +36,21 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
      `fable` (already the ceiling).
    - `claude --name` names the session (`ListAgents` discovery); the cmux/wmux workspace adopts
      that name, so no separate workspace-name flag.
-4. Then, per repo:
+4. Then, per repo, **before opening the worker**: enables at project scope (`claude plugin install
+   --scope project`, run with `cwd` = the repo) every installed project-scoped plugin whose
+   `projectPath` covers the repo (`matching_plugin_ids`). The write lands in the repo's **versioned**
+   `.claude/settings.json`, so the worker's boot `/pc-kanban:chantier` has those plugins live with no
+   `/reload-plugins`. Each enable is bounded and tried once; a failure is logged and skipped (the
+   worker's `/reload-plugins` and the always-on `pc-autodiscovery` hook remain the fallback). The
+   `pc-autodiscovery` `settings_commit_nudge` hook then reminds the worker to commit that change.
+5. Then, per repo:
    - **Inside cmux / wmux** (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID` set) →
      `<mux> new-workspace --cwd <path> --command '<the claude line>'`.
    - **Outside any multiplexer** → prints `cd <path> && <the claude line>` for the user to run, and
      spawns nothing.
 
-Pass `--dry-run` to print the command line(s) without spawning.
+Pass `--dry-run` to preview the command line(s) — it also skips the project-scope plugin enable, so
+a dry run mutates nothing.
 
 ## Multi-repo cards — sequential by convention
 

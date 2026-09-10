@@ -200,12 +200,19 @@ class TestMain(unittest.TestCase):
         self._orig_resolve = sw.resolve_paths
         sw.resolve_paths = self._fake_resolve  # type: ignore[assignment]
         self.spawned: list[list[str]] = []
+        self.enabled: list[tuple[list[str], dict]] = []
+        self.events: list[tuple[str, str]] = []  # ("enable"|"spawn", clone path)
+        self.enable_rc = 0
+        self.matched: list[str] = []
         self._orig_run = sw.subprocess.run
         sw.subprocess.run = self._fake_run  # type: ignore[assignment]
+        self._orig_match = sw.matching_plugin_ids
+        sw.matching_plugin_ids = lambda repo: list(self.matched)  # type: ignore[assignment]
 
     def tearDown(self):
         sw.resolve_paths = self._orig_resolve  # type: ignore[assignment]
         sw.subprocess.run = self._orig_run  # type: ignore[assignment]
+        sw.matching_plugin_ids = self._orig_match  # type: ignore[assignment]
         for k, v in self._saved_env.items():
             os.environ.pop(k, None)
             if v is not None:
@@ -215,10 +222,17 @@ class TestMain(unittest.TestCase):
         self.resolve_root = workspace_root
         return [sw.SpawnTarget(s, Path(f"/clones/{s.split('/')[-1]}")) for s in slugs]
 
-    def _fake_run(self, argv, **_kwargs):
+    def _fake_run(self, argv, **kwargs):
         if argv[:2] == [sys.executable, str(sw._HOOK)]:
             return _Result(stdout=self.hook_stdout.get(argv[2], ""))
+        if list(argv[:3]) == ["claude", "plugin", "install"]:
+            self.enabled.append((list(argv), kwargs))
+            self.events.append(("enable", str(kwargs.get("cwd"))))
+            return _Result(
+                returncode=self.enable_rc, stderr="boom" if self.enable_rc else ""
+            )
         self.spawned.append(list(argv))
+        self.events.append(("spawn", argv[argv.index("--cwd") + 1]))
         return _Result()
 
     def _run(self, *args):
@@ -304,6 +318,48 @@ class TestMain(unittest.TestCase):
             self._run("0099", 'my-card"; rm -rf ~')
         with self.assertRaises(SystemExit):
             self._run("not-an-id", "my-card")
+
+    def test_matched_project_plugins_are_enabled_per_repo_before_spawn(self):
+        self.matched = ["pc-git@mp", "pc-kanban@mp"]
+        rc, _, _ = self._run("0099", "my-card")
+        self.assertEqual(rc, 0)
+        # 2 plugins x 2 repos, each a project-scope install run with cwd on the clone
+        self.assertEqual(len(self.enabled), 4)
+        for argv, kwargs in self.enabled:
+            self.assertEqual(argv[:3], ["claude", "plugin", "install"])
+            self.assertEqual(argv[4:], ["--scope", "project", "--yes"])
+            self.assertEqual(kwargs["timeout"], 15)
+        # ordered: both enables for a repo, then its spawn, then the next repo
+        self.assertEqual(
+            self.events,
+            [
+                ("enable", "/clones/one"),
+                ("enable", "/clones/one"),
+                ("spawn", "/clones/one"),
+                ("enable", "/clones/two"),
+                ("enable", "/clones/two"),
+                ("spawn", "/clones/two"),
+            ],
+        )
+
+    def test_dry_run_enables_nothing(self):
+        self.matched = ["pc-git@mp"]
+        self._run("--dry-run", "0099", "my-card")
+        self.assertEqual(self.enabled, [])
+
+    def test_a_failed_enable_is_logged_not_fatal(self):
+        self.matched = ["pc-git@mp"]
+        self.enable_rc = 1
+        rc, _, err = self._run("0099", "my-card", "org/one")
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.spawned), 1)
+        self.assertIn("pc-git@mp", err)
+
+    def test_a_failed_enable_is_not_retried(self):
+        self.matched = ["pc-git@mp"]
+        self.enable_rc = 1
+        self._run("0099", "my-card")
+        self.assertEqual(len(self.enabled), 2)  # one attempt per repo, no retry
 
 
 if __name__ == "__main__":

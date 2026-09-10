@@ -62,6 +62,17 @@ pinky-agentic-plugins/
 │       ├── prek.yml
 │       └── release.yml
 ├── plugins/
+│   ├── pc-autodiscovery/
+│   │   ├── .claude-plugin/
+│   │   │   └── plugin.json
+│   │   └── hooks/
+│   │       ├── clear_pending_queue.py
+│   │       ├── hooks.json
+│   │       ├── pending_gate.py
+│   │       ├── pending_user_action.py
+│   │       ├── plugin_scope_lib.py
+│   │       ├── settings_commit_nudge.py
+│   │       └── sync_plugin_scope.py
 │   ├── pc-core/
 │   │   ├── .claude-plugin/
 │   │   │   └── plugin.json
@@ -185,6 +196,7 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       ├── spawn-workers/
 │   │       │   ├── scripts/
+│   │       │   │   ├── pc_kanban_spawn_plugin_scope_lib.py
 │   │       │   │   └── pc_kanban_spawn_workers.py
 │   │       │   └── SKILL.md
 │   │       └── yt/
@@ -290,6 +302,7 @@ pinky-agentic-plugins/
 │   ├── test_anonymize.py
 │   ├── test_branch_guard.py
 │   ├── test_bulk_commit_sh.py
+│   ├── test_clear_pending_queue.py
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py
@@ -308,6 +321,7 @@ pinky-agentic-plugins/
 │   ├── test_reconcile_oracle.py
 │   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
+│   ├── test_settings_commit_nudge.py
 │   ├── test_statusline.py
 │   ├── test_statusline_common.py
 │   ├── test_stop_handoff.py

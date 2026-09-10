@@ -1,0 +1,8 @@
+{
+  "name": "pc-autodiscovery",
+  "version": "0.1.0",
+  "description": "Always-on plugin activation: enables the project-scoped plugins matching wherever the session sits, and gates the next tool call while a user-only action (a slash command) is still pending.",
+  "author": {
+    "name": "Pinky & Co"
+  }
+}
