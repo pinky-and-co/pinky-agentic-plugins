@@ -2,7 +2,7 @@
 name: grill
 description: Interview a plan, an idea or an imported brief until nothing is silently assumed, then write the result as a chantier story with numbered, verifiable requirements. Use before starting a chantier, to stress-test a design, or to land an external brainstorm (written elsewhere, in another tool) into the board.
 argument-hint: "[<path-to-an-existing-brief>] [free-text idea]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(find:*), Bash(rg:*), Bash(git log:*), Bash(git remote:*), Bash(command -v:*)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(find:*), Bash(rg:*), Bash(git log:*), Bash(git remote:*), Bash(command -v:*), AskUserQuestion
 ---
 
 # Grill
@@ -32,14 +32,28 @@ be asked *now* without guessing at answers not yet heard.
 Work in **rounds**:
 
 1. Compute the frontier. A question whose answer depends on another question still open belongs to
-   a **later round**, never this one.
-2. Ask the whole frontier in one round. Number each question, state it plainly, and **give your
-   recommended answer** — a question without a default is a question the user has to design from
-   scratch, which defeats the purpose.
-3. Stop and wait. The answers reshape the tree: settled decisions push the frontier outward.
-4. Repeat until the frontier is empty.
+   a **later round**, never this one — and this includes a sub-question annexed to another one: if
+   it depends on its parent's answer, being attached to an already-open question does not exempt it.
+2. Split the frontier into batches of at most 4, and re-check independence *within* each candidate
+   batch: if a question depends on another question in the same batch, being asked in the same tool
+   call does not make them simultaneous — move the dependent one to the next batch or round.
+3. Route each batch by shape, and **give your recommended answer** in every case — a question
+   without a default is a question the user has to design from scratch, which defeats the purpose:
+   - **Closed** (a finite, nameable set of 2–4 options) → one `AskUserQuestion` call. The
+     recommended answer is the default option; its one-line reason goes in that option's
+     `description` — do not compress the reason to fit a label.
+   - **Open** (a hypothesis to test, a threshold to size, most `LEG`/`ASS` findings) → the markdown
+     format below. Forcing an open question into fixed options destroys the answer as much as
+     answering it yourself would.
+   - A batch mixing both shapes is split accordingly — one `AskUserQuestion` call for the closed
+     subset, one markdown block for the open one — never force an open question in just to keep a
+     batch homogeneous.
+4. Stop and wait. The answers reshape the tree: settled decisions push the frontier outward. If
+   `AskUserQuestion` returns an empty or unusable answer, that is not a silent yes — re-ask the same
+   question in the next round rather than proceeding on it.
+5. Repeat until the frontier is empty.
 
-Format a round like this:
+Format an open-question round like this:
 
 ```
 ❓ **Q1 — <title>**
