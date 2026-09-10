@@ -16,6 +16,12 @@ trap 'rm -rf "$T"' EXIT
 # désarmé pour toute la suite, sinon chaque cas watch paierait 60s réelles.
 export BULK_CI_STARTUP_DELAY=0
 
+# Identité git pour les commits que `bulk_commit.sh` fait lui-même — un runner CI vierge
+# n'a aucun `user.name`/`user.email` global, `git commit` y échoue et tout le reste
+# (push, PR, watch) est sauté en cascade. Les repos de test sont jetables.
+export GIT_AUTHOR_NAME="bulk-commit-test" GIT_AUTHOR_EMAIL="test@test.invalid"
+export GIT_COMMITTER_NAME="bulk-commit-test" GIT_COMMITTER_EMAIL="test@test.invalid"
+
 fail=0
 check() {
     if [ "$2" = "$3" ]; then
