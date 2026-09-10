@@ -1,4 +1,4 @@
-# Requirements — the norm a story's `## Exigences` table follows
+# Requirements — the norm a story's `## Requirements` table follows
 
 Referenced from the `exigences` field in `SKILL.md`. Read this when writing or reading a
 chantier story's requirements table; the method for *finding* requirements is the skill `grill`.

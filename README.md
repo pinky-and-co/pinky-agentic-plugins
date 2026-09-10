@@ -184,7 +184,8 @@ pinky-agentic-plugins/
 │   │       │   ├── references/
 │   │       │   │   ├── finishing-a-card.md
 │   │       │   │   ├── multi-board.md
-│   │       │   │   └── requirements.md
+│   │       │   │   ├── requirements.md
+│   │       │   │   └── story-template.md
 │   │       │   └── SKILL.md
 │   │       ├── permission-change/
 │   │       │   ├── scripts/

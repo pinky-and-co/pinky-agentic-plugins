@@ -83,7 +83,7 @@ which claims were measured and which were assumed, and the questions nobody aske
 So run the same frontier, and route each question to one of three outcomes:
 
 1. **Answered by the document** → record the decision *and where in the document it came from*.
-2. **Left open by the document** → it becomes a line under `## Items ouverts`, not a question.
+2. **Left open by the document** → it becomes a line under `## Open questions`, not a question.
 3. **Never asked** → this one, and only this one, goes to the user in the next round.
 
 Treat a stated cause the same way: a brief that asserts *why* something is the case states a
@@ -102,15 +102,20 @@ row.
 
 ## What the interview writes
 
-The story file, carrying at minimum:
+The story file, on the fixed template (skill `kanban` § The story file →
+`references/story-template.md`): `## Objective`, `## Scope`, `## Requirements`, `## Open questions`,
+`## Implementation priority`, nothing else. In particular:
 
-- **The objective**, and the constraint that shapes everything else.
-- **`## Exigences`** — the table, in the form the skill `kanban` § Requirements defines: id
+- **`## Objective`** — one line, and the constraint that shapes everything else.
+- **`## Requirements`** — the table, in the form the skill `kanban` § Requirements defines: id
   `{FAM}-{NNNN}-{NN}`, priority, statement, verification criterion. That norm is authoritative; do
   not restate or bend it here.
-- **`## Items ouverts`** — what is knowingly undecided. Declaring the silence is the point; an empty
+- **`## Open questions`** — what is knowingly undecided. Declaring the silence is the point; an empty
   section on a real design is a claim nobody believes.
-- **An ordered implementation priority** — what has to exist first for the rest to be testable.
+- **`## Implementation priority`** — what has to exist first for the rest to be testable.
+
+No dated decision block, no state dump — a closed grill folds into `## Requirements` and
+`## Open questions` (the two rules in `references/story-template.md`).
 
 Every claim carries its status: measured (with what command or test), assumed, or decided by the
 user. Cards then trace back to these ids through their own `exigences` field.

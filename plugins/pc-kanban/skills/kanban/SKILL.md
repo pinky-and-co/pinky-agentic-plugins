@@ -34,20 +34,21 @@ archive (`mv` between column directories).
 
 ## The board's own table (`INDEX.md`)
 
-`INDEX.md` (one per board) carries a `## Board` markdown table — one row per chantier: id,
-objective, Statut. The Statut cell holds **a status, not a journal**: `⚪`, `🟢 actif`,
-`🔴 bloqué par 0015`, or `🟡 partiel` plus a one-line pointer to where the detail actually lives
-("détail story", a `1-todo`/`0-ideas` card name, an archive path). A PR number, a commit hash, or a
-date belongs in the chantier's own story or an ADR — never accreted into the cell itself, which is
-read verbatim by every session that orients on this chantier.
+`INDEX.md` (one per board) carries a `## Board` table — one row per chantier: id, objective, status.
 
-**Cap: 200 characters per Statut cell.** `stop_handoff.py --list-chantiers`'s default (bounded)
-mode enforces this at read time — cells over the cap print truncated with a `… (+N car.)` marker —
-but that protects the pipe, not the source: the table itself stays readable in an editor only if
-the cells are kept short at write time too. Before trimming an over-cap cell, verify every PR/hash/
-date it carries is retrievable elsewhere (the chantier's story, or the PR/commit itself) — a board
-with no git history means a cut fact with nowhere else to live is a real loss, not just a shorter
-read.
+**The status cell is the icon alone** — its legend is at the top of `INDEX.md`. The only text a
+cell may carry is the blocker's chantier number, next to the blocked icon. No pointer, no
+parenthetical, no PR / hash / date — that detail is in the chantier's story and cards, and a
+session that needs it opens the folder. A cell that has grown a clause is over-cap by definition;
+`stop_handoff.py --list-chantiers` truncates at 200 chars at read time, the fix is at write time.
+
+## The story file
+
+A fixed template — `## Objective`, `## Scope`, `## Requirements`, `## Open questions`,
+`## Implementation priority`, nothing else — with two rules that keep it from accreting (no
+session-narrated prose, no struck-through rows). See
+[references/story-template.md](references/story-template.md); read it before writing or pruning a
+story.
 
 ## Card frontmatter
 
