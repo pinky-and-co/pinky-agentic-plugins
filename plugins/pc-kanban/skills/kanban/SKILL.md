@@ -109,9 +109,9 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   critical path a render off the board instead of a hand-maintained list: nothing enumerates what a
   parent needs, every child declares what it serves.
 
-- **`exigences`** — the requirement ids from the chantier's story that this card traces to, as a
+- **`requirements`** — the requirement ids from the chantier's story that this card traces to, as a
   list; `[]` or omitted = none. Orthogonal to `sert`: `sert` is card-to-card filiation (critical
-  path), `exigences` is card-to-requirement traceability, and a card may trace to several
+  path), `requirements` is card-to-requirement traceability, and a card may trace to several
   requirements where `sert` allows only one parent. A requirement id is only valid if the
   chantier's story declares it with a verification criterion — never invent an id.
 

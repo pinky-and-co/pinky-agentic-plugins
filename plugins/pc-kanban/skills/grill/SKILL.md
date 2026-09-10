@@ -118,7 +118,7 @@ No dated decision block, no state dump — a closed grill folds into `## Require
 `## Open questions` (the two rules in `references/story-template.md`).
 
 Every claim carries its status: measured (with what command or test), assumed, or decided by the
-user. Cards then trace back to these ids through their own `exigences` field.
+user. Cards then trace back to these ids through their own `requirements` field.
 
 ## Self-review before writing the table
 

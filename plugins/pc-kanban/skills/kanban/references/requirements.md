@@ -1,6 +1,6 @@
 # Requirements — the norm a story's `## Requirements` table follows
 
-Referenced from the `exigences` field in `SKILL.md`. Read this when writing or reading a
+Referenced from the `requirements` field in `SKILL.md`. Read this when writing or reading a
 chantier story's requirements table; the method for *finding* requirements is the skill `grill`.
 
 Cards trace to requirements; this is what a requirement has to be for the trace to mean anything.
@@ -13,7 +13,7 @@ The method for *finding* them is the skill `grill` — this section is only the 
 | **Atomic** | one capability per requirement — an "and", an "or" or a "without" joining two considerations is two requirements |
 | **Verifiable** | a test, an inspection or a command can settle it; no criterion means no requirement |
 | **Solution-free** | it states the need while more than one design satisfies it — once a design is *chosen*, that is a decision recorded in prose, not a requirement retrofitted to what got built |
-| **Traceable** | a unique id, and cards pointing at it through `exigences` |
+| **Traceable** | a unique id, and cards pointing at it through `requirements` |
 
 **Id: `{FAM}-{NNNN}-{NN}`** — family, the chantier's number, then a sequence **counted per family**
 and never reused (a deleted requirement's number stays burnt, so an old card citing it stays
