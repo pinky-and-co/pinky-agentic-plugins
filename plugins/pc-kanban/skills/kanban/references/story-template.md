@@ -20,13 +20,14 @@ Section headers are English even when the statements are not — they are struct
 prose. `## Requirements` follows [requirements.md](requirements.md) — id format, the five families,
 the four invariants, the table's columns.
 
-## Two rules
+## Three rules
 
 - **No session-narrated prose.** No `## Decisions (grill YYYY-MM-DD)` block, no `## State` dump.
-  When a grill closes, its outcome folds into `## Requirements` and `## Open questions` — a
-  delivered decision's substance is already the verification criterion of its row; anything else
-  worth keeping is an ADR, not a dated paragraph here.
-- **No struck-through rows.** A requirement dropped once its card shipped leaves the table. Git
-  holds why it went.
+  When a grill closes, its outcome folds into `## Requirements` and `## Open questions`.
+- **A delivered requirement leaves the table once the code holds it** — a test whose docstring
+  states it, or a line of the plugin's `SKILL.md` describing the behaviour. The code is the
+  durable form: the board is not versioned, and a chantier is deleted once finished. A row whose
+  durable form cannot be pointed at stays in the table.
+- **A retired requirement is deleted**, never struck through; its id stays burnt.
 
 A story past ~200 lines has accreted prose — prune it back to the template, don't grow the file.
