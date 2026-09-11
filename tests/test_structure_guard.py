@@ -23,8 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "h
 
 import structure_guard as sg  # noqa: E402
 
-# The real pinky-agentic-plugins rule set — a fixture here, not a module constant in
-# structure_guard.py, is the whole point of NFR-0023-24: this is one repo's data, not the code's.
 PLUGIN_RULES = [
     {
         "root": "plugins",
@@ -85,7 +83,6 @@ class TestDecidePluginRoot(TestDecideBase):
         self.assertIsNone(self.decide("pc-core/.mcp.json"))
 
     def test_allows_agents_dir(self):
-        # agents/ was missing from the first draft of this rule — regression guard.
         self.assertIsNone(self.decide("pc-core/agents/reviewer.md"))
 
 
@@ -132,9 +129,6 @@ class TestDecideSkillSubdirs(TestDecideBase):
         self.assertIsNotNone(self.decide("pc-kanban/skills/grill/weird/foo.py"))
 
     def test_denies_flat_file_instead_of_skill_directory(self):
-        # The headline case FR-0023-54 exists for: a flat `skills/<name>.md` file instead of a
-        # `skills/<name>/SKILL.md` directory. Regression guard for the v1 gap (len(rest) >= 3
-        # skipped this 2-segment shape entirely).
         decision = self.decide("pc-kanban/skills/newskill.md")
         self.assertIsNotNone(decision)
         reason = decision["hookSpecificOutput"]["permissionDecisionReason"]
@@ -212,15 +206,6 @@ class TestNRoots(TestDecideBase):
         self.assertIsNone(sg.decide(event, self.repo_root, self.RULES))
 
     def test_degenerate_match_on_a_duplicate_root_does_not_crash_or_deny(self):
-        # A Write directly at `<root>/<unit>` with nothing under it (e.g. a duplicated/redundant
-        # `root` entry) is degenerate — v1 bug returned None from `_matching_rule` on that case
-        # via `return`, which is harmless when it's the only rule but would have skipped the rest
-        # of the list for a real match on a different root. `continue` (not `return`) is the fix.
-        # Under the documented "roots must be disjoint" constraint, two prefixes of the same path
-        # are always ordered by inclusion, so at most one rule can ever match a given file — this
-        # only pins the safety property (no crash, no false deny), it cannot observe `continue`
-        # reaching a second, genuinely different match (that would require nested roots, out of
-        # scope by contract).
         rules = [{"root": "plugins"}, {"root": "plugins"}]
         event = {
             "tool_name": "Write",
@@ -282,10 +267,6 @@ class TestMalformedRuleData(TestDecideBase):
         self.assertIsNone(sg.decide(event, self.repo_root, rules))
 
     def test_non_dict_leaf_subdirs_entry_at_flat_depth_degrades_to_no_constraint(self):
-        # v3 regression: the entry-gate used to test the RAW (unsanitized) value, so a malformed
-        # `leaf_subdirs.<head>` reached the "must be a directory" branch anyway and denied
-        # unconditionally for a 2-segment write — contradicting "malformed = ignored, never
-        # misread". Must behave exactly like `leaf_subdirs` omitting `head` entirely: no decision.
         rules = [
             {
                 "root": "plugins",
@@ -373,9 +354,6 @@ class TestOptIn(unittest.TestCase):
         self.assertEqual(result.stderr.strip(), "")
 
     def test_local_override_beats_an_ancestor_file_placement(self):
-        # NFR-0023-23's opt-in is a settings.pinky.json key like any other: a repo whose own
-        # `plugins/` directory has nothing to do with Claude Code opts out locally, the same way
-        # any settings.pinky.json key is overridden — no separate structural detection needed.
         workspace_root = Path(self._tmp.name)
         (workspace_root / ".claude").mkdir()
         (workspace_root / ".claude" / "settings.pinky.json").write_text(

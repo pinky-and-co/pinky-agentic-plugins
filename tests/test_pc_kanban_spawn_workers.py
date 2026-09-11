@@ -186,8 +186,6 @@ class TestMain(unittest.TestCase):
         self.card_path = (
             "/home/me/ws/_KANBAN/CHANTIER0099-demo/2-selected-for-dev/my-card.md"
         )
-        # keyed by the stop_handoff.py mode flag; the real _hook() runs against this fake
-        # subprocess so its stale-copy guard is exercised too.
         self.hook_stdout = {
             "--card-path": f"{self.card_path}\n",
             "--card-repos": "org/one\norg/two\n",

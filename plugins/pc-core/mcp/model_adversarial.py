@@ -179,11 +179,6 @@ _METHODOLOGY_PATH = (
 )
 _FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
 
-# Stack-specific review guidance lives in a dedicated skill per stack, following the
-# `skills/<skill>/references/review.md` naming. This is a soft convention, not a plugin
-# dependency: pc-core does not depend on pc-craft/pc-snow, it just knows where they put their
-# review reference. Same-marketplace siblings resolve from this module's location; a missing file
-# (the plugin is not installed) degrades to no stack section, exactly like a missing methodology.
 _STACK_SKILLS: dict[str, tuple[str, str]] = {
     "fastapi": ("pc-craft", "fastapi"),
     "streamlit": ("pc-snow", "streamlit"),

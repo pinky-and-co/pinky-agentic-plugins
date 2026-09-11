@@ -297,7 +297,6 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
     out = server.adversarial(task="review this", files=[str(src)])
     # a phrase unique to the FastAPI review reference, not the generic methodology
     assert "N+1 query pattern" in captured["prompt"]
-    # IMP-0023-17 — the answer names the model that produced it, before the verdict
     assert out.startswith("[answered by ")
 
 
@@ -343,8 +342,6 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
 
 class TestKeylessPoolDegrades(unittest.TestCase):
     def test_all_keyless_entries_yield_none_not_raise(self):
-        # ASS-0023-11 — no pool key resolves: run_pool returns None + a message, never an
-        # exception, so the caller (finishing-a-card) can fall back to the `reviewer` agent
         with unittest.mock.patch.object(ma, "resolve_api_key_for", return_value=None):
             result = ma.run_pool([MISTRAL, GLM], "prompt")
         self.assertIsNone(result.entry)

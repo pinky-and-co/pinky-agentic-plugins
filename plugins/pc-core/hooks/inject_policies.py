@@ -29,11 +29,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
-# --- Detection: tool call -> artefact_type(s) it implicates -----------------
-# A single Write/Edit on a code file implicates SEVERAL artefact_types at
-# once (identifiers+docstrings in one language, inline comments in another)
-# — unlike commit/PR events, which implicate exactly one.
-
 CODE_EXTENSIONS = {".py", ".sql", ".sh", ".ts", ".js", ".go", ".rs", ".java"}
 
 
@@ -107,7 +102,7 @@ def main() -> None:
     repo_root = resolve_repo_root(project_dir, tool_input.get("file_path"))
     policies = load_policies(repo_root)
     if policies is None:
-        return  # no settings.pinky.json for this repo — nothing to inject
+        return
 
     lines = []
 

@@ -611,17 +611,6 @@ def build_phase1_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) -> st
     return "\n\n".join(parts)
 
 
-# --- model layer: the prompt + its output normalisation --------------------------------------
-#
-# Ce module n'appelle jamais de modèle (NFR-0026-03) : il porte seulement le *texte* du prompt de
-# jugement sémantique et le parsing de ce qu'un modèle renvoie. C'est le corps du skill qui passe
-# `PHASE1_TASK` + un brief au tool MCP `offline` / `panel`, puis redonne la réponse ici.
-#
-# `PHASE1_TASK` est repris verbatim du moteur déprécié (`pinky_reconcile.py`). Son framing exact est
-# précisément ce que l'oracle reconcile (`evals/reconcile_oracle.py`) protège — l'incident de
-# rubber-stamp des 2026-07-16/17 vient d'un réajustement à l'œil. Ne pas le reformuler sans l'oracle
-# vert sur les deux fixtures.
-
 PHASE1_TASK = (
     "Tu réconcilies le tableau de features d'un repo avec le code qui est censé l'implémenter.\n"
     "Le code fait FOI. Le tableau est le document suspect.\n"

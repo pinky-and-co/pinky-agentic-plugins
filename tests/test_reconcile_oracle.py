@@ -37,7 +37,6 @@ def _case(must_flag=(), must_not_flag=()):
 
 class TestScorer(unittest.TestCase):
     def test_rubber_stamp_is_a_recall_fail(self):
-        # the 2026-07-17 failure: model returns RAS on a repo with real broken promises
         answer = "VERDICT: 0 diverge, 0 manquant"
         s = ro.score_case(
             _case(must_flag=["api_integration", "compute_pool", "grant"]), answer
@@ -74,7 +73,6 @@ class TestScorer(unittest.TestCase):
         self.assertTrue(s.passed)
 
     def test_object_name_inside_a_compound_word_is_not_a_flag(self):
-        # regression (2026-07-17): "database" substring-matched inside "database-scoped ... grant"
         answer = (
             "DIVERGE: `grant` is a stub\n"
             "Ligne corrigée: `| grant | ⚠ | database-scoped privilege grant |`\n"

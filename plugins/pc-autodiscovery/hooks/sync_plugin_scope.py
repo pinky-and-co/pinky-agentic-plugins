@@ -145,7 +145,7 @@ def handle_cwd_changed(payload: dict) -> None:
     state = load_state(session_id)
     session_dir = session_open_path(state)
     if session_dir is None:
-        return  # sans le path d'ouverture on ne peut pas viser le bon settings.local.json
+        return
     newly_enabled = activate_for_path(
         Path(new_cwd), state, session_dir=session_dir, descent=True
     )

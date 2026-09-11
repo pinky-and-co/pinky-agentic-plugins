@@ -38,9 +38,6 @@ def test_managed_block_hooks_have_no_wallclock():
 
 
 def test_statusline_is_total_and_never_raises():
-    # The status line must render on a bare/garbage payload — an error blanks the whole bar.
-    # build_lines() covers the missing-field floor; main()'s own try/except (exercised via
-    # subprocess in tests/test_statusline.py) covers type-poisoned fields on top of that.
     import statusline as sl
 
     lines = sl.build_lines({})

@@ -33,8 +33,6 @@ from pathlib import Path
 MAX_OUTPUT_LINES = 20
 _CHECKERS_SUBDIR = ("scripts", "hooks")
 
-# Universal: no files:/types: filter on these two in a typical .pre-commit-config.yaml — they scan
-# any text file. The other two are path-scoped exactly like their pre-commit `files:` regex.
 _UNIVERSAL_CHECKERS = ("check_zws.py", "check_forbidden_keywords.py")
 
 

@@ -36,7 +36,6 @@ class _Base(unittest.TestCase):
         (self.open_path / ".claude").mkdir(parents=True)
         (self.open_path / "ops").mkdir()
 
-        # installed_plugins.json — pointed at a fixture, never the real one
         self.installed = self.root / "installed_plugins.json"
         self._orig_installed = psl.INSTALLED_PLUGINS_PATH
         psl.INSTALLED_PLUGINS_PATH = self.installed

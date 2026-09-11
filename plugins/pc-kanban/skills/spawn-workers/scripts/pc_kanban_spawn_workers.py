@@ -54,13 +54,6 @@ _USAGE = "Usage: pc_kanban_spawn_workers.py [--dry-run] <chantier-id> <card-slug
 _ID_RE = re.compile(r"[0-9]{3,4}")
 _SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
-# the card `model:` alias -> the `claude --model` value the worker boots on. The card decides the
-# tier, verbatim — a `haiku` card runs on haiku, not "at least haiku". `[1m]` is the long-context
-# variant, used wherever it exists so a big card does not compact mid-work; `haiku` has none (the
-# `haiku[1m]` alias is a hard 400, measured 2026-09-09). `fable[1m]` is assumed (fable is
-# 1M-native) — if it 400s like haiku's, `claude` prints the error in the fresh terminal and the
-# worker never starts: a loud failure, not a silent wrong model. A value not in this map is a
-# malformed card and aborts the spawn before any command is built.
 _MODEL_ARG = {
     "haiku": "haiku",
     "sonnet": "sonnet[1m]",
@@ -240,11 +233,6 @@ def build_claude_command(
         One POSIX shell string — for a sonnet card:
         claude --name pinky-bootstrap-fix --model "sonnet[1m]" --advisor "opus" "/pc-kanban:chantier 0025 fix"
     """
-    # A multiplexer types this line into a fresh shell. `name` holds an unconstrained repo
-    # basename → shlex.quote (single-quote) neutralises `$`/backtick/quote. Everything else —
-    # the `[1m]` model variant (a glob bracket zsh would choke on unquoted), the advisor alias,
-    # the slash-command arg — is a value from our own literal maps or a regex-validated id/slug,
-    # so a plain double-quote is enough and keeps the line readable inside an outer shlex.join.
     parts = ["claude", "--name", shlex.quote(name)]
     model = model_arg(card_model)
     if model:

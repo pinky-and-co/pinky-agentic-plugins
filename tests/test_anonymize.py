@@ -132,9 +132,6 @@ def test_xml_masks_leaf_tags_by_local_name_and_skips_containers(tmp_path):
     assert "<peci:Legal_Name>" in out  # container tag untouched
 
 
-# ── report formatting — LEG-0023-03: no real PII in returned text ────────────
-
-
 def test_detect_report_never_contains_a_sampled_value():
     findings = [
         anonymize.Finding("clients.csv", "email", "detected EMAIL_ADDRESS (12/15)"),

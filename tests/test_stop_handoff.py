@@ -267,8 +267,6 @@ class TestRemoteSlug(unittest.TestCase):
 
 class TestSecretScrubImport(unittest.TestCase):
     def test_scrub_is_imported_from_secret_patterns_not_redefined(self):
-        # stop_handoff.py must not carry its own copy — full coverage of the patterns
-        # themselves lives in test_secret_patterns.py.
         import pc_kanban_secret_patterns
 
         self.assertIs(sh.scrub, pc_kanban_secret_patterns.scrub)
@@ -308,9 +306,6 @@ class TestDeclaredKanbans(unittest.TestCase):
             self.assertEqual(sh.declared_kanbans(root), [shared / "_KANBAN"])
 
     def test_real_code_workspace_files_are_jsonc_not_strict_json(self):
-        # A real *.code-workspace carries `//` banner comments (path warnings, mount rationale) —
-        # json.loads alone would raise, get caught, and silently return []. Found live 2026-08-20
-        # against the author's own pinky.code-workspace: 0 boards instead of 2.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shared = root / "shared"
@@ -489,11 +484,6 @@ class TestBoundedBoardLines(unittest.TestCase):
             self.assertEqual(sh.bounded_board_lines(kb), [])
 
     def test_escaped_pipe_in_status_cell_does_not_shift_columns(self):
-        # A `\|` inside a code span (GFM's own escaping convention for a literal pipe in a table
-        # cell) must not count as a column delimiter — splitting on it shifts every cell after it,
-        # so a naive cap targets the wrong field instead of the real Statut tail. The tail is kept
-        # long enough (> MAX_STATUS_CHARS) to force the capping path — a short cell hides this bug
-        # entirely, since an uncapped row is returned verbatim regardless of how it was split.
         with tempfile.TemporaryDirectory() as tmp:
             content = "🟢 actif — `pinky docs serve\\|status\\|uninstall`. " + "x" * 220
             index = (

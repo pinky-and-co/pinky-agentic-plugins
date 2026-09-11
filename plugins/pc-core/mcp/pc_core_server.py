@@ -148,10 +148,6 @@ def adversarial(
     if not entries:
         return "[adversarial] BLOCKED — no candidate model in the pool."
 
-    # Shared methodology with the `reviewer` agent (`agents/reviewer.md`) — same review guidelines
-    # and output format regardless of which model reviews, its own "Adversarial mode" section
-    # always active here (this tool exists specifically for that stance). A stack checklist is
-    # folded in for the pool model, which has no `Skill` tool to load it as the agent would.
     resolved_stack = stack or model_adversarial.detect_stack(files)
     methodology = model_adversarial.load_methodology(resolved_stack)
     adversarial_task = (methodology + "\n\n" if methodology else "") + task

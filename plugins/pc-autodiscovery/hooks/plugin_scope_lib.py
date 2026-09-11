@@ -174,11 +174,6 @@ def enable_plugin_local(plugin_id: str, *, cwd: Path) -> EnableResult:
     return EnableResult(False, bool(_ALREADY_ENABLED_RE.search(stderr)), stderr)
 
 
-# --- Per-session state (which plugin ids we've already activated) -----------
-# Kept outside any repo's .claude/ on purpose — this is ephemeral session
-# bookkeeping, not project configuration, and never needs a .gitignore entry.
-
-
 def state_path(session_id: str) -> Path:
     return STATE_DIR / f"{session_id}.json"
 
@@ -215,12 +210,6 @@ def clear_state(session_id: str) -> None:
         backup_path(session_id).unlink()
     except FileNotFoundError:
         pass
-
-
-# --- Backup / restore of the single settings.local.json for this session ---
-# A real file copy, not a string embedded in the state JSON: settings.local.json
-# stays inspectable as itself on disk, and there's no JSON-in-JSON encoding to
-# get wrong or to make the state file balloon if settings.local.json ever does.
 
 
 def backup_settings_local(settings_local: Path, session_id: str) -> bool:

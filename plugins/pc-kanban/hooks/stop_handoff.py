@@ -37,9 +37,6 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).parent))
 from pc_kanban_secret_patterns import scrub  # noqa: E402
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
-# crashes with UnicodeEncodeError. Same fix as setup/__init__.py, applied here because this script
-# runs standalone (invoked directly by the harness) and never imports that package.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -51,20 +48,12 @@ BLOCK_END = "<!-- auto-handoff:end -->"
 ANTI_SECRETS = "never include secrets / credentials / internal URLs in a handoff"  # pragma: allowlist secret
 MAX_FILES = 20  # cap the changed-files list so a huge diff does not bloat the card
 
-# `--list-agent-logs` : bound of the cross-agent journal listing (`hook-output-invariants.md` §
-# bounded output). Deliberately a recency CAP, not a day-window: dating the filter would need a
-# clock, and a hook that writes a managed block must stay a pure function of state — relaxing that
-# guard for a simple listing would be a bad trade. The date stays readable in each entry's name: the
-# agent judges freshness itself, and an org whose journal has gone quiet stays visible instead of
-# disappearing from the listing.
 MAX_AGENT_LOGS = 12
 
 # `--list-unreviewed-done` : same bounded-output guard. The tail count keeps the pre-convention
 # backlog visible as a number without pasting the whole of it on every `/chantier` intake.
 MAX_UNREVIEWED_DONE = 10
 
-# `--list-chantiers` (default mode) : same bounded-output guard, applied per Statut cell rather
-# than per listing — a chantier's whole narrative history tends to accrete there (see FR-0025-12).
 MAX_STATUS_CHARS = 200
 
 
@@ -577,28 +566,17 @@ def refresh_cards(cards: list[Path], ctx: dict) -> None:
 
 
 def main() -> int:
-    # `--list-kanbans` / `--list-chantiers` / `--list-unreviewed-done` / `--list-agent-logs` : CLI
-    # modes for consumers that need the SAME board resolution as the hook — first among them the
-    # `/chantier` skill's
-    # auto-context. One binary to declare in `allowed-tools`, zero glob to quote, and the resolution
-    # (env > *.code-workspace folders[] > proximity) is tested once instead of reimplemented in shell.
     if "--list-kanbans" in sys.argv[1:]:
         for kanban in find_kanbans(Path(os.getcwd())):
             print(kanban)
         return 0
 
     if "--list-agent-log-dirs" in sys.argv[1:]:
-        # The path, not the contents — a consumer building a write allow-list (guard.py,
-        # FR-0025-27) needs the directory even before the first journal entry creates it,
-        # so this is deliberately unfiltered by `is_dir()` unlike `--list-agent-logs`.
         for kanban in find_kanbans(Path(os.getcwd())):
             print(agent_log_dir(kanban))
         return 0
 
     if sys.argv[1:2] == ["--card-path"]:
-        # Resolve a card by chantier id + slug through the SAME board resolution as the hook,
-        # for a consumer that must not reimplement the glob (spawn-workers, FR-0025-19). Prints
-        # the one match; 0 or >1 is a stderr message and exit 1, never a guess.
         cid, slug = sys.argv[2], sys.argv[3]
         hits = [
             c
@@ -632,9 +610,7 @@ def main() -> int:
         return 0
 
     if "--list-chantiers" in sys.argv[1:]:
-        full = (
-            "--full" in sys.argv[1:]
-        )  # verbatim `INDEX.md` — `yt` needs the full status prose
+        full = "--full" in sys.argv[1:]
         if not full:
             print(CARDS_LEGEND)
         for kanban in find_kanbans(Path(os.getcwd())):

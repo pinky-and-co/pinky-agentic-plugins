@@ -47,10 +47,6 @@ RED_BG = "\033[41;30m"  # red background, white text ->  "alert" effect
 
 SEP = f"  {GREY}·{RESET}  "
 
-# Headroom (optional third-party tool, headroomlabs-ai/headroom) proxies requests through a local
-# port and serves live counters there. Nothing listens when Headroom is not running — the line then
-# never renders. Scope is the proxy's own lifetime, which `headroom wrap claude` ties to one Claude
-# Code session.
 _HEADROOM_STATS_URL = "http://127.0.0.1:8787/stats"
 # A status line repaints on every turn, so the HTTP call is both hard-bounded and memoized: a hung
 # proxy costs one timeout, not one per paint.
@@ -63,10 +59,6 @@ _HEADROOM_CACHE = os.path.join(
 # Minimum blank gap between a row's left and right groups, and the gutter added past the widest
 # natural row to place the shared right-hand column.
 _MIN_GAP = 10
-# A braille blank (U+2800): an invisible, non-whitespace glyph. Used two ways below — as the
-# spacer row between content rows (the host collapses a row that is empty or whitespace-only, both
-# tried), and as row 0's left anchor (a row that starts with a space gets left-trimmed, which
-# would drag the version string away from its column).
 _BLANK = "⠀"
 _SPACER_ROW = _BLANK
 
@@ -583,10 +575,6 @@ def build_lines(data: dict) -> list[str]:
         cache_c = usage.get("cache_creation_input_tokens", 0) or 0
         cache_r = usage.get("cache_read_input_tokens", 0) or 0
         hit_rate = (cache_r / total_input_tokens * 100) if total_input_tokens > 0 else 0
-        # At the very beginning of a session (nothing to reuse yet, cache not
-        # yet primed), a low rate is normal: no alert.
-        # The cache only becomes a meaningful signal once data has been
-        # written to the cache (cache_c > 0) for reuse.
         warmed_up = cache_c > 0 or cache_r > 0
         color = _color_for_hit_rate(hit_rate, warmed_up)
         cache_txt = f"{color}{hit_rate:.0f}%{RESET}"

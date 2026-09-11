@@ -46,16 +46,11 @@ def test_mini_bar_clamps_out_of_range_pct():
 def test_short_model_oracle():
     assert sal._short_model("claude-haiku-4-5-20251001") == "Haiku 4.5"
     assert sal._short_model("claude-sonnet-5") == "Sonnet 5"
-    # Diverges from statusline.py's _short_model on the falsy case: "?" here, None there —
-    # each module renders its own placeholder inline, so this is what THIS module actually does.
     assert sal._short_model(None) == "?"
     assert sal._short_model("") == "?"
 
 
 def test_visible_len_ignores_ansi_but_does_not_width_correct_emoji():
-    # Unlike statusline.py's _visible_len, this one has no wide-char table — every non-escaped
-    # Python character counts as 1, emoji included. Documenting the actual behaviour, not the
-    # other module's: the two are independent implementations, never shared, never compared.
     assert sal._visible_len(f"{sal.RED}ab{sal.RESET}") == 2
     assert sal._visible_len("🤖") == 1
     assert sal._visible_len("ab") == 2

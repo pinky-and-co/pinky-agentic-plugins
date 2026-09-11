@@ -93,7 +93,6 @@ class TestTierFor(unittest.TestCase):
         self.assertEqual(rc.tier_for(_diff("src/auth.py", 3)), "opus")
 
     def test_two_diffs_two_tiers(self):
-        # FR-0023-26 — the tier is a function of the diff, not a human pick
         small = rc.tier_for(_diff("src/util.py", 10))
         big = rc.tier_for(_diff("src/core.py", 600))
         self.assertNotEqual(small, big)

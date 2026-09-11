@@ -410,8 +410,6 @@ def test_build_lines_rate_limit_warning_line_appears_above_90pct():
 
 
 def test_rate_limit_labels_are_english_no_profile_language_leak():
-    # NFR-0023-01: a public plugin renders no author-locale string. The seven-day window is
-    # "Weekly", never "Hebdo".
     data = {"rate_limits": {"seven_day": {"used_percentage": 99, "resets_at": None}}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
     assert any("Weekly: 99%" in ln for ln in stripped)

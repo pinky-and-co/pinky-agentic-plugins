@@ -44,9 +44,6 @@ MAX_REPORTED_LINES = (
     10  # bound the line list in the deny reason (hook output stays bounded)
 )
 
-# Bash commands that dump a file's CONTENT into the context — the same egress as a Read. Covering
-# them closes the frictionless bypass; grep/awk/interpreters stay out of scope (this guard stops
-# the accident, not determined extraction).
 _READ_CMDS = {"cat", "head", "tail", "less", "more", "strings"}
 MAX_BASH_TARGETS = 8  # bound the per-call scan cost
 
