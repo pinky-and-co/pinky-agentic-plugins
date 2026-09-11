@@ -17,8 +17,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# substrings in a changed file's path that mark it security-sensitive — a diff touching one of
-# these is never routed below opus-tier, however small
 _SECURITY_MARKERS = (
     ".env",
     "auth",
@@ -38,10 +36,8 @@ _TEST_PATH_RE = re.compile(
 )
 _DIFF_HEADER_RE = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+)$")
 
-# tier_for thresholds — a first cut, meant to be tuned against real runs (story § Items ouverts).
-# All comparisons are strict ``>``.
-_NO_TEST_MIN_LINES = 50  # below this a testless change is too small to flag
-_UNDERTESTED_OPUS_LINES = 150  # testless AND bigger than this → top tier
+_NO_TEST_MIN_LINES = 50
+_UNDERTESTED_OPUS_LINES = 150
 _OPUS_LINES = 400
 _SONNET_LINES = 80
 _SONNET_FILES = 5

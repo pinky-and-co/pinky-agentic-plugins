@@ -1,5 +1,3 @@
-# Cortex AI wrapper with semantic cache, model routing, and token compression.
-# Co-authored with CoCo
 """Cortex AI wrapper with semantic cache, model routing, and token compression."""
 
 from __future__ import annotations
@@ -91,8 +89,6 @@ class PinkyAI:
             self._validate_qualified(cache_table) if cache_table else None
         )
         self._similarity_threshold = similarity_threshold
-        # None → cache entries never expire (lookup ignores age). A positive value bounds
-        # both the lookup window and purge_expired().
         self._cache_ttl_seconds = cache_ttl_seconds
         self._routing = routing or ROUTING_RULES
         self._max_tokens = max_tokens
@@ -107,8 +103,6 @@ class PinkyAI:
         for part in name.split("."):
             validate_identifier(part)
         return name
-
-    # ── Public API ───────────────────────────────────────────────────────────
 
     def complete(
         self,
@@ -154,7 +148,6 @@ class PinkyAI:
         Raises:
             RuntimeError: If ``from_file`` is set on a non-Cortex backend.
         """
-        # AI_EXTRACT wants [[field, question], …] pairs — keep the descriptions.
         response_format = [[key, desc] for key, desc in schema.items()]
         if self._backend == "cortex":
             self._set_query_tag()
@@ -196,7 +189,6 @@ class PinkyAI:
             row = (
                 self._session.range(1)
                 .select(
-                    # AI_CLASSIFY returns {"labels": [<label>]} (plural array), not {"label": …}.
                     ai_classify(lit(text), parse_json(lit(categories_json)))["labels"][
                         0
                     ].cast("string")
@@ -219,7 +211,6 @@ class PinkyAI:
             self._set_query_tag()
             from snowflake.snowpark.functions import ai_filter, lit
 
-            # AI_FILTER takes a single natural-language predicate, not (text, condition).
             predicate = (
                 f"Text: {text}\nCondition: {condition}\n"
                 f"Does the text satisfy the condition?"
@@ -276,7 +267,6 @@ class PinkyAI:
             msg = "parse_document requires backend='cortex'"
             raise RuntimeError(msg)
         self._set_query_tag()
-        # AI_PARSE_DOCUMENT takes a FILE (via TO_FILE), not a string path.
         from snowflake.snowpark.functions import ai_parse_document, to_file
 
         row = (
@@ -296,8 +286,6 @@ class PinkyAI:
             self._set_query_tag()
             from snowflake.snowpark.functions import call_builtin, lit
 
-            # COUNT_TOKENS(model, text) — AI_COUNT_TOKENS returns NULL. The model must
-            # support token counting (mistral-*, llama-*; claude-* is rejected).
             row = (
                 self._session.range(1)
                 .select(
@@ -308,8 +296,6 @@ class PinkyAI:
             return int(row[0])
 
         return len(text) // 4
-
-    # ── Semantic cache ───────────────────────────────────────────────────────
 
     def _cache_lookup(self, prompt: str) -> str | None:
         """Query cache table for a semantically similar, non-expired prompt."""
@@ -324,8 +310,6 @@ class PinkyAI:
         )
 
         table = self._session.table(self._cache_table)
-        # TTL pre-filter: drop entries older than the window before scoring, so a stale
-        # response is never returned (and never wins the similarity sort).
         if self._cache_ttl_seconds is not None:
             cutoff = call_builtin(
                 "DATEADD",
@@ -411,8 +395,6 @@ class PinkyAI:
         )
         return int(result.rows_deleted)
 
-    # ── Token compression ────────────────────────────────────────────────────
-
     def _compress_history(self, history: list[dict[str, str]]) -> list[dict[str, str]]:
         """Summarise the oldest 2/3 of history when total exceeds max_tokens."""
         total_text = " ".join(m["content"] for m in history)
@@ -438,15 +420,11 @@ class PinkyAI:
             *recent_part,
         ]
 
-    # ── QUERY_TAG ────────────────────────────────────────────────────────────
-
     def _set_query_tag(self) -> None:
         """Set structured JSON QUERY_TAG on the session before a Cortex call."""
         if not self._query_tag or not self._session:
             return
         self._session.query_tag = json.dumps(self._query_tag)
-
-    # ── Backend dispatch ─────────────────────────────────────────────────────
 
     def _build_messages(
         self,
@@ -514,7 +492,7 @@ class PinkyAI:
             url = "https://api.groq.com/openai/v1/chat/completions"
             headers = {"Authorization": f"Bearer {self._api_key}"}
             local_model = model
-        else:  # task — EAI direct
+        else:
             url = f"{self._base_url}/v1/chat/completions"
             headers = {"Authorization": f"Bearer {self._api_key}"}
             local_model = model

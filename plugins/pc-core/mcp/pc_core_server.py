@@ -116,8 +116,6 @@ def adversarial(
     files = files or []
     override = model_adversarial.resolve_model(model)
 
-    # an unrecognised tier string would silently rank 0 in select_for_delegation (all entries
-    # qualify) — ignore it and fall to the default selection instead
     resolved_tier = tier if tier in model_adversarial._TIER_RANK else None
     if resolved_tier is None and diff:
         try:
@@ -132,8 +130,6 @@ def adversarial(
             {**model_adversarial._DEFAULT_POOL[0], "model": override, "name": override}
         ]
     elif resolved_tier:
-        # delegation selection is free-first and includes offline; this tool has no offline path,
-        # so keep only the HTTP entries
         entries = [
             e
             for e in model_adversarial.select_for_delegation(
@@ -157,7 +153,7 @@ def adversarial(
     if pool_result.entry is None:
         return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
     response = pool_result.result
-    assert isinstance(response, dict)  # guardrail for mypy
+    assert isinstance(response, dict)
     content = model_adversarial.extract_content(response)
     return f"[answered by {pool_result.entry['name']}]\n\n{content}"
 

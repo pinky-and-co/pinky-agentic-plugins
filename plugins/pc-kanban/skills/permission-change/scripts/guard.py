@@ -66,9 +66,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
-# crashes with UnicodeEncodeError. Reconfigure standalone, since this script runs as a subprocess
-# and cannot rely on a caller having already fixed the stream encoding.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -76,11 +73,8 @@ if sys.platform == "win32":
 STATE_ENV = "PC_GUARD_STATE"
 DEFAULT_STATE_REL = ".claude/.guard-state.json"
 
-# Tools whose target path `freeze` locks to the frozen scope. Bash is handled by `careful`, not here.
 FREEZE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
-# Curated destructive-command catalogue (label, pattern). Labels surface in the confirm prompt.
-# Tunable on purpose — kept readable so a profile author can extend it for their stack.
 _DESTRUCTIVE: list[tuple[str, re.Pattern[str]]] = [
     ("rm -rf", re.compile(r"\brm\s+(?:-\w*[rf]\w*\s+)+", re.I)),
     (
@@ -115,9 +109,6 @@ _DESTRUCTIVE: list[tuple[str, re.Pattern[str]]] = [
     ("sudo", re.compile(r"\bsudo\b")),
     (
         "git commit --no-verify / bypass signing",
-        # \bverify\b alone would false-positive on ordinary commit messages ("fix: verify the
-        # thing") — the flag forms only. `-c commit.gpgsign=false` is the config-override escape
-        # hatch alongside --no-gpg-sign; git allows either order around -c.
         re.compile(r"--no-verify|--no-gpg-sign|-c\s+commit\.gpgsign=false", re.I),
     ),
 ]
@@ -142,9 +133,6 @@ CLAUDE_DIR_HAND_EDITED = {
 }
 
 CLAUDE_DIR_HAND_EDITED_PREFIXES = {".claude/memory"}
-
-
-# ── state ─────────────────────────────────────────────────────────────────────
 
 
 def project_root(event: dict | None = None) -> Path:
@@ -206,9 +194,6 @@ def save_state(path: Path, state: dict) -> None:
     )
 
 
-# ── enforcement primitives ─────────────────────────────────────────────────────
-
-
 def is_destructive(command: str) -> str | None:
     """Return the label of the first destructive pattern the command matches, else None."""
     for label, pattern in _DESTRUCTIVE:
@@ -239,7 +224,7 @@ def generated_tree_violation(target: str, root: Path) -> str | None:
     try:
         rel = tgt.relative_to(root.resolve())
     except ValueError:
-        return None  # outside the workspace root entirely — the outside-scope guard's concern
+        return None
     if rel.as_posix() in CLAUDE_DIR_HAND_EDITED:
         return None
     if any(rel.is_relative_to(Path(p)) for p in CLAUDE_DIR_HAND_EDITED_PREFIXES):
@@ -336,7 +321,7 @@ def board_dirs(event: dict, root: Path) -> BoardDirs:
                 [sys.executable, str(_STOP_HANDOFF), mode],
                 capture_output=True,
                 text=True,
-                timeout=3,  # a plain directory listing; two of these + the git check stay < 10s
+                timeout=3,
                 cwd=cwd,
                 check=False,
             )
@@ -436,14 +421,10 @@ def decide(event: dict, root: Path) -> dict | None:
     if tool in FREEZE_TOOLS:
         target = target_path(tool, tool_input)
         if target:
-            # Standing invariants first — neither is session-scoped, so neither must be reachable
-            # through a freeze whose own scope happens to include what they close.
             message = generated_tree_violation(target, root)
             if message:
                 return _decision("deny", message)
 
-            # `deny` is an explicit blocklist — it wins even over a board dir, and it is a cheap
-            # local check, so it runs before the board carve-out's subprocess.
             if state.get("deny"):
                 scope = denied_violation(target, state["deny"], root)
                 if scope:
@@ -453,9 +434,6 @@ def decide(event: dict, root: Path) -> dict | None:
                         f"Lift it with `/permission-change deny off`.",
                     )
 
-            # Board dirs resolve lazily and once — the subprocess only runs when a guard would
-            # otherwise fire (an out-of-scope target, or a freeze escape), and both paths share
-            # the one resolution.
             memo: list[BoardDirs] = []
 
             def board() -> BoardDirs:
@@ -472,9 +450,7 @@ def decide(event: dict, root: Path) -> dict | None:
             if message:
                 if on_board():
                     return None
-                if (
-                    not board().resolved
-                ):  # resolution failed — never fail closed (advisor #3)
+                if not board().resolved:
                     return _decision("ask", _OUT_OF_SCOPE_ASK.format(target=target))
                 if in_git_repo(target, root):
                     return _decision("deny", message)
@@ -491,9 +467,6 @@ def decide(event: dict, root: Path) -> dict | None:
     return None
 
 
-# ── hook mode ───────────────────────────────────────────────────────────────--
-
-
 def run_hook() -> int:
     """Read the PreToolUse event from stdin, emit a decision when one applies, never raise."""
     try:
@@ -502,14 +475,11 @@ def run_hook() -> int:
         return 0
     try:
         decision = decide(event, project_root(event))
-    except Exception:  # a guard must never block a tool call on its own bug
+    except Exception:
         return 0
     if decision is not None:
         print(json.dumps(decision))
     return 0
-
-
-# ── ctl mode (skills) ────────────────────────────────────────────────────────
 
 
 def _onoff(arg: str | None, default: bool = True) -> bool:

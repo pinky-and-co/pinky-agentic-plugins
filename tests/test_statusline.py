@@ -24,9 +24,6 @@ sys.path.insert(0, str(HOOKS))
 import statusline as sl  # noqa: E402
 
 
-# --- small pure helpers -------------------------------------------------------------------
-
-
 def test_color_for_pct_thresholds():
     assert sl._color_for_pct(0) == sl.GREEN
     assert sl._color_for_pct(49) == sl.GREEN
@@ -37,13 +34,11 @@ def test_color_for_pct_thresholds():
 
 
 def test_color_for_hit_rate_not_warmed_up_is_always_dim():
-    # Cache not primed yet (no cache_creation/cache_read) — a low rate is expected, not a signal.
     assert sl._color_for_hit_rate(0, warmed_up=False) == "⚪️ " + sl.DIM
     assert sl._color_for_hit_rate(99, warmed_up=False) == "⚪️ " + sl.DIM
 
 
 def test_color_for_hit_rate_warmed_up_thresholds():
-    # Inverted vs. context %: here a LOW rate is the problem (more fresh tokens = higher cost).
     assert sl._color_for_hit_rate(29, warmed_up=True) == "🔴 " + sl.RED
     assert sl._color_for_hit_rate(30, warmed_up=True) == "🟡 " + sl.YELLOW
     assert sl._color_for_hit_rate(59, warmed_up=True) == "🟡 " + sl.YELLOW
@@ -51,7 +46,6 @@ def test_color_for_hit_rate_warmed_up_thresholds():
 
 
 def test_build_bar_oracle():
-    # 40% of a 10-char bar = 4 filled, 6 empty, wrapped in the pct's own color (green below 70).
     assert sl._build_bar(40, width=10) == (
         f"{sl.GREEN}{'█' * 4}{sl.RESET}{sl.DIM}{'░' * 6}{sl.RESET}"
     )
@@ -71,27 +65,21 @@ def test_short_model_oracle():
 
 def test_visible_len_ignores_ansi_and_counts_emoji_as_wide():
     assert sl._visible_len(f"{sl.RED}ab{sl.RESET}") == 2
-    # An emoji in the "main emoji" wide range counts as 2 columns, matching real terminal rendering.
     assert sl._visible_len("🤖") == 2
     assert sl._visible_len("ab") == 2
 
 
 def test_render_flex_ends_the_right_group_at_right_edge():
-    # left "L" (1 col) + right "R" (1 col), right_edge 20 -> 18 spaces, right group ends at col 20.
     assert (
         sl._render_flex(["L"], ["R"], right_edge=20, min_gap=3) == "L" + " " * 18 + "R"
     )
 
 
 def test_render_flex_holds_the_right_column_when_the_left_is_empty():
-    # No left content -> the right group still ends at right_edge; a shorter left just means more
-    # padding. This is what removes the need for a spacer placeholder on line 0.
     assert sl._render_flex([], ["R"], right_edge=20, min_gap=3) == " " * 19 + "R"
 
 
 def test_render_flex_degrades_to_min_gap_when_groups_do_not_fit():
-    # left+right already wider than right_edge -> the gap floors at min_gap, the row overflows
-    # rather than the two groups overlapping.
     assert (
         sl._render_flex(["x" * 15], ["y" * 15], right_edge=20, min_gap=4)
         == "x" * 15 + " " * 4 + "y" * 15
@@ -103,8 +91,6 @@ def test_render_flex_without_right_parts_returns_left_only():
 
 
 def test_content_widths_takes_max_per_column_not_per_row():
-    # Row 1: left 20 / right 43 ; row 2: left 50 / right 13. max_left and max_right are measured
-    # separately so every row's right group can sit at one consistent column.
     specs = [(["x" * 20], ["y" * 43]), (["x" * 50], ["y" * 13])]
     assert sl._content_widths(specs) == (50, 43)
 
@@ -151,9 +137,7 @@ def test_count_subagents_counts_only_matching_files(tmp_path):
     subagents_dir.mkdir(parents=True)
     (subagents_dir / "agent-a.jsonl").write_text("", encoding="utf-8")
     (subagents_dir / "agent-b.jsonl").write_text("", encoding="utf-8")
-    (subagents_dir / "agent-a.meta.json").write_text(
-        "{}", encoding="utf-8"
-    )  # not counted
+    (subagents_dir / "agent-a.meta.json").write_text("{}", encoding="utf-8")
     assert sl._count_subagents(str(transcript), "sess-1") == 2
 
 
@@ -167,8 +151,6 @@ def test_count_subagents_missing_inputs_is_none():
     assert sl._count_subagents("", "sess-1") is None
     assert sl._count_subagents("/x.jsonl", "") is None
 
-
-# --- Headroom net indicator -----------------------------------------------------------------
 
 import pytest as _pytest  # noqa: E402
 
@@ -240,7 +222,6 @@ def test_headroom_net_none_on_incomplete_or_poisoned_payload(payload):
 
 
 def test_headroom_net_none_when_it_exactly_breaks_even():
-    # No line beats a line saying "0" — the reader learns nothing from a wash.
     assert sl._headroom_net(_stats(500, 500, 1000, busts=1)) is None
 
 
@@ -275,7 +256,6 @@ def test_build_lines_renders_the_headroom_row_when_the_proxy_answers(monkeypatch
         "Headroom 🤑" in ln and "12%" in ln and "1336k tokens saved" in ln
         for ln in stripped
     )
-    # its own row, never appended to the context-window row
     assert not any("Context window" in ln and "Headroom" in ln for ln in stripped)
 
 
@@ -286,14 +266,11 @@ def test_build_lines_omits_the_headroom_row_when_the_proxy_is_down():
     assert not any("Headroom" in ln for ln in stripped)
 
 
-# --- build_lines() end-to-end oracles -------------------------------------------------------
-
-
 def _strip_ansi(line: str) -> str:
     import re
 
-    line = re.sub(r"\033\[[0-9;]*m", "", line)  # SGR color codes
-    return re.sub(r"\033\]8;;[^\033]*\033\\", "", line)  # OSC 8 hyperlink wrapper
+    line = re.sub(r"\033\[[0-9;]*m", "", line)
+    return re.sub(r"\033\]8;;[^\033]*\033\\", "", line)
 
 
 def test_build_lines_oracle_empty_payload_still_renders_the_full_skeleton():
@@ -302,7 +279,7 @@ def test_build_lines_oracle_empty_payload_still_renders_the_full_skeleton():
     lines = sl.build_lines({})
     assert len(lines) == 8
     stripped = [_strip_ansi(ln) for ln in lines]
-    assert "RATE LIMIT" not in stripped[0]  # no rate-limit banner on row 0
+    assert "RATE LIMIT" not in stripped[0]
     assert "v?" in stripped[0]
     assert "🤖 ?" in stripped[2]
     assert "Session 🆔 ?" in stripped[4]
@@ -339,7 +316,7 @@ def test_build_lines_oracle_rich_payload_readable_content(monkeypatch):
         },
     }
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "RATE LIMIT" not in stripped[0]  # no rate-limit banner on row 0
+    assert "RATE LIMIT" not in stripped[0]
     assert "v2.1.228" in stripped[0]
     assert "🤖 Opus 4.8" in stripped[2]
     assert "💪 high" in stripped[2]
@@ -360,9 +337,7 @@ def test_build_lines_tolerates_missing_and_wrong_shaped_nested_keys():
     subprocess test below) rather than guaranteed by every internal cast."""
     payloads = [
         {},
-        {
-            "model": "not-a-dict"
-        },  # _safe_get bails as soon as a path segment isn't a dict
+        {"model": "not-a-dict"},
         {"context_window": "not-a-dict"},
         {"rate_limits": None},
     ]
@@ -422,10 +397,6 @@ def test_build_lines_no_rate_limit_line_below_threshold():
     assert not any("RATE LIMIT" in ln for ln in stripped)
 
 
-# --- _repo_branch — repo/branch segment (CLAUDE_PROJECT_DIR is often empty in Claude Code,
-# this is the one place a session can see which repo/branch it is sitting in) ------------------
-
-
 def _git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
@@ -478,14 +449,14 @@ def test_build_lines_shows_repo_branch_on_its_own_row_between_session_and_contex
     data = {"workspace": {"current_dir": str(repo)}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
     assert "📁 pinky-lib @ feature/x" in stripped[6]
-    assert "Context window" in stripped[8]  # pushed down by one row + its spacer
+    assert "Context window" in stripped[8]
 
 
 def test_build_lines_omits_the_repo_row_entirely_outside_a_repo(tmp_path):
     data = {"workspace": {"current_dir": str(tmp_path)}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
     assert not any("📁" in ln for ln in stripped)
-    assert "Context window" in stripped[6]  # no repo row inserted, index unchanged
+    assert "Context window" in stripped[6]
 
 
 def test_build_lines_repo_row_independent_of_subagent_count_on_the_session_row(
@@ -502,11 +473,8 @@ def test_build_lines_repo_row_independent_of_subagent_count_on_the_session_row(
     monkeypatch.setattr(sl, "_count_subagents", lambda *_: 2)
     data = {"workspace": {"current_dir": str(repo)}, "transcript_path": "/t.jsonl"}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "2 subagents" in stripped[4]  # session row, untouched
-    assert "📁 pinky-lib @ main" in stripped[6]  # its own row
-
-
-# --- _forge_repo_slug / _repo_url -- link on the repo/branch row -----------------------------
+    assert "2 subagents" in stripped[4]
+    assert "📁 pinky-lib @ main" in stripped[6]
 
 
 def test_forge_repo_slug_parses_ssh_and_https():
@@ -616,9 +584,6 @@ def test_build_lines_repo_row_wraps_in_a_hyperlink_when_a_forge_url_resolves(tmp
     data = {"workspace": {"current_dir": str(repo)}}
     lines = sl.build_lines(data)
     assert "\033]8;;https://github.com/acme/api\033\\📁 my-repo @ main" in lines[6]
-
-
-# --- _hyperlink / short session id -----------------------------------------------------------
 
 
 def test_hyperlink_wraps_text_in_osc8():

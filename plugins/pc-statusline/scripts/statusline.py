@@ -39,25 +39,19 @@ from _common import (
 enable_ansi_on_windows()
 force_utf8_stdout()
 
-# --- ANSI colors — statusline-only, on top of the shared palette in _common ---
-
 WHITE = "\033[37m"
-YELLOW_BG = "\033[43;30m"  # yellow background, black text ->  "warning" effect
-RED_BG = "\033[41;30m"  # red background, white text ->  "alert" effect
+YELLOW_BG = "\033[43;30m"
+RED_BG = "\033[41;30m"
 
 SEP = f"  {GREY}·{RESET}  "
 
 _HEADROOM_STATS_URL = "http://127.0.0.1:8787/stats"
-# A status line repaints on every turn, so the HTTP call is both hard-bounded and memoized: a hung
-# proxy costs one timeout, not one per paint.
 _HEADROOM_HTTP_TIMEOUT_S = 0.15
 _HEADROOM_CACHE_TTL_S = 5.0
 _HEADROOM_CACHE = os.path.join(
     tempfile.gettempdir(), f"pc-statusline-headroom-{os.getuid()}.json"
 )
 
-# Minimum blank gap between a row's left and right groups, and the gutter added past the widest
-# natural row to place the shared right-hand column.
 _MIN_GAP = 10
 _BLANK = "⠀"
 _SPACER_ROW = _BLANK
@@ -95,10 +89,10 @@ def _visible_len(s: str):
         (0xF900, 0xFAFF),
         (0xFF00, 0xFF60),
         (0xFFE0, 0xFFE6),
-        (0x1F1E6, 0x1F1FF),  # drapeaux
-        (0x1F300, 0x1FAFF),  # emoji principaux
+        (0x1F1E6, 0x1F1FF),
+        (0x1F300, 0x1FAFF),
     )
-    ZERO_WIDTH_CODEPOINTS = {0x200D, 0xFE0E, 0xFE0F}  # ZWJ, VS15, VS16
+    ZERO_WIDTH_CODEPOINTS = {0x200D, 0xFE0E, 0xFE0F}
 
     out = 0
     i, n = 0, len(s)
@@ -106,12 +100,12 @@ def _visible_len(s: str):
         ch = s[i]
         if ch == "\033":
             nxt = s[i + 1] if i + 1 < n else ""
-            if nxt == "[":  # SGR: ESC [ ... m
+            if nxt == "[":
                 j = i + 2
                 while j < n and s[j] != "m":
                     j += 1
                 i = j + 1
-            elif nxt == "]":  # OSC 8: ESC ] ... (BEL | ESC \)
+            elif nxt == "]":
                 j = i + 2
                 while (
                     j < n
@@ -127,7 +121,7 @@ def _visible_len(s: str):
         cp = ord(ch)
         if cp in ZERO_WIDTH_CODEPOINTS or unicodedata.combining(ch):
             i += 1
-            continue  # largeur 0 : se colle au caractère précédent
+            continue
         if any(lo <= cp <= hi for lo, hi in WIDE_RANGES):
             out += 2
         else:
@@ -243,8 +237,6 @@ def _get_advisor_model(transcript_path, tail_bytes=16384):
             f.seek(max(0, size - tail_bytes))
             chunk = f.read().decode("utf-8", errors="ignore")
 
-        # Coupe la première ligne, probablement partielle (le seek tombe
-        # souvent au milieu d'une ligne JSON).
         lines = chunk.split("\n")[1:]
 
         for raw_line in reversed(lines):
@@ -275,7 +267,7 @@ def _headroom_stats() -> dict | None:
             with open(_HEADROOM_CACHE, encoding="utf-8") as handle:
                 return json.load(handle)
     except (OSError, ValueError):
-        pass  # no cache yet, or a torn write from a concurrent paint — refetch
+        pass
 
     try:
         with urllib.request.urlopen(  # nosec B310 — the URL is the module constant above, a hardcoded http:// loopback address; no caller input reaches it, so no file:/ or custom scheme is reachable
@@ -289,7 +281,7 @@ def _headroom_stats() -> dict | None:
         with open(_HEADROOM_CACHE, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
     except OSError:
-        pass  # an unwritable temp dir costs a refetch per paint, never a missing line
+        pass
     return payload
 
 
@@ -448,7 +440,7 @@ def _repo_url(start_dir):
             check=False,
         )
         if upstream.returncode != 0:
-            return base  # no upstream — the branch tree page would 404, link the repo instead
+            return base
         branch = subprocess.run(
             ["git", "-C", start_dir, "symbolic-ref", "--short", "HEAD"],
             capture_output=True,
@@ -487,11 +479,8 @@ def build_lines(data: dict) -> list[str]:
     lines: list[str] = []
 
     version = _safe_get(data, "version", "?")
-    # Row 0 carries only the version on the right; its left is an invisible anchor (see _BLANK),
-    # replaced by the rate-limit banner below when one fires.
     line0_left_parts = [_BLANK]
     line0_right_parts = [f"{DIM}v{version}{RESET}"]
-    # ---------- Ligne 1 : version, modèle, effort, thinking, fast mode, output style ----------
     model = _safe_get(data, "model.display_name", "?")
     effort = _safe_get(data, "effort.level")
     thinking_on = _safe_get(data, "thinking.enabled", False)
@@ -518,14 +507,10 @@ def build_lines(data: dict) -> list[str]:
         f"🎨 {style}{RESET}",
     ]
 
-    # ---------- Ligne 2 : session id (courte, en lien vers le transcript), heure de début,
-    # nombre de subagents à droite ----------
     session_id = _safe_get(data, "session_id", "?")
     short_session_id = (
         session_id[:8] if session_id and session_id != "?" else session_id
     )
-    # Court pour la lecture ; le lien porte l'id complet pour un outil de recherche par session
-    # (ex. le transcript lui-même) — le texte affiché n'a plus besoin d'être long pour ça.
     session_txt = (
         _hyperlink(short_session_id, f"file://{transcript_path}")
         if transcript_path
@@ -549,9 +534,6 @@ def build_lines(data: dict) -> list[str]:
         else []
     )
 
-    # ---------- Ligne repo/branche (entre session et context window), en lien vers le repo —
-    # CLAUDE_PROJECT_DIR est souvent vide dans Claude Code, c'est le seul endroit où une session
-    # voit dans quel repo/branche elle travaille réellement. Ligne omise hors d'un repo. ----------
     repo_dir = _safe_get(data, "workspace.current_dir") or _safe_get(data, "cwd")
     repo_branch = _repo_branch(repo_dir)
     repo_line_left_parts: list[str] = []
@@ -563,7 +545,6 @@ def build_lines(data: dict) -> list[str]:
         )
     repo_line_right_parts: list[str] = []
 
-    # ---------- Line 3 : context bar + hit cache performance ----------
     pct = _safe_get(data, "context_window.used_percentage", 0) or 0
     pct = int(pct)
     bar = _build_bar(pct)
@@ -587,14 +568,12 @@ def build_lines(data: dict) -> list[str]:
     ]
     line3_right_parts: list[str] = [f"💲 {cost:.2f} (API-equiv)"]
 
-    # ---------- Optional line : Headroom, only while its proxy is up ----------
     line4_left_parts: list[str] = []
     line4_right_parts: list[str] = []
     headroom = _headroom_net()
     if headroom:
         line4_left_parts.append(_fmt_headroom_line(*headroom))
 
-    # ---------- Optional line : rate limits > 90% ----------
     warnings = []
     bg = YELLOW_BG
     for label, key in (("Session", "five_hour"), ("Weekly", "seven_day")):
@@ -618,8 +597,6 @@ def build_lines(data: dict) -> list[str]:
             (line4_left_parts, line4_right_parts),
         ]
     )
-    # Shared right-hand column: the widest natural row plus one gutter. Content-derived on
-    # purpose - a width read from COLUMNS goes stale the moment a VSCode panel is resized.
     right_edge = max_left + max_right + _MIN_GAP
 
     lines.append(_render_flex(line0_left_parts, line0_right_parts, right_edge))
@@ -651,7 +628,6 @@ def main():
     try:
         print("\n".join(build_lines(data)))
     except Exception:
-        # A statusline must never crash — a bare fallback is better than an error blanking the bar.
         print("⬡")
 
 

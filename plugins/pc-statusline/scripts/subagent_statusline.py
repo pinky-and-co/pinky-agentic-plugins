@@ -114,12 +114,9 @@ def render_task(task: dict, columns: int) -> dict | None:
     else:
         ctx_txt = f"{DIM}ctx:—{RESET}"
 
-    # Budget fixe (hors nom) : emoji + séparateurs + model + effort + ctx
     suffix = f"{SEP}{CYAN}🤖 {model}{RESET}{SEP}{effort_txt}{SEP}{ctx_txt}"
 
-    fixed_len = (
-        _visible_len(status_emoji) + 1 + _visible_len(suffix)
-    )  # +1 pour l'espace avant le nom
+    fixed_len = _visible_len(status_emoji) + 1 + _visible_len(suffix)
 
     name_budget = max(6, columns - fixed_len)
     if len(name) > name_budget:
@@ -136,9 +133,6 @@ def main():
         print(json.dumps({"error": str(e)}), file=sys.stderr)
         return
     if not isinstance(data, dict):
-        # Valid JSON, wrong shape (e.g. "null" parses fine but isn't a dict) — no ids in the
-        # output means every row keeps Claude Code's default rendering, same degrade path as a
-        # single missing id, just applied to all of them at once.
         print(
             json.dumps(
                 {"error": f"top-level JSON is {type(data).__name__}, not object"}
@@ -161,8 +155,6 @@ def main():
         try:
             line = render_task(task, columns)
         except Exception as e:
-            # One malformed task must not blank every other agent's row — skip it (falls back
-            # to Claude Code's default rendering for that id) and keep going.
             print(
                 json.dumps({"error": str(e), "task_id": task.get("id")}),
                 file=sys.stderr,
