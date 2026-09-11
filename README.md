@@ -292,6 +292,7 @@ pinky-agentic-plugins/
 │       ├── generate-docs
 │       ├── generate_ci_badges.py
 │       ├── render_docs.py
+│       ├── ruff.toml
 │       ├── run-tests
 │       ├── tool_directives.py
 │       ├── validate_frontmatter.py
