@@ -19,10 +19,7 @@ import re
 import sys
 from pathlib import Path
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
-# crashes with UnicodeEncodeError (found by the windows-latest CI job, CHANTIER0001
-# portage-windows-du-moteur). Same fix as setup/__init__.py, applied here because this script runs
-# standalone (invoked directly by pre-commit) and never imports that package.
+# Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -90,9 +87,7 @@ def generate_hooks_badge(root: Path) -> None:
 
 # ── Noqa badge ────────────────────────────────────────────────────────────────
 
-# Counts ALL lint suppressions in src/ — ruff/flake8 `# noqa:` and custom `# pinky:`
-# (see check_snowpark_api.py). Captures the code list after the marker; trailing
-# justification prose (lowercase) is excluded since codes are uppercase tokens.
+# Exclut la prose de justification (minuscule) après le marqueur : les codes sont toujours en majuscules.
 _SUPPRESS_RE = re.compile(
     r"#\s*(?:noqa|pinky):\s*([A-Z][A-Z0-9-]*(?:\s*,\s*[A-Z][A-Z0-9-]*)*)"
 )

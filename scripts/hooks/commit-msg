@@ -16,26 +16,17 @@
 COMMIT_MSG_FILE=$1
 COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
 
-# Skip automatic merges
 if echo "$COMMIT_MSG" | grep -qE "^Merge "; then
     exit 0
 fi
 
-# Special save case — [skip ci] required
 if echo "$COMMIT_MSG" | grep -qE "^💾 save: .{3,} \[skip ci\]"; then
     exit 0
 fi
 
-# Emoji → allowed type mapping.
-#
-# Bash pur, zéro subprocess (2026-07-22). Les deux `python3 -c` d'avant se justifiaient par « macOS
-# BSD grep lacks PCRE (-P) », mais ils ne faisaient pas de PCRE : ils découpaient les deux premiers
-# tokens. `read` le fait nativement, et bash porte l'ERE avec `[[ =~ ]]` — aucun `-P` en jeu.
-# Ça enlève la dernière dépendance de ce hook à un interpréteur : `python3` existe sur macOS mais
-# n'est PAS garanti sur une machine Windows vanilla (ADR-0045 : `py -3` y est le lanceur canonique),
-# donc le frère n'aurait pas pu committer. Zéro interpréteur > choisir le bon lanceur.
-# Équivalence vérifiée sur 10 messages, emoji multi-octets à sélecteur de variation (♿️, ⚡️) et cas
-# limites (vide, sans emoji, mauvaise casse) inclus.
+# Bash pur, zéro subprocess : `read` découpe nativement les deux premiers tokens, et bash porte
+# l'ERE avec `[[ =~ ]]`. Ça enlève la dernière dépendance de ce hook à un interpréteur — `python3`
+# n'est pas garanti sur une machine Windows vanilla, donc committer y échouerait sinon.
 #
 # Le découpage sur l'espace est sûr en UTF-8 : l'espace est ASCII et UTF-8 est auto-synchronisant,
 # donc un emoji multi-octets n'est jamais coupé en deux.
@@ -135,14 +126,12 @@ case "$EMOJI" in
         ;;
 esac
 
-# Validate emoji matches declared type
 if [ "$TYPE" != "$allowed_type" ]; then
     echo "❌ Emoji '$EMOJI' requires type '$allowed_type', got '$TYPE'."
     echo "   Use: $EMOJI $allowed_type: <description>"
     exit 1
 fi
 
-# Validate full format
 TYPES="feat|fix|docs|style|refactor|move|perf|test|revert|build|chore|release"
 PATTERN="^.+ (${TYPES})!?: .{3,}"
 

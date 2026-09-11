@@ -1,43 +1,31 @@
 #!/bin/bash
 # =============================================================================
-# PRE-COMMIT HOOK — generate-docs (renamed/extended from check-docs-up-to-date, 2026-07-10)
+# PRE-COMMIT HOOK — generate-docs
 # =============================================================================
 # Distributed from pinky-workspace/core/hooks/ — do not edit in place. Universal (core/pre-commit/
-# base.yaml): every repo gets it, not just the snowflake extra — README/index.md/badges are a
-# cross-repo-type concern, not a Snowflake one.
+# base.yaml): every repo gets it — README/index.md/badges are a cross-repo-type concern.
 #
 # Two independent jobs:
 #   1. Repo-local README.md + docs/index.md regeneration (badges/tagline/documentation/license) —
-#      via render_docs.py, ALWAYS run (cheap + idempotent), never gated on which files are staged.
-#      That unconditional run is the fix for the bug that motivated this hook: editing
-#      pyproject.toml's [project].description used to leave README/index stale until the next
-#      manual `setup.py --all` — gating on staged src/ files missed exactly that edit.
-#   2. SVG quality badges (interrogate/coverage/noqa/hooks) — unchanged from check-docs-up-to-date,
-#      still gated on staged src/ or .pre-commit-config.yaml (more expensive: coverage xml + genbadge).
+#      via render_docs.py, ALWAYS run (cheap + idempotent), never gated on which files are staged,
+#      so an edit to pyproject.toml's [project].description alone still refreshes them.
+#   2. SVG quality badges (interrogate/coverage/noqa/hooks) — gated on staged src/ or
+#      .pre-commit-config.yaml (more expensive: coverage xml + genbadge).
 #
-# Coverage badge reliability fix (2026-07-12): the old version trusted a pre-existing
-# .cache/coverage/.coverage file — silently stale for a month on pinky-core (nobody's commit
-# happened to run a full, correctly-instrumented `pytest` right before hitting this hook) with
-# no failure, no warning, nothing. It now runs the test suite itself, every time, and prints a
-# visible warning instead of silently no-op'ing when pytest or genbadge aren't available. Uses
-# `coverage run -m pytest --no-cov` (not pytest-cov's own instrumentation) — editable-install
-# path setups (multiple repos' src/ on sys.path at once) can make pytest-cov silently measure
-# nothing ("module-not-measured") with no visible error; wrapping externally sidesteps that.
-#
-# Coverage badge reliability fix #2 (2026-07-25): that 2026-07-12 pass fixed the *data* (stale
-# .coverage) but left the *tool* resolved off the bare PATH while $PY was resolved out of .venv —
-# same class of bug, one line lower. See the comment at the genbadge block below.
+# The coverage badge runs the test suite itself every time rather than trusting a pre-existing
+# .coverage file, and prints a visible warning instead of silently no-op'ing when pytest or
+# genbadge aren't available. Uses `coverage run -m pytest --no-cov` (not pytest-cov's own
+# instrumentation) — editable-install path setups (multiple repos' src/ on sys.path at once) can
+# make pytest-cov silently measure nothing ("module-not-measured") with no visible error;
+# wrapping externally sidesteps that.
 # =============================================================================
 
-# 0. Interpréteur — résolu explicitement, jamais `python` nu (2026-07-22). `python` n'existe ni dans
-# un shell macOS sans conda ni venv activé (homebrew ne pose que `python3`), ni sur une machine
-# Windows vanilla ; il ne marchait ici que par l'auto-activation de conda base, porteuse par accident.
-# Le venv du projet passe en premier parce que le bloc coverage/pytest plus bas a besoin des deps de
-# dev — un `python3` système ne les a pas, donc un simple `python` → `python3` casserait ce bloc au
-# lieu de le réparer. `uv run` est écarté : il resynchronise l'env vers l'état par défaut et
-# désinstalle les extras, puis résout un env de cache distinct de .venv (mesuré, voir la card
-# uv-run-strips-extras-trap). Les repos sans .venv (studio, assets, infra, workspace) retombent sur
-# python3/py, suffisant pour render_docs.py qui est 100 % stdlib.
+# 0. Interpréteur résolu explicitement, jamais `python` nu : ni garanti sur un shell macOS sans
+# conda/venv activé, ni sur Windows. Le venv du projet passe en premier car le bloc coverage/pytest
+# plus bas a besoin des deps de dev, qu'un python3 système n'a pas. `uv run` est écarté : il
+# resynchronise l'env vers l'état par défaut et désinstalle les extras, résolvant un env de cache
+# distinct de .venv. Un repo sans .venv retombe sur python3/py, suffisant pour render_docs.py qui
+# est 100 % stdlib.
 if [ -x .venv/bin/python ]; then PY=".venv/bin/python"                    # POSIX
 elif [ -x .venv/Scripts/python.exe ]; then PY=".venv/Scripts/python.exe"  # Windows
 elif command -v python3 > /dev/null 2>&1; then PY="python3"
@@ -55,9 +43,8 @@ git add docs/index.md 2>/dev/null
 # 2. SVG quality badges — only when their inputs are staged (detect the package dir under src/).
 PKG_DIR=$(find src -maxdepth 1 -mindepth 1 -type d -not -name '__pycache__' 2>/dev/null | head -1)
 
-# Repos sans src/ (workspace, studio, assets, infra) : PKG_DIR est vide, et `git diff -- ""` sort en
-# `fatal: empty string is not a valid pathspec`. Bénin (le hook sort 0 quand même) mais il crachait ce
-# fatal à chaque commit sur ces 4 repos. Pas de paquet → rien à jauger, SRC_STAGED vaut 0.
+# Repo sans src/ : PKG_DIR est vide, et `git diff -- ""` sortirait en erreur pathspec vide.
+# On court-circuite : pas de paquet, rien à jauger, SRC_STAGED reste à 0.
 if [ -n "$PKG_DIR" ]; then
     SRC_STAGED=$(git diff --cached --name-only -- "$PKG_DIR" | grep -v '__pycache__' | wc -l | tr -d ' ')
 else
@@ -77,11 +64,8 @@ if [ "$SRC_STAGED" -gt 0 ]; then
     COV_LOG=$(mktemp)
     if $PY -m coverage run -m pytest -q --no-cov > "$COV_LOG" 2>&1; then
         $PY -m coverage xml -o .cache/coverage/coverage.xml > /dev/null 2>&1
-        # genbadge est un console-script : le chercher dans le venv du projet AVANT le PATH, même
-        # ladder que $PY plus haut (2026-07-25). Le lookup PATH nu a gelé le badge de pinky-connect
-        # six semaines à 77.03% alors que genbadge était bien installé dans .venv — c'est le PATH
-        # qui ne le portait pas. Il a fini par « marcher » par accident, l'env uv d'un repo sans
-        # rapport (pinky-airflow) s'étant retrouvé en tête de PATH : le vrai chiffre était 18.28%.
+        # genbadge est un console-script : le chercher dans le venv du projet avant le PATH —
+        # un lookup PATH nu peut silencieusement résoudre le genbadge d'un tout autre repo.
         if [ -x .venv/bin/genbadge ]; then GB=".venv/bin/genbadge"                    # POSIX
         elif [ -x .venv/Scripts/genbadge.exe ]; then GB=".venv/Scripts/genbadge.exe"  # Windows
         elif command -v genbadge > /dev/null 2>&1; then GB="genbadge"
@@ -94,10 +78,10 @@ if [ "$SRC_STAGED" -gt 0 ]; then
             echo "⚠ coverage_badge.svg not regenerated: 'genbadge' not found (.venv nor PATH) — uv sync --group dev" >&2
         fi
     else
-        # Depuis 2026-07-25 le verdict pass/fail appartient au hook run-tests (extra python), qui
-        # bloque le commit en amont — arriver ici veut dire que la suite passe en bare pytest mais
-        # casse sous instrumentation coverage, ou que run-tests n'est pas actif sur ce repo. On
-        # reste non bloquant (ce hook fait des docs, pas de la garde qualité) mais on le dit.
+        # Le verdict pass/fail appartient au hook run-tests, qui bloque le commit en amont —
+        # arriver ici veut dire que la suite casse sous instrumentation coverage spécifiquement,
+        # ou que run-tests n'est pas actif sur ce repo. Ce hook fait des docs, pas de la garde
+        # qualité : on reste non bloquant, mais on le dit.
         echo "⚠ coverage_badge.svg not regenerated: coverage run failed, see $COV_LOG" >&2
     fi
 

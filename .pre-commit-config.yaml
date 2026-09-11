@@ -146,6 +146,17 @@ repos:
         language: python
         pass_filenames: true
 
+  # ── Narrated history in comments and docstrings (warn-only) ───────────────
+  # `verbose: true` sur tout hook warn-only : sans lui, pre-commit masque la sortie d'un hook qui passe.
+  - repo: local
+    hooks:
+      - id: check-narrative-comments
+        name: "[NARRATIVE] History in comments and docstrings"
+        entry: python scripts/hooks/check_narrative_comments.py
+        language: python
+        types: [python]
+        verbose: true
+
   # ── Commit message format ─────────────────────────────────────────────────
   - repo: local
     hooks:

@@ -2,15 +2,13 @@
 """
 check_weak_assertions.py — Ratchet against weak assertions on generated output.
 
-Third and final stage of the "assertion faible sur sortie générée" pattern (tests.md §
-generator oracle): a test that only asserts a *fragment* of a generator's output
-(`assert "MY_DAG" in clause`) passes on the correct output AND on a wrong one — it freezes
-the bug in place. The rule (tests.md) bites on new code; the purge cleared the stock; THIS
-hook is the cliquet that keeps the stock at zero.
+A test that only asserts a *fragment* of a generator's output (`assert "MY_DAG" in clause`)
+passes on the correct output AND on a wrong one — it freezes the bug in place. This hook keeps
+that pattern from creeping back in.
 
-It is a RATCHET, not an exhaustiveness guarantee. It flags only the narrow, audit-validated
-pattern, so it stays at ~0 flags on already-purged repos and never cries wolf (a hook one
-learns to `--no-verify` is worse than no hook):
+It is a RATCHET, not an exhaustiveness guarantee. It flags only the narrow pattern below, so it
+stays at ~0 flags on a clean repo and never cries wolf (a hook one learns to `--no-verify` is
+worse than no hook):
 
   Flag a generator ONLY when ALL hold:
     1. an assert of the form  `assert "<str literal>" in <Y>`  (operator `in`, NOT `not in` —
@@ -22,18 +20,17 @@ learns to `--no-verify` is worse than no hook):
        `assert <gen(...)> == <literal>` nor an oracle routed through a local helper whose body
        does the `==` (e.g. `_assert_golden("...", html)` where `html = generate_html(...)`).
 
-The oracle need not sit in the SAME file as the fragment: tests.md asks for "at least one test"
-with a whole-output oracle, **repo-wide** — a fragment in test_web_precommit.py is legitimately
+The oracle need not sit in the SAME file as the fragment: at least one test needs a whole-output
+oracle, **repo-wide** — a fragment in test_web_precommit.py is legitimately
 covered by the oracle in test_precommit_config_oracle.py. pre-commit hands the hook only the
 CHANGED files, so main() builds the covered set by scanning every `.py` under the tests/ root(s)
 of the passed paths, not just argv. check_file() stays per-file (the testable unit of the AST
 scan); main() is the layer that applies the repo-wide covered set.
 
-Generators are matched BY NAME only (assumed hole, decided 2026-07-24): a function that builds
-output but is named without a convention prefix/suffix escapes the ratchet — not blocked, merely
-unguarded. The intended fix is to NAME it as a generator (tests.md § generator oracle requires it),
-not to widen the matcher — widening to "returns markup" was rejected: it reopens the false positives
-the audit eliminated.
+Generators are matched BY NAME only: a function that builds output but is named without a
+convention prefix/suffix escapes the ratchet — not blocked, merely unguarded. The intended fix
+is to name it as a generator, not to widen the matcher — widening to "returns markup" would
+reopen the false positives a name-based match avoids.
 
 Usage (pre-commit local hook):
   entry: python scripts/hooks/check_weak_assertions.py
@@ -49,16 +46,13 @@ import os
 import sys
 from pathlib import Path
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
-# crashes with UnicodeEncodeError (found by the windows-latest CI job, CHANTIER0001
-# portage-windows-du-moteur). Same fix as setup/__init__.py, applied here because this script runs
-# standalone (invoked directly by pre-commit) and never imports that package.
+# Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-# Generator naming convention (tests.md + card hook-cliquet). Matched on name.lstrip("_") so
-# private variants (`_build_ddl`, `_render_x`) are covered — bug #2 the purge audit already paid.
+# Convention de nommage des générateurs, appariée sur name.lstrip("_") pour couvrir aussi les
+# variantes privées (`_build_ddl`, `_render_x`).
 _SUFFIXES: tuple[str, ...] = ("_sql", "_ddl", "_clause", "_statement", "_query")
 _PREFIXES: tuple[str, ...] = ("build_", "render_", "generate_")
 
@@ -112,10 +106,9 @@ def _has_eq(node: ast.AST) -> bool:
 def _collect_oracle_helpers(tree: ast.AST) -> set[str]:
     """Module-level functions whose body performs an equality check.
 
-    A call to one of these, fed a generator's output, stands in for an inline `==` oracle
-    (bug #3, the most dangerous: without it the hook cries wolf on correctly-covered code).
+    A call to one of these, fed a generator's output, stands in for an inline `==` oracle.
     Deliberately permissive — a false *exemption* only misses a flag; a false *positive*
-    gets the ratchet disabled, the worse failure for this card.
+    disables the ratchet, which is worse.
     """
     helpers: set[str] = set()
     for node in ast.walk(tree):
@@ -175,8 +168,8 @@ def _scan(path: Path) -> tuple[dict[tuple[str, int], None], set[str]]:
     The two halves stay separate so callers can compose them across files: check_file() subtracts
     covered from weak within the one file; main() applies a repo-wide covered set built from many.
     """
-    # Distributed copies of this very hook live at scripts/hooks/ in every consumer repo — never
-    # under tests/, so `files: ^tests/` already excludes them; this guard keeps a manual run honest.
+    # Ce hook a des copies distribuées ailleurs, jamais dans le dossier de tests : garde-fou
+    # pour une exécution manuelle en dehors de pre-commit.
     if "scripts/hooks" in path.as_posix():
         return {}, set()
     try:
@@ -241,7 +234,7 @@ def main() -> int:
     for filepath in paths:
         for line, gen in check_file(Path(filepath)):
             if gen in repo_covered:
-                continue  # oracle exists elsewhere in tests/ — the fragment is documentation, not a hole
+                continue  # oracle ailleurs : ce fragment est de la documentation, pas un trou de couverture
             print(
                 f"❌ [WEAK-ASSERT] {filepath}:{line}: `{gen}` — fragment `in` assertion with no "
                 f"equality oracle for the whole output"

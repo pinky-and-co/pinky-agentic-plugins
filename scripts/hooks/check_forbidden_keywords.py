@@ -27,10 +27,7 @@ import re
 import sys
 from pathlib import Path
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
-# crashes with UnicodeEncodeError (found by the windows-latest CI job, CHANTIER0001
-# portage-windows-du-moteur). Same fix as setup/__init__.py, applied here because this script runs
-# standalone (invoked directly by pre-commit) and never imports that package.
+# Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -65,7 +62,6 @@ def _config_hint() -> str:
 def _make_pattern(keywords: list[str]) -> re.Pattern[str] | None:
     if not keywords:
         return None
-    # whole-word match, case-insensitive
     escaped = [re.escape(kw) for kw in keywords]
     return re.compile(r"\b(" + "|".join(escaped) + r")\b", re.IGNORECASE)
 

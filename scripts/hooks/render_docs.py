@@ -5,18 +5,14 @@ Standalone module — stdlib only, no dependency on the workspace's distribution
 Distributed as-is into every repo's scripts/hooks/ (always-on, like generate_ci_badges.py) so the
 `generate-docs` hook can regenerate at commit time without the full pinky-workspace checkout.
 `pinky-workspace/setup.py` imports this same module (CORE_HOOKS_DIR on sys.path) so the two never
-duplicate the render logic — see the `generate-docs-hook` kanban card.
+duplicate the render logic.
 
 Instance identity (suite header image, suite line, GitHub org, pitch manifesto/pills) is NOT
 hardcoded here — this module is the generic, shippable engine (`core/`). It is loaded from a
 repo-local `docs_identity.json` (distributed by setup.py, sourced from the repo's group config —
 see `_group_docs_identity`), so `core/` carries no `pinky` literal and the engine stays
-instance-agnostic (de-leak,
-2026-07-10). This includes the '## Why <suite>?' pitch section (2026-07-11): the manifesto/pills text used to be read live from pinky-studio's landing page HTML at
-distribution time, a cross-repo dependency a per-repo hook can't reach reliably — that was the
-ONLY identity field not already sourced from docs_identity.json. It now joins the others there
-(`pitch_heading`/`pitch_paragraphs`/`pitch_pills`, one-time migrated from the HTML), so this
-module renders it locally like every other section — no hybrid split, no cross-repo read.
+instance-agnostic, including the '## Why <suite>?' pitch section: the manifesto/pills text is
+rendered locally from that same file, with no cross-repo read at distribution time.
 """
 
 import json
@@ -28,10 +24,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this hook's ✓/⚠ output and
-# crashes with UnicodeEncodeError (found by the windows-latest CI job, CHANTIER0001
-# portage-windows-du-moteur). Same fix as setup/__init__.py, applied here because this script runs
-# standalone (invoked directly by pre-commit) and never imports that package.
+# Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -81,12 +74,6 @@ class SuiteIdentity:
         "pitch_pills",
     )
 
-    # Seul `github_org` est structurellement requis : l'URL du badge CI se construit avec, il n'a pas
-    # de forme dégradée. Les six autres décrivent une SUITE — bandeau, ligne d'appartenance, pitch —
-    # et un profil peut légitimement n'en être pas une : une org qui livre des applications plutôt
-    # que des libs publiées n'a rien à y mettre, et un repo outil n'a jamais rendu de pitch. Devoir
-    # déclarer six champs vides pour dire « je n'en suis pas une » était un contournement propre,
-    # pas une réponse (card `profil-sans-identite-de-suite`).
     _REQUIRED = ("github_org",)
 
     @classmethod
@@ -97,8 +84,7 @@ class SuiteIdentity:
         every instance stays hashable (this dataclass is frozen).
 
         An ABSENT optional field yields an empty value, and each renderer then omits the block it
-        feeds — the block becomes unavailable rather than rendered empty. Same reversal as
-        ADR-0058 → 0062: what is not declared does not exist.
+        feeds — the block becomes unavailable rather than rendered empty.
 
         Args:
             data: the parsed `docs_identity.json` mapping.
@@ -117,9 +103,6 @@ class SuiteIdentity:
         seqs = ("pitch_paragraphs", "pitch_pills")
         return cls(
             **{  # type: ignore[arg-type]  # mypy can't verify a **dict unpack field-by-field
-                # against SuiteIdentity's per-field types; the ternary above already keys the
-                # tuple-vs-str split off `seqs`, so runtime shape is correct — mypy's gap, not a
-                # real defect.
                 k: tuple(data.get(k) or ()) if k in seqs else (data.get(k) or "")
                 for k in cls._FIELDS
             }
@@ -133,7 +116,7 @@ class SuiteIdentity:
 def _load_identity() -> SuiteIdentity:
     """Load the repo-local instance identity distributed alongside this module. Fails loud if
     absent — a generated hook without its identity config is a distribution bug, not a silent
-    fallback to some hardcoded default (there is none here, by design — that is the de-leak)."""
+    fallback to some hardcoded default (there is none here, by design)."""
     path = Path(__file__).with_name("docs_identity.json")
     if not path.exists():
         sys.exit(f"✗ {path} missing — run setup.py to distribute docs_identity")
@@ -147,9 +130,7 @@ def _repo_license_name(repo: Path) -> str:
     """License name derived from the repo's own LICENSE file (e.g. 'MIT License' → 'MIT').
 
     Reads the first NON-BLANK line, not line 0: the canonical Apache-2.0 text opens with an empty
-    line, so the previous version returned an empty name for it — and the README's generated License
-    section would have said "` — see LICENSE`" on every repo adopting Apache (found 2026-08-09,
-    adding one to the moteur).
+    line, so line 0 alone would yield an empty name for it.
 
     When the following line carries a version (Apache's `Version 2.0, January 2004`), it joins the
     name: "Apache-2.0", the SPDX form, rather than a bare "Apache" that names three licenses.
@@ -178,8 +159,8 @@ def _shields_escape(text: str) -> str:
 
 
 def _frontmatter_title(path: Path) -> str | None:
-    """The `title:` field from a file's YAML frontmatter (see doc_conventions.md), or None if
-    the file has no frontmatter or no `title:` line in it."""
+    """The `title:` field from a file's YAML frontmatter, or None if the file has no
+    frontmatter or no `title:` line in it."""
     lines = path.read_text(encoding="utf-8").splitlines()
     if not lines or lines[0].strip() != "---":
         return None
@@ -196,7 +177,7 @@ def _doc_links(dir_path: Path) -> list[tuple[str, str]]:
     """(title, filename) for every direct .md child of dir_path carrying a title: frontmatter.
 
     Sorted by filename — numbered prefixes (1-design.md, 2-features.md, …) order naturally. A file
-    without title: is silently skipped (not an error — see doc_conventions.md's own carve-out).
+    without title: is silently skipped, not treated as an error.
     """
     if not dir_path.is_dir():
         return []
@@ -209,11 +190,6 @@ def _doc_links(dir_path: Path) -> list[tuple[str, str]]:
     return links
 
 
-# Extra exclusions for render_tree() on top of what git already ignores — deterministic, never
-# grown ad hoc. `docs/` is excluded wholesale: the '**Explanation**'/'**Reference**'/'**Decisions**'
-# sections right above the tree already enumerate it (title-frontmatter links, ADRs) — relisting it
-# raw here is redundant, not structure worth showing twice. Everything else noisy (.cache, .venv,
-# __pycache__, build artifacts…) is caught by .gitignore itself (see _tracked_or_unignored_files).
 _TREE_EXCLUDE_PATHS = {"docs"}
 
 
@@ -226,8 +202,6 @@ def _tracked_or_unignored_files(repo: Path) -> list[str]:
     if git is None:
         return []
     try:
-        # Bandit S603 suppressed below: fixed argument list (no user input interpolated),
-        # no shell=True, git resolved via shutil.which() above (not a bare literal on PATH).
         result = subprocess.run(  # noqa: S603
             [git, "ls-files", "--cached", "--others", "--exclude-standard"],
             cwd=repo,
@@ -333,8 +307,8 @@ _API_STUB_TEMPLATE = (
 def render_missing_api_stubs(repo: Path) -> list[str]:
     """Create missing docs/reference/api/<module>.md stubs for top-level public modules under
     src/<pkg>/*.py — mkdocstrings only renders content INTO an existing stub, it never creates
-    one, so a new module silently never appears on the site until someone remembers to add its
-    stub by hand (observed on pinky-core: html.py and lint.py went unstubbed for a while).
+    one, so a new module would otherwise never appear on the site until someone adds its stub
+    by hand.
 
     Deliberately non-recursive (src/<pkg>/*.py, not **/*.py): repos with subpackages
     (pinky-streamlit, pinky-provider) hand-curate their stubs — grouping several submodules under
@@ -398,8 +372,6 @@ def _render_badges(repo: Path, identity: SuiteIdentity, surface: str) -> list[st
 def render_readme_badges(repo: Path, identity: SuiteIdentity) -> str:
     """Suite icon + quality/release badges (from core/hooks/badges.toml) + a centered quick-nav line."""
     lines: list[str] = ['<div align="center">', ""]
-    # Pas de bandeau déclaré = pas de bandeau. Un `<img src="">` rendrait une image cassée, ce qui
-    # est pire que l'absence (card `profil-sans-identite-de-suite`).
     if identity.header_image_url:
         lines += [
             f'<img src="{identity.header_image_url}" width="380" alt="{identity.header_alt}">',
@@ -442,7 +414,6 @@ def _repo_description(repo: Path) -> str:
 def _tagline_body(repo: Path, identity: SuiteIdentity) -> str:
     """Description paragraph + the fixed suite line — shared verbatim by README and index.md."""
     description = f"{_repo_description(repo).rstrip('.')}."
-    # Un profil sans suite n'a pas de ligne d'appartenance à afficher.
     return (
         f"{description}\n\n{identity.suite_line}"
         if identity.suite_line
@@ -458,15 +429,10 @@ def render_readme_tagline(repo: Path, identity: SuiteIdentity) -> str:
 def render_readme_why(identity: SuiteIdentity) -> str:
     """The '## <pitch_heading>' section — suite-level positioning, identical across every README.
 
-    Sourced from ``identity.pitch_paragraphs``/``pitch_pills`` (docs_identity.json) — repo-local,
-    like every other section here, since 2026-07-11 (see the module docstring).
+    Sourced from ``identity.pitch_paragraphs``/``pitch_pills`` (docs_identity.json), repo-local
+    like every other section here.
     """
     if not identity.pitch_paragraphs and not identity.pitch_pills:
-        # Rien à dire : on rend les marqueurs vides plutôt qu'un titre suivi de blanc. Les marqueurs
-        # restent pour que l'injection soit idempotente et qu'un pitch ajouté plus tard atterrisse.
-        # La ligne blanche entre les deux n'est pas cosmétique : sans elle, mdformat en ajoute une à
-        # chaque commit et generate-docs la retire à chaque fois — boucle qui bloque `git commit`
-        # indéfiniment sur tout repo dont l'identité de groupe n'a pas encore de pitch.
         return f"{README_WHY_MARK_START}\n\n{README_WHY_MARK_END}"
     parts = ["\n\n".join(identity.pitch_paragraphs)]
     if identity.pitch_pills:
@@ -477,17 +443,17 @@ def render_readme_why(identity: SuiteIdentity) -> str:
 
 def has_generated_index(repo: Path) -> bool:
     """Whether ``repo`` wants `docs/index.md` generated (the mkdocs homepage) rather than left
-    hand-maintained. Single predicate shared by both call sites (`_main()` below, `distribute()`
-    in setup/precommit.py — same imported function, see setup/common.py) so the exception can't
-    drift between the commit-time hook and the one-time distribution render.
+    hand-maintained. Single predicate shared by both call sites (`_main()` below and setup.py's
+    distribution render) so the exception can't drift between the commit-time hook and the
+    one-time distribution render.
 
     True whenever `docs/mkdocs.yml` exists — UNLESS `docs/.no-generated-index` (empty, committed
     marker) opts a repo out. Written for `pinky-workspace` itself: its `docs/index.md` is a
-    hand-curated agent navigation index over 70+ ADRs, richer than anything the generated homepage
-    or the README's generated Documentation section (which only links the `docs/adr/` folder, not
-    per-file) can reproduce — see kanban card `site-mkdocs-sur-le-moteur`. A marker file, not a
-    hardcoded repo path, because `core/hooks/render_docs.py` is distributed byte-identical to every
-    repo (ADR-0031) — any future repo with the same corpus-scale mismatch can opt out the same way.
+    hand-curated agent navigation index over many ADRs, richer than anything the generated
+    homepage or the README's generated Documentation section (which only links the `docs/adr/`
+    folder, not per-file) can reproduce. A marker file, not a hardcoded repo path, because
+    `core/hooks/render_docs.py` is distributed byte-identical to every repo — any future repo
+    with the same corpus-scale mismatch can opt out the same way.
     """
     return (repo / "docs" / "mkdocs.yml").exists() and not (
         repo / "docs" / ".no-generated-index"
@@ -500,7 +466,7 @@ def render_index_home(repo: Path, identity: SuiteIdentity) -> str:
     Same conditional-badge principle as render_readme_badges(). No CI badge here regardless (it
     404s unauthenticated on a private repo — the mkdocs site has no GitHub session to pass through).
     No '*Update date*' tag: a fully-generated file's freshness is the git history, not a hand-typed
-    line (exempted in doc_conventions.md).
+    line.
 
     The wrapping `<div>` needs `markdown="1"`: unlike GitHub's renderer (used for README.md), mkdocs'
     Python-Markdown treats raw HTML blocks as opaque and won't parse the `![...](...)` badge syntax
@@ -540,12 +506,11 @@ def inject_readme_sections_local(
 
     Idempotent, marker-wrapped. Updates content between EXISTING markers only. First-run wrapping of
     hand-typed sections (the `elif` branches below) is destructive — it can drop hand-typed content
-    that a doc's missing `title:` frontmatter makes invisible to the enumeration (the pinky-studio
-    incident, 2026-07-11: `## Documentation` lost its Design/Features links on the adoption commit) —
-    so it is gated behind ``allow_first_run`` and OFF by default. The commit-time `generate-docs`
-    hook calls with the default (never wraps hand-typed content silently); only setup.py's reviewed
-    distribution passes ``allow_first_run=True`` for the one-time adoption, where the diff is seen
-    before it lands.
+    that a doc's missing `title:` frontmatter makes invisible to the enumeration — so it is gated
+    behind ``allow_first_run`` and OFF by default. The commit-time `generate-docs` hook calls with
+    the default (never wraps hand-typed content silently); only setup.py's reviewed distribution
+    passes ``allow_first_run=True`` for the one-time adoption, where the diff is seen before it
+    lands.
     """
     new = readme
 
@@ -569,8 +534,6 @@ def inject_readme_sections_local(
             flags=re.MULTILINE,
         )
 
-    # Tagline needs pyproject.toml's [project].description — skip on repos without one (assets,
-    # infra) rather than crash them every commit; no source, no section, same rule as the badges.
     if (repo / "pyproject.toml").exists():
         tagline = render_readme_tagline(repo, identity)
         if README_TAGLINE_MARK_START in new and README_TAGLINE_MARK_END in new:
@@ -601,8 +564,6 @@ def inject_readme_sections_local(
             flags=re.DOTALL,
         )
     elif allow_first_run and re.search(r"^## Install[ \t]*$", new, flags=re.MULTILINE):
-        # First run: insert as a new section right before ## Install — no prior anchor to replace.
-        # Reuses the file's own separator style (mdformat's rendering of `___`), not a bare `---`.
         sep = "_" * 70
         new = re.sub(
             r"^## Install[ \t]*$",
@@ -653,10 +614,6 @@ def inject_readme_sections_local(
             flags=re.MULTILINE,
         )
 
-    # Strip the '*Update date*' tag: it exists (doc_conventions.md) to resolve conflicts between
-    # diverging HAND-TYPED copies, and README no longer qualifies — badges/tagline/documentation/
-    # license are generator-owned, each derived from a single source that can't diverge that way.
-    # Git history is the freshness signal now, same reasoning as docs/index.md.
     new = re.sub(r"^\*Update date :.*\*\n\n", "", new, count=1, flags=re.MULTILINE)
     return new if new != readme else None
 

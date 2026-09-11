@@ -281,6 +281,7 @@ pinky-agentic-plugins/
 │   └── hooks/
 │       ├── badges.toml
 │       ├── check_forbidden_keywords.py
+│       ├── check_narrative_comments.py
 │       ├── check_typed_api.py
 │       ├── check_vendor_checksum.py
 │       ├── check_weak_assertions.py
