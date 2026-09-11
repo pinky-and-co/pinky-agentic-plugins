@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 .coverage
 .cache/
-.vendor-manifest.json
 
 # skill-creator eval scratch (sibling <skill>-workspace/ dirs)
 *-workspace/
