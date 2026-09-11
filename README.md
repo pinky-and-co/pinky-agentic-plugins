@@ -51,20 +51,8 @@ claude plugin install pc-core@pinky-agentic-plugins
 
 ```text
 pinky-agentic-plugins/
-├── .claude/
-│   ├── settings.json
-│   └── settings.pinky.json
-├── .claude-plugin/
-│   └── marketplace.json
-├── .github/
-│   └── workflows/
-│       ├── ci.yml
-│       ├── prek.yml
-│       └── release.yml
 ├── plugins/
 │   ├── pc-autodiscovery/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   └── hooks/
 │   │       ├── clear_pending_queue.py
 │   │       ├── hooks.json
@@ -74,8 +62,6 @@ pinky-agentic-plugins/
 │   │       ├── settings_commit_nudge.py
 │   │       └── sync_plugin_scope.py
 │   ├── pc-core/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   ├── agents/
 │   │   │   └── reviewer.md
 │   │   ├── hooks/
@@ -111,11 +97,8 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   └── review-guidelines/
 │   │   │       └── SKILL.md
-│   │   ├── .mcp.json
 │   │   └── README.md
 │   ├── pc-craft/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   └── skills/
 │   │       ├── code-conventions/
 │   │       │   ├── references/
@@ -132,8 +115,6 @@ pinky-agentic-plugins/
 │   │       └── improve/
 │   │           └── SKILL.md
 │   ├── pc-git/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   ├── agents/
 │   │   │   └── git-workflow.md
 │   │   ├── hooks/
@@ -162,8 +143,6 @@ pinky-agentic-plugins/
 │   │       └── commit-convention/
 │   │           └── SKILL.md
 │   ├── pc-kanban/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   ├── hooks/
 │   │   │   ├── hooks.json
 │   │   │   ├── orchestrator_freeze.py
@@ -199,16 +178,11 @@ pinky-agentic-plugins/
 │   │       └── yt/
 │   │           └── SKILL.md
 │   ├── pc-privacy/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   ├── mcp/
 │   │   │   ├── anonymize.py
 │   │   │   └── pc_privacy_server.py
-│   │   ├── .mcp.json
 │   │   └── README.md
 │   ├── pc-pypi/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   └── skills/
 │   │       └── dev-prerelease/
 │   │           ├── docs/
@@ -234,8 +208,6 @@ pinky-agentic-plugins/
 │   │           │   └── reconcile.py
 │   │           └── SKILL.md
 │   ├── pc-snow/
-│   │   ├── .claude-plugin/
-│   │   │   └── plugin.json
 │   │   ├── skills/
 │   │   │   ├── cortex/
 │   │   │   │   ├── references/
@@ -262,16 +234,13 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── sql-to-snowpark/
 │   │   │   │   └── SKILL.md
-│   │   │   ├── streamlit/
-│   │   │   │   ├── references/
-│   │   │   │   │   ├── review.md
-│   │   │   │   │   └── streamlit.md
-│   │   │   │   └── SKILL.md
-│   │   │   └── .gitkeep
+│   │   │   └── streamlit/
+│   │   │       ├── references/
+│   │   │       │   ├── review.md
+│   │   │       │   └── streamlit.md
+│   │   │       └── SKILL.md
 │   │   └── README.md
 │   └── pc-statusline/
-│       ├── .claude-plugin/
-│       │   └── plugin.json
 │       ├── scripts/
 │       │   ├── _common.py
 │       │   ├── statusline.py
@@ -280,23 +249,6 @@ pinky-agentic-plugins/
 │       └── settings.json
 ├── scripts/
 │   └── hooks/
-│       ├── badges.toml
-│       ├── check_forbidden_keywords.py
-│       ├── check_narrative_comments.py
-│       ├── check_typed_api.py
-│       ├── check_vendor_checksum.py
-│       ├── check_weak_assertions.py
-│       ├── check_zws.py
-│       ├── commit-msg
-│       ├── docs_identity.json
-│       ├── generate-docs
-│       ├── generate_ci_badges.py
-│       ├── render_docs.py
-│       ├── ruff.toml
-│       ├── run-tests
-│       ├── tool_directives.py
-│       ├── validate_frontmatter.py
-│       └── validate_plugins_strict.py
 ├── tests/
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
@@ -328,14 +280,6 @@ pinky-agentic-plugins/
 │   ├── test_structure_guard.py
 │   ├── test_subagent_statusline.py
 │   └── test_sync_plugin_scope.py
-├── .darglint
-├── .gitattributes
-├── .gitignore
-├── .gitleaks.toml
-├── .pre-commit-config.yaml
-├── .python-version
-├── .secrets.baseline
-├── .vendor-manifest.json
 ├── AGENTS.md
 ├── ATTRIBUTIONS.md
 ├── CLAUDE.md

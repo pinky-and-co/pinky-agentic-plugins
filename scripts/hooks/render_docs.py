@@ -191,6 +191,7 @@ def _doc_links(dir_path: Path) -> list[tuple[str, str]]:
 
 
 _TREE_EXCLUDE_PATHS = {"docs"}
+_TREE_COLLAPSED_PATHS = {"scripts/hooks"}
 
 
 def _tracked_or_unignored_files(repo: Path) -> list[str]:
@@ -216,15 +217,32 @@ def _tracked_or_unignored_files(repo: Path) -> list[str]:
 
 
 def _build_tree(paths: list[str]) -> dict:
-    """Nested dict from repo-relative POSIX paths: directories map to dict, files map to None."""
+    """Nested dict from repo-relative POSIX paths: directories map to dict, files map to None.
+
+    Hidden files and directories are left out, and a collapsed path (``scripts/hooks``, which a
+    distribution fills) shows as an empty folder — so a distribution never rewrites the tree.
+    """
     root: dict = {}
     for rel in paths:
         parts = rel.split("/")
-        if any(
-            "/".join(parts[: i + 1]) in _TREE_EXCLUDE_PATHS for i in range(len(parts))
+        prefixes = ["/".join(parts[: i + 1]) for i in range(len(parts))]
+        if any(part.startswith(".") for part in parts) or any(
+            prefix in _TREE_EXCLUDE_PATHS for prefix in prefixes
         ):
             continue
+        collapsed = next(
+            (
+                i + 1
+                for i, prefix in enumerate(prefixes[:-1])
+                if prefix in _TREE_COLLAPSED_PATHS
+            ),
+            None,
+        )
         node = root
+        if collapsed is not None:
+            for part in parts[:collapsed]:
+                node = node.setdefault(part, {})
+            continue
         for part in parts[:-1]:
             node = node.setdefault(part, {})
         node[parts[-1]] = None
