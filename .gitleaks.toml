@@ -9,6 +9,8 @@ useDefault = true
 # "secret"-shaped key still trips gitleaks' generic-api-key heuristic the moment a repo's baseline
 # records its first real finding (empty result sets don't trigger it, which is why this went
 # unnoticed until pinky-studio).
+# .vendor-manifest.json maps each vendored path to its sha256 — a hash, same reason.
 paths = [
   '''\.secrets\.baseline''',
+  '''\.vendor-manifest\.json''',
 ]

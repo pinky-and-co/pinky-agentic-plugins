@@ -126,7 +126,7 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
-        exclude: ^(docs/|pylock\.toml$)
+        exclude: ^(docs/|pylock\.toml$|\.vendor-manifest\.json$)
 
   # ── Zero-width spaces (copy-paste from Outlook/Teams) ────────────────────
   - repo: local

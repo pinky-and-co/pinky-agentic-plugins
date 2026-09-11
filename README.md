@@ -292,6 +292,7 @@ pinky-agentic-plugins/
 │       ├── generate_ci_badges.py
 │       ├── render_docs.py
 │       ├── run-tests
+│       ├── tool_directives.py
 │       ├── validate_frontmatter.py
 │       └── validate_plugins_strict.py
 ├── tests/
@@ -332,6 +333,7 @@ pinky-agentic-plugins/
 ├── .pre-commit-config.yaml
 ├── .python-version
 ├── .secrets.baseline
+├── .vendor-manifest.json
 ├── AGENTS.md
 ├── ATTRIBUTIONS.md
 ├── CLAUDE.md

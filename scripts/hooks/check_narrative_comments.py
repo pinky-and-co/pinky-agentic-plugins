@@ -13,8 +13,8 @@ Warn-only (exit 0), one ``path:line: kinds: text`` line per finding. Registered 
 ``verbose: true``: pre-commit hides a passing hook's output otherwise.
 
 Python only: ``tokenize`` separates comments from string literals exactly, so a ``#`` inside a
-string is never read as a comment. Tool directives (shebang, ``noqa``, ``type:``, ``nosec``,
-``pragma``…) and PEP 723 ``# /// script`` blocks are skipped.
+string is never read as a comment. The shebang, PEP 723 ``# /// script`` blocks and every tool
+directive of ``tool_directives.py`` are skipped.
 
 Stdlib only — this hook is distributed into each consumer repo and runs in its pre-commit
 environment.
@@ -37,6 +37,8 @@ import tokenize
 from pathlib import Path
 from typing import NamedTuple
 
+from tool_directives import DIRECTIVE_RE
+
 # La console Windows (cp1252 par défaut) ne sait pas encoder la sortie ⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -48,9 +50,6 @@ _HISTORY = {
     "chantier ref": re.compile(r"\bchantier[- ]?\d{4}\b", re.IGNORECASE),
     "card ref": re.compile(r"\b(?:card|carte)s?\s+`[\w-]+`", re.IGNORECASE),
 }
-_DIRECTIVE = re.compile(
-    r"#\s*(?:noqa|type:|nosec|pragma|fmt:|pylint:|mypy:|isort:|ruff:|-\*-)"
-)
 _URL = re.compile(r"\w+://\S+")
 _PATH_TOKEN = re.compile(r"[\w./-]+(?![\w./(-])")
 _FILE_NAME = re.compile(
@@ -107,7 +106,11 @@ def _comment_findings(source: str) -> list[Finding]:
         line, text = tok.start[0], tok.string.strip()
         if text == "# /// script":
             in_pep723 = True
-        if in_pep723 or (line == 1 and text.startswith("#!")) or _DIRECTIVE.match(text):
+        if (
+            in_pep723
+            or (line == 1 and text.startswith("#!"))
+            or DIRECTIVE_RE.match(text)
+        ):
             in_pep723 = in_pep723 and text != "# ///"
             _close_block(block, kinds_by_line)
             continue

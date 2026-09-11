@@ -6,12 +6,16 @@ content that was copied in from the pinky-bootstrap source of truth. A mismatch 
 copy was hand-edited instead of the source: it will be silently overwritten by the next
 distribution, so catch it at commit time rather than let the edit evaporate later.
 
+The manifest must be committed: git-ignored, a CI checkout never has it and this check passes on
+nothing there — so an ignored manifest fails too.
+
 Usage:
     python3 check_vendor_checksum.py   # no args -> scan the whole repo, pass_filenames: false
 """
 
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,12 +31,28 @@ def load_manifest() -> dict[str, str]:
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
+def _manifest_is_ignored() -> bool:
+    """Whether git ignores the manifest — then no CI checkout has it, and the check proves nothing."""
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "check-ignore", "-q", MANIFEST_NAME],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def main() -> int:
     """Recompute each manifest entry's sha256, print a line per path, exit 1 on any mismatch."""
     manifest = load_manifest()
     if not manifest:
         print("No .vendor-manifest.json — nothing to check.")
         return 0
+    if _manifest_is_ignored():
+        print(
+            f"[IGNORED] {MANIFEST_NAME} is git-ignored — a CI checkout never has it, so this "
+            "check passes on nothing there. Remove it from .gitignore and commit it."
+        )
+        return 1
 
     mismatched = []
     for rel_path, expected in sorted(manifest.items()):
