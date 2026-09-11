@@ -202,7 +202,7 @@ def _tracked_or_unignored_files(repo: Path) -> list[str]:
     if git is None:
         return []
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603
             [git, "ls-files", "--cached", "--others", "--exclude-standard"],
             cwd=repo,
             capture_output=True,

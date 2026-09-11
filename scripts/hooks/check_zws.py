@@ -35,7 +35,7 @@ def check_file(filepath: str) -> list[int]:
             for i, line in enumerate(f, 1):
                 if any(ch in line for ch in ZWS):
                     found.append(i)
-    except Exception:
+    except Exception:  # noqa: S110 — silently skip unreadable files
         pass
     return found
 
