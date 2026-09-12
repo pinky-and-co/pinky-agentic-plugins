@@ -117,6 +117,72 @@ pinky-agentic-plugins/
 │   ├── pc-git/
 │   │   ├── agents/
 │   │   │   └── git-workflow.md
+│   │   ├── evals/
+│   │   │   ├── 01-gh-guarded-ci-pass/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── correct-flow.md
+│   │   │   │   │   ├── no-force-push.md
+│   │   │   │   │   └── skill-fired.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 02-gh-guarded-ci-fail/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── ci-fail-honest.md
+│   │   │   │   │   ├── no-force-push.md
+│   │   │   │   │   └── skill-fired.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 03-gh-exempt-noargs-ok/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── exempt-direct-push.md
+│   │   │   │   │   ├── no-force-push.md
+│   │   │   │   │   └── skill-fired.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 04-gl-guarded-ci-pass/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── correct-mr-flow.md
+│   │   │   │   │   ├── no-force-push.md
+│   │   │   │   │   └── skill-fired.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 05-gh-gitflow-base-develop/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── base-branch-develop.md
+│   │   │   │   │   ├── no-force-push.md
+│   │   │   │   │   └── skill-fired.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 06-orchestrator-noarg-hardfail/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── hardfail-message.md
+│   │   │   │   │   └── no-bulk-script-call.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 07-neg-unrelated-task/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── answers-question.md
+│   │   │   │   │   ├── no-git-mutation.md
+│   │   │   │   │   └── skill-not-fired.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 08-neg-status-only/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── no-git-mutation.md
+│   │   │   │   │   ├── reports-status-only.md
+│   │   │   │   │   └── skill-not-fired.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 09-precommit-lint-nonautofix-agent-fixes/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── diagnosis-before-fix.md
+│   │   │   │   │   ├── fixed-bare-except.md
+│   │   │   │   │   └── no-force-push.md
+│   │   │   │   └── prompt.md
+│   │   │   ├── 10-precommit-test-blocks/
+│   │   │   │   ├── graders/
+│   │   │   │   │   ├── blocks-no-cheat.md
+│   │   │   │   │   └── nothing-pushed.md
+│   │   │   │   └── prompt.md
+│   │   │   └── results/
+│   │   │       ├── 2026-09-11T21-40-49-061Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       └── 2026-09-11T22-23-25-091Z/
+│   │   │           ├── aggregate-result.json
+│   │   │           └── report.html
 │   │   ├── hooks/
 │   │   │   ├── branch-policy/
 │   │   │   │   ├── branch_guard.py

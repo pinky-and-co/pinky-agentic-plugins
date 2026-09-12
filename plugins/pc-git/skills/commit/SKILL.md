@@ -79,21 +79,20 @@ means the commit is there, the second that nothing was committed. Derive no stat
 4. Trust your own judgment on grouping and message wording, same as you would writing prose — you
   write better commit messages than a manually-specified rule would produce. Genuinely unrelated
   changes still deserve separate commits; that's a normal editorial call, not a special procedure.
-5. `command -v prek || command -v pre-commit` — none found → skip to 6. Found → `<runner> run --files
-  <changed files>` BEFORE staging (a reformat changes file contents; staging first would commit the
-  pre-reformat version). Re-check `git diff HEAD` after — a hook FAILURE (not a reformat) stops you,
-  report it, commit nothing.
+    5. **Hook status** → if `bulk_commit.sh plan` reports:
+       - `❌ pre-commit failure` $ightarrow$ analyze logs, fix syntax/lint errors, and restart `plan`.
+       - `⚠️  missing pre-commit hooks` $ightarrow$ check repo criticality. For POCs/Assets, ignore. For Production, alert user and suggest adding security hooks.
 6. Apply the `branch-workflow` skill's Guard section before staging anything — it decides whether
   a feature branch is needed first. Follow what it says, then `git add <files>` and commit with the
   attribution trailer built programmatically (never hand-assembled — an empty env var must drop the
   line, not emit a broken URL):
 
-   ```
-   trailer="Co-Authored-By: Claude <noreply@anthropic.com>"
-   [ -n "${CLAUDE_CODE_BRIDGE_SESSION_ID:-}" ] && trailer="$trailer
-   Claude-Session: https://claude.ai/code/$CLAUDE_CODE_BRIDGE_SESSION_ID"
-   git commit -m "<message>" -m "$trailer"
-   ```
+  ```
+  trailer="Co-Authored-By: Claude <noreply@anthropic.com>"
+  [ -n "${CLAUDE_CODE_BRIDGE_SESSION_ID:-}" ] && trailer="$trailer
+  Claude-Session: https://claude.ai/code/$CLAUDE_CODE_BRIDGE_SESSION_ID"
+  git commit -m "<message>" -m "$trailer"
+  ```
 
-   `$CLAUDE_CODE_BRIDGE_SESSION_ID` is inherited from the parent even in a fork. Report
+  `$CLAUDE_CODE_BRIDGE_SESSION_ID` is inherited from the parent even in a fork. Report
   `<emoji> <subject>` (+ file list) and the branch you committed on.

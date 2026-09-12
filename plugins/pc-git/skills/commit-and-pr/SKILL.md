@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit> or --all [--no-watch-ci]"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write, Bash(prek run:*), Bash(pre-commit run:*)
 ---
 
 # Commit + push + PR/MR
@@ -77,7 +77,12 @@ above:
 Then plan the resolved target:
 
 ```
-${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}" [--repo <target>]
+    ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan --root "${CLAUDE_PROJECT_DIR}" [--repo <target>]
+
+
+    **Hook status** → if `plan` reports:
+       - `❌ pre-commit failure` $ightarrow$ analyze logs, fix syntax/lint errors, and restart `plan`.
+       - `⚠️  missing pre-commit hooks` $ightarrow$ check repo criticality. For POCs/Assets, ignore. For Production, alert user and suggest adding security hooks.
 ```
 
 Include `--repo <target>` for every scope except `--all` / `all of them`.

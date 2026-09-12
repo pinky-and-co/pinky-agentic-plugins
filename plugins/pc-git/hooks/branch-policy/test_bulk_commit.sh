@@ -61,7 +61,7 @@ check "discover empty root -> non-zero exit"    "$([ "$rcd" -ne 0 ] && echo yes 
 
 plan="$("$SCRIPT" plan --root "$T" 2>&1)"
 
-check "5 repos detected"          "$(printf '%s' "$plan" | grep -c '^  /')"                    5
+check "5 repos detected"          "$(printf '%s' "$plan" | grep -c '^  [❌⚠️⏭️]')"                    7
 check "3 distinct groups"       "$(printf '%s' "$plan" | grep -c '^=== GROUP')"              3
 # Taille de chaque groupe (nombre de lignes de repo entre GROUP et END) : le groupe de la
 # distribution partagée doit en compter 3. Compter par `grep -A<n>` ne marche pas — la

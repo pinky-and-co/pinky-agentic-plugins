@@ -41,10 +41,11 @@ this guard is what stands in for it.
    `.claude/settings.pinky.json` as in "Choosing a base branch" below)? If not — already on a topic
    branch, nothing to do, proceed to commit.
 3. On a permanent branch — check every changed file (`git status --porcelain`) against the
-   non-guarded exemption: documentation (`*.md`, anything under `docs/`), CI/config files
-   (`.github/workflows/**`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, lockfiles),
-   and files a distribution mechanism owns outright (never hand-authored by this repo). **Every**
-   changed file must match — one code file mixed in loses the exemption for the whole change.
+   non-guarded exemption: documentation (`*.md`, anything under `docs/`), hidden files and
+   directories — any path with a component starting with `.` (`.github/workflows/**`,
+   `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, etc.) — lockfiles, and files a
+   distribution mechanism owns outright (never hand-authored by this repo). **Every** changed file
+   must match — one code file mixed in loses the exemption for the whole change.
 4. All exempt → commit directly, no branch needed.
 5. Not all exempt → create and switch to a feature branch first (naming conventions above), THEN
    commit — never commit on the permanent branch and branch off afterward.

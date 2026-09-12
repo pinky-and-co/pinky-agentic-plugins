@@ -126,6 +126,32 @@ resolve_noise() {
     return $((1 - added))
 }
 
+# ── Hooks ──────────────────────────────────────────────────────────────────
+# Exécute prek ou pre-commit sur les fichiers modifiés avant le staging.
+# Retourne 0 si succès ou absent, 1 si échec.
+run_precommit_hooks() {
+    local repo="$1"
+    local runner=""
+    if command -v prek >/dev/null 2>&1; then
+        runner="prek"
+    elif command -v pre-commit >/dev/null 2>&1; then
+        runner="pre-commit"
+    fi
+
+    # If no runner is installed, the hooks are effectively absent.
+    [ -z "$runner" ] && return 2
+
+    # Check for the standard config file. If missing, return 'absent'.
+    if [ ! -f "$repo/.pre-commit-config.yaml" ]; then
+        return 2
+    fi
+
+    if ! "$runner" run --all-files; then
+        return 1
+    fi
+    return 0
+}
+
 discover_repos() {
     local root="$1"
     find "$root" -maxdepth 4 -name .git -not -path '*/node_modules/*' -print 2>/dev/null \
@@ -148,7 +174,7 @@ do_discover() {
         case ",$EXCLUDED_DEFAULT," in *",$name,"*) continue ;; esac
         scanned=$((scanned + 1))
         if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null || true)" ]; then
-            printf '%s\n' "$name"
+            printf "%s\n" "$name"
         fi
     done < <(discover_repos "$root")
 
@@ -170,6 +196,10 @@ do_plan() {
     # workspace : rendre l'effet de bord visible plutôt que silencieux (`discover` = read-only).
     [ -n "$filter" ] || printf 'bulk_commit: note: unfiltered plan — staging every dirty repo under %s\n' "$root" >&2
 
+    # Use a temp file to avoid process substitution issues in some bash versions
+    tmp_repos=$(mktemp)
+    discover_repos "$root" > "$tmp_repos"
+
     while IFS= read -r repo; do
         [ -n "$repo" ] || continue
         name="$(basename "$repo")"
@@ -178,12 +208,26 @@ do_plan() {
 
         scanned=$((scanned + 1))
         resolve_noise "$repo" || true
-        git -C "$repo" add -A 2>/dev/null || true
-        git -C "$repo" diff --staged --quiet && continue
+
+        rc=0
+        run_precommit_hooks "$repo" || rc=$?
+        if [ $rc -eq 1 ]; then
+            printf "  ❌ %-28s pre-commit hook failed\n" "$name"
+            continue
+        elif [ $rc -eq 2 ]; then
+            printf "  ⚠️  %-28s missing pre-commit hooks\n" "$name"
+        fi
+
+        git -C "$repo" add -A || printf "  ❌ %-28s git add failed\n" "$name"
+        if git -C "$repo" diff --staged --quiet; then
+            printf "  ⏭️  %-28s nothing staged\n" "$name"
+            continue
+        fi
 
         repos+=("$repo")
         fps+=("$(fingerprint "$repo")")
-    done < <(discover_repos "$root")
+    done < "$tmp_repos"
+    rm -f "$tmp_repos"
 
     if [ "$scanned" -eq 0 ]; then
         no_repos_found "$root"
