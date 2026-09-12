@@ -118,15 +118,15 @@ pinky-agentic-plugins/
 │   │   ├── agents/
 │   │   │   └── git-workflow.md
 │   │   ├── evals/
-│   │   │   ├── 01-gh-guarded-ci-pass/
+│   │   │   ├── 01-gh-guarded-push-prfails-honest/
 │   │   │   │   ├── graders/
 │   │   │   │   │   ├── correct-flow.md
 │   │   │   │   │   ├── no-force-push.md
 │   │   │   │   │   └── skill-fired.md
 │   │   │   │   └── prompt.md
-│   │   │   ├── 02-gh-guarded-ci-fail/
+│   │   │   ├── 02-gh-push-conflict-no-force/
 │   │   │   │   ├── graders/
-│   │   │   │   │   ├── ci-fail-honest.md
+│   │   │   │   │   ├── conflict-handled-cleanly.md
 │   │   │   │   │   ├── no-force-push.md
 │   │   │   │   │   └── skill-fired.md
 │   │   │   │   └── prompt.md
@@ -136,42 +136,36 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── no-force-push.md
 │   │   │   │   │   └── skill-fired.md
 │   │   │   │   └── prompt.md
-│   │   │   ├── 04-gl-guarded-ci-pass/
-│   │   │   │   ├── graders/
-│   │   │   │   │   ├── correct-mr-flow.md
-│   │   │   │   │   ├── no-force-push.md
-│   │   │   │   │   └── skill-fired.md
-│   │   │   │   └── prompt.md
-│   │   │   ├── 05-gh-gitflow-base-develop/
+│   │   │   ├── 04-gh-gitflow-base-develop/
 │   │   │   │   ├── graders/
 │   │   │   │   │   ├── base-branch-develop.md
 │   │   │   │   │   ├── no-force-push.md
 │   │   │   │   │   └── skill-fired.md
 │   │   │   │   └── prompt.md
-│   │   │   ├── 06-orchestrator-noarg-hardfail/
+│   │   │   ├── 05-orchestrator-noarg-hardfail/
 │   │   │   │   ├── graders/
 │   │   │   │   │   ├── hardfail-message.md
 │   │   │   │   │   └── no-bulk-script-call.md
 │   │   │   │   └── prompt.md
-│   │   │   ├── 07-neg-unrelated-task/
+│   │   │   ├── 06-neg-unrelated-task/
 │   │   │   │   ├── graders/
 │   │   │   │   │   ├── answers-question.md
 │   │   │   │   │   ├── no-git-mutation.md
 │   │   │   │   │   └── skill-not-fired.md
 │   │   │   │   └── prompt.md
-│   │   │   ├── 08-neg-status-only/
+│   │   │   ├── 07-neg-status-only/
 │   │   │   │   ├── graders/
 │   │   │   │   │   ├── no-git-mutation.md
 │   │   │   │   │   ├── reports-status-only.md
 │   │   │   │   │   └── skill-not-fired.md
 │   │   │   │   └── prompt.md
-│   │   │   ├── 09-precommit-lint-nonautofix-agent-fixes/
+│   │   │   ├── 08-precommit-lint-nonautofix-agent-fixes/
 │   │   │   │   ├── graders/
 │   │   │   │   │   ├── diagnosis-before-fix.md
 │   │   │   │   │   ├── fixed-bare-except.md
 │   │   │   │   │   └── no-force-push.md
 │   │   │   │   └── prompt.md
-│   │   │   ├── 10-precommit-test-blocks/
+│   │   │   ├── 09-precommit-test-blocks/
 │   │   │   │   ├── graders/
 │   │   │   │   │   ├── blocks-no-cheat.md
 │   │   │   │   │   └── nothing-pushed.md
@@ -180,7 +174,22 @@ pinky-agentic-plugins/
 │   │   │       ├── 2026-09-11T21-40-49-061Z/
 │   │   │       │   ├── aggregate-result.json
 │   │   │       │   └── report.html
-│   │   │       └── 2026-09-11T22-23-25-091Z/
+│   │   │       ├── 2026-09-11T22-23-25-091Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-06-50-788Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-09-12-565Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-24-19-631Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-36-49-395Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       └── 2026-09-12T09-39-53-019Z/
 │   │   │           ├── aggregate-result.json
 │   │   │           └── report.html
 │   │   ├── hooks/
