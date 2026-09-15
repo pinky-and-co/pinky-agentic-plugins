@@ -5,10 +5,9 @@ declared directory-structure convention.
 The convention itself is data, never Python: a repo opts in and defines its own rule set under
 `file_placement` in `.claude/settings.pinky.json`, resolved by the same walk-up as
 `branch_workflow` (`policy_lib.load_policies`) — a repo that never sets the key sees no blocking,
-ever (NFR-0023-23), and a repo can locally override an ancestor's value the same way any other key
+ever, and a repo can locally override an ancestor's value the same way any other key
 is overridden (closest-declaring-repo wins). Adopting this on another repo, or adding a second
-independent convention on this one, is a `settings.pinky.json` edit — this file never changes
-(NFR-0023-24).
+independent convention on this one, is a `settings.pinky.json` edit — this file never changes.
 
 `file_placement` is a list of rules, each scoped to its own `root` (a path relative to the repo),
 so a repo can declare N independent conventions at once. Each rule matches `<root>/<unit>/...` —
@@ -44,7 +43,7 @@ depth, so which rule "should" win has no well-defined answer independent of whic
 happens to set. Keep every rule's `root` disjoint from every other's.
 
 Same envelope as `privacy_egress.py`: `permissionDecision: "deny"` in JSON stdout, process exit 0
-always — never `exit 2`, that contract belongs to the PostToolUse `post_edit_lint.py` (IMP-0023-29).
+always — never `exit 2`, that contract belongs to the PostToolUse `post_edit_lint.py`.
 
 Only `Write` is in scope: `Edit` cannot create a new file, so misplacement cannot occur through it.
 

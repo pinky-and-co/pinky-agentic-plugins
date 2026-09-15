@@ -8,7 +8,7 @@ clears it. The user's next message is that something.
 Conditional on the latch pending_gate drops when it actually issues a deny —
 so a `reload-plugins` queued at SessionStart, before the gate has run, is
 *not* wiped by the user's first prompt: it survives to the first tool call
-and the nudge surfaces (FR-0025-25). Once the gate has denied at least once,
+and the nudge surfaces. Once the gate has denied at least once,
 the next prompt clears the queue and the latch.
 
 Fail open: a queue that fails to clear is a nuisance, never a reason to

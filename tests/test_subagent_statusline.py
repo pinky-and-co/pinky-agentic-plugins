@@ -1,13 +1,12 @@
-"""subagentStatusLine — one custom row per subagent in the agents panel (2026-08-12).
+"""subagentStatusLine — one custom row per subagent in the agents panel.
 
 Companion to test_statusline.py, same oracle strategy (tests.md § generator oracle): unit
 oracles on the small pure helpers, then end-to-end oracles on `render_task()` — the pure entry
-point extracted from `main()`'s per-task loop by this same fix, for the same reason (a testable
-seam, and a real bug closed: a single malformed task's `tokenCount`/`contextWindowSize` being the
-wrong TYPE used to crash the whole render loop via an uncaught `int(str / str)`, blanking every
-other agent's row too — `main()` now isolates each task's render in a try/except, and
-`render_task()` itself falls back to the dim `ctx:—` placeholder on a type mismatch instead of
-trusting the schema blindly.
+point `main()`'s per-task loop calls, for a testable seam. A single malformed task's
+`tokenCount`/`contextWindowSize` being the wrong TYPE would otherwise crash the whole render loop
+via an uncaught `int(str / str)`, blanking every other agent's row too — `main()` isolates each
+task's render in a try/except, and `render_task()` itself falls back to the dim `ctx:—` placeholder
+on a type mismatch instead of trusting the schema blindly.
 """
 
 import json
@@ -100,9 +99,9 @@ def test_render_task_unresolved_model_shows_dim_ctx_placeholder():
 
 
 def test_render_task_tolerates_wrong_typed_token_fields():
-    """The bug this fix closes: tokenCount/contextWindowSize holding the wrong TYPE (a string,
-    from a misbehaving upstream) used to raise inside int(token_count / ctx_size * 100) with
-    nothing catching it in main()'s loop. render_task() now type-checks before dividing."""
+    """tokenCount/contextWindowSize holding the wrong TYPE (a string, from a misbehaving
+    upstream) would otherwise raise inside int(token_count / ctx_size * 100). render_task()
+    type-checks before dividing, so this degrades instead of crashing."""
     task = {
         "id": "t1",
         "name": "worker",

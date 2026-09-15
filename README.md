@@ -117,6 +117,29 @@ pinky-agentic-plugins/
 │   ├── pc-git/
 │   │   ├── agents/
 │   │   │   └── git-workflow.md
+│   │   ├── evals/
+│   │   │   └── results/
+│   │   │       ├── 2026-09-11T21-40-49-061Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-11T22-23-25-091Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-06-50-788Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-09-12-565Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-24-19-631Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       ├── 2026-09-12T09-36-49-395Z/
+│   │   │       │   ├── aggregate-result.json
+│   │   │       │   └── report.html
+│   │   │       └── 2026-09-12T09-39-53-019Z/
+│   │   │           ├── aggregate-result.json
+│   │   │           └── report.html
 │   │   ├── hooks/
 │   │   │   ├── branch-policy/
 │   │   │   │   ├── branch_guard.py

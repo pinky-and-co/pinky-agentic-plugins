@@ -51,7 +51,7 @@ class TestGeneratedTreeViolation(unittest.TestCase):
 
 
 class TestBoardDirCarveOut(unittest.TestCase):
-    """FR-0025-27/28 — board card + agent-log dirs stay writable from any session root; a
+    """Board card + agent-log dirs stay writable from any session root; a
     write that is out of scope AND in no git repo asks instead of a silent deny."""
 
     def setUp(self):

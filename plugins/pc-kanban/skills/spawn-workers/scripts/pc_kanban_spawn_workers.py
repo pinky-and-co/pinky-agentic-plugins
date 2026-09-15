@@ -10,20 +10,20 @@ straight into `/pc-kanban:chantier <id> <slug>` on the card's declared `model:` 
 Per repo, before opening the worker: `enable_project_plugins` turns on — at project scope, in the
 target repo's *versioned* `.claude/settings.json` — every installed project-scoped plugin whose
 `projectPath` covers the repo, so the worker's boot `/pc-kanban:chantier` runs with them live and
-no `/reload-plugins` (FR-0025-52/53). Then:
+no `/reload-plugins`. Then:
 
 - **Inside cmux / wmux** (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID`): `<mux> new-workspace --cwd <path>
   --command '<claude ...>'`, one per repo.
 - **Outside any multiplexer**: prints a `cd <path> && claude ...` line per repo for the user to run,
   and spawns nothing.
 
-No dependency on the `pinky` CLI (FR-0025-20): card lookup, board resolution, `repos:` and `model:`
+No dependency on the `pinky` CLI: card lookup, board resolution, `repos:` and `model:`
 all go through `stop_handoff.py`'s CLI (same plugin, same pattern guard.py uses); slug->path
 resolution reuses `resolve_repos.sh` (sibling skill); the project-scope enable shells out to
 `claude plugin` directly. The workspace root is derived from the board that holds the card — never
 a configured value.
 
-Multi-repo cards (FR-0025-21) are sequential by convention: pass the single next `<repo-slug>` to
+Multi-repo cards are sequential by convention: pass the single next `<repo-slug>` to
 spawn just that one. With no slug filter every repo of the card is spawned, in `repos:` order.
 
 `--dry-run` previews the command line(s) and does nothing else — no spawn, no plugin enable.

@@ -5,8 +5,8 @@ python3 -m unittest discover tests
 Defines "done": a UserPromptSubmit empties the pending_user_action queue *only
 when pending_gate has latched a deny* — so a `reload-plugins` queued at
 SessionStart (before the gate runs) survives the first prompt and its nudge
-surfaces (FR-0025-25), while a peeked deny key stops denying once the user
-sends their next message (FR-0025-56). Fails open.
+surfaces, while a peeked deny key stops denying once the user
+sends their next message. Fails open.
 """
 
 import io
