@@ -8,7 +8,7 @@ of whichever harness or plugin renders this hook. They already run at commit tim
 `.pre-commit-config.yaml` — this hook adds no new detection, it moves the *feedback loop* earlier:
 without it, several edits happen, then the checkers fire together at commit time, far from each
 file's own context. Routing here mirrors `.pre-commit-config.yaml`'s own `files:`/`types:` filters
-(check-zws and check-forbidden-keywords are universal; check-typed-api is `src/`-only;
+(check-zws, check-latex-notation and check-forbidden-keywords are universal; check-typed-api is `src/`-only;
 check-weak-assertions is `tests/`-only) so a nudge here never disagrees with what CI actually
 enforces. A checker not present in a given repo's `scripts/hooks/` is silently skipped — not every
 repo carries every checker.
@@ -33,7 +33,11 @@ from pathlib import Path
 MAX_OUTPUT_LINES = 20
 _CHECKERS_SUBDIR = ("scripts", "hooks")
 
-_UNIVERSAL_CHECKERS = ("check_zws.py", "check_forbidden_keywords.py")
+_UNIVERSAL_CHECKERS = (
+    "check_zws.py",
+    "check_latex_notation.py",
+    "check_forbidden_keywords.py",
+)
 
 
 def _is_disabled() -> bool:

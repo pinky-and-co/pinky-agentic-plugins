@@ -28,7 +28,12 @@ def _repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
     dst = tmp_path / "scripts" / "hooks"
     dst.mkdir(parents=True)
-    for name in ("check_zws.py", "check_forbidden_keywords.py", "check_typed_api.py"):
+    for name in (
+        "check_zws.py",
+        "check_latex_notation.py",
+        "check_forbidden_keywords.py",
+        "check_typed_api.py",
+    ):
         shutil.copy(_REAL_CHECKERS_DIR / name, dst / name)
     return tmp_path
 
@@ -46,6 +51,15 @@ class TestDecide(unittest.TestCase):
             report = pel.decide(_edit_event(f))
             self.assertIsNotNone(report)
             self.assertIn("[ZWS]", report)
+
+    def test_reports_raw_latex_notation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _repo(Path(tmp))
+            f = repo / "note.md"
+            f.write_text("A `SAINT` $\\rightarrow$ `ST`.\n", encoding="utf-8")
+            report = pel.decide(_edit_event(f))
+            self.assertIsNotNone(report)
+            self.assertIn("[LATEX]", report)
 
     def test_clean_file_reports_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

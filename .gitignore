@@ -9,3 +9,6 @@ __pycache__/
 
 # Claude Code local session state (permission-change skill), not source
 .claude/.guard-state.json
+
+# Plugin evaluation results (test output)
+plugins/*/evals/
