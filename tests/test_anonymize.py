@@ -188,7 +188,7 @@ def test_write_rows_guards_an_unsupported_extension(tmp_path):
 
 
 def test_server_apply_tool_runs_offline(tmp_path):
-    """`anonymize_apply` is pure stdlib — it must work with no model, no network (FR-0023-20)."""
+    """`anonymize_apply` is pure stdlib — it must work with no model, no network."""
     pytest.importorskip("mcp")
     sys.path.insert(
         0, str(Path(__file__).parent.parent / "plugins" / "pc-privacy" / "mcp")

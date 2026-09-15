@@ -16,10 +16,10 @@ Design:
 - records branch · uncommitted files · recent commit subjects · a develop→main landmark.
 - carries the anti-secrets directive: commit subjects are scrubbed before being written.
 
-`ADR-0004` (`pinky-bootstrap`) considered adding a signal comparing the card's declared `model:` to
-the model that actually ran the turn, and found it not buildable: a `Stop`/`SessionEnd` event carries
-`session_id`/`cwd`/`hook_event_name`/`stop_hook_active`, no model name, no documented
-`transcript_path` for these events. Left out rather than faked.
+This deliberately omits a signal comparing the card's declared `model:` to the model that actually
+ran the turn: a `Stop`/`SessionEnd` event carries `session_id`/`cwd`/`hook_event_name`/
+`stop_hook_active`, no model name, no documented `transcript_path` for these events — left out
+rather than faked.
 
 Python 3.11+, stdlib only. Exit code is always 0 (a hook failure must never block a Stop/SessionEnd).
 """
@@ -270,7 +270,7 @@ def _board_table_lines(index_text: str) -> list[str]:
 
     `INDEX.md` carries onboarding prose above the table (preamble, topology, the column
     convention) that the `kanban` skill's own docs already own — `--list-chantiers`'s default
-    mode drops it, keeping only what a session needs to orient (FR-0025-11).
+    mode drops it, keeping only what a session needs to orient.
     """
     lines = index_text.splitlines()
     start = next(
@@ -322,8 +322,8 @@ CARDS_LEGEND = "cards legend: " + "/".join(_KANBAN_COLUMNS)
 def _column_counts(chantier_dir: Path | None) -> str:
     """`N/N/N/N/N` in `_KANBAN_COLUMNS` order (see `CARDS_LEGEND`), walked from the filesystem.
 
-    Positional rather than `col=N` per column (FR-0025-13's letter, not its exact rendering) —
-    one legend line for the whole invocation replaces a repeated label on every chantier row.
+    Positional rather than `col=N` per column — one legend line for the whole invocation
+    replaces a repeated label on every chantier row.
     """
     return "/".join(
         str(sum(1 for _ in (chantier_dir / col).glob("*.md")) if chantier_dir else 0)
@@ -340,7 +340,7 @@ def bounded_board_lines(kanban: Path) -> list[str]:
     Returns:
         One line per table row (header/separator included, unchanged) plus, right after each
         data row, a `  cards: N/N/N/N/N` line with that chantier's per-column card count — see
-        `CARDS_LEGEND` for the column order (FR-0025-13). `[]` when `INDEX.md` is missing or has
+        `CARDS_LEGEND` for the column order. `[]` when `INDEX.md` is missing or has
         no `## Board` table.
     """
     index = kanban / "INDEX.md"
@@ -486,8 +486,9 @@ def card_repos(card_text: str) -> list[str] | None:
 def card_accepts(card_text: str, repo_name: str, repo_slug: str | None) -> bool:
     """Whether this session's breadcrumb belongs on this card — the anti-cross-contamination filter.
 
-    A single Stop used to stamp the SAME block (the cwd repo's git state) into every in-progress
-    card of every chantier, clobbering unrelated breadcrumbs. Two repo identities are checked
+    Without this filter, a single Stop would stamp the SAME block (the cwd repo's git state) into
+    every in-progress card of every chantier, clobbering unrelated breadcrumbs. Two repo identities
+    are checked
     because the board carries both card formats during its ongoing YAML conversion: a YAML
     `repos:` declares `org/repo` slugs (matched against `repo_slug`, a bare name collides across
     orgs) ; the legacy `**Repos:**` line declares bare directory names (matched against

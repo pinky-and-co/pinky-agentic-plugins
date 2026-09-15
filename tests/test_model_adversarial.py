@@ -274,7 +274,7 @@ class TestDetectStack(unittest.TestCase):
 
 
 def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp_path):
-    """FR-0023-28 — the pool model has no `Skill` tool, so the stack checklist must be in the prompt."""
+    """The pool model has no `Skill` tool, so the stack checklist must be in the prompt."""
     pytest.importorskip("mcp")
     sys.path.insert(
         0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")

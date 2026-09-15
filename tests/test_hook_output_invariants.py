@@ -1,12 +1,13 @@
-"""Anti-bloat invariant over plugin hooks (incident 2026-07-04).
+"""Anti-bloat invariant over plugin hooks.
 
 A hook that persists a MANAGED BLOCK into a file (marked by a `BLOCK_START` constant) must build
 that block as a pure function of state — no wall-clock, no nonce. Otherwise the block differs every
 turn, the hook rewrites the file, and because that file may already be in the agent's context the
-harness re-injects it whole -> pure token waste (exactly how the auto-handoff timestamp leaked
-~1K/turn).
+harness re-injects it whole -> pure token waste (a stray timestamp alone can leak on the order of
+1K tokens per turn).
 
-Generic: it scans every plugin hook, protecting future ones, not just the one already fixed.
+Generic: it scans every plugin hook, not one hardcoded file, so it protects any hook that might
+reintroduce the pattern.
 Plus a total-function check on the status-line entry point (an error there blanks the whole bar).
 """
 

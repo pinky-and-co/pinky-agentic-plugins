@@ -1,17 +1,14 @@
-"""Statusline — multi-line dashboard rewrite (2026-08-12).
+"""Statusline — multi-line dashboard tests.
 
-Replaces the single-segment `⬡ model · ctx · $cost · cwd` bar with a 3-line dashboard (+ a
-conditional rate-limit warning line): model/effort/mode, session id/duration/subagent count,
-context bar + cache hit rate. `context_window.used_percentage` now comes straight from the harness
-payload — the old manual transcript-tail parsing (`_tail_usage`/`_ctx_tokens`) and its
-`PINKY_CONTEXT_WINDOW`/`PINKY_WARN_PCT` overrides are gone with it.
+Covers a 3-line dashboard (+ a conditional rate-limit warning line): model/effort/mode, session
+id/duration/subagent count, context bar + cache hit rate. `context_window.used_percentage` comes
+straight from the harness payload.
 
 Oracle strategy (tests.md § generator oracle): the small pure helpers (`_color_for_pct`,
 `_build_bar`, `_short_model`, `_render_flex`, `_visible_len`...) each get a direct equality oracle —
 sharper and far more readable than reverse-engineering one giant ANSI-laden string. `build_lines()`
-itself (the `main()`-callable pure entry point restored by this fix, so a "never raises" test can
-exist without shelling out) gets end-to-end oracles for the two cases that matter: a rich payload and
-an empty one.
+itself (the `main()`-callable pure entry point, so a "never raises" test can exist without shelling
+out) gets end-to-end oracles for the two cases that matter: a rich payload and an empty one.
 """
 
 import subprocess
@@ -158,11 +155,10 @@ import pytest as _pytest  # noqa: E402
 def _stats(saved, lost, before, busts=0):
     """A minimal `/stats` payload shaped like the proxy's, keyed only where the code reads.
 
-    `compression_vs_cache` nests under `prefix_cache` in the real payload (verified live against a
-    running proxy 2026-09-04) — not at the top level. Getting this nesting wrong here would hide a
-    wrong read path in the code the same way it did in production: a lookup that never resolves
-    falls back through `or 0` on both sides, which reads as "nothing to report" rather than as an
-    error, so nothing fails loudly.
+    `compression_vs_cache` nests under `prefix_cache` in the real payload, not at the top level.
+    Getting this nesting wrong here would hide a wrong read path in the code: a lookup that never
+    resolves falls back through `or 0` on both sides, which reads as "nothing to report" rather
+    than as an error, so nothing fails loudly.
     """
     return {
         "prefix_cache": {

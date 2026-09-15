@@ -137,10 +137,10 @@ class TestDecide(unittest.TestCase):
             self.assertIsNone(bg.decide(event, root))
 
     def test_target_in_no_git_repo_is_not_guarded(self):
-        """FR-0025-29 — the exact shape that misfired: the session's project dir is a repo on
-        a permanent branch, but the write targets a sibling path (`_KANBAN/…`) that is inside
-        no git repo. `resolve_repo_root` falls back to the project dir, and without the guard
-        the target inherits `main` and gets denied."""
+        """The session's project dir is a repo on a permanent branch, but the write targets a
+        sibling path (`_KANBAN/…`) that is inside no git repo. `resolve_repo_root` falls back to
+        the project dir, and without the guard the target would inherit `main` and get wrongly
+        denied."""
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)  # not a git repo
             repo = self._repo(workspace, "main", "github flow")

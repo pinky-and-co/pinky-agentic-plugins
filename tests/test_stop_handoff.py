@@ -530,7 +530,7 @@ class TestListAgentLogDirsCLI(unittest.TestCase):
     )
 
     def test_prints_the_dir_even_when_it_does_not_exist_yet(self):
-        """The allow-list consumer (guard.py, FR-0025-27) needs the path before the first
+        """The allow-list consumer (guard.py) needs the path before the first
         journal entry creates it — so this mode, unlike `--list-agent-logs`, never filters
         on `is_dir()`."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -554,7 +554,7 @@ class TestListAgentLogDirsCLI(unittest.TestCase):
 
 
 class TestCardCLI(unittest.TestCase):
-    """`--card-path` / `--card-repos` — card resolution exposed for spawn-workers (FR-0025-19)."""
+    """`--card-path` / `--card-repos` — card resolution exposed for spawn-workers."""
 
     SCRIPT = str(
         Path(__file__).parent.parent
