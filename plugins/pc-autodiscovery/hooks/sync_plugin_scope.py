@@ -4,22 +4,25 @@ actually is.
 
 Ascend at SessionStart, descend at CwdChanged, restore at SessionEnd:
 
-- SessionStart: back up the session's single settings.local.json (resolved
-  from CLAUDE_PROJECT_DIR, same value inject_policies.py already reads — see
-  plugin_scope_lib's module docstring for why it's one file, not one per
-  repo touched), then activate — at project scope, in the repo opened in —
-  every project-scoped plugin whose projectPath is an ancestor of it. Same
-  call `spawn-workers`' pre-enable makes (`claude plugin install --scope
-  project`), so the write lands in that repo's versioned `.claude/
-  settings.json`, not an ephemeral settings.local.json.
+- SessionStart: join or start the shared, per-directory backup of
+  settings.local.json (resolved from CLAUDE_PROJECT_DIR, same value
+  inject_policies.py already reads — see plugin_scope_lib's module
+  docstring for why it's one file, not one per repo touched, and for the
+  shared-backup mechanism itself), then activate — at project scope, in the
+  repo opened in — every project-scoped plugin whose projectPath is an
+  ancestor of it. Same call `spawn-workers`' pre-enable makes (`claude
+  plugin install --scope project`), so the write lands in that repo's
+  versioned `.claude/settings.json`, not an ephemeral settings.local.json.
 - CwdChanged: local-scope matching against the *new* cwd, additive only —
   never deactivates a plugin a previous position already turned on. Passes
   the session's open path so the match drops what the SessionStart ascend
   already covered (projectPath at or above the open dir) and what
   settings.local.json already lists.
-- SessionEnd: restore settings.local.json to exactly what backup_settings_local
-  captured, drop the per-session state file, and clear the pending queue —
-  never touches the ascend's project-scope settings.json, which stays.
+- SessionEnd: leave this session's directory (see plugin_scope_lib's shared
+  per-directory backup — restore fires only once every session open there
+  has left, live or crashed), drop the per-session state file, and clear the
+  pending queue — never touches the ascend's project-scope settings.json,
+  which stays.
 
 Registered as a single script across three hook events in hooks.json rather
 than three files — one entry to maintain, dispatch on `hook_event_name`
@@ -39,14 +42,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 from pending_user_action import clear_all as clear_pending
 from pending_user_action import require
 from plugin_scope_lib import (
-    backup_settings_local,
+    backup_settings_local_shared,
     clear_state,
     enable_plugin_local,
     install_plugin_project,
     load_state,
     matching_plugin_ids,
     project_scope_installed_ids,
-    restore_settings_local,
+    restore_settings_local_shared,
     save_state,
     settings_json_plugin_ids,
     settings_local_plugin_ids,
@@ -133,7 +136,7 @@ def handle_session_start(payload: dict) -> None:
 
     state = load_state(session_id)
     state["settings_local_path"] = str(settings_local)
-    state["existed"] = backup_settings_local(settings_local, session_id)
+    backup_settings_local_shared(settings_local, session_id, os.getppid())
 
     newly_enabled = activate_for_path(
         Path(payload.get("cwd", project_dir)),
@@ -185,9 +188,7 @@ def handle_session_end(payload: dict) -> None:
     state = load_state(session_id)
     settings_local_path = state.get("settings_local_path")
     if settings_local_path:
-        restore_settings_local(
-            Path(settings_local_path), session_id, state.get("existed")
-        )
+        restore_settings_local_shared(Path(settings_local_path), session_id)
     clear_state(session_id)
     clear_pending(session_id)
 

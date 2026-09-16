@@ -15,6 +15,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -300,7 +301,6 @@ class TestHandleCwdChanged(unittest.TestCase):
                 "settings_local_path": str(
                     self.open_path / ".claude" / "settings.local.json"
                 ),
-                "existed": False,
             },
         )
         self._orig_activate = sps.activate_for_path
@@ -346,7 +346,7 @@ class TestHandleSessionEndScopeIsolation(unittest.TestCase):
         self.settings_local.write_text(
             json.dumps({"enabledPlugins": {"post-cd@mp": True}})
         )
-        psl.backup_settings_local(self.settings_local, self.session)
+        psl.backup_settings_local_shared(self.settings_local, self.session, os.getpid())
         # l'état local diverge maintenant de la sauvegarde, comme si CwdChanged avait écrit
         self.settings_local.write_text(
             json.dumps({"enabledPlugins": {"post-cd@mp": True, "extra@mp": True}})
@@ -362,7 +362,6 @@ class TestHandleSessionEndScopeIsolation(unittest.TestCase):
             {
                 "activated": ["pc-snow@mp"],
                 "settings_local_path": str(self.settings_local),
-                "existed": True,
             },
         )
 
@@ -398,8 +397,8 @@ class TestHandleSessionEndNeverWroteSettingsLocal(unittest.TestCase):
         (self.project_dir / ".claude").mkdir(parents=True)
 
         self.settings_local = self.project_dir / ".claude" / "settings.local.json"
-        psl.backup_settings_local(
-            self.settings_local, self.session
+        psl.backup_settings_local_shared(
+            self.settings_local, self.session, os.getpid()
         )  # n'a jamais existé
 
         self.settings_json = self.project_dir / ".claude" / "settings.json"
@@ -412,7 +411,6 @@ class TestHandleSessionEndNeverWroteSettingsLocal(unittest.TestCase):
             {
                 "activated": ["pc-snow@mp"],
                 "settings_local_path": str(self.settings_local),
-                "existed": False,
             },
         )
 
@@ -426,6 +424,88 @@ class TestHandleSessionEndNeverWroteSettingsLocal(unittest.TestCase):
         sps.handle_session_end({"session_id": self.session})
         self.assertEqual(self.settings_json.read_text(), before)
         self.assertFalse(self.settings_local.exists())
+
+
+class TestSharedBackupConcurrentSessions(unittest.TestCase):
+    """Done when #1/#3/#4: the backup is shared per directory, not per
+    session — the second session to arrive joins it instead of recapturing
+    an already-modified file, and restore fires only once every session
+    (live or crashed) has left."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self._orig_psl_dir, psl.STATE_DIR = psl.STATE_DIR, root / "scope"
+        self.project_dir = root / "repo"
+        (self.project_dir / ".claude").mkdir(parents=True)
+        self.settings_local = self.project_dir / ".claude" / "settings.local.json"
+        self.settings_local.write_text(
+            json.dumps({"enabledPlugins": {"orig@mp": True}})
+        )
+
+    def tearDown(self):
+        psl.STATE_DIR = self._orig_psl_dir
+        self._tmp.cleanup()
+
+    def _open_two_sessions(self):
+        """Session A opens first and captures the backup; session B opens
+        second, on the already-open directory, and must join without
+        recapturing. Both use this test process's own (genuinely alive) PID."""
+        psl.backup_settings_local_shared(self.settings_local, "A", os.getpid())
+        psl.backup_settings_local_shared(self.settings_local, "B", os.getpid())
+        # une session ultérieure écrit (CwdChanged) — l'état diverge de l'original
+        self.settings_local.write_text(
+            json.dumps({"enabledPlugins": {"orig@mp": True, "cwd-written@mp": True}})
+        )
+
+    def test_lifo_close_restores_the_original_once_both_are_gone(self):
+        self._open_two_sessions()
+        psl.restore_settings_local_shared(
+            self.settings_local, "B"
+        )  # dernière ouverte, ferme en 1er
+        self.assertEqual(
+            json.loads(self.settings_local.read_text())["enabledPlugins"],
+            {"orig@mp": True, "cwd-written@mp": True},
+        )  # A encore vivante — pas de restauration
+        psl.restore_settings_local_shared(self.settings_local, "A")
+        self.assertEqual(
+            json.loads(self.settings_local.read_text()),
+            {"enabledPlugins": {"orig@mp": True}},
+        )
+
+    def test_non_lifo_close_restores_the_original_once_both_are_gone(self):
+        self._open_two_sessions()
+        psl.restore_settings_local_shared(
+            self.settings_local, "A"
+        )  # ouverte en 1er, ferme en 1er
+        self.assertEqual(
+            json.loads(self.settings_local.read_text())["enabledPlugins"],
+            {"orig@mp": True, "cwd-written@mp": True},
+        )  # B encore vivante — pas de restauration
+        psl.restore_settings_local_shared(self.settings_local, "B")
+        self.assertEqual(
+            json.loads(self.settings_local.read_text()),
+            {"enabledPlugins": {"orig@mp": True}},
+        )
+
+    def test_a_crashed_sessions_dead_pid_is_purged_and_restore_still_fires(self):
+        proc = subprocess.Popen(["true"])
+        dead_pid = proc.pid
+        proc.wait()  # garanti mort : le fd n'a jamais été relâché explicitement, juste fermé
+
+        psl.backup_settings_local_shared(self.settings_local, "crashed", dead_pid)
+        psl.backup_settings_local_shared(self.settings_local, "alive", os.getpid())
+        self.settings_local.write_text(
+            json.dumps({"enabledPlugins": {"orig@mp": True, "cwd-written@mp": True}})
+        )
+
+        # la session vivante ferme normalement — le PID de la session crashée est
+        # détecté mort au passage, purgé, et plus aucun verrou vivant ne reste
+        psl.restore_settings_local_shared(self.settings_local, "alive")
+        self.assertEqual(
+            json.loads(self.settings_local.read_text()),
+            {"enabledPlugins": {"orig@mp": True}},
+        )
 
 
 if __name__ == "__main__":
