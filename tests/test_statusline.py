@@ -393,6 +393,48 @@ def test_build_lines_no_rate_limit_line_below_threshold():
     assert not any("RATE LIMIT" in ln for ln in stripped)
 
 
+# --- rate-limit state file — the only exposure point for the server-aggregated 5h/7d quota,
+# read by pc-kanban's own recommendation script ---------------------------------------------
+
+
+def test_rate_limit_state_path_is_deterministic_per_session():
+    assert sl._rate_limit_state_path("abc") == sl._rate_limit_state_path("abc")
+    assert sl._rate_limit_state_path("abc") != sl._rate_limit_state_path("def")
+
+
+def test_write_rate_limit_state_writes_both_windows(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(sl.tempfile, "gettempdir", lambda: str(tmp_path))
+    data = {
+        "rate_limits": {
+            "five_hour": {"used_percentage": 96, "resets_at": 111},
+            "seven_day": {"used_percentage": 30, "resets_at": 222},
+        }
+    }
+    sl._write_rate_limit_state(data, "sess-1")
+    with open(sl._rate_limit_state_path("sess-1"), encoding="utf-8") as f:
+        state = json.load(f)
+    assert state == {
+        "five_hour": {"used_percentage": 96, "resets_at": 111},
+        "seven_day": {"used_percentage": 30, "resets_at": 222},
+    }
+
+
+def test_write_rate_limit_state_no_session_id_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sl.tempfile, "gettempdir", lambda: str(tmp_path))
+    sl._write_rate_limit_state(
+        {"rate_limits": {"five_hour": {"used_percentage": 99}}}, None
+    )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_rate_limit_state_missing_rate_limits_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sl.tempfile, "gettempdir", lambda: str(tmp_path))
+    sl._write_rate_limit_state({}, "sess-2")
+    assert list(tmp_path.iterdir()) == []
+
+
 def _git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 

@@ -106,6 +106,43 @@ On explicit user OK: `mv` the chosen card into `2-selected-for-dev`. On silence 
 nothing — the proposal is not a commitment, and repeating it unprompted next turn is not this
 skill's job either.
 
+### Recommending session vs spawn, next to the proposal
+
+**Worker sessions only** — an orchestrator never takes a card itself, so it never reaches this
+step. Alongside the proposed card, run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py"
+```
+
+It prints `{"context_window_pct": <int|null>, "rate_limit": {"five_hour": {...}, "seven_day":
+{...}}|null}`, each field independently `null` when its own data source is unavailable (missing
+transcript, `pc-statusline` not installed) — never an error. Render the line from this output and
+the candidate card's `repos:`/`sert` against the current session's own:
+
+1. **Rate-limit override, checked first.** If either window in `rate_limit` has `triggered: true`,
+   the whole line becomes a pause recommendation, naming the window and its `resets_at` — skip
+   step 2 entirely. Do not recommend "continue in session" when the account is about to get cut
+   off regardless of context headroom.
+2. **Otherwise, context-window + proximity.** `context_window_pct` (`null` → omit the line
+   entirely, nothing to base it on) against the `<50` / `≥50` band gives the default recommendation
+   (continue / spawn a fresh session); a candidate sharing `repos:` or `sert` with the current
+   session modulates the wording toward "continue" but never flips a `≥50` verdict to the
+   opposite — this stays a recommendation, never a gate (`.claude/rules/kanban-proactivity.md`).
+
+```
+→ Proposition : <card-slug>
+  💡 Reco : continuer en session (context à 22%, même repos:)
+```
+```
+→ Proposition : <card-slug>
+  ⚠️ Reco : attendre le reset (dans 1h15, five_hour à 96%) avant de démarrer — risque de hit
+  mi-travail, cache froid à la reprise
+```
+
+Purely consultative end to end: this step never `mv`s the card, never spawns a session, never
+forces a pause — the same human decision as the proposal itself.
+
 ### Relaying a multi-repo card
 
 A card with 2+ entries in `repos:` is worked by one worker session per repo, spawned by the
