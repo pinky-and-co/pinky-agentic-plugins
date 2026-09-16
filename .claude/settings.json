@@ -3,6 +3,9 @@
     "skill-creator@claude-plugins-official": true,
     "pc-core@pinky-agentic-plugins": true,
     "pc-kanban@pinky-agentic-plugins": true,
-    "pc-git@pinky-agentic-plugins": true
+    "pc-git@pinky-agentic-plugins": true,
+    "pc-craft@pinky-agentic-plugins": true,
+    "pc-privacy@pinky-agentic-plugins": true,
+    "pyright@claude-code-lsps": true
   }
 }
