@@ -218,6 +218,8 @@ pinky-agentic-plugins/
 │   │       │   │   ├── multi-board.md
 │   │       │   │   ├── requirements.md
 │   │       │   │   └── story-template.md
+│   │       │   ├── scripts/
+│   │       │   │   └── next_card_recommendation.py
 │   │       │   └── SKILL.md
 │   │       ├── permission-change/
 │   │       │   ├── scripts/
@@ -315,6 +317,7 @@ pinky-agentic-plugins/
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
 │   ├── test_model_panel.py
+│   ├── test_next_card_recommendation.py
 │   ├── test_orchestrator_freeze.py
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pending_gate.py

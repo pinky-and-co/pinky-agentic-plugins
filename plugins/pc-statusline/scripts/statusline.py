@@ -346,6 +346,41 @@ def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
     return f"Headroom {face}{SEP}{colour}{pct_txt} {name}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
 
 
+def _rate_limit_state_path(session_id: str) -> str:
+    """Doit rester identique, octet pour octet, à
+    `pc-kanban/skills/kanban/scripts/next_card_recommendation.py::_rate_limit_state_path` — les
+    deux calculs sont dupliqués volontairement (deux plugins découplés), pas partagés."""
+    return os.path.join(
+        tempfile.gettempdir(),
+        f"pc-statusline-ratelimits-{os.getuid()}-{session_id}.json",
+    )
+
+
+def _write_rate_limit_state(data: dict, session_id) -> None:
+    """`rate_limits.five_hour`/`.seven_day` sont un quota agrégé côté serveur, poussé uniquement
+    à ce script — le seul point d'accès pour la recommandation session-vs-spawn de `pc-kanban`.
+    Une écriture par rendu ; toute erreur est avalée, un rendu de statusline ne doit jamais échouer
+    pour ça."""
+    if not session_id:
+        return
+    state = {}
+    for key in ("five_hour", "seven_day"):
+        used = _safe_get(data, f"rate_limits.{key}.used_percentage")
+        if used is None:
+            continue
+        state[key] = {
+            "used_percentage": used,
+            "resets_at": _safe_get(data, f"rate_limits.{key}.resets_at"),
+        }
+    if not state:
+        return
+    try:
+        with open(_rate_limit_state_path(session_id), "w", encoding="utf-8") as handle:
+            json.dump(state, handle)
+    except OSError:
+        pass
+
+
 _GIT_TIMEOUT_S = 0.3
 
 
@@ -625,6 +660,7 @@ def main():
     except Exception:
         print("[status line: invalid JSON]")
         return
+    _write_rate_limit_state(data, _safe_get(data, "session_id"))
     try:
         print("\n".join(build_lines(data)))
     except Exception:
