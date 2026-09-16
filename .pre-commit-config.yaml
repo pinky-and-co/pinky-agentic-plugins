@@ -137,6 +137,15 @@ repos:
         language: python
         pass_filenames: true
 
+  # ── Raw LaTeX notation (local LLM fallback, e.g. Gemma via Ollama) ────────
+  - repo: local
+    hooks:
+      - id: check-latex-notation
+        name: "[LATEX] Raw LaTeX instead of Unicode symbol"
+        entry: python scripts/hooks/check_latex_notation.py
+        language: python
+        pass_filenames: true
+
   # ── Employer reference guard ──────────────────────────────────────────────
   - repo: local
     hooks:

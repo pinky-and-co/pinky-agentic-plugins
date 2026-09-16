@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """The one secret-shape detector, shared by every hook that needs it.
 
-Extracted from `stop_handoff.py` (2026-08-19): `privacy_egress.py` needed the same detection and
-was importing it sideways from a hook it has nothing to do with (kanban handoff vs read-time
-privacy) via a same-directory `sys.path` hack — an invisible coupling between two unrelated
-concerns. Never declared in `hooks.json` and never invoked directly — a pure dependency, same role
-as `policy_lib.py`.
+Never declared in `hooks.json` and never invoked directly — a pure dependency, same role as
+`policy_lib.py`.
 
-`stop_handoff.py` itself still carries its own copy for now — it is distributed standalone into
-every repo's `.claude/hooks/` and must not import an installed plugin's package (see its own
-docstring). `1-todo/migrer-stop-handoff-vers-pc-core-sessionend.md` adopts this module and drops
-that copy once `stop_handoff.py` joins `pc-core/hooks/` as a sibling.
+`stop_handoff.py` carries its own copy of this detection because it is distributed standalone into
+every repo's `.claude/hooks/` and must not import an installed plugin's package.
 """
 
 from __future__ import annotations

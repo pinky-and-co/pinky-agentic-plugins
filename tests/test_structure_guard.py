@@ -2,12 +2,12 @@
 """Tests for plugins/pc-core/hooks/structure_guard.py — run with:
 python3 -m unittest discover tests
 
-Defines "done": `decide()` is a pure interpreter over a repo-declared `file_placement` rule list
-(FR-0023-51..54) — no rule is Python-hardcoded (NFR-0023-24). A `Write` violating a matched rule
-returns permissionDecision "deny"; a compliant Write, a non-Write tool, an unmatched root, or a
-repo without `file_placement` in its resolved settings.pinky.json returns no decision
-(NFR-0023-23); a repo can locally override an ancestor's `file_placement` (same closest-wins
-walk-up as any other settings.pinky.json key); the deny reason is actionable (IMP-0023-29).
+Defines "done": `decide()` is a pure interpreter over a repo-declared `file_placement` rule list —
+no rule is Python-hardcoded. A `Write` violating a matched rule returns permissionDecision "deny";
+a compliant Write, a non-Write tool, an unmatched root, or a repo without `file_placement` in its
+resolved settings.pinky.json returns no decision; a repo can locally override an ancestor's
+`file_placement` (same closest-wins walk-up as any other settings.pinky.json key); the deny reason
+is actionable.
 """
 
 import contextlib
@@ -167,7 +167,7 @@ class TestScopeAndSafety(TestDecideBase):
 
 
 class TestNRoots(TestDecideBase):
-    """NFR-0023-24: a repo declares as many independent conventions as it wants, each scoped to
+    """A repo declares as many independent conventions as it wants, each scoped to
     its own `root` — no cross-talk between them, no code change to add a second one."""
 
     RULES = [

@@ -18,7 +18,7 @@ this **single script** that reads it. The script is dual-mode:
     no state file needed), and every declared `permissions.additionalDirectories` entry is
     stopped. Read-visibility (Claude Code natively loads ancestor `CLAUDE.md` files as context)
     is not write authorization — this guard makes that boundary mechanical instead of relying on
-    the agent to remember it. Two carve-outs (FR-0025-27/28):
+    the agent to remember it. Two carve-outs:
     - **Board dirs are always writable** — the card and agent-log directories of every kanban
       board mounted on this machine (`stop_handoff.py --list-kanbans` / `--list-agent-log-dirs`),
       whatever the session root. An orchestrator or a repo-scoped worker session must still be
@@ -140,10 +140,10 @@ def project_root(event: dict | None = None) -> Path:
 
     The last fallback only holds when the caller's shell cwd truly IS the project root — always
     true for the hook (Claude Code sets the event itself) but not for a ctl-mode call from a
-    long-running session shell, where an earlier `cd` can drift it silently (incident 2026-08-21:
-    a stray `.guard-state.json` written under the wrong repo, undetected until the next freeze
-    check missed it). `main()`'s `--root` lets a caller that already knows the root (`/chantier`)
-    skip this guess entirely; this is the last resort, so it prints what it guessed.
+    long-running session shell, where an earlier `cd` can drift it silently and leave a stray
+    `.guard-state.json` under the wrong repo, undetected until the next freeze check misses it.
+    `main()`'s `--root` lets a caller that already knows the root (`/chantier`) skip this guess
+    entirely; this is the last resort, so it prints what it guessed.
     """
     proj = os.environ.get("CLAUDE_PROJECT_DIR")
     if proj:
@@ -307,7 +307,7 @@ class BoardDirs(NamedTuple):
 
 def board_dirs(event: dict, root: Path) -> BoardDirs:
     """Card + agent-log directories of every kanban board mounted on this machine — writable
-    from any session root (FR-0025-27).
+    from any session root.
 
     Resolved through `stop_handoff.py`'s own CLI (`--list-kanbans` + `--list-agent-log-dirs`),
     the one place board resolution lives.
@@ -340,7 +340,7 @@ def board_dirs(event: dict, root: Path) -> BoardDirs:
 
 def in_git_repo(target: str, root: Path) -> bool:
     """True when `target` resolves inside some real git repo. Splits the out-of-scope guard:
-    a target in another repo is a hard `deny`, one in no repo at all is an `ask` (FR-0025-28)."""
+    a target in another repo is a hard `deny`, one in no repo at all is an `ask`."""
     tgt = Path(target)
     tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
     try:

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Reconcile Step 0 — framing oracle. Score ``reconcile.PHASE1_TASK`` against known-answer cases.
 
-**Why this exists.** Twice (2026-07-16, 2026-07-17) a session retuned the phase-1 prompt by eye on
-two repos with no ground truth, and the second attempt broke the tool: a "report only what breaks a
-promise / when in doubt stay silent" framing made the model rubber-stamp a repo carrying 3 stubs
-marked OK (``VERDICT: 0 diverge, 0 manquant``, no analysis). The rule that came out of it — **no
-change to the prompt ships without this oracle passing** — needs the oracle to exist. This is it.
+**Why this exists.** Retuning the phase-1 prompt by eye, on repos with no ground truth, is
+unreliable: a "report only what breaks a promise / when in doubt stay silent" framing can make the
+model rubber-stamp a repo carrying real stubs marked OK (``VERDICT: 0 diverge, 0 manquant``, no
+analysis). The rule that follows — **no change to the prompt ships without this oracle passing** —
+needs the oracle to exist. This is it.
 
 Two frozen cases, deliberately opposite (``fixtures/``):
 
@@ -19,7 +19,7 @@ Scoring mirrors hand verification: is the object's name present in the report bo
 told to emit only problem lines, so a mention = a flag. Crude, but it is exactly the check a human
 does at triage, and it is stable across prose phrasings.
 
-Transport (rewired from the deprecated Mistral-only call): ``--transport offline`` runs the local
+Transport: ``--transport offline`` runs the local
 Ollama model via ``model_offline`` (zero egress, the primary reconcile path); ``--transport panel``
 runs a pool sonnet/opus model via ``model_panel`` (the cloud fallback). ``--model`` overrides the
 pick on either path. NOT a pytest: it calls a live model and scores a probabilistic output — the
@@ -95,8 +95,8 @@ def flagged(answer: str, obj: str) -> bool:
     mention = a flag.
 
     Whole-token match, not substring: ``database`` (the object) must not match inside
-    ``database-scoped`` (a description word) — that false match made the recall case wrongly fail on
-    2026-07-17. A token is bounded by anything other than a word char or hyphen, so neither a
+    ``database-scoped`` (a description word) — a substring match would wrongly fail the recall
+    case. A token is bounded by anything other than a word char or hyphen, so neither a
     hyphenated compound (``database-scoped``) nor a longer identifier (``api_integration_v2``) counts.
 
     Scored on the body only — never the trailing ``VERDICT:`` line, which restates counts and could
