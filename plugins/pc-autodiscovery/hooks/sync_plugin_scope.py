@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """sync_plugin_scope — activates the right plugins for wherever the session
-actually is, without ever touching a .claude/settings.json source file.
+actually is.
 
 Ascend at SessionStart, descend at CwdChanged, restore at SessionEnd:
 
 - SessionStart: back up the session's single settings.local.json (resolved
   from CLAUDE_PROJECT_DIR, same value inject_policies.py already reads — see
   plugin_scope_lib's module docstring for why it's one file, not one per
-  repo touched), then activate every project-scoped plugin whose projectPath
-  is an ancestor of (or equal to) the session's starting cwd.
-- CwdChanged: same matching, against the *new* cwd, additive only — never
-  deactivates a plugin a previous position already turned on. Passes the
-  session's open path so the match drops what the SessionStart ascend
+  repo touched), then activate — at project scope, in the repo opened in —
+  every project-scoped plugin whose projectPath is an ancestor of it. Same
+  call `spawn-workers`' pre-enable makes (`claude plugin install --scope
+  project`), so the write lands in that repo's versioned `.claude/
+  settings.json`, not an ephemeral settings.local.json.
+- CwdChanged: local-scope matching against the *new* cwd, additive only —
+  never deactivates a plugin a previous position already turned on. Passes
+  the session's open path so the match drops what the SessionStart ascend
   already covered (projectPath at or above the open dir) and what
   settings.local.json already lists.
 - SessionEnd: restore settings.local.json to exactly what backup_settings_local
-  captured, drop the per-session state file, and clear the pending queue.
+  captured, drop the per-session state file, and clear the pending queue —
+  never touches the ascend's project-scope settings.json, which stays.
 
 Registered as a single script across three hook events in hooks.json rather
 than three files — one entry to maintain, dispatch on `hook_event_name`
@@ -38,10 +42,13 @@ from plugin_scope_lib import (
     backup_settings_local,
     clear_state,
     enable_plugin_local,
+    install_plugin_project,
     load_state,
     matching_plugin_ids,
+    project_scope_installed_ids,
     restore_settings_local,
     save_state,
+    settings_json_plugin_ids,
     settings_local_plugin_ids,
 )
 
@@ -70,29 +77,44 @@ def activate_for_path(
     plugin ids newly enabled this call (empty if nothing new — cheap to call
     on every CwdChanged, most of which won't match anything new).
 
-    `session_dir` is the directory the session opened in: `claude plugin
-    enable -s local` is always run from there, so every write lands in that
-    one settings.local.json, and its `enabledPlugins` seed the skip-set.
-    `descent=True` (CwdChanged) additionally drops plugins whose projectPath
-    is at or above `session_dir` — the SessionStart ascend already handled
-    those; `descent=False` (the ascend) keeps them.
+    `session_dir` is the directory the session opened in. `descent=True`
+    (CwdChanged) enables at local scope (`claude plugin enable -s local`,
+    always run from `session_dir` so every write lands in that one
+    settings.local.json) and additionally drops plugins whose projectPath is
+    at or above `session_dir` — the SessionStart ascend already handled
+    those. `descent=False` (the ascend, `session_dir` == the repo opened in)
+    enables at project scope instead (`claude plugin install --scope
+    project`, same call `spawn-workers` makes) — the write is then versioned
+    in `session_dir/.claude/settings.json`, not ephemeral.
     """
-    already = set(state["activated"]) | set(settings_local_plugin_ids(session_dir))
+    if descent:
+        already = set(state["activated"]) | set(settings_local_plugin_ids(session_dir))
+        exclude_above: Path | None = session_dir
+    else:
+        already = (
+            set(state["activated"])
+            | set(settings_json_plugin_ids(session_dir))
+            | set(project_scope_installed_ids(session_dir))
+        )
+        exclude_above = None
     newly_enabled = []
-    exclude_above = session_dir if descent else None
     for plugin_id in matching_plugin_ids(path, open_path=exclude_above):
         if plugin_id in already:
             continue
-        result = enable_plugin_local(plugin_id, cwd=session_dir)
+        result = (
+            enable_plugin_local(plugin_id, cwd=session_dir)
+            if descent
+            else install_plugin_project(plugin_id, cwd=session_dir)
+        )
         if result.success:
             already.add(plugin_id)
             newly_enabled.append(plugin_id)
         elif result.already_enabled:
-            # déjà actif au scope local : rien à faire, on le note pour ne pas
-            # ré-essayer (et ré-avertir) au prochain cd.
+            # déjà actif au scope visé : rien à faire, on le note pour ne pas
+            # ré-essayer (et ré-avertir) au prochain passage.
             already.add(plugin_id)
             print(
-                f"sync_plugin_scope: {plugin_id} already enabled at local scope — skipped",
+                f"sync_plugin_scope: {plugin_id} already enabled — skipped",
                 file=sys.stderr,
             )
         else:

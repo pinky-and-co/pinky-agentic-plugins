@@ -129,6 +129,42 @@ def settings_local_plugin_ids(open_path: Path) -> list[str]:
     return sorted(enabled) if isinstance(enabled, dict) else []
 
 
+def settings_json_plugin_ids(project_dir: Path) -> list[str]:
+    """Every plugin id present in `enabledPlugins` of the repo's versioned
+    `.claude/settings.json` (the file `claude plugin install --scope
+    project` writes), on or off, sorted. Absent or unreadable file → empty
+    list. Same presence-not-truthiness read as `settings_local_plugin_ids`,
+    against the ascend's own file instead of the descent's."""
+    settings_json = Path(project_dir) / ".claude" / "settings.json"
+    try:
+        data = json.loads(settings_json.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    enabled = data.get("enabledPlugins", {})
+    return sorted(enabled) if isinstance(enabled, dict) else []
+
+
+def project_scope_installed_ids(project_dir: Path) -> list[str]:
+    """Plugin ids already installed at `scope: "project"` for exactly
+    `project_dir` — not just an ancestor of it — per `installed_plugins.json`.
+    A previous ascend, or `spawn-workers`' pre-enable, already ran `claude
+    plugin install --scope project` here, so the ascend must not re-install
+    (no-op, no nudge) — unlike `matching_plugin_ids`, which matches on
+    ancestor-or-equal on purpose (a plugin project-scoped at a group root
+    still needs enabling in a repo below it)."""
+    installed = load_installed_plugins()
+    resolved = Path(project_dir).resolve()
+    matches = []
+    for plugin_id, entries in installed.get("plugins", {}).items():
+        for entry in entries:
+            if entry.get("scope") != "project" or not entry.get("projectPath"):
+                continue
+            if Path(entry["projectPath"]).resolve() == resolved:
+                matches.append(plugin_id)
+                break
+    return sorted(matches)
+
+
 # --- Activation --------------------------------------------------------------
 
 
@@ -160,6 +196,31 @@ def enable_plugin_local(plugin_id: str, *, cwd: Path) -> EnableResult:
     try:
         result = subprocess.run(
             ["claude", "plugin", "enable", "-s", "local", plugin_id],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return EnableResult(False, False, str(exc))
+    stderr = result.stderr.strip()
+    if result.returncode == 0:
+        return EnableResult(True, False, stderr)
+    return EnableResult(False, bool(_ALREADY_ENABLED_RE.search(stderr)), stderr)
+
+
+def install_plugin_project(plugin_id: str, *, cwd: Path) -> EnableResult:
+    """Run `claude plugin install <plugin_id> --scope project --yes` from
+    `cwd` — the exact call `spawn-workers`' `enable_project_plugins` makes
+    before opening a worker, reused here for the `SessionStart` ascend when
+    it opens directly in the repo: it writes the versioned `cwd/.claude/
+    settings.json`, not the ephemeral `settings.local.json` a local enable
+    would. No retry on failure or timeout — same bounded posture as
+    `enable_plugin_local`."""
+    try:
+        result = subprocess.run(
+            ["claude", "plugin", "install", plugin_id, "--scope", "project", "--yes"],
             cwd=cwd,
             capture_output=True,
             text=True,

@@ -1,11 +1,11 @@
 {
   "plugins/pc-autodiscovery/hooks/pending_user_action.py": "75e1fd39c51750e80c4fb7a806f79fc311088a11647aefa54ff5c49d3bc02964",
-  "plugins/pc-autodiscovery/hooks/plugin_scope_lib.py": "651a1403aec2fbca203b0654830b58b183365eb804a0608cde0f21d1e52d4ef4",
+  "plugins/pc-autodiscovery/hooks/plugin_scope_lib.py": "f398a46816bf9a1b36980217665357c66d7df7414d1a656a7e5ff5aa1234733f",
   "plugins/pc-core/hooks/policy_lib.py": "ca0f9f35db940cff154868407acb975f04620a4dda7cf9c812fbea41d4e05eb1",
   "plugins/pc-core/hooks/secret_patterns.py": "8701ac8928b3637a62514103e1f59f6df96b4936b5d011ed590c321e91867414",
   "plugins/pc-git/hooks/pc_git_policy_lib.py": "ca0f9f35db940cff154868407acb975f04620a4dda7cf9c812fbea41d4e05eb1",
   "plugins/pc-kanban/hooks/pc_kanban_secret_patterns.py": "8701ac8928b3637a62514103e1f59f6df96b4936b5d011ed590c321e91867414",
   "plugins/pc-kanban/skills/chantier/scripts/pc_kanban_pending_user_action.py": "75e1fd39c51750e80c4fb7a806f79fc311088a11647aefa54ff5c49d3bc02964",
-  "plugins/pc-kanban/skills/chantier/scripts/pc_kanban_plugin_scope_lib.py": "651a1403aec2fbca203b0654830b58b183365eb804a0608cde0f21d1e52d4ef4",
-  "plugins/pc-kanban/skills/spawn-workers/scripts/pc_kanban_spawn_plugin_scope_lib.py": "651a1403aec2fbca203b0654830b58b183365eb804a0608cde0f21d1e52d4ef4"
+  "plugins/pc-kanban/skills/chantier/scripts/pc_kanban_plugin_scope_lib.py": "f398a46816bf9a1b36980217665357c66d7df7414d1a656a7e5ff5aa1234733f",
+  "plugins/pc-kanban/skills/spawn-workers/scripts/pc_kanban_spawn_plugin_scope_lib.py": "f398a46816bf9a1b36980217665357c66d7df7414d1a656a7e5ff5aa1234733f"
 }
