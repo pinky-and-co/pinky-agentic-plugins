@@ -70,6 +70,7 @@ Spawn every repo in one call (no slug filter) only for a card whose repos are ge
 1. Orchestrator-only. A worker session is already repo-scoped; it runs this skill only to relay to
    the *next* repo of its own card, never to spawn its own.
 2. The skill spawns; it never moves the card or sets a goal — the worker's own `/pc-kanban:chantier`
-   run does that (it finds the card already in `3-in-progress`).
+   run does that (its `chantier/SKILL.md` step 7 moves the card from `2-selected-for-dev` to
+   `3-in-progress` and bumps `date:`, the orchestrator never does either).
 3. Work state for a multi-repo hand-off lives in the card's handoff block, never in the
    inter-session message (`finishing-a-card.md`).

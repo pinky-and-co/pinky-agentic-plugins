@@ -82,8 +82,25 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     deliverable.
   `Agent(subagent_type: "fork")` never floors a model — never use it to "run
   something on haiku".
-7. **Take the card, if one is being taken** (already in `3-in-progress/` → resume directly; else the
-  FIRST card of `2-selected-for-dev/` → move it into `3-in-progress/`, set its `date` to today):
+7. **Resolve role, then take the card, if one is being taken** (already in `3-in-progress/` → resume
+  directly; else the FIRST card of `2-selected-for-dev/` → move it into `3-in-progress/`, set its
+  `date` to today):
+   - **Role.**
+    ```bash
+    git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
+    ```
+    Exit 0 → **worker** (the session is scoped to a repo). Non-zero → **orchestrator** (opened
+    outside any git repo — board curation/selection/spawning, never edits code). Same criterion as
+    `orchestrator_freeze.py`'s own `SessionStart` check, applied here at a different call site (this
+    skill's own body, not a hook payload) — the duplication is intentional, not drift.
+     - **Orchestrator + the card has `repos:` non-empty** → do not take it: no `mv`, no freeze, no
+       **Session name**, no **Grill gate**, no **Goal**. Invoke `pc-kanban:spawn-workers
+       <chantier-id> <card-slug>` instead and stop — every bullet below this one is worker-only. The
+       worker it opens runs this same skill from inside the repo, lands on the worker branch, and
+       performs the actual take (its own `mv` + `date:` bump — the orchestrator never does either).
+     - **Orchestrator + `repos: []` or absent** → unchanged: continue below (in-session kanban-only
+       curation — nothing to scope to).
+     - **Worker** → unchanged: continue below.
    - **Parent context** — part of the "move it into `3-in-progress`" branch only: a card already
     resident there takes the "resume directly" branch above and never reaches this bullet, so
     nothing here needs a runtime first-time check. If `sert` is non-null, locate the parent card
@@ -196,6 +213,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     `- [x] reviewed (n/a — mechanical)` stamp at close; a missing clause on judgment work is the
     expensive failure this card exists to stop. A card that is *obviously* mechanical (doc typo, a
     rename, a one-line config) gets no clause and is closed with `- [x] reviewed (n/a — mechanical)`.
+    **Escape clause.** Append an OR branch to `<condition>`: `… OR the agent's last message names a
+    precise, user-only action (a literal command to paste, a named permission to grant,
+    `/reload-plugins`, an input asked for by name) that is the only remaining path — no
+    agent-executable alternative is available — and the agent yielded the turn without relaunching a
+    tool`. An active `/goal` blocks the turn from ending even when the only way forward needs the
+    user — without this branch the pasted command queues silently instead of running (repro: a
+    session whose tools died mid-turn from `anthropics/claude-code#90135`, so the deadlock itself is
+    *assumed*, not confirmed clean on healthy tools — see chantier 0025's story § Open questions).
+    Anti-cheat: the named action must be precise, nameable, and necessary — never a vague "I'm
+    stuck", and never an action the agent could have run itself instead of yielding.
     Add nothing after that block (the **Session name** `/rename`
     line goes just before it, never after): no "would you like me to…", no rephrasing — just the
     `/goal` line, ready to paste as the next message. If no `sert` is
@@ -209,7 +236,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
 
 1. Read-only for browsing — this skill does not edit cards to build the report. The one exception is
   step 7's `2-selected-for-dev/` → `3-in-progress/` move plus its freeze and, *when the card clears
-  the grill gate*, its goal setup: the user already committed by selecting, so this performs it
-  directly. Every other card move happens as work progresses.
+  the grill gate*, its goal setup — **worker branch, or orchestrator on a `repos: [] or absent`
+  card only**; an orchestrator on a `repos:`-scoped card never performs this move (step 7's
+  **Role** bullet routes it to `spawn-workers` instead). Where it does apply, the user already
+  committed by selecting, so this performs it directly. Every other card move happens as work
+  progresses.
 2. Reference the story and ADRs by path — never inline their full content into the report.
 3. Keep the report under ~15 lines — orientation, not a recap of every card.
