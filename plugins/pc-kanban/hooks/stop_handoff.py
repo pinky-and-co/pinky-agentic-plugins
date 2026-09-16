@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
@@ -53,6 +54,11 @@ MAX_AGENT_LOGS = 12
 # `--list-unreviewed-done` : same bounded-output guard. The tail count keeps the pre-convention
 # backlog visible as a number without pasting the whole of it on every `/chantier` intake.
 MAX_UNREVIEWED_DONE = 10
+
+# Idle threshold, in days, per column — `2-selected-for-dev` deliberately absent, its own
+# immobility is a prioritization problem, not staleness.
+STALE_THRESHOLDS_DAYS = {"0-ideas": 60, "1-todo": 30}
+MAX_STALE = 10
 
 MAX_STATUS_CHARS = 200
 
@@ -260,6 +266,52 @@ def unreviewed_done_cards(kanban: Path) -> UnreviewedDone:
         flagged.append((date if isinstance(date, str) else "", card, tag))
     flagged.sort(key=lambda row: (row[0], row[1].name), reverse=True)
     return UnreviewedDone([(card, tag) for _, card, tag in flagged], mechanical)
+
+
+class StaleCard(NamedTuple):
+    """One row of `stale_cards`'s result: the card, its column, and how many days since its
+    `date:` frontmatter last changed."""
+
+    card: Path
+    column: str
+    days_idle: int
+
+
+def stale_cards(kanban: Path, today: date | None = None) -> list[StaleCard]:
+    """`0-ideas`/`1-todo` cards whose `date:` frontmatter is older than
+    `STALE_THRESHOLDS_DAYS[column]` — a fallback net behind the closing-time proposal
+    (`finishing-a-card.md` § "Proposing the next card"), for a card no closure ever crosses.
+    `2-selected-for-dev` is deliberately absent from `STALE_THRESHOLDS_DAYS`, so it can never
+    appear here however old. A missing or unparseable `date:` is skipped, never guessed.
+
+    Args:
+        kanban: a board root, as returned by `find_kanbans`.
+        today: injectable for tests; defaults to the real current date.
+
+    Returns:
+        Rows sorted by `days_idle` descending — most idle first.
+    """
+    today = today or date.today()
+    flagged: list[StaleCard] = []
+    for column, threshold in STALE_THRESHOLDS_DAYS.items():
+        for card in kanban.glob(f"CHANTIER*/{column}/*.md"):
+            try:
+                text = card.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            fm = parse_frontmatter(text) or {}
+            raw_date = fm.get("date")
+            if not isinstance(raw_date, str) or not raw_date:
+                continue
+            try:
+                card_date = date.fromisoformat(raw_date)
+            except ValueError:
+                continue
+            days_idle = (today - card_date).days
+            if days_idle > threshold:
+                flagged.append(StaleCard(card, column, days_idle))
+    flagged.sort(key=lambda row: row.days_idle, reverse=True)
+    return flagged
 
 
 _KANBAN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress", "4-done")
@@ -641,6 +693,20 @@ def main() -> int:
                 print(f"… (+{extra} more)")
             if mechanical:
                 print(f"— {mechanical} closed `reviewed (n/a — mechanical)`")
+            print()
+        return 0
+
+    if "--list-stale" in sys.argv[1:]:
+        for kanban in find_kanbans(Path(os.getcwd())):
+            stale = stale_cards(kanban)
+            if not stale:
+                continue
+            print(f"=== BOARD: {kanban}")
+            for card, column, days_idle in stale[:MAX_STALE]:
+                print(f"{card.relative_to(kanban)}  ({column}, {days_idle}j)")
+            extra = len(stale) - MAX_STALE
+            if extra > 0:
+                print(f"… (+{extra} more)")
             print()
         return 0
 

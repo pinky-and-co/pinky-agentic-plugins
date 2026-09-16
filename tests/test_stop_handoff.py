@@ -405,6 +405,67 @@ class TestUnreviewedDoneCards(unittest.TestCase):
             self.assertEqual(sh.unreviewed_done_cards(kb), ([], 0))
 
 
+class TestStaleCards(unittest.TestCase):
+    def _card(
+        self, kanban: Path, chantier: str, column: str, name: str, date: str
+    ) -> Path:
+        col = kanban / f"CHANTIER{chantier}" / column
+        col.mkdir(parents=True, exist_ok=True)
+        card = col / name
+        card.write_text(f"---\ndate: {date}\n---\n# {name}\n", encoding="utf-8")
+        return card
+
+    def test_flags_0_ideas_past_60_days_and_1_todo_past_30(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            stale_idea = self._card(
+                kb, "0001", "0-ideas", "old-idea.md", "2026-07-01"
+            )  # 77 jours
+            fresh_idea = self._card(
+                kb, "0001", "0-ideas", "fresh-idea.md", "2026-09-01"
+            )  # 15 jours
+            stale_todo = self._card(
+                kb, "0001", "1-todo", "old-todo.md", "2026-08-01"
+            )  # 46 jours
+            fresh_todo = self._card(
+                kb, "0001", "1-todo", "fresh-todo.md", "2026-09-10"
+            )  # 6 jours
+
+            today = sh.date(2026, 9, 16)
+            flagged = sh.stale_cards(kb, today=today)
+
+            self.assertEqual({c for c, _, _ in flagged}, {stale_idea, stale_todo})
+            self.assertNotIn(fresh_idea, {c for c, _, _ in flagged})
+            self.assertNotIn(fresh_todo, {c for c, _, _ in flagged})
+
+    def test_2_selected_for_dev_never_flagged_however_old(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            self._card(kb, "0001", "2-selected-for-dev", "ancient.md", "2026-01-01")
+            self.assertEqual(sh.stale_cards(kb, today=sh.date(2026, 9, 16)), [])
+
+    def test_sorted_most_idle_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            less_stale = self._card(kb, "0001", "1-todo", "b.md", "2026-08-10")
+            more_stale = self._card(kb, "0001", "0-ideas", "a.md", "2026-06-01")
+            flagged = sh.stale_cards(kb, today=sh.date(2026, 9, 16))
+            self.assertEqual([c for c, _, _ in flagged], [more_stale, less_stale])
+
+    def test_missing_or_unparseable_date_is_skipped_not_crashed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            col = kb / "CHANTIER0001" / "0-ideas"
+            col.mkdir(parents=True)
+            (col / "no-date.md").write_text(
+                "---\nsert: null\n---\n# x\n", encoding="utf-8"
+            )
+            (col / "bad-date.md").write_text(
+                "---\ndate: pas-une-date\n---\n# x\n", encoding="utf-8"
+            )
+            self.assertEqual(sh.stale_cards(kb, today=sh.date(2026, 9, 16)), [])
+
+
 class TestBoundedBoardLines(unittest.TestCase):
     def _board(self, tmp: str, index_body: str) -> Path:
         kb = Path(tmp) / "_KANBAN"
