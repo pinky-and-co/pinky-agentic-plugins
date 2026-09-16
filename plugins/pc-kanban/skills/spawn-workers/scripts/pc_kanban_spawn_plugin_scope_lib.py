@@ -39,6 +39,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -305,10 +306,9 @@ def _sessions_dir(key: str) -> Path:
     return _shared_dir(key) / "sessions"
 
 
-def _is_alive(pid: int) -> bool:
-    """Whether `pid` still names a running process, via the null-signal probe
-    (`os.kill(pid, 0)` sends no actual signal, just checks the kernel's
-    process table)."""
+def _is_alive_posix(pid: int) -> bool:
+    """POSIX liveness via the null-signal probe (`os.kill(pid, 0)` sends no
+    actual signal, just checks the kernel's process table)."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -316,6 +316,39 @@ def _is_alive(pid: int) -> bool:
     except PermissionError:
         return True  # exists, just not ours to signal — still alive
     return True
+
+
+def _is_alive_windows(pid: int) -> bool:
+    """Windows liveness — `os.kill(pid, sig)` is not a probe there: CPython
+    special-cases only `CTRL_C_EVENT`/`CTRL_BREAK_EVENT`, every other signal
+    (0 included) goes to `TerminateProcess(handle, sig)`, so `os.kill(pid, 0)`
+    would kill the target instead of checking it. Opens a query-only handle
+    and reads the exit code instead — `STILL_ACTIVE` (259) means running; a
+    failed `OpenProcess` means the PID no longer exists."""
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.pointer(exit_code)):
+            return False
+        return exit_code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _is_alive(pid: int) -> bool:
+    """Whether `pid` still names a running process — dispatches to the
+    platform-correct probe, since a null `os.kill` signal means "check" on
+    POSIX and "terminate" on Windows."""
+    if sys.platform == "win32":
+        return _is_alive_windows(pid)
+    return _is_alive_posix(pid)
 
 
 def _purge_dead_sessions(key: str) -> list[Path]:
