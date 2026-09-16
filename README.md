@@ -206,6 +206,7 @@ pinky-agentic-plugins/
 │   │       │   ├── scripts/
 │   │       │   │   ├── activate_plugins_for_repos.py
 │   │       │   │   ├── archive_card.sh
+│   │       │   │   ├── drop_card.sh
 │   │       │   │   ├── pc_kanban_pending_user_action.py
 │   │       │   │   ├── pc_kanban_plugin_scope_lib.py
 │   │       │   │   └── resolve_repos.sh
@@ -310,6 +311,7 @@ pinky-agentic-plugins/
 │   ├── test_branch_guard.py
 │   ├── test_bulk_commit_sh.py
 │   ├── test_clear_pending_queue.py
+│   ├── test_drop_card_sh.py
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py

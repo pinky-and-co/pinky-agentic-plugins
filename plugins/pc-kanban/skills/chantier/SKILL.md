@@ -2,7 +2,7 @@
 name: chantier
 description: Resume a chantier — load its story, cards and in-progress handoff from the kanban boards visible to this session, then report state and take the next card. Use when the user says "resume chantier NNNN", "reprends le chantier", or names a chantier id/slug.
 argument-hint: "<chantier-id-or-slug-substring> [free-text instruction]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(ls:*), Bash(find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh:*), Bash(mv:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(ls:*), Bash(find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/drop_card.sh:*), Bash(mv:*), Read, Edit, AskUserQuestion
 ---
 
 # Chantier
@@ -25,6 +25,7 @@ keeps its number when it moves between boards. If two boards ever collide on an 
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-chantiers
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-agent-logs
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 ```
 
 ## Steps
@@ -54,6 +55,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     count (the output is already capped and `date:`-ordered, bulk is pre-convention history so do
     not paste it whole), then the newest one or two. Not blocking; the fix is a `reviewed (…)` line
     on each, `n/a — mechanical` if there was nothing to review.
+  - if the `--list-stale` output names any card in **this chantier**: one line — the count and the
+    most idle one or two. Not blocking (FR-0025-65) — a fallback net behind the closing-time
+    obsolescence check (`finishing-a-card.md` § "Flagging cards the closed card just made
+    obsolete"), never a reason to stop and re-triage on its own.
   - if `4-done/` is non-empty: flag it and offer to fold + archive. Only after the user confirms
     the rationale is folded into the story/an ADR, archive via:
 ```bash
@@ -105,8 +110,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
     resident there takes the "resume directly" branch above and never reaches this bullet, so
     nothing here needs a runtime first-time check. If `sert` is non-null, locate the parent card
     (`<sert>.md`) in *this same chantier's* `4-done/` or, once archived, its own
-    `_ARCHIVE/CHANTIER<this-chantier's-number>-done/YYYY-MM-DD_<sert>.md` — never glob other
-    chantiers' archives.
+    `_ARCHIVE/CHANTIER<this-chantier's-number>-done/YYYY-MM-DD_<sert>.md` — or, if the parent was
+    `dropped` rather than finished (FR-0025-66), `_ARCHIVE/CHANTIER<this-chantier's-number>-dropped/
+    YYYY-MM-DD_<sert>.md`. Never glob other chantiers' archives.
     - Parent found, `done`, and carries both a `## Done when` and a `## Why` → append a managed
       block to the child's body:
       ```
@@ -119,8 +125,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-unreviewed-done
       Idempotent by construction — this bullet only ever runs once per card (see above) — never
       hand-edit between the markers on a later resume.
     - Parent found but has no `## Why` → append the block with `## Done when` only, same markers.
-    - Parent not `done` yet, not found (purged without archive), or `sert` orphaned → say so
-      plainly, append nothing, and move on; never invent parent content.
+    - Parent not `done` yet, `dropped` (ASS-0025-68), not found (purged without archive), or
+      `sert` orphaned → say so plainly, append nothing, and move on; never invent parent content.
     - A card ending up without this block (older cards, `sert: null`, parent unavailable) parses
       exactly as before — this is appended body content, not a frontmatter field.
    - **Repo-scope.** `repos: []` or absent → kanban-only work, do not freeze (nothing to scope to).
