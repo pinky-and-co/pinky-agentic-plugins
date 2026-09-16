@@ -489,7 +489,9 @@ class TestSharedBackupConcurrentSessions(unittest.TestCase):
         )
 
     def test_a_crashed_sessions_dead_pid_is_purged_and_restore_still_fires(self):
-        proc = subprocess.Popen(["true"])
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "pass"]
+        )  # portable, pas de "true" sous Windows
         dead_pid = proc.pid
         proc.wait()  # garanti mort : le fd n'a jamais été relâché explicitement, juste fermé
 
