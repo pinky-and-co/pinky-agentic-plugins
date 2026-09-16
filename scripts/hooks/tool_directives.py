@@ -145,6 +145,7 @@ NO_DIRECTIVE_HOOKS: list[str] = [
     "run-tests",
     "mdformat",
     "check-zws",
+    "check-latex-notation",
     "check-forbidden-keywords",
     "check-narrative-comments",
     "commit-msg-format",
