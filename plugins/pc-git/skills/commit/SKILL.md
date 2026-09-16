@@ -22,22 +22,22 @@ in this order:
 
 1. **`--all`, or an argument naming several repos** → the bulk branch below.
 2. **An argument naming one repo** → resolve the name to a path via the same sweep the bulk branch
-   uses (below): the candidate whose basename matches the argument. No match → say so, stop. Then go
-   to Step 2 with that path.
+  uses (below): the candidate whose basename matches the argument. No match → say so, stop. Then go
+  to Step 2 with that path.
 3. **No argument** → resolve by session location:
 
-   ```
-   git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
-   ```
+  ```
+  git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
+  ```
 
    - **Exit 0** → the session sits inside a repo (worker layout). The printed worktree root **is**
-     the target — no question. Go to Step 2 with that path.
+    the target — no question. Go to Step 2 with that path.
    - **Nonzero exit** → `${CLAUDE_PROJECT_DIR}` is not inside any git repo (orchestrator / workspace
      layout). **Hard-fail before any state-changing call**: report that a target is required (a repo
-     name or `--all`) and stop. Do not prompt for it — this skill runs `context: fork`; a question
-     here has no channel back, the fork has already returned. On a mounted-board orchestrator
-     session this hard-fail is the second line behind `orchestrator_freeze.py`, which already
-     freezes such a session out of the repos; no code dependency is asserted between the two.
+    name or `--all`) and stop. Do not prompt for it — this skill runs `context: fork`; a question
+    here has no channel back, the fork has already returned. On a mounted-board orchestrator
+    session this hard-fail is the second line behind `orchestrator_freeze.py`, which already
+    freezes such a session out of the repos; no code dependency is asserted between the two.
 
 **Bulk branch.** Discover the dirty repos:
 
@@ -79,21 +79,20 @@ means the commit is there, the second that nothing was committed. Derive no stat
 4. Trust your own judgment on grouping and message wording, same as you would writing prose — you
   write better commit messages than a manually-specified rule would produce. Genuinely unrelated
   changes still deserve separate commits; that's a normal editorial call, not a special procedure.
-5. `command -v prek || command -v pre-commit` — none found → skip to 6. Found → `<runner> run --files
-  <changed files>` BEFORE staging (a reformat changes file contents; staging first would commit the
-  pre-reformat version). Re-check `git diff HEAD` after — a hook FAILURE (not a reformat) stops you,
-  report it, commit nothing.
+5. **Hook status** → if `bulk_commit.sh plan` reports:
+    - `❌ pre-commit failure` -> analyze logs, fix syntax/lint errors, and restart `plan`.
+    - `⚠️  missing pre-commit hooks` -> check repo criticality. For POCs/Assets, ignore. For Production, alert user and suggest adding security hooks.
 6. Apply the `branch-workflow` skill's Guard section before staging anything — it decides whether
   a feature branch is needed first. Follow what it says, then `git add <files>` and commit with the
   attribution trailer built programmatically (never hand-assembled — an empty env var must drop the
   line, not emit a broken URL):
 
-   ```
-   trailer="Co-Authored-By: Claude <noreply@anthropic.com>"
-   [ -n "${CLAUDE_CODE_BRIDGE_SESSION_ID:-}" ] && trailer="$trailer
-   Claude-Session: https://claude.ai/code/$CLAUDE_CODE_BRIDGE_SESSION_ID"
-   git commit -m "<message>" -m "$trailer"
-   ```
+  ```
+  trailer="Co-Authored-By: Claude <noreply@anthropic.com>"
+  [ -n "${CLAUDE_CODE_BRIDGE_SESSION_ID:-}" ] && trailer="$trailer
+  Claude-Session: https://claude.ai/code/$CLAUDE_CODE_BRIDGE_SESSION_ID"
+  git commit -m "<message>" -m "$trailer"
+  ```
 
-   `$CLAUDE_CODE_BRIDGE_SESSION_ID` is inherited from the parent even in a fork. Report
+  `$CLAUDE_CODE_BRIDGE_SESSION_ID` is inherited from the parent even in a fork. Report
   `<emoji> <subject>` (+ file list) and the branch you committed on.
