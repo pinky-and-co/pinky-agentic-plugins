@@ -33,7 +33,9 @@ SessionStart ascend and the CwdChanged descend: a plugin scoped to
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -244,16 +246,15 @@ def backup_path(session_id: str) -> Path:
 
 
 def load_state(session_id: str) -> dict:
-    """{"activated": [...plugin_ids], "settings_local_path": str|None,
-    "existed": bool|None} — the backup's actual content lives in its own
-    file (see backup_path), not embedded here as a string."""
+    """{"activated": [...plugin_ids], "settings_local_path": str|None} — the
+    shared per-directory backup (see `backup_settings_local_shared`) lives
+    outside this per-session file, keyed by directory, not session."""
     try:
         state = json.loads(state_path(session_id).read_text())
     except (OSError, json.JSONDecodeError):
         state = {}
     state.setdefault("activated", [])
     state.setdefault("settings_local_path", None)
-    state.setdefault("existed", None)
     return state
 
 
@@ -267,34 +268,127 @@ def clear_state(session_id: str) -> None:
         state_path(session_id).unlink()
     except FileNotFoundError:
         pass
+
+
+# --- Shared per-directory backup, session-counted by PID liveness -----------
+#
+# `sync_plugin_scope.py` runs as a short-lived subprocess per hook event
+# (SessionStart/CwdChanged/SessionEnd) — an `fcntl.flock` taken in one of
+# these processes releases at that process's exit, long before the actual
+# Claude Code session (a different, long-lived process) ends. It can never
+# signal "this session is still open". The session's real lifetime is instead
+# tracked by recording, per session, the PID of `sync_plugin_scope.py`'s
+# parent process at `SessionStart` (`os.getppid()` — the long-lived `claude`
+# process itself, since `hooks.json` execs this script directly, no shell
+# in between) and checking that PID's liveness later — a crashed session's
+# entry is then detected and purged without needing anything to stay running.
+#
+# Known residual gap, accepted: unlike a held flock, a PID can be reused by
+# an unrelated process after the real session exits — in that narrow window
+# `_is_alive` reports a crashed session as live, delaying its purge until
+# the unrelated process also exits. Rare on a modern OS's PID space, but not
+# eliminated the way the (infeasible) flock design would have.
+
+
+def _dir_key(settings_local: Path) -> str:
+    """Filesystem-safe key for `settings_local`'s resolved path, shared by
+    every session open in that directory — the backup and the live-session
+    registry below are both keyed on this, not on any one session_id."""
+    return hashlib.sha256(str(Path(settings_local).resolve()).encode()).hexdigest()
+
+
+def _shared_dir(key: str) -> Path:
+    return STATE_DIR / "shared" / key
+
+
+def _sessions_dir(key: str) -> Path:
+    return _shared_dir(key) / "sessions"
+
+
+def _is_alive(pid: int) -> bool:
+    """Whether `pid` still names a running process, via the null-signal probe
+    (`os.kill(pid, 0)` sends no actual signal, just checks the kernel's
+    process table)."""
     try:
-        backup_path(session_id).unlink()
-    except FileNotFoundError:
-        pass
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just not ours to signal — still alive
+    return True
 
 
-def backup_settings_local(settings_local: Path, session_id: str) -> bool:
-    """Copy settings_local to its backup file if it exists. Returns whether
-    the original existed at all — the one bit `restore_settings_local` needs
-    that a file copy alone can't carry (a missing backup file is ambiguous
-    between "never existed" and "not yet backed up")."""
-    if settings_local.is_file():
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(settings_local, backup_path(session_id))
-        return True
-    return False
-
-
-def restore_settings_local(
-    settings_local: Path, session_id: str, existed: bool | None
-) -> None:
-    """Put settings.local.json back exactly how backup_settings_local found it."""
-    if existed is None:
-        return  # no backup was ever taken this session — nothing to restore
-    if existed:
-        shutil.copy2(backup_path(session_id), settings_local)
-    else:
+def _purge_dead_sessions(key: str) -> list[Path]:
+    """Delete every session-pid file under `key` whose recorded PID is no
+    longer alive. Returns the remaining (still-alive) session-pid file paths."""
+    sessions_dir = _sessions_dir(key)
+    if not sessions_dir.is_dir():
+        return []
+    alive = []
+    for f in sessions_dir.glob("*.pid"):
         try:
-            settings_local.unlink()
-        except FileNotFoundError:
-            pass
+            pid = int(f.read_text().strip())
+        except (OSError, ValueError):
+            f.unlink(missing_ok=True)
+            continue
+        if _is_alive(pid):
+            alive.append(f)
+        else:
+            f.unlink(missing_ok=True)
+    return alive
+
+
+def backup_settings_local_shared(
+    settings_local: Path, session_id: str, ppid: int
+) -> None:
+    """Register this session as active on `settings_local`'s resolved
+    directory, and capture the shared original-content backup the first time
+    any session claims it — an atomic create-if-absent on the meta file
+    (`os.O_CREAT | os.O_EXCL`, a single syscall, no lock to hold across
+    processes) decides "first" even if two sessions start at once. A later
+    session — concurrent, or arriving after every previous one crashed
+    without `SessionEnd` — joins the existing backup instead of recapturing
+    it, so a crashed session's own edits never get mistaken for the original.
+    """
+    key = _dir_key(settings_local)
+    sessions_dir = _sessions_dir(key)
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / f"{session_id}.pid").write_text(str(ppid))
+
+    shared = _shared_dir(key)
+    meta_path = shared / "meta.json"
+    try:
+        fd = os.open(str(meta_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return  # a backup already exists for this directory — join it
+    try:
+        if settings_local.is_file():
+            shutil.copy2(settings_local, shared / "backup.settings.local.json")
+            os.write(fd, json.dumps({"existed": True}).encode())
+        else:
+            os.write(fd, json.dumps({"existed": False}).encode())
+    finally:
+        os.close(fd)
+
+
+def restore_settings_local_shared(settings_local: Path, session_id: str) -> None:
+    """Drop this session from its directory's live-session registry; once no
+    session remains there (this one, plus any other found still alive after
+    purging dead entries), restore `settings_local` to the shared backup and
+    clear the directory's shared state so a later open starts fresh."""
+    key = _dir_key(settings_local)
+    (_sessions_dir(key) / f"{session_id}.pid").unlink(missing_ok=True)
+    if _purge_dead_sessions(key):
+        return  # another session is still open here — don't restore yet
+
+    shared = _shared_dir(key)
+    try:
+        meta = json.loads((shared / "meta.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        meta = None
+    if meta is not None:
+        if meta.get("existed"):
+            shutil.copy2(shared / "backup.settings.local.json", settings_local)
+        else:
+            settings_local.unlink(missing_ok=True)
+    shutil.rmtree(shared, ignore_errors=True)
