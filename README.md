@@ -114,6 +114,12 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       └── improve/
 │   │           └── SKILL.md
+│   ├── pc-delegate/
+│   │   └── skills/
+│   │       └── retour/
+│   │           ├── scripts/
+│   │           │   └── apply_retour.py
+│   │           └── SKILL.md
 │   ├── pc-git/
 │   │   ├── agents/
 │   │   │   └── git-workflow.md
@@ -310,6 +316,7 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
+│   ├── test_apply_retour.py
 │   ├── test_branch_guard.py
 │   ├── test_bulk_commit_sh.py
 │   ├── test_clear_pending_queue.py

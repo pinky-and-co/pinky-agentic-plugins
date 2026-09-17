@@ -1,0 +1,10 @@
+{
+  "name": "pc-delegate",
+  "version": "0.1.0",
+  "description": "Aller/retour workflow for delegating work to an agent operating outside Claude Code — export context, reintegrate its results safely.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"],
+  "dependencies": ["pc-core", "pc-git"]
+}
