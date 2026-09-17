@@ -50,6 +50,11 @@
       "name": "pc-pypi",
       "source": "./plugins/pc-pypi",
       "description": "Cut a dev pre-release of a PyPI library — preconditions, version bump, push, then stop before the publishing tag for an explicit human go. Zero profile-resolved values."
+    },
+    {
+      "name": "pc-delegate",
+      "source": "./plugins/pc-delegate",
+      "description": "Aller/retour workflow for delegating work to an agent operating outside Claude Code — export context, reintegrate its results safely."
     }
   ]
 }
