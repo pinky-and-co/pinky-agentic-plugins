@@ -179,22 +179,23 @@ pinky-agentic-plugins/
 │   │   │   │   └── test_bulk_commit.sh
 │   │   │   ├── hooks.json
 │   │   │   └── pc_git_policy_lib.py
-│   │   └── skills/
-│   │       ├── branch-workflow/
-│   │       │   └── SKILL.md
-│   │       ├── clean-gone/
-│   │       │   ├── scripts/
-│   │       │   │   └── bulk_clean_gone.sh
-│   │       │   └── SKILL.md
-│   │       ├── commit/
-│   │       │   └── SKILL.md
-│   │       ├── commit-and-pr/
-│   │       │   ├── references/
-│   │       │   │   ├── ci-reaction.md
-│   │       │   │   └── conflict-reaction.md
-│   │       │   └── SKILL.md
-│   │       └── commit-convention/
-│   │           └── SKILL.md
+│   │   ├── skills/
+│   │   │   ├── branch-workflow/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── clean-gone/
+│   │   │   │   ├── scripts/
+│   │   │   │   │   └── bulk_clean_gone.sh
+│   │   │   │   └── SKILL.md
+│   │   │   ├── commit/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── commit-and-pr/
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── ci-reaction.md
+│   │   │   │   │   └── conflict-reaction.md
+│   │   │   │   └── SKILL.md
+│   │   │   └── commit-convention/
+│   │   │       └── SKILL.md
+│   │   └── README.md
 │   ├── pc-kanban/
 │   │   ├── hooks/
 │   │   │   ├── hooks.json
