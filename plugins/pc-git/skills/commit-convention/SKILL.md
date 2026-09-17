@@ -141,6 +141,12 @@ BREAKING CHANGE: upload_packages now takes (bucket, key) instead of (path).
 
 ## Gotchas
 
+- **`.md` is not automatically `docs`** — in a plugin-marketplace repo, `SKILL.md`, agent
+  definitions, and hook-config `.md` files ARE the executable unit: editing one changes what an
+  agent does, the same as editing a `.py` file. Judge the emoji from what the change *does*, never
+  from the file extension: a behavioral fix to a `SKILL.md` is `🐛 fix`, a new skill is `✨ feat`, a
+  restructure is `♻️ refactor`. Reserve `📝 docs` for genuine prose with no behavioral effect — a
+  README, a guide, a comment.
 - **Multiple unrelated changes in one diff** → propose one commit per logical group, never merge them
 - **Emoji chosen before reading the diff fully** → read everything before picking the emoji, late changes often shift the type
 - **`BREAKING CHANGE:` in the wrong case or hyphenated** → `Breaking change:` / `BREAKING-CHANGE:` are rejected by the `commit-msg` hook — always exactly `BREAKING CHANGE:` (space, both words uppercase)
