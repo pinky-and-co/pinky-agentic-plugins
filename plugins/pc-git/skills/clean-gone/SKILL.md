@@ -23,6 +23,10 @@ as `commit-and-pr`'s `bulk_commit.sh`.
 ${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh --root "${CLAUDE_PROJECT_DIR}" [--repo <name>]
 ```
 
+`args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
+at all means no argument was passed** — that is the normal, expected shape for a bare invocation,
+not missing information: it means the whole root, same as `--all` below, never a reason to ask.
+
 A named repo as argument → add `--repo <name>` (basename match against every repo the same
 discovery finds — `find <root> -maxdepth 4 -name .git`, `node_modules` excluded, identical to
 `bulk_commit.sh`'s, reused not reinvented). No argument or `--all` → no `--repo`, the whole root.

@@ -17,6 +17,10 @@ consent already exists.)
 
 ## Step 1 — Identify the target(s)
 
+`args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
+at all means no argument was passed** — that is the normal, expected shape for a bare invocation,
+not missing information. Go straight to step 3 below; never ask for one instead.
+
 The target passed to Step 2 is **always an absolute worktree root**, never a bare name. Resolve it
 in this order:
 

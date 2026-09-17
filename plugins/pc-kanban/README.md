@@ -1,0 +1,42 @@
+# pc-kanban
+
+File-based kanban board mechanics for Claude Code — chantiers, cards, permission guards, and
+requirements interviews.
+
+## Overview
+
+The board lives as plain files under `_KANBAN/` — no external ticketing tool, no server. A
+chantier (epic) is a directory of cards moving through columns; the agent maintains the board as
+part of the work instead of waiting to be told "create a card" or "move it to done".
+
+Two permission guards ship alongside the board mechanics because a mounted board needs writes an
+ordinary repo-scoped session shouldn't otherwise have — see the `permission-change` skill and
+`hooks/orchestrator_freeze.py`.
+
+## Skills
+
+- **`chantier`** — resume a chantier: load its story, cards, and in-progress handoff, report
+  state, and take the next card.
+- **`grill`** — interview a plan, idea, or imported brief until nothing is silently assumed, then
+  write it as a chantier story with numbered, verifiable requirements.
+- **`kanban`** *(reference)* — the board's own mechanics: column lifecycle, card frontmatter
+  schema, filiation, cross-agent log.
+- **`permission-change`** — toggle the PreToolUse permission guards: `careful` (confirm
+  destructive Bash), `freeze` (lock edits to a scope), `deny` (block edits to a scope), or `guard`
+  (`careful` + `freeze` together).
+- **`spawn-workers`** — from an orchestrator session, hand a selected card to one worker session
+  per repo it touches.
+- **`yt`** — summarize a YouTube video and verdict its relevance against the active chantier
+  board.
+
+## Hooks
+
+- **`stop_handoff.py`** — resolves the boards and agent-log directories mounted on this machine;
+  other plugins' guards (see `pc-kanban:permission-change`'s board-dir carve-out) shell out to it
+  rather than re-deriving board discovery.
+- **`orchestrator_freeze.py`** — freezes an orchestrator session out of the repos it dispatches to.
+- **`pc_kanban_secret_patterns.py`** — secret-pattern definitions shared by this plugin's guards.
+
+## Dependencies
+
+`pc-core`.
