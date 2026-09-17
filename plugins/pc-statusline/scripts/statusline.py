@@ -19,6 +19,8 @@ import tempfile
 import unicodedata
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from _common import (
@@ -201,6 +203,24 @@ def _fmt_epoch(epoch_seconds):
         return "?"
 
 
+def _fmt_duration_until(epoch_seconds):
+    """Countdown to `epoch_seconds` from now — `"27 min"`, `"1h 5min"`, `"1h"`. `"now"` once the
+    deadline has passed (a stale payload should never show a negative duration), `"?"` on a
+    garbage input — same degrade-to-`"?"` contract as `_fmt_epoch`, the sibling it is always shown
+    alongside."""
+    try:
+        target = datetime.fromtimestamp(epoch_seconds)
+        total_minutes = int((target - datetime.now()).total_seconds() // 60)
+        if total_minutes <= 0:
+            return "now"
+        hours, minutes = divmod(total_minutes, 60)
+        if hours > 0:
+            return f"{hours}h {minutes}min" if minutes else f"{hours}h"
+        return f"{minutes} min"
+    except Exception:
+        return "?"
+
+
 def _count_subagents(transcript_path, session_id):
     """The sub-agents (Task tool / context:fork) each write their own
     file to <transcript-folder>/<session_id>/subagents/agent-*.jsonl
@@ -254,7 +274,24 @@ def _get_advisor_model(transcript_path, tail_bytes=16384):
         return None
 
 
-def _headroom_stats() -> dict | None:
+@dataclass
+class ProxyStats:
+    """Provider-agnostic contract a compression-proxy adapter (`_xx_stats`) must return, consumed
+    by `_fmt_compression_proxy_line` — adding a provider means writing one such function returning
+    this shape, nothing else in this module changes.
+
+    `net_tokens` carries the sign (positive = the proxy is paying for itself); `percent` is always
+    positive, read alongside the sign. `bust_count` is `None` for a provider that doesn't track
+    cache busts at all — distinct from `0`, a provider that tracks them and found none this
+    session."""
+
+    provider_name: str
+    net_tokens: int
+    percent: float
+    bust_count: int | None = None
+
+
+def _headroom_raw_stats() -> dict | None:
     """Raw Headroom proxy counters, memoized on disk for `_HEADROOM_CACHE_TTL_S`.
 
     Returns the decoded `/stats` payload, or None when the proxy is down, slow or unreadable —
@@ -285,8 +322,8 @@ def _headroom_stats() -> dict | None:
     return payload
 
 
-def _headroom_net(stats: dict | None = None) -> tuple[int, float, int] | None:
-    """Net effect of Headroom's compression, as `(net_tokens, percent, bust_count)`.
+def _headroom_stats() -> ProxyStats | None:
+    """Headroom's `_xx_stats` adapter: net effect of its compression, as a `ProxyStats`.
 
     Compression removes tokens before send, but rewriting a request mutates the cached prefix and
     invalidates it: the tokens that would have been read at a discount are re-sent instead. Only
@@ -301,9 +338,9 @@ def _headroom_net(stats: dict | None = None) -> tuple[int, float, int] | None:
     `percent` is the net against what the session would have sent uncompressed, so it reads as
     "N% cheaper" or "N% dearer". Its denominator counts only the requests actually compressed while
     busts are charged against the whole session, so a negative reading errs pessimistic rather than
-    flattering the tool. It is always positive; `net_tokens` carries the sign.
+    flattering the tool.
     """
-    stats = _headroom_stats() if stats is None else stats
+    stats = _headroom_raw_stats()
     if not isinstance(stats, dict):
         return None
 
@@ -325,31 +362,56 @@ def _headroom_net(stats: dict | None = None) -> tuple[int, float, int] | None:
     net = saved - lost
     if net == 0:
         return None
-    return (net, abs(net) / before * 100, busts if isinstance(busts, int) else 0)
+    return ProxyStats(
+        provider_name="Headroom",
+        net_tokens=net,
+        percent=abs(net) / before * 100,
+        bust_count=busts if isinstance(busts, int) else 0,
+    )
 
 
-def _fmt_headroom_line(net: int, percent: float, busts: int) -> str:
-    """The Headroom row: one verdict, one magnitude, coloured by the sign.
+def _fmt_compression_proxy_line(stats: ProxyStats) -> str:
+    """One row for any compression-proxy provider: one verdict, one magnitude, coloured by the
+    sign of `stats.net_tokens`. Provider-agnostic — consumes only the `ProxyStats` contract, so a
+    new `_xx_stats` adapter needs no change here.
 
     Deliberately not a neutral indicator — a reader who has never heard of prompt caching must be
     able to tell in one glance whether the tool is helping, so the wording flips with the sign
     instead of staying constant and leaving the reader to work out what a minus means.
     """
-    amount = abs(net)
+    amount = abs(stats.net_tokens)
     amount_txt = f"{amount // 1000}k" if amount >= 1000 else str(amount)
-    pct_txt = f"{percent:.1f}%" if percent < 10 else f"{percent:.0f}%"
-    if net > 0:
+    pct_txt = f"{stats.percent:.1f}%" if stats.percent < 10 else f"{stats.percent:.0f}%"
+    if stats.net_tokens > 0:
         colour, face, verb, name = GREEN, "🤑", "saved", "savings"
     else:
         colour, face, verb, name = RED, "💸", "lost", "losses"
-    bust_txt = f"{SEP}{busts} cache bust{'s' if busts != 1 else ''}" if busts else ""
-    return f"Headroom {face}{SEP}{colour}{pct_txt} {name}{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
+    bust_txt = (
+        f"{SEP}{stats.bust_count} cache bust{'s' if stats.bust_count != 1 else ''}"
+        if stats.bust_count
+        else ""
+    )
+    return (
+        f"{stats.provider_name} {face}{SEP}{colour}{pct_txt} {name}"
+        f"{SEP}{colour}{amount_txt} tokens {verb}{RESET}{bust_txt}"
+    )
+
+
+_PROXY_PROVIDERS: tuple[Callable[[], ProxyStats | None], ...] = (_headroom_stats,)
+
+
+def _compression_proxy_stats() -> str | None:
+    """The active compression proxy's rendered row, or None when none is running."""
+    for provider_stats in _PROXY_PROVIDERS:
+        stats = provider_stats()
+        if stats is not None:
+            return _fmt_compression_proxy_line(stats)
+    return None
 
 
 def _rate_limit_state_path(session_id: str) -> str:
-    """Doit rester identique, octet pour octet, à
-    `pc-kanban/skills/kanban/scripts/next_card_recommendation.py::_rate_limit_state_path` — les
-    deux calculs sont dupliqués volontairement (deux plugins découplés), pas partagés."""
+    """Must stay byte-identical to `pc-kanban/skills/kanban/scripts/next_card_recommendation.py::_rate_limit_state_path`.
+    Deliberately duplicated (decoupled plugins), not shared."""
     return os.path.join(
         tempfile.gettempdir(),
         f"pc-statusline-ratelimits-{os.getuid()}-{session_id}.json",
@@ -357,10 +419,9 @@ def _rate_limit_state_path(session_id: str) -> str:
 
 
 def _write_rate_limit_state(data: dict, session_id) -> None:
-    """`rate_limits.five_hour`/`.seven_day` sont un quota agrégé côté serveur, poussé uniquement
-    à ce script — le seul point d'accès pour la recommandation session-vs-spawn de `pc-kanban`.
-    Une écriture par rendu ; toute erreur est avalée, un rendu de statusline ne doit jamais échouer
-    pour ça."""
+    """Write server-side aggregated rate limits (`five_hour`/`seven_day`) to disk;
+    pc-kanban reads this state to decide session-vs-spawn. One write per render;
+    errors are swallowed — a statusline render must never fail."""
     if not session_id:
         return
     state = {}
@@ -385,7 +446,7 @@ _GIT_TIMEOUT_S = 0.3
 
 
 def _repo_branch(start_dir):
-    """`"<basename(repo-root)> @ <branch>"` for the git repo `start_dir` sits in (or a subdir of),
+    """`"<basename(repo-root)>{SEP}🌿 <branch>"` for the git repo `start_dir` sits in (or a subdir of),
     or `None` outside a git repo / on any lookup failure: timeout, no git binary, detached-HEAD
     edge cases. `CLAUDE_PROJECT_DIR` is often empty in Claude Code and `${CLAUDE_PROJECT_DIR}`-style
     prompts don't render, so this is the one place a session can see at a glance which repo/branch
@@ -415,7 +476,7 @@ def _repo_branch(start_dir):
             check=False,
         )
         branch_name = branch.stdout.strip() if branch.returncode == 0 else "detached"
-        return f"{os.path.basename(repo_root)} @ {branch_name}"
+        return f"{os.path.basename(repo_root)}{SEP}🌿 {branch_name}"
     except Exception:
         return None
 
@@ -514,8 +575,29 @@ def build_lines(data: dict) -> list[str]:
     lines: list[str] = []
 
     version = _safe_get(data, "version", "?")
-    line0_left_parts = [_BLANK]
     line0_right_parts = [f"{DIM}v{version}{RESET}"]
+    # ---------- Optional line : rate limits > 90% ----------
+    warnings = []
+    bg = YELLOW_BG
+    for label, key in (("Session", "five_hour"), ("Weekly", "seven_day")):
+        used = _safe_get(data, f"rate_limits.{key}.used_percentage")
+        resets_at = _safe_get(data, f"rate_limits.{key}.resets_at")
+        if used is not None and used > 90:
+            if resets_at:
+                warnings.append(
+                    f"{label}: {used:.0f}% (in {_fmt_duration_until(resets_at)}, "
+                    f"reset {_fmt_epoch(resets_at)})"
+                )
+            else:
+                warnings.append(f"{label}: {used:.0f}% (reset ?)")
+            if used >= 100:
+                bg = RED_BG
+
+    if warnings:
+        line0_left_parts = [f"{bg} ⚠ RATE LIMIT — {' | '.join(warnings)} {RESET}"]
+    else:
+        line0_left_parts = [_BLANK]
+
     model = _safe_get(data, "model.display_name", "?")
     effort = _safe_get(data, "effort.level")
     thinking_on = _safe_get(data, "thinking.enabled", False)
@@ -603,25 +685,12 @@ def build_lines(data: dict) -> list[str]:
     ]
     line3_right_parts: list[str] = [f"💲 {cost:.2f} (API-equiv)"]
 
+    # ---------- Optional line : the active compression proxy, only while one is up ----------
     line4_left_parts: list[str] = []
     line4_right_parts: list[str] = []
-    headroom = _headroom_net()
-    if headroom:
-        line4_left_parts.append(_fmt_headroom_line(*headroom))
-
-    warnings = []
-    bg = YELLOW_BG
-    for label, key in (("Session", "five_hour"), ("Weekly", "seven_day")):
-        used = _safe_get(data, f"rate_limits.{key}.used_percentage")
-        resets_at = _safe_get(data, f"rate_limits.{key}.resets_at")
-        if used is not None and used > 90:
-            reset_txt = _fmt_epoch(resets_at) if resets_at else "?"
-            warnings.append(f"{label}: {used:.0f}% (reset {reset_txt})")
-            if used >= 100:
-                bg = RED_BG
-
-    if warnings:
-        line0_left_parts = [f"{bg} ⚠ RATE LIMIT — {' | '.join(warnings)} {RESET}"]
+    proxy_line = _compression_proxy_stats()
+    if proxy_line:
+        line4_left_parts.append(proxy_line)
 
     max_left, max_right = _content_widths(
         [
