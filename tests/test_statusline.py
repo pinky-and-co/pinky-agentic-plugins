@@ -127,6 +127,62 @@ def test_fmt_epoch_degrades_to_question_mark_on_garbage():
     assert sl._fmt_epoch("not-a-timestamp") == "?"
 
 
+def test_fmt_duration_until_minutes_only(monkeypatch):
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    target = dt_mod.datetime(2026, 8, 12, 18, 27, 0).timestamp()
+    assert sl._fmt_duration_until(target) == "27 min"
+
+
+def test_fmt_duration_until_hours_and_minutes(monkeypatch):
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    target = dt_mod.datetime(2026, 8, 12, 19, 5, 0).timestamp()
+    assert sl._fmt_duration_until(target) == "1h 5min"
+
+
+def test_fmt_duration_until_exact_hours_has_no_trailing_minutes(monkeypatch):
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    target = dt_mod.datetime(2026, 8, 12, 20, 0, 0).timestamp()
+    assert sl._fmt_duration_until(target) == "2h"
+
+
+def test_fmt_duration_until_past_deadline_is_now(monkeypatch):
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    target = dt_mod.datetime(2026, 8, 12, 17, 30, 0).timestamp()
+    assert sl._fmt_duration_until(target) == "now"
+
+
+def test_fmt_duration_until_degrades_to_question_mark_on_garbage():
+    assert sl._fmt_duration_until("not-a-timestamp") == "?"
+
+
 def test_count_subagents_counts_only_matching_files(tmp_path):
     transcript = tmp_path / "main.jsonl"
     transcript.write_text("", encoding="utf-8")
@@ -176,26 +232,33 @@ def _stats(saved, lost, before, busts=0):
 def _no_live_proxy(monkeypatch):
     """Never let the suite reach a real Headroom proxy — a developer running one would otherwise
     see different results from CI."""
-    monkeypatch.setattr(sl, "_headroom_stats", lambda: None)
+    monkeypatch.setattr(sl, "_headroom_raw_stats", lambda: None)
 
 
-def test_headroom_net_is_savings_minus_cache_busts():
-    assert sl._headroom_net(_stats(101_634, 388_415, 15_658_746, busts=4)) == (
-        -286_781,
-        _pytest.approx(1.8317, rel=1e-3),
-        4,
+def test_headroom_stats_net_is_savings_minus_cache_busts(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_headroom_raw_stats", lambda: _stats(101_634, 388_415, 15_658_746, busts=4)
     )
+    stats = sl._headroom_stats()
+    assert stats.provider_name == "Headroom"
+    assert stats.net_tokens == -286_781
+    assert stats.percent == _pytest.approx(1.8317, rel=1e-3)
+    assert stats.bust_count == 4
 
 
-def test_headroom_net_is_positive_when_compression_outweighs_busts():
-    net, percent, busts = sl._headroom_net(_stats(1_400_000, 64_000, 11_000_000))
-    assert net == 1_336_000
-    assert percent == _pytest.approx(12.145, rel=1e-3)
-    assert busts == 0
+def test_headroom_stats_is_positive_when_compression_outweighs_busts(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_headroom_raw_stats", lambda: _stats(1_400_000, 64_000, 11_000_000)
+    )
+    stats = sl._headroom_stats()
+    assert stats.net_tokens == 1_336_000
+    assert stats.percent == _pytest.approx(12.145, rel=1e-3)
+    assert stats.bust_count == 0
 
 
-def test_headroom_net_none_when_proxy_is_unreachable():
-    assert sl._headroom_net(None) is None
+def test_headroom_stats_none_when_proxy_is_unreachable(monkeypatch):
+    monkeypatch.setattr(sl, "_headroom_raw_stats", lambda: None)
+    assert sl._headroom_stats() is None
 
 
 @_pytest.mark.parametrize(
@@ -213,34 +276,48 @@ def test_headroom_net_none_when_proxy_is_unreachable():
     ],
     ids=["empty", "summary-only", "compression-only", "type-poisoned"],
 )
-def test_headroom_net_none_on_incomplete_or_poisoned_payload(payload):
-    assert sl._headroom_net(payload) is None
+def test_headroom_stats_none_on_incomplete_or_poisoned_payload(monkeypatch, payload):
+    monkeypatch.setattr(sl, "_headroom_raw_stats", lambda: payload)
+    assert sl._headroom_stats() is None
 
 
-def test_headroom_net_none_when_it_exactly_breaks_even():
-    assert sl._headroom_net(_stats(500, 500, 1000, busts=1)) is None
+def test_headroom_stats_none_when_it_exactly_breaks_even(monkeypatch):
+    monkeypatch.setattr(
+        sl, "_headroom_raw_stats", lambda: _stats(500, 500, 1000, busts=1)
+    )
+    assert sl._headroom_stats() is None
 
 
-def test_fmt_headroom_line_reads_as_a_gain_when_positive():
-    line = _strip_ansi(sl._fmt_headroom_line(1_336_000, 12.145, 0))
+def test_fmt_compression_proxy_line_reads_as_a_gain_when_positive():
+    stats = sl.ProxyStats(
+        provider_name="Headroom", net_tokens=1_336_000, percent=12.145, bust_count=0
+    )
+    line = _strip_ansi(sl._fmt_compression_proxy_line(stats))
     assert "🤑" in line and "12%" in line and "1336k tokens saved" in line
     assert "lost" not in line and "bust" not in line
 
 
-def test_fmt_headroom_line_reads_as_a_loss_when_negative():
-    line = _strip_ansi(sl._fmt_headroom_line(-286_781, 1.8317, 4))
+def test_fmt_compression_proxy_line_reads_as_a_loss_when_negative():
+    stats = sl.ProxyStats(
+        provider_name="Headroom", net_tokens=-286_781, percent=1.8317, bust_count=4
+    )
+    line = _strip_ansi(sl._fmt_compression_proxy_line(stats))
     assert "💸" in line and "1.8%" in line and "286k tokens lost" in line
     assert "4 cache busts" in line
 
 
-def test_fmt_headroom_line_singularises_a_lone_bust():
-    assert "1 cache bust" in _strip_ansi(sl._fmt_headroom_line(-10_000, 1.0, 1))
-    assert "1 cache busts" not in _strip_ansi(sl._fmt_headroom_line(-10_000, 1.0, 1))
+def test_fmt_compression_proxy_line_singularises_a_lone_bust():
+    stats = sl.ProxyStats(
+        provider_name="Headroom", net_tokens=-10_000, percent=1.0, bust_count=1
+    )
+    line = _strip_ansi(sl._fmt_compression_proxy_line(stats))
+    assert "1 cache bust" in line
+    assert "1 cache busts" not in line
 
 
 def test_build_lines_renders_the_headroom_row_when_the_proxy_answers(monkeypatch):
     monkeypatch.setattr(
-        sl, "_headroom_stats", lambda: _stats(1_400_000, 64_000, 11_000_000)
+        sl, "_headroom_raw_stats", lambda: _stats(1_400_000, 64_000, 11_000_000)
     )
     data = {
         "session_id": "s",
@@ -387,6 +464,30 @@ def test_rate_limit_labels_are_english_no_profile_language_leak():
     assert not any("Hebdo" in ln for ln in stripped)
 
 
+def test_build_lines_rate_limit_warning_includes_duration_until_reset(monkeypatch):
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    resets_at = dt_mod.datetime(2026, 8, 12, 18, 27, 0).timestamp()
+    data = {
+        "rate_limits": {"five_hour": {"used_percentage": 95, "resets_at": resets_at}}
+    }
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert any("Session: 95% (in 27 min, reset 18:27)" in ln for ln in stripped)
+
+
+def test_build_lines_rate_limit_warning_no_resets_at_falls_back_to_question_mark():
+    data = {"rate_limits": {"five_hour": {"used_percentage": 95, "resets_at": None}}}
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert any("Session: 95% (reset ?)" in ln for ln in stripped)
+    assert not any(" in " in ln and "RATE LIMIT" in ln for ln in stripped)
+
+
 def test_build_lines_no_rate_limit_line_below_threshold():
     data = {"rate_limits": {"five_hour": {"used_percentage": 50, "resets_at": None}}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
@@ -448,7 +549,7 @@ def test_repo_branch_returns_basename_at_branch(tmp_path):
     (repo / "f.txt").write_text("x")
     _git("add", ".", cwd=repo)
     _git("commit", "-q", "-m", "x", cwd=repo)
-    assert sl._repo_branch(str(repo)) == "my-repo @ main"
+    assert sl._repo_branch(str(repo)) == f"my-repo{sl.SEP}🌿 main"
 
 
 def test_repo_branch_walks_up_from_a_nested_subdir(tmp_path):
@@ -461,7 +562,7 @@ def test_repo_branch_walks_up_from_a_nested_subdir(tmp_path):
     (repo / "f.txt").write_text("x")
     _git("add", ".", cwd=repo)
     _git("commit", "-q", "-m", "x", cwd=repo)
-    assert sl._repo_branch(str(nested)) == "my-repo @ main"
+    assert sl._repo_branch(str(nested)) == f"my-repo{sl.SEP}🌿 main"
 
 
 def test_repo_branch_none_outside_a_repo(tmp_path):
@@ -486,7 +587,7 @@ def test_build_lines_shows_repo_branch_on_its_own_row_between_session_and_contex
     _git("commit", "-q", "-m", "x", cwd=repo)
     data = {"workspace": {"current_dir": str(repo)}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert "📁 pinky-lib @ feature/x" in stripped[6]
+    assert f"📁 pinky-lib{_strip_ansi(sl.SEP)}🌿 feature/x" in stripped[6]
     assert "Context window" in stripped[8]
 
 
@@ -512,7 +613,7 @@ def test_build_lines_repo_row_independent_of_subagent_count_on_the_session_row(
     data = {"workspace": {"current_dir": str(repo)}, "transcript_path": "/t.jsonl"}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
     assert "2 subagents" in stripped[4]
-    assert "📁 pinky-lib @ main" in stripped[6]
+    assert f"📁 pinky-lib{_strip_ansi(sl.SEP)}🌿 main" in stripped[6]
 
 
 def test_forge_repo_slug_parses_ssh_and_https():
@@ -621,7 +722,10 @@ def test_build_lines_repo_row_wraps_in_a_hyperlink_when_a_forge_url_resolves(tmp
     _git("remote", "add", "origin", "git@github.com:acme/api.git", cwd=repo)
     data = {"workspace": {"current_dir": str(repo)}}
     lines = sl.build_lines(data)
-    assert "\033]8;;https://github.com/acme/api\033\\📁 my-repo @ main" in lines[6]
+    assert (
+        f"\033]8;;https://github.com/acme/api\033\\📁 my-repo{sl.SEP}🌿 main"
+        in lines[6]
+    )
 
 
 def test_hyperlink_wraps_text_in_osc8():
