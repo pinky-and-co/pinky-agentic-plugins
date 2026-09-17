@@ -18,12 +18,17 @@ this **single script** that reads it. The script is dual-mode:
     no state file needed), and every declared `permissions.additionalDirectories` entry is
     stopped. Read-visibility (Claude Code natively loads ancestor `CLAUDE.md` files as context)
     is not write authorization — this guard makes that boundary mechanical instead of relying on
-    the agent to remember it. Two carve-outs:
+    the agent to remember it. Three carve-outs:
     - **Board dirs are always writable** — the card and agent-log directories of every kanban
       board mounted on this machine (`stop_handoff.py --list-kanbans` / `--list-agent-log-dirs`),
       whatever the session root. An orchestrator or a repo-scoped worker session must still be
       able to maintain the boards. This carve-out also clears `freeze` (a whitelist lock), but
       not an explicit `deny` — deny-listing a board dir is a deliberate choice and wins.
+    - **The session's own scratchpad is always writable** — same freeze/deny treatment as board
+      dirs (see `is_session_scratchpad`). The harness's own banner already tells the agent this
+      directory needs no permission prompt; without this carve-out a `context: fork` skill that
+      writes there (no channel back to answer an ``ask``) stalls waiting on a prompt nobody can
+      answer.
     - **Outside every git repo → ``ask``, never a silent ``deny``.** A target that is out of
       scope *and* sits in no git repo at all (`~/.config/...`, a scratch dir) returns
       ``permissionDecision: "ask"``. Only a target that lands inside *another* git repo is a
@@ -338,6 +343,33 @@ def board_dirs(event: dict, root: Path) -> BoardDirs:
     return BoardDirs(dirs, ok)
 
 
+def is_session_scratchpad(target: str) -> bool:
+    """True when `target` sits inside a Claude Code session scratchpad directory.
+
+    The harness announces this path per session (the "Scratchpad directory" line in the
+    Environment banner) but does not pass it to hooks directly — no env var, no PreToolUse event
+    field — so it is recognized by its own stable shape instead:
+    ``<tmpdir>/claude-<uid>/<sanitized-cwd>/<session-id>/scratchpad/...``. The harness's own banner
+    already tells the agent this directory "can generally be used without permission prompts";
+    without this carve-out, the outside-scope guard treats it like any other out-of-repo path and
+    asks anyway — a real problem for a `context: fork` skill (no channel back to answer an ask).
+    """
+    tgt = Path(target)
+    tgt = tgt if tgt.is_absolute() else Path.cwd() / tgt
+    try:
+        tgt = tgt.resolve()
+    except OSError:
+        return False
+    # Ne pas ancrer sur `tempfile.gettempdir()` : sur macOS il suit `$TMPDIR`
+    # (`/var/folders/.../T`), alors que le harness écrit sous `/private/tmp` — deux racines
+    # différentes. On reconnaît la forme du chemin à la place, indépendamment de sa racine.
+    parts = tgt.parts
+    for i, part in enumerate(parts):
+        if re.fullmatch(r"claude-\d+", part) and "scratchpad" in parts[i + 1 :]:
+            return True
+    return False
+
+
 def in_git_repo(target: str, root: Path) -> bool:
     """True when `target` resolves inside some real git repo. Splits the out-of-scope guard:
     a target in another repo is a hard `deny`, one in no repo at all is an `ask`."""
@@ -446,9 +478,11 @@ def decide(event: dict, root: Path) -> dict | None:
                 tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
                 return any(tgt == d or tgt.is_relative_to(d) for d in board().dirs)
 
+            scratchpad = is_session_scratchpad(target)
+
             message = outside_scope_violation(event, target, root)
             if message:
-                if on_board():
+                if on_board() or scratchpad:
                     return None
                 if not board().resolved:
                     return _decision("ask", _OUT_OF_SCOPE_ASK.format(target=target))
@@ -458,7 +492,7 @@ def decide(event: dict, root: Path) -> dict | None:
 
             if state.get("freeze"):
                 scope = frozen_violation(target, state["freeze"], root)
-                if scope and not on_board():
+                if scope and not on_board() and not scratchpad:
                     return _decision(
                         "deny",
                         f"freeze: edits are locked to `{scope}`; `{target}` is outside it. "

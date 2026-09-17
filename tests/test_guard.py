@@ -133,5 +133,83 @@ class TestBoardDirCarveOut(unittest.TestCase):
             self.assertIsNone(self._decide(card, root=self.ws))
 
 
+class TestIsSessionScratchpad(unittest.TestCase):
+    """`is_session_scratchpad` recognizes the harness's own path shape, independent of which
+    temp root it sits under — `tempfile.gettempdir()` follows macOS's per-user `$TMPDIR`
+    (`/var/folders/.../T`), which is NOT where the harness actually writes (`/private/tmp`)."""
+
+    def test_matches_the_real_shape_under_private_tmp(self):
+        self.assertTrue(
+            g.is_session_scratchpad(
+                "/private/tmp/claude-501/-Users-x-repo/session-id/scratchpad/out.txt"
+            )
+        )
+
+    def test_matches_under_an_unrelated_temp_root_too(self):
+        """The check is shape-based, not anchored to `/private/tmp` specifically."""
+        self.assertTrue(
+            g.is_session_scratchpad(
+                "/var/folders/tz/xyz/T/claude-501/-Users-x-repo/session-id/scratchpad/out.txt"
+            )
+        )
+
+    def test_repo_file_is_not_a_scratchpad(self):
+        self.assertFalse(g.is_session_scratchpad("/Users/x/repo/README.md"))
+
+    def test_claude_numbered_dir_without_a_scratchpad_segment_does_not_match(self):
+        self.assertFalse(g.is_session_scratchpad("/Users/x/claude-501/notes.txt"))
+
+    def test_scratchpad_segment_before_the_claude_dir_does_not_match(self):
+        """`scratchpad` must come AFTER the `claude-<uid>` segment, not before it."""
+        self.assertFalse(
+            g.is_session_scratchpad("/Users/x/scratchpad/claude-501/out.txt")
+        )
+
+
+class TestScratchpadCarveOut(unittest.TestCase):
+    """The session's own scratchpad is always writable — same treatment as board dirs — because
+    a `context: fork` skill writing there has no channel back to answer an interactive `ask`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        self.session_root = self.base / "repo"
+        self.session_root.mkdir()
+        self.scratchpad = self.base / "claude-999" / "sess" / "scratchpad"
+        self.scratchpad.mkdir(parents=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _decide(self, target):
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(target)},
+            "cwd": str(self.session_root),
+        }
+        with unittest.mock.patch.object(
+            g, "board_dirs", return_value=g.BoardDirs([], True)
+        ):
+            return g.decide(event, self.session_root)
+
+    def test_scratchpad_write_is_allowed_outside_any_repo(self):
+        target = self.scratchpad / "commit_messages.txt"
+        with unittest.mock.patch.dict(
+            os.environ, {"CLAUDE_PROJECT_DIR": str(self.session_root)}
+        ):
+            self.assertIsNone(self._decide(target))
+
+    def test_freeze_does_not_block_the_scratchpad(self):
+        g.save_state(
+            g.state_path(self.session_root),
+            {"careful": False, "freeze": [str(self.session_root)], "deny": []},
+        )
+        target = self.scratchpad / "commit_messages.txt"
+        with unittest.mock.patch.dict(
+            os.environ, {"CLAUDE_PROJECT_DIR": str(self.session_root)}
+        ):
+            self.assertIsNone(self._decide(target))
+
+
 if __name__ == "__main__":
     unittest.main()
