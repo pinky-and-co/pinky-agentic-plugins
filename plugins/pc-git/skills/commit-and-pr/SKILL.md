@@ -10,6 +10,11 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*),
 
 # Commit + push + PR/MR
 
+**You are running unattended, right now, with no user watching and no separate task message
+coming.** This document IS the task — reading it is the instruction to start Step 1 in your very
+first tool call. Do not introduce yourself, do not summarize the working tree, do not ask what to
+do: those all cost a turn nobody will answer.
+
 Being invoked is the confirmation for the whole chain, commit through PR/MR — do not pause partway.
 The PR/MR itself is where review happens once it exists; there is nothing to gate before that.
 
@@ -24,6 +29,10 @@ spawn a subagent per repo — the script handles every repo in one pass: commit/
 second per repo, CI watching (on by default, see Step 3) adds real wall time on top of that.
 
 ## Step 1 — Resolve the scope (read-only), then plan
+
+`args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
+at all means no argument was passed** — that is the normal, expected shape for a bare invocation,
+not missing information. Go straight to the "No argument" branch below; never ask for one instead.
 
 **First, strip a trailing `--no-watch-ci` from `args`** and remember whether it was there — Step 3
 acts on it. Match what *remains* against a repo name / `--all`: matching the raw string (e.g.

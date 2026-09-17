@@ -201,38 +201,39 @@ pinky-agentic-plugins/
 │   │   │   ├── orchestrator_freeze.py
 │   │   │   ├── pc_kanban_secret_patterns.py
 │   │   │   └── stop_handoff.py
-│   │   └── skills/
-│   │       ├── chantier/
-│   │       │   ├── scripts/
-│   │       │   │   ├── activate_plugins_for_repos.py
-│   │       │   │   ├── archive_card.sh
-│   │       │   │   ├── drop_card.sh
-│   │       │   │   ├── pc_kanban_pending_user_action.py
-│   │       │   │   ├── pc_kanban_plugin_scope_lib.py
-│   │       │   │   └── resolve_repos.sh
-│   │       │   └── SKILL.md
-│   │       ├── grill/
-│   │       │   └── SKILL.md
-│   │       ├── kanban/
-│   │       │   ├── references/
-│   │       │   │   ├── finishing-a-card.md
-│   │       │   │   ├── multi-board.md
-│   │       │   │   ├── requirements.md
-│   │       │   │   └── story-template.md
-│   │       │   ├── scripts/
-│   │       │   │   └── next_card_recommendation.py
-│   │       │   └── SKILL.md
-│   │       ├── permission-change/
-│   │       │   ├── scripts/
-│   │       │   │   └── guard.py
-│   │       │   └── SKILL.md
-│   │       ├── spawn-workers/
-│   │       │   ├── scripts/
-│   │       │   │   ├── pc_kanban_spawn_plugin_scope_lib.py
-│   │       │   │   └── pc_kanban_spawn_workers.py
-│   │       │   └── SKILL.md
-│   │       └── yt/
-│   │           └── SKILL.md
+│   │   ├── skills/
+│   │   │   ├── chantier/
+│   │   │   │   ├── scripts/
+│   │   │   │   │   ├── activate_plugins_for_repos.py
+│   │   │   │   │   ├── archive_card.sh
+│   │   │   │   │   ├── drop_card.sh
+│   │   │   │   │   ├── pc_kanban_pending_user_action.py
+│   │   │   │   │   ├── pc_kanban_plugin_scope_lib.py
+│   │   │   │   │   └── resolve_repos.sh
+│   │   │   │   └── SKILL.md
+│   │   │   ├── grill/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── kanban/
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── finishing-a-card.md
+│   │   │   │   │   ├── multi-board.md
+│   │   │   │   │   ├── requirements.md
+│   │   │   │   │   └── story-template.md
+│   │   │   │   ├── scripts/
+│   │   │   │   │   └── next_card_recommendation.py
+│   │   │   │   └── SKILL.md
+│   │   │   ├── permission-change/
+│   │   │   │   ├── scripts/
+│   │   │   │   │   └── guard.py
+│   │   │   │   └── SKILL.md
+│   │   │   ├── spawn-workers/
+│   │   │   │   ├── scripts/
+│   │   │   │   │   ├── pc_kanban_spawn_plugin_scope_lib.py
+│   │   │   │   │   └── pc_kanban_spawn_workers.py
+│   │   │   │   └── SKILL.md
+│   │   │   └── yt/
+│   │   │       └── SKILL.md
+│   │   └── README.md
 │   ├── pc-privacy/
 │   │   ├── mcp/
 │   │   │   ├── anonymize.py
