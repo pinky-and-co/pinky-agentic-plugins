@@ -114,6 +114,12 @@ The story file, on the fixed template (skill `kanban` § The story file →
   section on a real design is a claim nobody believes.
 - **`## Implementation priority`** — what has to exist first for the rest to be testable.
 
+**The source card**, when the input was an existing `0-ideas` card (not free text, not an imported
+document), moves to `1-todo` on convergence — `date:` set to today, `requirements:` backfilled with
+the ids it now traces to. Never `drop` it: `kanban`'s drop mechanism is for a card confirmed
+obsolete, never for one whose own open questions the interview just closed. Document-mode input has
+no source card to move.
+
 No dated decision block, no state dump — a closed grill folds into `## Requirements` and
 `## Open questions` (the two rules in `references/story-template.md`).
 
