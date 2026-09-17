@@ -407,12 +407,19 @@ class TestUnreviewedDoneCards(unittest.TestCase):
 
 class TestStaleCards(unittest.TestCase):
     def _card(
-        self, kanban: Path, chantier: str, column: str, name: str, date: str
+        self,
+        kanban: Path,
+        chantier: str,
+        column: str,
+        name: str,
+        date: str,
+        priority: str | None = None,
     ) -> Path:
         col = kanban / f"CHANTIER{chantier}" / column
         col.mkdir(parents=True, exist_ok=True)
         card = col / name
-        card.write_text(f"---\ndate: {date}\n---\n# {name}\n", encoding="utf-8")
+        fm = f"date: {date}\n" + (f"priority: {priority}\n" if priority else "")
+        card.write_text(f"---\n{fm}---\n# {name}\n", encoding="utf-8")
         return card
 
     def test_flags_0_ideas_past_60_days_and_1_todo_past_30(self):
@@ -464,6 +471,56 @@ class TestStaleCards(unittest.TestCase):
                 "---\ndate: pas-une-date\n---\n# x\n", encoding="utf-8"
             )
             self.assertEqual(sh.stale_cards(kb, today=sh.date(2026, 9, 16)), [])
+
+    def test_threshold_tightens_for_higher_priority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            urgent = self._card(
+                kb, "0025", "1-todo", "urgent.md", "2026-08-27", priority="5"
+            )  # 20 jours, seuil priority 5 = 15j
+            flagged = sh.stale_cards(kb, today=sh.date(2026, 9, 16))
+            self.assertEqual({c for c, _, _ in flagged}, {urgent})
+
+    def test_threshold_loosens_for_lower_priority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            self._card(
+                kb, "0025", "1-todo", "low.md", "2026-08-27", priority="1"
+            )  # 20 jours, seuil priority 1 = 60j
+            self.assertEqual(sh.stale_cards(kb, today=sh.date(2026, 9, 16)), [])
+
+    def test_missing_priority_defaults_to_3_unchanged_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            just_under = self._card(
+                kb, "0001", "1-todo", "under.md", "2026-08-18"
+            )  # 29j
+            just_over = self._card(
+                kb, "0001", "1-todo", "over.md", "2026-08-17"
+            )  # 30j -> 30 !> 30
+            older = self._card(kb, "0001", "1-todo", "older.md", "2026-08-16")  # 31j
+            flagged = {c for c, _, _ in sh.stale_cards(kb, today=sh.date(2026, 9, 16))}
+            self.assertNotIn(just_under, flagged)
+            self.assertNotIn(just_over, flagged)
+            self.assertIn(older, flagged)
+
+    def test_unparseable_priority_falls_back_to_3_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            card = self._card(
+                kb, "0001", "1-todo", "bad-priority.md", "2026-08-16", priority="haute"
+            )  # 31j > seuil défaut 30j
+            flagged = {c for c, _, _ in sh.stale_cards(kb, today=sh.date(2026, 9, 16))}
+            self.assertIn(card, flagged)
+
+    def test_out_of_range_priority_clamps_instead_of_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            extreme = self._card(
+                kb, "0001", "1-todo", "extreme.md", "2026-08-16", priority="-3000"
+            )  # clamps to 1 -> threshold 60j (1-todo) ; 31j idle, never flagged
+            flagged = {c for c, _, _ in sh.stale_cards(kb, today=sh.date(2026, 9, 16))}
+            self.assertNotIn(extreme, flagged)
 
 
 class TestBoundedBoardLines(unittest.TestCase):

@@ -15,7 +15,8 @@ _KANBAN/
 │   ├── <SPEC>.md
 │   ├── 0-ideas/              ← not yet scoped
 │   ├── 1-todo/               ← scoped + committed
-│   ├── 2-selected-for-dev/   ← commitment point — user-ordered, next session takes the FIRST card
+│   ├── 2-selected-for-dev/   ← commitment point — next session takes the highest `priority:`,
+│   │                            file position tie-breaks
 │   ├── 3-in-progress/        ← active — the card carries its handoff
 │   └── 4-done/               ← done (airlock) — fold the "why" into the story/an ADR, then purge
 └── _ARCHIVE/
@@ -58,6 +59,7 @@ handoff); frontmatter carries only what a script or a hook needs to resolve with
 ```yaml
 ---
 date: YYYY-MM-DD       # meaning is implied by the column folder — see table below
+priority: 1-5          # 1 (low) to 5 (urgent); omitted = 3
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
@@ -82,6 +84,15 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   | `4-done` | done |
 
   Set on creation; update only the value when a card moves column, never invent a second date field.
+
+- **`priority`** — 1 (low) to 5 (urgent). The agent proposes a value at the same moment it writes a
+  card (`kanban-proactivity.md` § Capture → card) with its reason; the human validates or changes
+  it before the card is written — never agent-set unconfirmed. Drives the ordering of the next-card
+  proposal in `0-ideas`/`1-todo` (`finishing-a-card.md` § Proposing the next card) and of the
+  "highest `priority:`" pick in `2-selected-for-dev` above — `date:`/file position only tie-break
+  at equal `priority`. Omitted = `3`, no backfill of existing cards, no error; `--list-stale`
+  scales its threshold from it (`stop_handoff.py`). Independent of `sert` — a child never inherits
+  its parent's `priority`, no auto-propagation.
 
 - **`model`** — a floor, never a ceiling: the minimum a session needs before taking this card.
   A direct model alias (`haiku`/`sonnet`/`opus`/`fable`), never a tier name to resolve through a
