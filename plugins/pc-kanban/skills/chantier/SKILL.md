@@ -38,9 +38,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 3. **Read the story** (the chantier's spec file at its root) — the why / scope / architecture.
 4. **Read the live state, in priority order:**
   - `3-in-progress/` first — an in-progress card is the thread to resume.
-  - `2-selected-for-dev/` — the work order, not a queue to browse: if non-empty, its FIRST card
-    (by filename sort, or an explicit order noted in the chantier's story) is what a session takes
-    next.
+  - `2-selected-for-dev/` — the work order, not a queue to browse: if non-empty, its highest
+    `priority:` card (skill `kanban` § Card frontmatter) is what a session takes next — filename
+    sort, or an explicit order noted in the chantier's story, only tie-breaks at equal `priority`.
   - `1-todo/` and `0-ideas/` for what is queued.
   - skim `4-done/` only for recent decisions.
   - the cross-agent journal listing above — open any entry whose title suggests it touched this
@@ -48,7 +48,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 5. **Report**, under ~15 lines:
   - one-line objective (from the story)
   - what is in progress, with its handoff summary — or "nothing in progress"
-  - if `2-selected-for-dev/` is non-empty: name the first card, it's the work order
+  - if `2-selected-for-dev/` is non-empty: name its highest-`priority:` card, it's the work order
   - queued cards grouped by `sert` (skill `kanban` § Filiation) — one group per root, `sert: null`
     cards elsewhere folded into a single "N autonomous cards" count
   - if the `--list-unreviewed-done` output names any card in **this chantier**: one line — the
@@ -88,8 +88,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   `Agent(subagent_type: "fork")` never floors a model — never use it to "run
   something on haiku".
 7. **Resolve role, then take the card, if one is being taken** (already in `3-in-progress/` → resume
-  directly; else the FIRST card of `2-selected-for-dev/` → move it into `3-in-progress/`, set its
-  `date` to today):
+  directly; else the highest-`priority:` card of `2-selected-for-dev/` (step 4's pick) → move it
+  into `3-in-progress/`, set its `date` to today):
    - **Role.**
     ```bash
     git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel

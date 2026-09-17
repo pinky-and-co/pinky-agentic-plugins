@@ -97,9 +97,9 @@ scoping first, never proposed directly), filtered and ordered:
    sort position. **Exception**: a `blocked_by` pointing at a card now `dropped` (§ below) is never
    excluded this way — it goes through the obsolescence check instead (FR-0025-67), because a dead
    blocker calls the blocked card's own premise into question, not just its availability.
-2. **Sort the rest into two buckets**, each by `date:` ascending: cards whose `blocked_by` was
-   resolved in *this same session* first, then everything else. Both buckets are plain FIFO — the
-   dependency filter already did the real work, this is only the tie-break.
+2. **Sort the rest into two buckets**: cards whose `blocked_by` was resolved in *this same session*
+   first, then everything else. Within each bucket, sort by `priority` (skill `kanban` § Card
+   frontmatter) descending, `date:` ascending as tie-break at equal `priority`.
 
 **Nothing survives the filter** → say so plainly ("nothing to propose — `1-todo/` is empty or
 everything is blocked") and propose nothing; do not lower the bar to fill a slot.

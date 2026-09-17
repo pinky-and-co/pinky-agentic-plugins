@@ -47,18 +47,32 @@ BLOCK_START = (
 )
 BLOCK_END = "<!-- auto-handoff:end -->"
 ANTI_SECRETS = "never include secrets / credentials / internal URLs in a handoff"  # pragma: allowlist secret
-MAX_FILES = 20  # cap the changed-files list so a huge diff does not bloat the card
-
+MAX_FILES = 20
 MAX_AGENT_LOGS = 12
-
-# `--list-unreviewed-done` : same bounded-output guard. The tail count keeps the pre-convention
-# backlog visible as a number without pasting the whole of it on every `/chantier` intake.
 MAX_UNREVIEWED_DONE = 10
-
-# Idle threshold, in days, per column — `2-selected-for-dev` deliberately absent, its own
-# immobility is a prioritization problem, not staleness.
 STALE_THRESHOLDS_DAYS = {"0-ideas": 60, "1-todo": 30}
 MAX_STALE = 10
+
+DEFAULT_PRIORITY = 3
+
+
+def card_priority(fm: dict[str, object]) -> int:
+    """A card's `priority:` (1-5), clamped to that range, or `DEFAULT_PRIORITY` when absent or
+    unparseable — never raises."""
+    raw = fm.get("priority")
+    if isinstance(raw, str):
+        try:
+            return max(1, min(5, int(raw)))
+        except ValueError:
+            pass
+    return DEFAULT_PRIORITY
+
+
+def stale_threshold(base_days: int, priority: int) -> float:
+    """`--list-stale` threshold, scaled by priority: `base × 2^((3-priority)/2)`, `base` being
+    `STALE_THRESHOLDS_DAYS` at the default priority."""
+    return base_days * 2 ** ((DEFAULT_PRIORITY - priority) / 2)
+
 
 MAX_STATUS_CHARS = 200
 
@@ -278,11 +292,11 @@ class StaleCard(NamedTuple):
 
 
 def stale_cards(kanban: Path, today: date | None = None) -> list[StaleCard]:
-    """`0-ideas`/`1-todo` cards whose `date:` frontmatter is older than
-    `STALE_THRESHOLDS_DAYS[column]` — a fallback net behind the closing-time proposal
-    (`finishing-a-card.md` § "Proposing the next card"), for a card no closure ever crosses.
-    `2-selected-for-dev` is deliberately absent from `STALE_THRESHOLDS_DAYS`, so it can never
-    appear here however old. A missing or unparseable `date:` is skipped, never guessed.
+    """`0-ideas`/`1-todo` cards whose `date:` frontmatter is older than `stale_threshold(
+    STALE_THRESHOLDS_DAYS[column], card_priority(...))` — a fallback net behind the closing-time
+    proposal (`finishing-a-card.md` § "Proposing the next card"), for a card no closure ever
+    crosses. `2-selected-for-dev` is deliberately absent from `STALE_THRESHOLDS_DAYS`, so it can
+    never appear here however old. A missing or unparseable `date:` is skipped, never guessed.
 
     Args:
         kanban: a board root, as returned by `find_kanbans`.
@@ -293,7 +307,7 @@ def stale_cards(kanban: Path, today: date | None = None) -> list[StaleCard]:
     """
     today = today or date.today()
     flagged: list[StaleCard] = []
-    for column, threshold in STALE_THRESHOLDS_DAYS.items():
+    for column, base_days in STALE_THRESHOLDS_DAYS.items():
         for card in kanban.glob(f"CHANTIER*/{column}/*.md"):
             try:
                 text = card.read_text(encoding="utf-8")
@@ -308,7 +322,7 @@ def stale_cards(kanban: Path, today: date | None = None) -> list[StaleCard]:
             except ValueError:
                 continue
             days_idle = (today - card_date).days
-            if days_idle > threshold:
+            if days_idle > stale_threshold(base_days, card_priority(fm)):
                 flagged.append(StaleCard(card, column, days_idle))
     flagged.sort(key=lambda row: row.days_idle, reverse=True)
     return flagged
@@ -644,16 +658,12 @@ def main() -> int:
         return 0
 
     if sys.argv[1:2] == ["--card-repos"]:
-        # A card's declared repo slugs, one per line (empty output = none). Same parser the
-        # hook uses for its own repo-scope match — no second frontmatter reader downstream.
         text = Path(sys.argv[2]).read_text(encoding="utf-8")
         for slug in card_repos(text) or []:
             print(slug)
         return 0
 
     if sys.argv[1:2] == ["--card-model"]:
-        # A card's `model:` floor (skill `kanban`), or empty if the card omits it. Same
-        # frontmatter reader as everything else here — spawn-workers passes it to `claude --model`.
         fm = parse_frontmatter(Path(sys.argv[2]).read_text(encoding="utf-8")) or {}
         model = fm.get("model")
         if isinstance(model, str) and model:
