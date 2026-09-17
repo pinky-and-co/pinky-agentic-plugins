@@ -51,6 +51,7 @@ MAX_FILES = 20
 MAX_AGENT_LOGS = 12
 MAX_UNREVIEWED_DONE = 10
 STALE_THRESHOLDS_DAYS = {"0-ideas": 60, "1-todo": 30}
+EXPORTED_STALE_THRESHOLD_DAYS = 14
 MAX_STALE = 10
 
 DEFAULT_PRIORITY = 3
@@ -296,7 +297,13 @@ def stale_cards(kanban: Path, today: date | None = None) -> list[StaleCard]:
     STALE_THRESHOLDS_DAYS[column], card_priority(...))` — a fallback net behind the closing-time
     proposal (`finishing-a-card.md` § "Proposing the next card"), for a card no closure ever
     crosses. `2-selected-for-dev` is deliberately absent from `STALE_THRESHOLDS_DAYS`, so it can
-    never appear here however old. A missing or unparseable `date:` is skipped, never guessed.
+    never appear here however old (its immobility is a priority problem, not obsolescence).
+
+    A `3-in-progress` card carrying an `exported:` marker (the `pc-delegate` "aller" leg's signal
+    that it left for an agent working outside Claude Code) is checked the same way, against
+    `EXPORTED_STALE_THRESHOLD_DAYS` — this is the only way `3-in-progress` ever appears here; a
+    card taken into progress locally never carries that marker. A missing or unparseable `date:`
+    is skipped, never guessed.
 
     Args:
         kanban: a board root, as returned by `find_kanbans`.
@@ -324,6 +331,26 @@ def stale_cards(kanban: Path, today: date | None = None) -> list[StaleCard]:
             days_idle = (today - card_date).days
             if days_idle > stale_threshold(base_days, card_priority(fm)):
                 flagged.append(StaleCard(card, column, days_idle))
+    for card in kanban.glob("CHANTIER*/3-in-progress/*.md"):
+        try:
+            text = card.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        fm = parse_frontmatter(text) or {}
+        if not fm.get("exported"):
+            continue
+        raw_date = fm.get("date")
+        if not isinstance(raw_date, str) or not raw_date:
+            continue
+        try:
+            card_date = date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+        days_idle = (today - card_date).days
+        if days_idle > stale_threshold(
+            EXPORTED_STALE_THRESHOLD_DAYS, card_priority(fm)
+        ):
+            flagged.append(StaleCard(card, "3-in-progress", days_idle))
     flagged.sort(key=lambda row: row.days_idle, reverse=True)
     return flagged
 
