@@ -12,6 +12,11 @@ exactly inside the archive (e.g. `src/pkg/module.py`, `docs/adr/0004-x.md`) — 
 archive is how your changes get placed back, there is no separate manifest to fill in. A brand-new
 file is fine; do not invent a placeholder for it elsewhere.
 
+Also include a `REPORT.md` at the root of the archive (not nested under any path) — what you did,
+any judgment call you made and why, anything you found but left alone because it was out of scope,
+and any caveat a reviewer should know before trusting the change. This is read by a human, not
+applied to the repository — write it as you would a short handoff note, not as code.
+
 ## What you cannot do here — and do not need to
 
 You cannot commit, push, run the project's own lint/type-check/test suite, or move a file between

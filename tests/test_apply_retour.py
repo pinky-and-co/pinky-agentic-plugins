@@ -10,7 +10,9 @@ quirks (a leading `./`, duplicate separators, non-ASCII, a case-only difference)
 the same tracked file. Real temp git repos throughout — tracked/dirty status against HEAD is
 exactly the behaviour under test, so faking `git` would remove the subject. Assertions check both
 the resulting file content and the printed outcome line (`capsys`) — a refusal for the wrong reason
-would pass a content-only assertion.
+would pass a content-only assertion. A top-level `REPORT.md` in the source is never applied as a
+repo file — it is written as a new `_AGENT_LOG` entry when `--agent-log-dir` is given, or printed,
+never silently dropped; a nested `sub/REPORT.md` is an ordinary repo file, not the reserved report.
 """
 
 from __future__ import annotations
@@ -263,3 +265,82 @@ class TestUnbornHead:
         archive = _zip_of(tmp_path, "u1.zip", {"staged.py": "x = 1\n"})
         code = ar.apply_source(archive, root, dry_run=False)
         assert code == 0
+
+
+class TestIsReportEntry:
+    def test_top_level_report_matches(self) -> None:
+        assert ar._is_report_entry("REPORT.md") is True
+
+    def test_top_level_report_with_dot_slash_prefix_matches(self) -> None:
+        assert ar._is_report_entry("./REPORT.md") is True
+
+    def test_nested_report_does_not_match(self) -> None:
+        assert ar._is_report_entry("sub/REPORT.md") is False
+
+    def test_different_name_does_not_match(self) -> None:
+        assert ar._is_report_entry("readme.md") is False
+
+
+class TestReportMd:
+    def test_report_is_never_applied_as_a_repo_file(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        archive = _zip_of(
+            tmp_path, "r10.zip", {"brand_new.py": "x = 1\n", "REPORT.md": "did stuff\n"}
+        )
+        ar.apply_source(archive, repo, dry_run=False)
+        assert not (repo / "REPORT.md").exists()
+        assert (repo / "brand_new.py").exists()
+
+    def test_nested_report_md_is_applied_as_an_ordinary_file(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        archive = _zip_of(tmp_path, "r11.zip", {"docs/REPORT.md": "not the report\n"})
+        ar.apply_source(archive, repo, dry_run=False)
+        assert (repo / "docs" / "REPORT.md").read_text() == "not the report\n"
+
+    def test_report_written_to_agent_log_dir_when_given(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        archive = _zip_of(
+            tmp_path, "r12.zip", {"REPORT.md": "## What I did\n\nstuff\n"}
+        )
+        ar.apply_source(
+            archive, repo, dry_run=False, agent_log_dir=log_dir, card_ids=["my-card"]
+        )
+        written = list(log_dir.glob("*_retour-my-card.md"))
+        assert len(written) == 1
+        assert written[0].read_text() == "## What I did\n\nstuff\n"
+
+    def test_report_falls_back_to_repo_name_without_card_ids(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        archive = _zip_of(tmp_path, "r13.zip", {"REPORT.md": "stuff\n"})
+        ar.apply_source(archive, repo, dry_run=False, agent_log_dir=log_dir)
+        written = list(log_dir.glob(f"*_retour-{repo.name}.md"))
+        assert len(written) == 1
+
+    def test_report_printed_inline_without_agent_log_dir(
+        self, tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        archive = _zip_of(tmp_path, "r14.zip", {"REPORT.md": "printed content\n"})
+        ar.apply_source(archive, repo, dry_run=False)
+        assert "printed content" in capsys.readouterr().out
+
+    def test_dry_run_does_not_write_the_report(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        archive = _zip_of(tmp_path, "r15.zip", {"REPORT.md": "stuff\n"})
+        ar.apply_source(archive, repo, dry_run=True, agent_log_dir=log_dir)
+        assert not log_dir.exists()
+
+    def test_no_report_in_source_writes_nothing_to_agent_log_dir(
+        self, tmp_path: Path, repo: Path
+    ) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        archive = _zip_of(tmp_path, "r16.zip", {"brand_new.py": "x = 1\n"})
+        ar.apply_source(archive, repo, dry_run=False, agent_log_dir=log_dir)
+        assert not log_dir.exists()

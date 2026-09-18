@@ -22,8 +22,15 @@ Every applied `.py` file is classified `comments-only` vs `code-changed` by AST 
 (docstrings masked). A brand-new file has no "old" version to compare against, so it always
 classifies `code-changed`.
 
+A top-level `REPORT.md` in the source (no directory prefix — `sub/REPORT.md` is an ordinary repo
+file) is reserved: never applied into the repo, always pulled out and either written as a new
+`_AGENT_LOG` entry (when `--agent-log-dir` is given) or printed in full so a human can act on it —
+the narrative an external agent hands back (what it did, judgment calls, anything found but out of
+scope) otherwise has nowhere durable to land.
+
 Usage:
-    python3 apply_retour.py <retour.zip-or-dir> [--repo PATH] [--dry-run]
+    python3 apply_retour.py <retour.zip-or-dir> [--repo PATH] [--agent-log-dir PATH]
+        [--card ID ...] [--dry-run]
 """
 
 from __future__ import annotations
@@ -36,9 +43,25 @@ import sys
 import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 _DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_REPORT_ENTRY = "REPORT.md"
+
+
+def _is_report_entry(entry_name: str) -> bool:
+    """True for a top-level `REPORT.md` only — `sub/REPORT.md` is an ordinary repo file, not the
+    reserved report."""
+    normalized = entry_name.replace("\\", "/")
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized == _REPORT_ENTRY
+
+
+def _report_log_name(*, card_ids: list[str], repo: Path, today: str) -> str:
+    slug = "-".join(card_ids) if card_ids else repo.name
+    return f"{today}_retour-{slug}.md"
 
 
 def _mask_docstrings(tree: ast.AST) -> ast.AST:
@@ -165,7 +188,14 @@ class Outcome:
     )
 
 
-def apply_source(source: Path, repo: Path, *, dry_run: bool) -> int:
+def apply_source(
+    source: Path,
+    repo: Path,
+    *,
+    dry_run: bool,
+    agent_log_dir: Path | None = None,
+    card_ids: list[str] | None = None,
+) -> int:
     repo_resolved = repo.resolve()
     tracked = _tracked_files(repo_resolved)
     head_exists = _has_head(repo_resolved)
@@ -174,8 +204,12 @@ def apply_source(source: Path, repo: Path, *, dry_run: bool) -> int:
     skipped_dirty: list[str] = []
     skipped_conflict: list[str] = []
     skipped_error: list[tuple[str, str]] = []
+    report_content: str | None = None
 
     for entry_name, content in source_entries(source):
+        if _is_report_entry(entry_name):
+            report_content = content.decode("utf-8", errors="replace")
+            continue
         target_path = resolve_within_repo(repo_resolved, entry_name)
         if target_path is None:
             skipped_traversal.append(entry_name)
@@ -283,6 +317,31 @@ def apply_source(source: Path, repo: Path, *, dry_run: bool) -> int:
             "(mechanical fixes auto-applied, anything touching logic or security stops for review), "
             "then hand off to the `commit` skill (pc-git) — never an automatic commit/push/PR."
         )
+    if report_content is not None:
+        if dry_run:
+            print(
+                f"\n📝 REPORT.md present ({len(report_content)} chars) — dry-run, not written."
+            )
+        elif agent_log_dir is not None:
+            name = _report_log_name(
+                card_ids=card_ids or [],
+                repo=repo_resolved,
+                today=date.today().isoformat(),
+            )
+            log_path = agent_log_dir / name
+            try:
+                agent_log_dir.mkdir(parents=True, exist_ok=True)
+                log_path.write_text(report_content, encoding="utf-8")
+                print(f"\n📝 external agent's report written to {log_path}")
+            except OSError as exc:
+                print(f"\n⚠️  could not write REPORT.md to {log_path}: {exc}")
+                print("--- REPORT.md ---")
+                print(report_content)
+        else:
+            print("\n📝 REPORT.md (no --agent-log-dir given — not persisted):")
+            print("--- REPORT.md ---")
+            print(report_content)
+
     clean = not (
         skipped_traversal or skipped_dirty or skipped_conflict or skipped_error
     )
@@ -293,6 +352,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="a zip file, or a directory")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--agent-log-dir",
+        type=Path,
+        default=None,
+        help="where to write a REPORT.md found in the source, as a new dated entry",
+    )
+    parser.add_argument(
+        "--card",
+        action="append",
+        default=[],
+        dest="card_ids",
+        help="card id this retour belongs to — used only to name the REPORT.md log entry",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -304,7 +376,13 @@ def main() -> int:
         return 2
 
     try:
-        return apply_source(args.source, args.repo.resolve(), dry_run=args.dry_run)
+        return apply_source(
+            args.source,
+            args.repo.resolve(),
+            dry_run=args.dry_run,
+            agent_log_dir=args.agent_log_dir,
+            card_ids=args.card_ids,
+        )
     except zipfile.BadZipFile:
         print(f"not a valid zip file: {args.source}", file=sys.stderr)
         return 2

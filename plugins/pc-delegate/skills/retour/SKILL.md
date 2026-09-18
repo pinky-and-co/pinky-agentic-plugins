@@ -1,7 +1,7 @@
 ---
 name: retour
 description: "Reintegrate the results an external agent (Cortex/Snowsight, claude.ai web, any agent working outside Claude Code) produced — a zip or directory of the files it created or modified. Applies safely (new files OK, a locally-diverged file is refused not overwritten), classifies each Python file comments-only vs code-changed, runs the target repo's own verify loop, then hands off to `commit` — never an automatic commit/push/PR. Use when the user says 'réintègre ce zip', 'intègre le retour de <agent>', or hands you a directory of externally-produced files to bring back into a repo."
-argument-hint: "<zip-or-directory> --repo <path>"
+argument-hint: "<zip-or-directory> --repo <path> [--agent-log-dir <path>] [--card <id> ...]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/retour/scripts/apply_retour.py:*), Bash(git status:*), Bash(git diff:*), Bash(ruff check:*), Bash(ruff format:*), Bash(mypy:*), Bash(pytest:*), Bash(prek run:*), Bash(pre-commit run:*), Read, Skill
 ---
 
@@ -10,8 +10,15 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/retour/scripts/apply_re
 ## Step 1 — Apply
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/retour/scripts/apply_retour.py" <source> --repo <path>
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/retour/scripts/apply_retour.py" <source> --repo <path> \
+  --agent-log-dir <chantier-workspace>/_AGENT_LOG --card <id>
 ```
+
+`--agent-log-dir`/`--card` are optional — pass them whenever the retour belongs to a known
+chantier/card, so a `REPORT.md` at the root of `<source>` (the external agent's own account of
+what it did, any judgment call, anything found but out of scope) gets written as a new dated
+`_AGENT_LOG` entry instead of only printed to the terminal. `REPORT.md` is never applied into the
+repo — it is reserved, pulled out before the file-apply pass.
 
 Run with `--dry-run` first when the source is unfamiliar or large — same output, nothing written.
 The script's own report already separates what happened:
@@ -22,7 +29,9 @@ The script's own report already separates what happened:
 - **conflict-skipped** — an untracked file already at that path, different content.
 
 Report the skipped entries to the user as-is — a skip is not a failure to paper over, it is the
-guard doing its job (a local edit that would otherwise be silently lost).
+guard doing its job (a local edit that would otherwise be silently lost). If a `REPORT.md` printed
+inline (no `--agent-log-dir` given) names something worth tracking, fold it into the card's own
+handoff yourself — the script only persists it when told where.
 
 ## Step 2 — Verify loop
 
