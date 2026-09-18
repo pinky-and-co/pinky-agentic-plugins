@@ -422,6 +422,15 @@ class TestStaleCards(unittest.TestCase):
         card.write_text(f"---\n{fm}---\n# {name}\n", encoding="utf-8")
         return card
 
+    def _exported_card(self, kanban: Path, chantier: str, name: str, date: str) -> Path:
+        col = kanban / f"CHANTIER{chantier}" / "3-in-progress"
+        col.mkdir(parents=True, exist_ok=True)
+        card = col / name
+        card.write_text(
+            f"---\ndate: {date}\nexported: {date}\n---\n# {name}\n", encoding="utf-8"
+        )
+        return card
+
     def test_flags_0_ideas_past_60_days_and_1_todo_past_30(self):
         with tempfile.TemporaryDirectory() as tmp:
             kb = Path(tmp) / "_KANBAN"
@@ -503,6 +512,28 @@ class TestStaleCards(unittest.TestCase):
             self.assertNotIn(just_under, flagged)
             self.assertNotIn(just_over, flagged)
             self.assertIn(older, flagged)
+
+    def test_exported_in_progress_card_past_threshold_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            stuck = self._exported_card(
+                kb, "0025", "stuck.md", "2026-09-01"
+            )  # 15j > 14j
+            flagged = sh.stale_cards(kb, today=sh.date(2026, 9, 16))
+            self.assertEqual([c for c, _col, _ in flagged], [stuck])
+            self.assertEqual(flagged[0].column, "3-in-progress")
+
+    def test_exported_in_progress_card_under_threshold_is_not_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            self._exported_card(kb, "0025", "fresh.md", "2026-09-10")  # 6j < 14j
+            self.assertEqual(sh.stale_cards(kb, today=sh.date(2026, 9, 16)), [])
+
+    def test_ordinary_in_progress_card_without_export_marker_never_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp) / "_KANBAN"
+            self._card(kb, "0025", "3-in-progress", "ancient.md", "2026-01-01")
+            self.assertEqual(sh.stale_cards(kb, today=sh.date(2026, 9, 16)), [])
 
     def test_unparseable_priority_falls_back_to_3_without_crashing(self):
         with tempfile.TemporaryDirectory() as tmp:

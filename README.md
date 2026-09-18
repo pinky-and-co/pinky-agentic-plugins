@@ -114,6 +114,24 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       └── improve/
 │   │           └── SKILL.md
+│   ├── pc-delegate/
+│   │   ├── mcp/
+│   │   │   ├── pc_delegate_server.py
+│   │   │   └── subtree.py
+│   │   └── skills/
+│   │       ├── aller/
+│   │       │   ├── references/
+│   │       │   │   └── providers/
+│   │       │   │       └── cortex/
+│   │       │   │           └── GUIDE.md
+│   │       │   ├── scripts/
+│   │       │   │   ├── build_aller.py
+│   │       │   │   └── secrets_filter.py
+│   │       │   └── SKILL.md
+│   │       └── retour/
+│   │           ├── scripts/
+│   │           │   └── apply_retour.py
+│   │           └── SKILL.md
 │   ├── pc-git/
 │   │   ├── agents/
 │   │   │   └── git-workflow.md
@@ -310,7 +328,9 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
+│   ├── test_apply_retour.py
 │   ├── test_branch_guard.py
+│   ├── test_build_aller.py
 │   ├── test_bulk_commit_sh.py
 │   ├── test_clear_pending_queue.py
 │   ├── test_drop_card_sh.py
@@ -339,6 +359,7 @@ pinky-agentic-plugins/
 │   ├── test_stop_handoff.py
 │   ├── test_structure_guard.py
 │   ├── test_subagent_statusline.py
+│   ├── test_subtree.py
 │   └── test_sync_plugin_scope.py
 ├── AGENTS.md
 ├── ATTRIBUTIONS.md

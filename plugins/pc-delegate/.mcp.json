@@ -1,0 +1,6 @@
+{
+  "pc-delegate": {
+    "command": "uv",
+    "args": ["run", "--script", "${CLAUDE_PLUGIN_ROOT}/mcp/pc_delegate_server.py"]
+  }
+}
