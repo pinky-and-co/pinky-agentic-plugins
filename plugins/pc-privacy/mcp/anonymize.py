@@ -18,10 +18,11 @@ value), so the same real value always produces the same pseudonym within one ``a
 every file passed to it) and across reruns that pass the same salt. A fresh salt is generated per
 call and returned by :func:`apply_anonymization` (never written to disk) unless one is pinned.
 
-Masked by default: PERSON, EMAIL_ADDRESS, PHONE_NUMBER, IBAN_CODE, CREDIT_CARD, FR_SIRET, FR_SIREN
-(FR_SIRET/FR_SIREN are custom pattern recognizers — Presidio has no built-in for them). DATE_TIME
-and generic LOCATION are deliberately left alone: they usually carry the debugging signal itself
-(order dates, shipping city) and masking them by default would cripple the analysis this exists for.
+Masked by default: PERSON, EMAIL_ADDRESS, PHONE_NUMBER, IBAN_CODE, CREDIT_CARD, FR_SIRET, FR_SIREN,
+FR_NIR, BIC_SWIFT (FR_SIRET/FR_SIREN/FR_NIR/BIC_SWIFT are custom pattern recognizers — Presidio has
+no built-in for them). DATE_TIME and generic LOCATION are deliberately left alone: they usually
+carry the debugging signal itself (order dates, shipping city) and masking them by default would
+cripple the analysis this exists for.
 
 Formats: CSV and JSON (array-of-objects) via stdlib only. Parquet via a lazy ``pyarrow`` import. XML
 via regex on leaf-tag text content (no parser — sidesteps the undeclared-namespace-prefix
@@ -58,6 +59,13 @@ if sys.platform == "win32":
 
 FR_SIRET_PATTERN = r"\b\d{3}\s?\d{3}\s?\d{3}\s?\d{5}\b"
 FR_SIREN_PATTERN = r"\b\d{3}\s?\d{3}\s?\d{3}\b"
+# NIR (numéro de sécurité sociale / INSEE) — sexe(1) AA(2) MM(2) dept(2-3) commune(2-3) ordre(3) clé(2),
+# séparateurs espace ou tiret facultatifs entre chaque groupe.
+FR_NIR_PATTERN = (
+    r"\b[12][\s-]?\d{2}[\s-]?\d{2}[\s-]?\d{2,3}[\s-]?\d{2,3}[\s-]?\d{3}[\s-]?\d{2}\b"
+)
+# BIC/SWIFT (ISO 9362) — code banque(4) + pays(2) + localisation(2) + code agence optionnel(3).
+BIC_SWIFT_PATTERN = r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b"
 
 SPACY_MODEL = "fr_core_news_md"
 
@@ -69,6 +77,8 @@ DEFAULT_MASK_ENTITIES = {
     "CREDIT_CARD",
     "FR_SIRET",
     "FR_SIREN",
+    "FR_NIR",
+    "BIC_SWIFT",
 }
 
 NAME_HEURISTIC_KEYWORDS = {
@@ -92,6 +102,18 @@ NAME_HEURISTIC_KEYWORDS = {
     "secu",
     "sécu",
     "numero_secu",
+    "national",
+    "insee",
+    "nir",
+    "bic",
+    "swift",
+    "postal",
+    "code_postal",
+    "cp",
+    "birth",
+    "naissance",
+    "account",
+    "compte",
 }
 
 SAMPLE_SIZE = 15
@@ -198,6 +220,26 @@ def _build_analyzer():  # type: ignore[no-untyped-def]  # noqa: DAR201
         PatternRecognizer(
             supported_entity="FR_SIREN",
             patterns=[Pattern("siren", FR_SIREN_PATTERN, 0.4)],
+        )
+    )
+    # supported_language="fr" required: an "en" recognizer (the default) on an "fr"-only
+    # `analyze()` call is silently never queried.
+    analyzer.registry.add_recognizer(
+        PatternRecognizer(
+            supported_entity="FR_NIR",
+            supported_language="fr",
+            patterns=[Pattern("nir", FR_NIR_PATTERN, 0.6)],
+        )
+    )
+    analyzer.registry.add_recognizer(
+        PatternRecognizer(
+            supported_entity="BIC_SWIFT",
+            supported_language="fr",
+            patterns=[Pattern("bic_swift", BIC_SWIFT_PATTERN, 0.5)],
+            # PatternRecognizer's global_regex_flags default to IGNORECASE, which would turn this
+            # uppercase-only ISO-9362 pattern into a case-insensitive match against any ordinary
+            # 8- or 11-letter word (e.g. "lovelace") — drop it, BIC/SWIFT codes are uppercase by spec.
+            global_regex_flags=re.DOTALL | re.MULTILINE,
         )
     )
     return analyzer

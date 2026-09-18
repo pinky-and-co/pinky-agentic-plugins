@@ -246,3 +246,71 @@ def test_detect_flags_an_obvious_email_column(tmp_path):
     flagged = {(x.column) for x in findings}
     assert "contact" in flagged
     assert "city" not in flagged
+
+
+@pytest.mark.skipif(
+    anonymize.preflight() is not None,
+    reason="Presidio / fr_core_news_md not installed in this env",
+)
+def test_detect_flags_a_french_nir_column_by_pattern(tmp_path):
+    """NIR values match the FR_NIR pattern recognizer even under a column name the keyword
+    heuristic wouldn't catch on its own (unlike a name containing e.g. `national`/`insee`/`nir`)."""
+    f = _csv(
+        tmp_path / "workers.csv",
+        [
+            {"reference": "2 88 07 75 116 001 32", "note": "actif"},
+            {"reference": "1 90 03 45 202 010 08", "note": "actif"},
+            {"reference": "2-75-11-92-050-003-77", "note": "actif"},
+        ],
+    )
+    findings = anonymize.detect_findings([str(f)])
+    flagged = {x.column for x in findings}
+    assert "reference" in flagged
+    assert "note" not in flagged
+
+
+@pytest.mark.skipif(
+    anonymize.preflight() is not None,
+    reason="Presidio / fr_core_news_md not installed in this env",
+)
+def test_detect_flags_a_bic_swift_column_by_pattern(tmp_path):
+    """BIC/SWIFT values match the BIC_SWIFT pattern recognizer even under a neutral column name.
+
+    Also pins that the match stays case-sensitive: an 8- or 11-letter ordinary lowercase word
+    (same length as a BIC without/with branch code) must NOT be flagged — PatternRecognizer
+    defaults to IGNORECASE, which would otherwise turn this into a false-positive machine on
+    everyday words.
+    """
+    f = _csv(
+        tmp_path / "bank.csv",
+        [
+            {"code_agence": "CEPAFRPP450", "label": "handmade"},
+            {"code_agence": "BNPAFRPPXXX", "label": "originality"},
+            {"code_agence": "SOGEFRPP", "label": "handmade"},
+        ],
+    )
+    findings = anonymize.detect_findings([str(f)])
+    flagged = {x.column for x in findings}
+    assert "code_agence" in flagged
+    assert "label" not in flagged
+
+
+@pytest.mark.skipif(
+    anonymize.preflight() is not None,
+    reason="Presidio / fr_core_news_md not installed in this env",
+)
+def test_detect_flags_a_postal_code_column_by_keyword(tmp_path):
+    """No dedicated pattern for postal codes (too generic, unlike NIR/BIC) — caught by the
+    widened NAME_HEURISTIC_KEYWORDS instead."""
+    f = _csv(
+        tmp_path / "clients.csv",
+        [
+            {"Postal_Code": "45770", "note": "x"},
+            {"Postal_Code": "75001", "note": "x"},
+            {"Postal_Code": "13008", "note": "x"},
+        ],
+    )
+    findings = anonymize.detect_findings([str(f)])
+    flagged = {x.column for x in findings}
+    assert "Postal_Code" in flagged
+    assert "note" not in flagged
