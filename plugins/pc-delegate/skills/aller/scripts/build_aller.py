@@ -147,6 +147,26 @@ def _resolve_repo_files(
     return kept, excluded
 
 
+def suggested_prompt(card_ids: list[str]) -> str:
+    """A ready-to-paste message for the external agent's chat — the deliverable-format contract
+    (zip layout, `REPORT.md`) is identical on every export, so it is generated here once instead
+    of retyped by hand each time; the task itself is not restated — `AGENTS.md` already tells the
+    agent to read `cards/<id>.md` for it. English, unconditionally — a public plugin never
+    hardcodes a chat language; a caller who wants another one translates this before pasting it."""
+    cards_line = ", ".join(card_ids)
+    return (
+        f"I've uploaded a zip containing AGENTS.md (read it first — it's the instructions) and "
+        f"cards/<id>.md for each card ({cards_line}) — the exact task is described there.\n"
+        "\n"
+        "When you're done, give me back a zip containing:\n"
+        "- only the files you created or modified, paths preserved exactly as in the archive "
+        "you received (not under repo/)\n"
+        "- a REPORT.md at the root of the zip: what you did, any scope decisions you made, any "
+        "bug/issue you found but left alone because it was out of scope, and anything a human "
+        "reviewer should know before trusting the change.\n"
+    )
+
+
 def build_zip(
     out: Path,
     *,
@@ -235,6 +255,8 @@ def main() -> int:
     print(f"wrote {args.out} — {len(cards)} card(s), {len(repo_paths)} repo file(s)")
     for rel in excluded:
         print(f"🚫 excluded (secrets denylist): {rel}")
+    print("\n--- suggested prompt for the external agent's chat ---")
+    print(suggested_prompt(args.card_ids))
     return 0
 
 

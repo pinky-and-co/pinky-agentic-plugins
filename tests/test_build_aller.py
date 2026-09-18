@@ -303,6 +303,18 @@ class TestBuildZip:
         assert "repo/src.py" in names
 
 
+class TestSuggestedPrompt:
+    def test_lists_every_card_id(self) -> None:
+        prompt = ba.suggested_prompt(["card-a", "card-b"])
+        assert "card-a" in prompt
+        assert "card-b" in prompt
+
+    def test_mentions_report_md_and_zip_layout(self) -> None:
+        prompt = ba.suggested_prompt(["card-a"])
+        assert "REPORT.md" in prompt
+        assert "AGENTS.md" in prompt
+
+
 class TestMainAtomicity:
     def test_repo_file_escape_leaves_board_and_output_untouched(
         self, tmp_path: Path, chantier: Path
@@ -361,3 +373,5 @@ class TestMainAtomicity:
         assert not card.is_file()
         assert (chantier / "3-in-progress" / "movable.md").is_file()
         assert out.is_file()
+        assert "REPORT.md" in result.stdout
+        assert "movable" in result.stdout

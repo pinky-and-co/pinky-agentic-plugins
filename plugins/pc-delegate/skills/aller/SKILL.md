@@ -42,6 +42,7 @@ user as-is — an exclusion is the filter doing its job, not a failure.
 
 ## Step 4 — Hand off
 
-Give the user the zip path and the target provider's guide name. Nothing beyond this is this
-skill's job — sending the zip, and reintegrating what comes back (the `retour` skill, same plugin),
-are separate, explicit steps.
+`build_aller.py` prints a ready-to-paste prompt for the external agent's chat, after the zip is
+written — hand that to the user as-is alongside the zip path. Nothing beyond this is this skill's
+job — sending the zip, and reintegrating what comes back (the `retour` skill, same plugin), are
+separate, explicit steps.
