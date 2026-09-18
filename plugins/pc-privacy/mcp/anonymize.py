@@ -59,11 +59,9 @@ if sys.platform == "win32":
 
 FR_SIRET_PATTERN = r"\b\d{3}\s?\d{3}\s?\d{3}\s?\d{5}\b"
 FR_SIREN_PATTERN = r"\b\d{3}\s?\d{3}\s?\d{3}\b"
-# NIR (numéro de sécurité sociale / INSEE) — sexe(1) AA(2) MM(2) dept(2-3) commune(2-3) ordre(3) clé(2),
-# séparateurs espace ou tiret facultatifs entre chaque groupe.
-FR_NIR_PATTERN = (
-    r"\b[12][\s-]?\d{2}[\s-]?\d{2}[\s-]?\d{2,3}[\s-]?\d{2,3}[\s-]?\d{3}[\s-]?\d{2}\b"
-)
+# NIR — sexe(1) AA(2) MM(2) dept(2-3, "2A"/"2B" Corse) commune(2-3) ordre(3) clé(2). Ni la clé
+# de contrôle (mod 97) ni le préfixe NIA (7/8) ne sont validés — recall privilégié sur precision.
+FR_NIR_PATTERN = r"\b[12][\s-]?\d{2}[\s-]?\d{2}[\s-]?(?:\d{2,3}|2[AB])[\s-]?\d{2,3}[\s-]?\d{3}[\s-]?\d{2}\b"
 # BIC/SWIFT (ISO 9362) — code banque(4) + pays(2) + localisation(2) + code agence optionnel(3).
 BIC_SWIFT_PATTERN = r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b"
 
@@ -109,7 +107,6 @@ NAME_HEURISTIC_KEYWORDS = {
     "swift",
     "postal",
     "code_postal",
-    "cp",
     "birth",
     "naissance",
     "account",
@@ -187,7 +184,8 @@ def preflight() -> str | None:
 
 
 def _build_analyzer():  # type: ignore[no-untyped-def]  # noqa: DAR201
-    """Presidio AnalyzerEngine on the French spaCy model + custom SIRET/SIREN pattern recognizers.
+    """Presidio AnalyzerEngine on the French spaCy model + custom SIRET/SIREN/NIR/BIC_SWIFT
+    pattern recognizers.
 
     Returns:
         A configured presidio_analyzer.AnalyzerEngine (untyped — Presidio ships no stubs).
@@ -210,20 +208,22 @@ def _build_analyzer():  # type: ignore[no-untyped-def]  # noqa: DAR201
     analyzer = AnalyzerEngine(
         nlp_engine=provider.create_engine(), supported_languages=["fr"]
     )
+    # supported_language="fr" required on every recognizer below: an "en" recognizer (the
+    # default) on an "fr"-only `analyze()` call is silently never queried.
     analyzer.registry.add_recognizer(
         PatternRecognizer(
             supported_entity="FR_SIRET",
+            supported_language="fr",
             patterns=[Pattern("siret", FR_SIRET_PATTERN, 0.6)],
         )
     )
     analyzer.registry.add_recognizer(
         PatternRecognizer(
             supported_entity="FR_SIREN",
+            supported_language="fr",
             patterns=[Pattern("siren", FR_SIREN_PATTERN, 0.4)],
         )
     )
-    # supported_language="fr" required: an "en" recognizer (the default) on an "fr"-only
-    # `analyze()` call is silently never queried.
     analyzer.registry.add_recognizer(
         PatternRecognizer(
             supported_entity="FR_NIR",

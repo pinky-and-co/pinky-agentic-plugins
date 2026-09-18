@@ -273,6 +273,45 @@ def test_detect_flags_a_french_nir_column_by_pattern(tmp_path):
     anonymize.preflight() is not None,
     reason="Presidio / fr_core_news_md not installed in this env",
 )
+def test_detect_flags_a_corsica_nir_with_alpha_department(tmp_path):
+    """The department group covers the "2A"/"2B" alpha codes Corsica uses instead of a 2-3 digit
+    number — a plain `\\d{2,3}` group would silently miss every Corsican NIR."""
+    f = _csv(
+        tmp_path / "workers.csv",
+        [
+            {"reference": "2 88 07 2A 116 001 32", "note": "actif"},
+            {"reference": "1-90-03-2B-202-010-08", "note": "actif"},
+        ],
+    )
+    findings = anonymize.detect_findings([str(f)])
+    flagged = {x.column for x in findings}
+    assert "reference" in flagged
+
+
+@pytest.mark.skipif(
+    anonymize.preflight() is not None,
+    reason="Presidio / fr_core_news_md not installed in this env",
+)
+def test_detect_flags_siret_and_siren_under_a_neutral_column_name(tmp_path):
+    """Regression test: FR_SIRET/FR_SIREN must be queried by the "fr"-only `analyze()` call the
+    same way FR_NIR/BIC_SWIFT are — a recognizer left at its "en" default silently never fires,
+    exactly the class of bug this pins."""
+    f = _csv(
+        tmp_path / "companies.csv",
+        [
+            {"reference": "732 829 320 00074", "note": "actif"},
+            {"reference": "732 829 320", "note": "actif"},
+        ],
+    )
+    findings = anonymize.detect_findings([str(f)])
+    flagged = {x.column for x in findings}
+    assert "reference" in flagged
+
+
+@pytest.mark.skipif(
+    anonymize.preflight() is not None,
+    reason="Presidio / fr_core_news_md not installed in this env",
+)
 def test_detect_flags_a_bic_swift_column_by_pattern(tmp_path):
     """BIC/SWIFT values match the BIC_SWIFT pattern recognizer even under a neutral column name.
 
@@ -280,6 +319,11 @@ def test_detect_flags_a_bic_swift_column_by_pattern(tmp_path):
     (same length as a BIC without/with branch code) must NOT be flagged — PatternRecognizer
     defaults to IGNORECASE, which would otherwise turn this into a false-positive machine on
     everyday words.
+
+    Known remaining gap, not pinned here as a passing case (documented, not silently claimed
+    fixed): an ALL-CAPS 8/11-letter word — a realistic status enum (`APPROVED`, `TEMPLATE`) or an
+    upper-case business field — still matches, since the pattern has no country-code or checksum
+    validation. Dropping IGNORECASE only rules out lowercase/mixed-case false positives.
     """
     f = _csv(
         tmp_path / "bank.csv",
