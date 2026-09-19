@@ -23,11 +23,11 @@ that tracks development effort just counts commits.
 The cost is not cosmetic: a plugin shipping a status line is wired into `~/.claude/settings.json`
 through an absolute path carrying its version (`statusLine` has no plugin-manifest slot). Bumping
 lands a new cache directory while the old one survives, so the wired path stays valid and silently
-serves the previous build — no error, no signal. `pinky install --plugin <name>` re-points it.
+serves the previous build — no error, no signal. `pinky claude-plugin install <name>` re-points it.
 
 Refreshing the *content* of a version already in the cache is a separate step: `claude plugin
 install`/`update` fills a cache directory only when it is absent, so editing a plugin without
-bumping leaves the installed copy stale. `pinky install --plugin <name> --force` clears
+bumping leaves the installed copy stale. `pinky claude-plugin install <name> --force` clears
 `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` before fetching, so the working tree
 is picked up in the same command — no more manual `rm -rf` + separate re-run.
 
@@ -86,7 +86,7 @@ is picked up in the same command — no more manual `rm -rf` + separate re-run.
   - **`scripts/` holds a status line's command scripts** (`pc-statusline/scripts/statusline.py`
     + `subagent_statusline.py` + a shared module). A status line is not a hook (not in
     `hooks.json`), a skill, an agent, or an MCP server — it is a command wired through a
-    `settings.json` key (`statusLine` by `pinky install --plugin`, `subagentStatusLine` by the
+    `settings.json` key (`statusLine` by `pinky claude-plugin install`, `subagentStatusLine` by the
     plugin's own bundled `settings.json`, `${CLAUDE_PLUGIN_ROOT}/scripts/<file>`). This is the one
     sanctioned `scripts/` directory; every other script still lives in `hooks/`,
     `skills/<name>/scripts/`, or `mcp/`.
