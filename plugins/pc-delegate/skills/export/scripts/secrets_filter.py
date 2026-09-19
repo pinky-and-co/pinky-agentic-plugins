@@ -1,4 +1,4 @@
-"""Denylist-based secret filtering for the "aller" leg export.
+"""Denylist-based secret filtering for the "export" leg.
 
 Two separate concerns, deliberately not merged:
 

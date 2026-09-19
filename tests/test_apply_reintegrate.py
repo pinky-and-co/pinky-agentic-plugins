@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-delegate/skills/retour/scripts/apply_retour.py
+"""Tests for plugins/pc-delegate/skills/reintegrate/scripts/apply_reintegrate.py
 
 Defines "done": a zip/directory of files an external agent produced applies onto a real local git
 repo — a brand-new path (including an empty one) is created, an existing tracked-and-clean path is
@@ -29,12 +29,12 @@ SCRIPTS = (
     / "plugins"
     / "pc-delegate"
     / "skills"
-    / "retour"
+    / "reintegrate"
     / "scripts"
 )
 sys.path.insert(0, str(SCRIPTS))
 
-import apply_retour as ar  # noqa: E402
+import apply_reintegrate as ar  # noqa: E402
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -309,7 +309,7 @@ class TestReportMd:
         ar.apply_source(
             archive, repo, dry_run=False, agent_log_dir=log_dir, card_ids=["my-card"]
         )
-        written = list(log_dir.glob("*_retour-my-card.md"))
+        written = list(log_dir.glob("*_reintegrate-my-card.md"))
         assert len(written) == 1
         assert written[0].read_text() == "## What I did\n\nstuff\n"
 
@@ -319,7 +319,7 @@ class TestReportMd:
         log_dir = tmp_path / "_AGENT_LOG"
         archive = _zip_of(tmp_path, "r13.zip", {"REPORT.md": "stuff\n"})
         ar.apply_source(archive, repo, dry_run=False, agent_log_dir=log_dir)
-        written = list(log_dir.glob(f"*_retour-{repo.name}.md"))
+        written = list(log_dir.glob(f"*_reintegrate-{repo.name}.md"))
         assert len(written) == 1
 
     def test_report_printed_inline_without_agent_log_dir(

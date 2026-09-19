@@ -1,11 +1,11 @@
 ---
-name: aller
-description: "Export selected kanban cards, their chantier context, a filtered _AGENT_LOG, a repo code subtree, and a rendered provider guide into one zip for an agent working outside Claude Code (Cortex/Snowsight, claude.ai web, ...). Moves the exported cards to 3-in-progress with an export marker. Use when the user says 'exporte ces cards pour <agent externe>', 'envoie ce travail à Cortex/Snowsight', or names specific card ids to hand off outside the session."
+name: export
+description: "Export selected kanban cards, their chantier context, a filtered _AGENT_LOG, a repo code subtree, and a rendered guide into one zip for an agent working outside Claude Code (Cortex/Snowsight, claude.ai web, ChatGPT, ...). Moves the exported cards to 3-in-progress with an export marker. Use when the user says 'exporte ces cards pour <agent externe>', 'envoie ce travail à Cortex/Snowsight', or names specific card ids to hand off outside the session."
 argument-hint: "<chantier-dir> --card <id> [--card <id> ...] --repo <path> --touched <file> [...]"
-allowed-tools: mcp__plugin_pc-delegate_pc-delegate__export_subtree, Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/aller/scripts/build_aller.py:*), Read
+allowed-tools: mcp__plugin_pc-delegate_pc-delegate__export_subtree, Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/export/scripts/build_export.py:*), Read
 ---
 
-# Aller — export a job for an agent working outside Claude Code
+# Export — export a job for an agent working outside Claude Code
 
 ## Step 1 — Resolve the touched files
 
@@ -24,13 +24,13 @@ Returns the touched files plus their direct imports (depth 1) — repo-relative 
 ## Step 3 — Build the export
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/aller/scripts/build_aller.py" \
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/export/scripts/build_export.py" \
   --chantier <chantier-dir> \
   --card <id> [--card <id> ...] \
   --repo <repo-path> \
   --repo-file <path> [--repo-file <path> ...] \
   --agent-log-dir <chantier-workspace>/_AGENT_LOG \
-  --guide "${CLAUDE_PLUGIN_ROOT}/skills/aller/references/providers/cortex/GUIDE.md" \
+  --guide "${CLAUDE_PLUGIN_ROOT}/skills/export/references/GUIDE.md" \
   --out <output.zip>
 ```
 
@@ -42,7 +42,7 @@ user as-is — an exclusion is the filter doing its job, not a failure.
 
 ## Step 4 — Hand off
 
-`build_aller.py` prints a ready-to-paste prompt for the external agent's chat, after the zip is
+`build_export.py` prints a ready-to-paste prompt for the external agent's chat, after the zip is
 written — hand that to the user as-is alongside the zip path. Nothing beyond this is this skill's
-job — sending the zip, and reintegrating what comes back (the `retour` skill, same plugin), are
+job — sending the zip, and reintegrating what comes back (the `reintegrate` skill, same plugin), are
 separate, explicit steps.

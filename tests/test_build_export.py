@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-delegate/skills/aller/scripts/{secrets_filter,build_aller}.py
+"""Tests for plugins/pc-delegate/skills/export/scripts/{secrets_filter,build_export}.py
 
 Defines "done": a card selected by id is found across the chantier's columns, moved to
 `3-in-progress` with `date:` bumped and an `exported:` marker set (dry-run writes nothing), a
@@ -21,12 +21,12 @@ SCRIPTS = (
     / "plugins"
     / "pc-delegate"
     / "skills"
-    / "aller"
+    / "export"
     / "scripts"
 )
 sys.path.insert(0, str(SCRIPTS))
 
-import build_aller as ba  # noqa: E402
+import build_export as be  # noqa: E402
 import secrets_filter as sf  # noqa: E402
 
 
@@ -91,7 +91,7 @@ class TestRedactLocalPaths:
 @pytest.fixture
 def chantier(tmp_path: Path) -> Path:
     root = tmp_path / "CHANTIER0099-test"
-    for col in ba._COLUMNS:
+    for col in be._COLUMNS:
         (root / col).mkdir(parents=True)
     return root
 
@@ -109,40 +109,40 @@ def _write_card(
 class TestFindCard:
     def test_found_in_one_column(self, chantier: Path) -> None:
         _write_card(chantier, "1-todo", "my-card")
-        assert ba.find_card(chantier, "my-card") == chantier / "1-todo" / "my-card.md"
+        assert be.find_card(chantier, "my-card") == chantier / "1-todo" / "my-card.md"
 
     def test_not_found_raises(self, chantier: Path) -> None:
-        with pytest.raises(ba.AllerError):
-            ba.find_card(chantier, "missing")
+        with pytest.raises(be.ExportError):
+            be.find_card(chantier, "missing")
 
     def test_found_in_two_columns_raises(self, chantier: Path) -> None:
         _write_card(chantier, "1-todo", "dup")
         _write_card(chantier, "0-ideas", "dup")
-        with pytest.raises(ba.AllerError):
-            ba.find_card(chantier, "dup")
+        with pytest.raises(be.ExportError):
+            be.find_card(chantier, "dup")
 
 
 class TestSetFrontmatterField:
     def test_appends_new_field(self) -> None:
         content = "---\ndate: 2026-01-01\n---\n# Title\n"
-        result = ba.set_frontmatter_field(content, "exported", "2026-02-02")
+        result = be.set_frontmatter_field(content, "exported", "2026-02-02")
         assert "exported: 2026-02-02\n" in result
         assert result.endswith("# Title\n")
 
     def test_replaces_existing_field(self) -> None:
         content = "---\ndate: 2026-01-01\nexported: 2026-01-15\n---\nbody\n"
-        result = ba.set_frontmatter_field(content, "exported", "2026-02-02")
+        result = be.set_frontmatter_field(content, "exported", "2026-02-02")
         assert result.count("exported:") == 1
         assert "exported: 2026-02-02" in result
         assert "2026-01-15" not in result
 
     def test_missing_frontmatter_raises(self) -> None:
-        with pytest.raises(ba.AllerError):
-            ba.set_frontmatter_field("# no frontmatter\n", "exported", "2026-02-02")
+        with pytest.raises(be.ExportError):
+            be.set_frontmatter_field("# no frontmatter\n", "exported", "2026-02-02")
 
     def test_unclosed_frontmatter_raises(self) -> None:
-        with pytest.raises(ba.AllerError):
-            ba.set_frontmatter_field("---\ndate: 2026-01-01\nbody\n", "exported", "x")
+        with pytest.raises(be.ExportError):
+            be.set_frontmatter_field("---\ndate: 2026-01-01\nbody\n", "exported", "x")
 
 
 class TestExportedContentAndApply:
@@ -150,15 +150,15 @@ class TestExportedContentAndApply:
         self, chantier: Path
     ) -> None:
         card = _write_card(chantier, "1-todo", "movable")
-        content = ba._exported_content(card, today="2026-03-03")
+        content = be._exported_content(card, today="2026-03-03")
         assert "date: 2026-03-03" in content
         assert "exported: 2026-03-03" in content
         assert card.read_text() != content  # nothing written yet
 
     def test_apply_export_moves_from_todo_to_in_progress(self, chantier: Path) -> None:
         card = _write_card(chantier, "1-todo", "movable")
-        content = ba._exported_content(card, today="2026-03-03")
-        ba._apply_export(card, chantier, content)
+        content = be._exported_content(card, today="2026-03-03")
+        be._apply_export(card, chantier, content)
         dest = chantier / "3-in-progress" / "movable.md"
         assert dest.is_file()
         assert dest.read_text() == content
@@ -168,27 +168,27 @@ class TestExportedContentAndApply:
         self, chantier: Path
     ) -> None:
         card = _write_card(chantier, "3-in-progress", "already-there")
-        content = ba._exported_content(card, today="2026-03-03")
-        ba._apply_export(card, chantier, content)
+        content = be._exported_content(card, today="2026-03-03")
+        be._apply_export(card, chantier, content)
         assert card.is_file()
         assert card.read_text() == content
 
 
 class TestFindCardEscape:
     def test_card_id_with_slash_raises(self, chantier: Path) -> None:
-        with pytest.raises(ba.AllerError):
-            ba.find_card(chantier, "../../etc/passwd")
+        with pytest.raises(be.ExportError):
+            be.find_card(chantier, "../../etc/passwd")
 
     def test_card_id_with_leading_slash_raises(self, chantier: Path) -> None:
-        with pytest.raises(ba.AllerError):
-            ba.find_card(chantier, "/etc/passwd")
+        with pytest.raises(be.ExportError):
+            be.find_card(chantier, "/etc/passwd")
 
 
 class TestChantierTreeListing:
     def test_lists_every_card_across_columns(self, chantier: Path) -> None:
         _write_card(chantier, "1-todo", "a")
         _write_card(chantier, "4-done", "b")
-        listing = ba.chantier_tree_listing(chantier)
+        listing = be.chantier_tree_listing(chantier)
         assert "1-todo/a.md" in listing
         assert "4-done/b.md" in listing
 
@@ -200,7 +200,7 @@ class TestFilteredAgentLog:
         (log_dir / "2026-01-01_note.md").write_text(
             "see /Users/perrine/Workspaces/pinky/repo/file.py\n"
         )
-        result = ba.filtered_agent_log(log_dir)
+        result = be.filtered_agent_log(log_dir)
         assert "_AGENT_LOG/2026-01-01_note.md" in result
         assert "/Users/perrine" not in result["_AGENT_LOG/2026-01-01_note.md"]
 
@@ -211,7 +211,7 @@ class TestFilteredAgentLog:
         log_dir.mkdir()
         (log_dir / "2026-01-01_note.md").write_text("hello\n")
         (log_dir / "aws-credentials.md").write_text("not really markdown\n")
-        result = ba.filtered_agent_log(log_dir)
+        result = be.filtered_agent_log(log_dir)
         assert "_AGENT_LOG/2026-01-01_note.md" in result
         assert "_AGENT_LOG/aws-credentials.md" not in result
 
@@ -224,33 +224,33 @@ class TestResolveRepoFiles:
         repo.mkdir()
         (repo / "src.py").write_text("x = 1\n")
         (repo / ".env").write_text("SECRET=1\n")  # pragma: allowlist secret
-        kept, excluded = ba._resolve_repo_files(repo, ["src.py", ".env"])
+        kept, excluded = be._resolve_repo_files(repo, ["src.py", ".env"])
         assert kept == [repo / "src.py"]
         assert excluded == [".env"]
 
     def test_repo_file_escaping_repo_root_raises(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
-        with pytest.raises(ba.AllerError):
-            ba._resolve_repo_files(repo, ["../../etc/passwd"])
+        with pytest.raises(be.ExportError):
+            be._resolve_repo_files(repo, ["../../etc/passwd"])
 
     def test_absolute_repo_file_raises(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
-        with pytest.raises(ba.AllerError):
-            ba._resolve_repo_files(repo, ["/etc/passwd"])
+        with pytest.raises(be.ExportError):
+            be._resolve_repo_files(repo, ["/etc/passwd"])
 
     def test_missing_repo_file_raises(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
-        with pytest.raises(ba.AllerError):
-            ba._resolve_repo_files(repo, ["nope.py"])
+        with pytest.raises(be.ExportError):
+            be._resolve_repo_files(repo, ["nope.py"])
 
 
 class TestBuildZip:
     def test_zip_contains_cards_tree_log_and_guide(self, tmp_path: Path) -> None:
-        out = tmp_path / "aller.zip"
-        ba.build_zip(
+        out = tmp_path / "export.zip"
+        be.build_zip(
             out,
             cards={"my-card.md": "# My card\n"},
             chantier_tree="1-todo/my-card.md\n",
@@ -267,8 +267,8 @@ class TestBuildZip:
         assert "AGENTS.md" in names
 
     def test_card_content_local_paths_are_redacted(self, tmp_path: Path) -> None:
-        out = tmp_path / "aller.zip"
-        ba.build_zip(
+        out = tmp_path / "export.zip"
+        be.build_zip(
             out,
             cards={"c.md": "see /Users/perrine/Workspaces/pinky/repo/file.py\n"},
             chantier_tree="",
@@ -286,9 +286,9 @@ class TestBuildZip:
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "src.py").write_text("x = 1\n")
-        out = tmp_path / "aller.zip"
+        out = tmp_path / "export.zip"
 
-        ba.build_zip(
+        be.build_zip(
             out,
             cards={},
             chantier_tree="",
@@ -305,12 +305,12 @@ class TestBuildZip:
 
 class TestSuggestedPrompt:
     def test_lists_every_card_id(self) -> None:
-        prompt = ba.suggested_prompt(["card-a", "card-b"])
+        prompt = be.suggested_prompt(["card-a", "card-b"])
         assert "card-a" in prompt
         assert "card-b" in prompt
 
     def test_mentions_report_md_and_zip_layout(self) -> None:
-        prompt = ba.suggested_prompt(["card-a"])
+        prompt = be.suggested_prompt(["card-a"])
         assert "REPORT.md" in prompt
         assert "AGENTS.md" in prompt
 
@@ -322,12 +322,12 @@ class TestMainAtomicity:
         card = _write_card(chantier, "1-todo", "safe-card")
         repo = tmp_path / "repo"
         repo.mkdir()
-        out = tmp_path / "aller.zip"
+        out = tmp_path / "export.zip"
 
         result = subprocess.run(
             [
                 sys.executable,
-                str(SCRIPTS / "build_aller.py"),
+                str(SCRIPTS / "build_export.py"),
                 "--chantier",
                 str(chantier),
                 "--card",
@@ -352,12 +352,12 @@ class TestMainAtomicity:
         self, tmp_path: Path, chantier: Path
     ) -> None:
         card = _write_card(chantier, "1-todo", "movable")
-        out = tmp_path / "aller.zip"
+        out = tmp_path / "export.zip"
 
         result = subprocess.run(
             [
                 sys.executable,
-                str(SCRIPTS / "build_aller.py"),
+                str(SCRIPTS / "build_export.py"),
                 "--chantier",
                 str(chantier),
                 "--card",
