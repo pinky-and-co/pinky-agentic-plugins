@@ -92,6 +92,60 @@ def current_branch(repo_root: Path) -> str | None:
     return out.stdout.strip()
 
 
+def _resolve_base_branch(repo_root: Path) -> str | None:
+    """Resolve the integration branch from origin/HEAD symref, fallback to current HEAD.
+
+    Mimics resolve_base() in branch-policy/bulk_commit.sh: read the remote's default branch
+    via symbolic ref, avoid hardcoding 'main'/'develop' which varies per repo.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "symbolic-ref",
+                "--short",
+                "refs/remotes/origin/HEAD",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if out.returncode == 0:
+            ref = out.stdout.strip()
+            if ref.startswith("origin/"):
+                return ref[7:]  # Remove "origin/" prefix
+            return ref
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    # Try main or master (common integration branch names)
+    for candidate in ("main", "master"):
+        try:
+            out = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_root),
+                    "rev-parse",
+                    "--verify",
+                    f"refs/heads/{candidate}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if out.returncode == 0:
+                return candidate
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    return None
+
+
 def _diff_files(repo_root: Path, base: str = "HEAD") -> set[str]:
     """Files changed in current working tree vs base (default HEAD)."""
     try:
@@ -190,7 +244,7 @@ def _open_pr_files_gitlab(repo_root: Path) -> dict[str, set[str]]:
 
 
 def _local_branch_files(repo_root: Path) -> dict[str, set[str]]:
-    """Files in local branches (vs their tracking branch or main)."""
+    """Files in local branches (vs their tracking branch or resolved base branch)."""
     try:
         out = subprocess.run(
             ["git", "-C", str(repo_root), "branch"],
@@ -225,7 +279,13 @@ def _local_branch_files(repo_root: Path) -> dict[str, set[str]]:
                 timeout=2,
                 check=False,
             )
-            base = "main" if upstream.returncode != 0 else upstream.stdout.strip()
+            base = (
+                _resolve_base_branch(repo_root)
+                if upstream.returncode != 0
+                else upstream.stdout.strip()
+            )
+            if base is None:
+                continue
             diff_out = subprocess.run(
                 [
                     "git",
@@ -285,7 +345,15 @@ def decide(event: dict, root: Path) -> dict | None:
     except (OSError, subprocess.CalledProcessError):
         return None
 
-    current_diff = _diff_files(repo_root)
+    is_pr_create = bool(re.search(r"\b(gh\s+pr|glab\s+mr)\s+create\b", command))
+    if is_pr_create:
+        base = _resolve_base_branch(repo_root)
+        if base is None:
+            return None
+        current_diff = _diff_files(repo_root, f"{base}...HEAD")
+    else:
+        current_diff = _diff_files(repo_root, "HEAD")
+
     if not current_diff:
         return None
 
