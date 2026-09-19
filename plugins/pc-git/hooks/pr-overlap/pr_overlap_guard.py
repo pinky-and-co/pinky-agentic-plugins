@@ -93,10 +93,11 @@ def current_branch(repo_root: Path) -> str | None:
 
 
 def _resolve_base_branch(repo_root: Path) -> str | None:
-    """Resolve the integration branch from origin/HEAD symref, fallback to current HEAD.
+    """Resolve the integration branch, or None when no candidate exists.
 
-    Mimics resolve_base() in branch-policy/bulk_commit.sh: read the remote's default branch
-    via symbolic ref, avoid hardcoding 'main'/'develop' which varies per repo.
+    Mimics resolve_base() in branch-policy/bulk_commit.sh: the remote's default branch via
+    symbolic ref first, then a local `main`/`master`. None means the caller must abstain —
+    never HEAD, which would make a `base...HEAD` comparison empty by construction.
     """
     try:
         out = subprocess.run(
@@ -341,7 +342,7 @@ def decide(event: dict, root: Path) -> dict | None:
         return None
 
     try:
-        repo_root = resolve_repo_root(str(root), ".")
+        repo_root = resolve_repo_root(str(root), None)
     except (OSError, subprocess.CalledProcessError):
         return None
 
