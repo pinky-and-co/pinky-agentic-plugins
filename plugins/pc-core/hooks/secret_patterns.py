@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """The one secret-shape detector, shared by every hook that needs it.
 
-Never declared in `hooks.json` and never invoked directly — a pure dependency, same role as
-`policy_lib.py`.
+Extracted so `privacy_egress.py` could use the same detection without importing it sideways from a
+hook it has nothing to do with, via a same-directory `sys.path` hack — an invisible coupling
+between two unrelated concerns. Never declared in `hooks.json` and never invoked directly — a pure
+dependency, same role as `policy_lib.py`.
 
-`stop_handoff.py` carries its own copy of this detection because it is distributed standalone into
-every repo's `.claude/hooks/` and must not import an installed plugin's package.
+`stop_handoff.py` itself still carries its own copy for now — it is distributed standalone into
+every repo's `.claude/hooks/` and must not import an installed plugin's package (see its own
+docstring).
 """
 
 from __future__ import annotations

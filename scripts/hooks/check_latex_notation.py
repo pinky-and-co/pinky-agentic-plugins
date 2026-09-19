@@ -21,15 +21,45 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 LATEX_TO_UNICODE = {
-    r"\rightarrow": "→", r"\Rightarrow": "⇒", r"\leftarrow": "←", r"\Leftarrow": "⇐",
-    r"\leftrightarrow": "↔", r"\Leftrightarrow": "⇔",
-    r"\times": "×", r"\div": "÷", r"\pm": "±", r"\mp": "∓", r"\cdot": "·",
-    r"\leq": "≤", r"\geq": "≥", r"\neq": "≠", r"\approx": "≈", r"\equiv": "≡",
-    r"\infty": "∞", r"\in": "∈", r"\notin": "∉", r"\subset": "⊂", r"\subseteq": "⊆",
-    r"\forall": "∀", r"\exists": "∃", r"\emptyset": "∅",
-    r"\cup": "∪", r"\cap": "∩", r"\sum": "∑", r"\prod": "∏", r"\sqrt": "√",
-    r"\alpha": "α", r"\beta": "β", r"\gamma": "γ", r"\delta": "δ", r"\pi": "π",
-    r"\theta": "θ", r"\lambda": "λ", r"\mu": "μ", r"\sigma": "σ", r"\omega": "ω",
+    r"\rightarrow": "→",
+    r"\Rightarrow": "⇒",
+    r"\leftarrow": "←",
+    r"\Leftarrow": "⇐",
+    r"\leftrightarrow": "↔",
+    r"\Leftrightarrow": "⇔",
+    r"\times": "×",
+    r"\div": "÷",
+    r"\pm": "±",
+    r"\mp": "∓",
+    r"\cdot": "·",
+    r"\leq": "≤",
+    r"\geq": "≥",
+    r"\neq": "≠",
+    r"\approx": "≈",
+    r"\equiv": "≡",
+    r"\infty": "∞",
+    r"\in": "∈",
+    r"\notin": "∉",
+    r"\subset": "⊂",
+    r"\subseteq": "⊆",
+    r"\forall": "∀",
+    r"\exists": "∃",
+    r"\emptyset": "∅",
+    r"\cup": "∪",
+    r"\cap": "∩",
+    r"\sum": "∑",
+    r"\prod": "∏",
+    r"\sqrt": "√",
+    r"\alpha": "α",
+    r"\beta": "β",
+    r"\gamma": "γ",
+    r"\delta": "δ",
+    r"\pi": "π",
+    r"\theta": "θ",
+    r"\lambda": "λ",
+    r"\mu": "μ",
+    r"\sigma": "σ",
+    r"\omega": "ω",
 }
 
 _KEYS_BY_LEN = sorted(LATEX_TO_UNICODE, key=len, reverse=True)
@@ -47,7 +77,7 @@ def _looks_binary(filepath: str) -> bool:
 
 
 def check_file(filepath: str) -> list[int]:
-    found = []
+    found: list[int] = []
     if _looks_binary(filepath):
         return found
     in_fence = False

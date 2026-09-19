@@ -46,6 +46,7 @@ def _read_keyword_file(path: Path) -> list[str]:
 
 
 def _config_path() -> Path:
+    """Resolved keyword-file path: the `PINKY_FORBIDDEN_KEYWORDS_FILE` override if set, else the default."""
     override = os.environ.get(KEYWORDS_FILE_ENV)
     return Path(override).expanduser() if override else _DEFAULT_CONFIG
 
@@ -56,10 +57,12 @@ def load_keywords() -> list[str]:
 
 
 def _config_hint() -> str:
+    """The resolved config path as a string, for the fix-it hint printed on failure."""
     return str(_config_path())
 
 
 def _make_pattern(keywords: list[str]) -> re.Pattern[str] | None:
+    """Case-insensitive whole-word regex matching any of `keywords`, or None if the list is empty."""
     if not keywords:
         return None
     escaped = [re.escape(kw) for kw in keywords]
@@ -76,6 +79,7 @@ def _looks_binary(path: Path) -> bool:
 
 
 def check_file(path: Path, pattern: re.Pattern[str]) -> list[tuple[int, str]]:
+    """1-indexed (line, matched keyword) pairs for `path`; [] if binary or unreadable."""
     if _looks_binary(path):
         return []
     try:
@@ -91,11 +95,13 @@ def check_file(path: Path, pattern: re.Pattern[str]) -> list[tuple[int, str]]:
 
 
 def _is_disabled() -> bool:
+    """True if this hook's filename stem is listed in `PINKY_DISABLED_HOOKS` (comma-separated)."""
     disabled = os.environ.get("PINKY_DISABLED_HOOKS", "")
     return Path(__file__).stem in {h.strip() for h in disabled.split(",") if h.strip()}
 
 
 def main() -> int:
+    """Fail if any CLI argument contains a configured keyword; returns 0 if none are configured."""
     if _is_disabled():
         return 0
     keywords = load_keywords()

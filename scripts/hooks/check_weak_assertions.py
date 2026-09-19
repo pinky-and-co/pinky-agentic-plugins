@@ -58,6 +58,7 @@ _PREFIXES: tuple[str, ...] = ("build_", "render_", "generate_")
 
 
 def _is_generator_name(name: str) -> bool:
+    """True if `name`, leading underscores stripped, matches the generator naming convention."""
     bare = name.lstrip("_")
     return bare.startswith(_PREFIXES) or bare.endswith(_SUFFIXES)
 
@@ -97,6 +98,7 @@ def _build_var_to_gen(scope: ast.AST) -> dict[str, str]:
 
 
 def _has_eq(node: ast.AST) -> bool:
+    """True if an equality comparison (`==`) appears anywhere within `node`."""
     return any(
         isinstance(n, ast.Compare) and any(isinstance(op, ast.Eq) for op in n.ops)
         for n in ast.walk(node)
@@ -133,6 +135,7 @@ def _scan_scope(
     weak: dict[tuple[str, int], None],
     covered: set[str],
 ) -> None:
+    """Walk `scope` for weak `in`-fragment asserts and `==` oracles, updating `weak`/`covered` in place."""
     for node in ast.walk(scope):
         if isinstance(node, ast.Assert):
             for cmp in _iter_compares(node.test):
@@ -159,6 +162,7 @@ def _scan_scope(
 
 
 def _is_str_literal(node: ast.expr) -> bool:
+    """True if `node` is a string constant."""
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
@@ -196,6 +200,7 @@ def check_file(path: Path) -> list[tuple[int, str]]:
 
 
 def _is_disabled() -> bool:
+    """True if this hook's filename stem is listed in `PINKY_DISABLED_HOOKS` (comma-separated)."""
     disabled = os.environ.get("PINKY_DISABLED_HOOKS", "")
     return Path(__file__).stem in {h.strip() for h in disabled.split(",") if h.strip()}
 
@@ -226,6 +231,7 @@ def _repo_covered(paths: list[str]) -> set[str]:
 
 
 def main() -> int:
+    """Fail on a weak `in`-fragment assert whose generator has no equality oracle anywhere under tests/."""
     if _is_disabled():
         return 0
     paths = sys.argv[1:]

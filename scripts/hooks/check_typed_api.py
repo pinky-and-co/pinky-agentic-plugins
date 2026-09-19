@@ -33,7 +33,7 @@ _COMPOSITE: frozenset[str] = frozenset({"dict", "list", "tuple", "set"})
 _ALWAYS_BLOCKED: frozenset[str] = frozenset({"tuple", "set"})
 
 
-def _subscript_name(node: ast.expr) -> str | None:
+def _subscript_name(node: ast.expr | None) -> str | None:
     """Return the base name if *node* is a subscript, e.g. 'dict' for dict[str, Any]."""
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
         return node.value.id
@@ -62,8 +62,8 @@ def _violation(node: ast.expr | None) -> str | None:
         return None
     if name in _ALWAYS_BLOCKED:
         return f"{name}[...] — use a dataclass or Pydantic model"
-    if name == "dict":
-        slc = node.slice  # type: ignore[union-attr]
+    if name == "dict" and isinstance(node, ast.Subscript):
+        slc = node.slice
         args: list[ast.expr] = slc.elts if isinstance(slc, ast.Tuple) else [slc]
         if len(args) >= 2:
             inner = _subscript_name(_resolve(args[1]))
@@ -73,12 +73,15 @@ def _violation(node: ast.expr | None) -> str | None:
 
 
 class _Visitor(ast.NodeVisitor):
+    """Collects (lineno, message) for each blocked raw composite annotation in public API surface."""
+
     def __init__(self) -> None:
         self.violations: list[tuple[int, str]] = []
         self._private_depth: int = 0
         self._function_depth: int = 0
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Track whether we're nested inside a private (`_`-prefixed) class, whose members are exempt."""
         if node.name.startswith("_"):
             self._private_depth += 1
             self.generic_visit(node)
@@ -87,6 +90,7 @@ class _Visitor(ast.NodeVisitor):
             self.generic_visit(node)
 
     def _check_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        """Flag blocked annotations on a public function's parameters and return type."""
         self._function_depth += 1
         if node.name.startswith("_") or self._private_depth:
             self.generic_visit(node)
@@ -105,12 +109,15 @@ class _Visitor(ast.NodeVisitor):
         self._function_depth -= 1
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # type: ignore[override]
+        """Delegate to `_check_function`."""
         self._check_function(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # type: ignore[override]
+        """Delegate to `_check_function`."""
         self._check_function(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        """Flag a blocked annotation on a module-level, public, non-`_`-prefixed assignment."""
         if self._private_depth or self._function_depth:
             return
         if isinstance(node.target, ast.Name) and not node.target.id.startswith("_"):
@@ -120,6 +127,7 @@ class _Visitor(ast.NodeVisitor):
 
 
 def check_file(path: Path) -> list[tuple[int, str]]:
+    """(line, message) for each blocked raw composite annotation in `path`; [] on parse/read failure."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError):
@@ -130,11 +138,13 @@ def check_file(path: Path) -> list[tuple[int, str]]:
 
 
 def _is_disabled() -> bool:
+    """True if this hook's filename stem is listed in `PINKY_DISABLED_HOOKS` (comma-separated)."""
     disabled = os.environ.get("PINKY_DISABLED_HOOKS", "")
     return Path(__file__).stem in {h.strip() for h in disabled.split(",") if h.strip()}
 
 
 def main() -> int:
+    """Fail if any CLI argument's public API uses a blocked raw composite annotation."""
     if _is_disabled():
         return 0
     failed = False

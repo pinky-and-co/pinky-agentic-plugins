@@ -31,6 +31,7 @@ _PAD = 9  # horizontal padding each side
 
 
 def _svg(label: str, message: str, color: str, title: str = "") -> str:
+    """Shields.io-style flat badge: `label` on a grey box, `message` on a `color` box."""
     lw = int(len(label) * _CHAR_W + _PAD * 2)
     mw = int(len(message) * _CHAR_W + _PAD * 2)
     tw = lw + mw
@@ -76,6 +77,7 @@ def _count_local_hooks(config: Path) -> tuple[int, list[str]]:
 
 
 def generate_hooks_badge(root: Path) -> None:
+    """Write `docs/reference/generated/hooks_badge.svg`, counting `repo: local` hooks in `.pre-commit-config.yaml`."""
     out = root / "docs" / "reference" / "generated" / "hooks_badge.svg"
     out.parent.mkdir(parents=True, exist_ok=True)
     n, ids = _count_local_hooks(root / ".pre-commit-config.yaml")
@@ -94,6 +96,7 @@ _SUPPRESS_RE = re.compile(
 
 
 def _count_noqa(src: Path) -> dict[str, int]:
+    """Occurrences of each `noqa`/`pinky` suppression code across every `.py` file under `src`."""
     counts: dict[str, int] = {}
     if not src.exists():
         return counts
@@ -106,6 +109,7 @@ def _count_noqa(src: Path) -> dict[str, int]:
 
 
 def _noqa_color(total: int) -> str:
+    """Badge color for `total` suppressions: green at 0, yellow up to 3, red beyond."""
     if total == 0:
         return "#4c1"  # green
     if total <= 3:
@@ -114,6 +118,7 @@ def _noqa_color(total: int) -> str:
 
 
 def generate_noqa_badge(root: Path) -> None:
+    """Write `docs/reference/generated/noqa_badge.svg` with the total suppression count under `root/src`."""
     out = root / "docs" / "reference" / "generated" / "noqa_badge.svg"
     out.parent.mkdir(parents=True, exist_ok=True)
     counts = _count_noqa(root / "src")
@@ -133,11 +138,13 @@ def generate_noqa_badge(root: Path) -> None:
 
 
 def _is_disabled() -> bool:
+    """True if this hook's filename stem is listed in `PINKY_DISABLED_HOOKS` (comma-separated)."""
     disabled = os.environ.get("PINKY_DISABLED_HOOKS", "")
     return Path(__file__).stem in {h.strip() for h in disabled.split(",") if h.strip()}
 
 
 def main() -> int:
+    """Generate the hooks badge, the noqa badge, or both if neither flag is given; always returns 0."""
     if _is_disabled():
         return 0
     args = sys.argv[1:]

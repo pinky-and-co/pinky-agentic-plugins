@@ -210,14 +210,6 @@ repos:
         types: [python]
         args: [--ignore-missing-imports]
         files: ^plugins/
-        # Temporary exclude (card `remonter-seuil-interrogate-70-vers-80`, chantier 0024) — same
-        # story as check-typed-api below: these paths only exist in pinky-bootstrap's flat layout,
-        # inert on every src/ repo. Turning mypy on for real for the first time on this repo's own
-        # code surfaced 6 pre-existing type errors — real debt, deferred rather than blocking.
-        # (2 of the 6, in render_docs.py, are fixed inline with `# type: ignore[arg-type]` instead
-        # of excluded here — mypy follows the import from setup/common.py regardless of `exclude:`,
-        # so a file-level exclude is silently ineffective on anything reachable via import.)
-        exclude: ^(cli_pinky\.py|hygiene/hooks/(check_zws|check_typed_api)\.py)$
         # mypy's incremental cache (.mypy_cache/) isn't safe under concurrent access — without
         # this, prek/pre-commit's default file-batch parallelism spawns multiple mypy processes
         # against the same cache dir and one crashes with INTERNAL ERROR (reproduced on
@@ -293,13 +285,6 @@ repos:
         language: python
         types: [python]
         files: ^plugins/
-        # Temporary exclude (card `remonter-seuil-interrogate-70-vers-80`, chantier 0024) — these
-        # paths only exist in pinky-bootstrap's flat layout, inert on every src/ repo. Turning the
-        # `python` extra's src/-scoped hooks on for real for the first time on this repo's own
-        # `setup/`/`hygiene/` (the `_py_lint_roots` fix) surfaced 11 pre-existing raw dict/tuple/set
-        # findings across these files — real debt, not a false positive, deferred rather than
-        # blocking every future commit while it gets backfilled.
-        exclude: ^(setup/(plugin_install|rules|plugin_reconcile|doctor)\.py|hygiene/hooks/(validate_plugins_strict|check_snowpark_api|render_docs)\.py)$
 
   # Weak-assertion ratchet — first hook to target tests/, not src/ (tests.md § generator oracle).
   # Blocks a fragment `assert "x" in <generator(...)>` that has no whole-output equality oracle in

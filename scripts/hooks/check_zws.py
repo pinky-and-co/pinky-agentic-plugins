@@ -27,7 +27,8 @@ def _looks_binary(filepath: str) -> bool:
 
 
 def check_file(filepath: str) -> list[int]:
-    found = []
+    """1-indexed line numbers of `filepath` that contain a zero-width character; [] if binary."""
+    found: list[int] = []
     if _looks_binary(filepath):
         return found
     try:
@@ -41,11 +42,13 @@ def check_file(filepath: str) -> list[int]:
 
 
 def _is_disabled() -> bool:
+    """True if this hook's filename stem is listed in `PINKY_DISABLED_HOOKS` (comma-separated)."""
     disabled = os.environ.get("PINKY_DISABLED_HOOKS", "")
     return Path(__file__).stem in {h.strip() for h in disabled.split(",") if h.strip()}
 
 
 def main() -> int:
+    """Fail if any CLI argument contains a zero-width character; returns 1 on any hit."""
     if _is_disabled():
         return 0
     failed = False

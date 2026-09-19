@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +42,34 @@ README_WHY_MARK_START = "<!-- pinky:readme-why:start -->"
 README_WHY_MARK_END = "<!-- pinky:readme-why:end -->"
 
 
+@dataclass(frozen=True, eq=False)
+class _MarkdownParagraphs:
+    """A sequence of markdown strings, wrapped so it stays hashable on a frozen dataclass.
+
+    Proxies `tuple[str, ...]` (iteration, length, equality/hash against a plain tuple) so the
+    existing `join`/truthiness call sites need no change; `to_json` still unwraps it to a
+    JSON-native list.
+    """
+
+    values: tuple[str, ...] = ()
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _MarkdownParagraphs):
+            return self.values == other.values
+        if isinstance(other, tuple):
+            return self.values == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.values)
+
+
 @dataclass(frozen=True)
 class SuiteIdentity:
     """Instance identity injected into generated docs — deliberately NOT hardcoded in this module
@@ -59,10 +88,12 @@ class SuiteIdentity:
     pitch_heading: (
         str  # the README '## <heading>' pitch section title, e.g. "Why pinky?"
     )
-    pitch_paragraphs: tuple[str, ...]  # pitch manifesto, one markdown paragraph each
-    pitch_pills: tuple[
-        str, ...
-    ]  # short positioning pills, rendered "· "-joined and bolded
+    pitch_paragraphs: (
+        _MarkdownParagraphs  # pitch manifesto, one markdown paragraph each
+    )
+    pitch_pills: (
+        _MarkdownParagraphs  # short positioning pills, rendered "· "-joined and bolded
+    )
 
     _FIELDS = (
         "header_image_url",
@@ -80,8 +111,8 @@ class SuiteIdentity:
     def from_dict(cls, data: dict) -> "SuiteIdentity":
         """Build from the docs_identity.json mapping (the ONE place the field names are read).
 
-        JSON arrays decode as lists; ``pitch_paragraphs``/``pitch_pills`` are coerced to tuples so
-        every instance stays hashable (this dataclass is frozen).
+        JSON arrays decode as lists; ``pitch_paragraphs``/``pitch_pills`` are coerced into
+        `_MarkdownParagraphs` so every instance stays hashable (this dataclass is frozen).
 
         An ABSENT optional field yields an empty value, and each renderer then omits the block it
         feeds — the block becomes unavailable rather than rendered empty.
@@ -103,14 +134,26 @@ class SuiteIdentity:
         seqs = ("pitch_paragraphs", "pitch_pills")
         return cls(
             **{  # type: ignore[arg-type]  # mypy can't verify a **dict unpack field-by-field
-                k: tuple(data.get(k) or ()) if k in seqs else (data.get(k) or "")
+                k: _MarkdownParagraphs(tuple(data.get(k) or ()))
+                if k in seqs
+                else (data.get(k) or "")
                 for k in cls._FIELDS
             }
         )
 
     def to_json(self) -> str:
         """The docs_identity.json text — what setup.py distributes into each repo's scripts/hooks/."""
-        return json.dumps({k: getattr(self, k) for k in self._FIELDS}, indent=2) + "\n"
+        seqs = ("pitch_paragraphs", "pitch_pills")
+        return (
+            json.dumps(
+                {
+                    k: (list(getattr(self, k)) if k in seqs else getattr(self, k))
+                    for k in self._FIELDS
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
 
 def _load_identity() -> SuiteIdentity:

@@ -15,6 +15,7 @@ Usage:
 
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -30,15 +31,23 @@ def find_marketplace_manifests() -> list[Path]:
     return sorted(REPO_ROOT.glob("**/.claude-plugin/marketplace.json"))
 
 
-def validate(path: Path) -> tuple[bool, str]:
-    """Run strict validation on a plugin manifest, return (passed, combined output)."""
+@dataclass(frozen=True)
+class ValidationResult:
+    """Outcome of running `claude plugin validate --strict` on one manifest."""
+
+    passed: bool
+    output: str
+
+
+def validate(path: Path) -> ValidationResult:
+    """Run strict validation on a plugin manifest."""
     result = subprocess.run(
         ["claude", "plugin", "validate", "--strict", str(path)],
         capture_output=True,
         text=True,
     )
     output = (result.stdout + result.stderr).strip()
-    return result.returncode == 0, output
+    return ValidationResult(passed=result.returncode == 0, output=output)
 
 
 def main() -> int:
@@ -49,17 +58,17 @@ def main() -> int:
         return 0
 
     try:
-        results = [(path, *validate(path)) for path in manifests]
+        results = [(path, validate(path)) for path in manifests]
     except FileNotFoundError:
         print("`claude` CLI not found on PATH — cannot validate manifests.")
         return 1
 
-    failed = [path for path, passed, _ in results if not passed]
-    for path, passed, output in results:
-        mark = "OK" if passed else "FAIL"
+    failed = [path for path, result in results if not result.passed]
+    for path, result in results:
+        mark = "OK" if result.passed else "FAIL"
         print(f"[{mark}] {path.relative_to(REPO_ROOT)}")
-        if not passed:
-            print(output)
+        if not result.passed:
+            print(result.output)
 
     if failed:
         print(f"{len(failed)}/{len(manifests)} manifest(s) failed --strict validation.")
