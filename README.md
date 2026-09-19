@@ -119,18 +119,16 @@ pinky-agentic-plugins/
 │   │   │   ├── pc_delegate_server.py
 │   │   │   └── subtree.py
 │   │   └── skills/
-│   │       ├── aller/
+│   │       ├── export/
 │   │       │   ├── references/
-│   │       │   │   └── providers/
-│   │       │   │       └── cortex/
-│   │       │   │           └── GUIDE.md
+│   │       │   │   └── GUIDE.md
 │   │       │   ├── scripts/
-│   │       │   │   ├── build_aller.py
+│   │       │   │   ├── build_export.py
 │   │       │   │   └── secrets_filter.py
 │   │       │   └── SKILL.md
-│   │       └── retour/
+│   │       └── reintegrate/
 │   │           ├── scripts/
-│   │           │   └── apply_retour.py
+│   │           │   └── apply_reintegrate.py
 │   │           └── SKILL.md
 │   ├── pc-git/
 │   │   ├── agents/
@@ -328,9 +326,9 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
-│   ├── test_apply_retour.py
+│   ├── test_apply_reintegrate.py
 │   ├── test_branch_guard.py
-│   ├── test_build_aller.py
+│   ├── test_build_export.py
 │   ├── test_bulk_commit_sh.py
 │   ├── test_clear_pending_queue.py
 │   ├── test_drop_card_sh.py

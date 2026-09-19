@@ -1,8 +1,8 @@
-# Working as an external agent (Cortex/Snowsight)
+# Working as an external agent
 
-You are working on a repository outside Claude Code, in a Snowsight/Cortex session with no local
-git and no ability to move files between folders. This guide is rendered as `AGENTS.md` at the
-root of what you were given — read it fully before making any change.
+You are working on a repository outside Claude Code, in a web-based agentic tool session with no
+local git and no ability to move files between folders. This guide is rendered as `AGENTS.md` at
+the root of what you were given — read it fully before making any change.
 
 ## What to produce when you are done
 

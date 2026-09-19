@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["mcp", "grimp"]
 # ///
-"""pc-delegate MCP server — `export_subtree`, the "aller" leg's subtree computation.
+"""pc-delegate MCP server — `export_subtree`, the "export" leg's subtree computation.
 
 Thin wrapper around `subtree.py`'s `compute_subtree` — no reasoning here. `grimp` needs a
 third-party resolve, hence this is a native `mcp/` tool rather than a `skills/.../scripts/`
@@ -28,7 +28,7 @@ m = MCPServer("pc-delegate")
 
 @m.tool()
 def export_subtree(repo_path: str, touched_files: list[str]) -> str:
-    """The files the "aller" leg should zip for `repo_path`: every entry in `touched_files`
+    """The files the "export" leg should zip for `repo_path`: every entry in `touched_files`
     (repo-relative) plus the modules each one directly imports (depth 1, never transitive) —
     resolved on disk via `grimp` for a proper Python package, or a direct-import AST scan for a
     standalone script with no `__init__.py` in its own directory. Returns one repo-relative POSIX

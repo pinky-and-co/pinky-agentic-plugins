@@ -1,20 +1,20 @@
 ---
-name: retour
+name: reintegrate
 description: "Reintegrate the results an external agent (Cortex/Snowsight, claude.ai web, any agent working outside Claude Code) produced — a zip or directory of the files it created or modified. Applies safely (new files OK, a locally-diverged file is refused not overwritten), classifies each Python file comments-only vs code-changed, runs the target repo's own verify loop, then hands off to `commit` — never an automatic commit/push/PR. Use when the user says 'réintègre ce zip', 'intègre le retour de <agent>', or hands you a directory of externally-produced files to bring back into a repo."
 argument-hint: "<zip-or-directory> --repo <path> [--agent-log-dir <path>] [--card <id> ...]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/retour/scripts/apply_retour.py:*), Bash(git status:*), Bash(git diff:*), Bash(ruff check:*), Bash(ruff format:*), Bash(mypy:*), Bash(pytest:*), Bash(prek run:*), Bash(pre-commit run:*), Read, Skill
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/apply_reintegrate.py:*), Bash(git status:*), Bash(git diff:*), Bash(ruff check:*), Bash(ruff format:*), Bash(mypy:*), Bash(pytest:*), Bash(prek run:*), Bash(pre-commit run:*), Read, Skill
 ---
 
-# Retour — reintegrate an external agent's results
+# Reintegrate — reintegrate an external agent's results
 
 ## Step 1 — Apply
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/retour/scripts/apply_retour.py" <source> --repo <path> \
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/apply_reintegrate.py" <source> --repo <path> \
   --agent-log-dir <chantier-workspace>/_AGENT_LOG --card <id>
 ```
 
-`--agent-log-dir`/`--card` are optional — pass them whenever the retour belongs to a known
+`--agent-log-dir`/`--card` are optional — pass them whenever the reintegration belongs to a known
 chantier/card, so a `REPORT.md` at the root of `<source>` (the external agent's own account of
 what it did, any judgment call, anything found but out of scope) gets written as a new dated
 `_AGENT_LOG` entry instead of only printed to the terminal. `REPORT.md` is never applied into the

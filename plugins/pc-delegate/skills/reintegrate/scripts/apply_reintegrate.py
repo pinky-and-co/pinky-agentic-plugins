@@ -29,7 +29,7 @@ the narrative an external agent hands back (what it did, judgment calls, anythin
 scope) otherwise has nowhere durable to land.
 
 Usage:
-    python3 apply_retour.py <retour.zip-or-dir> [--repo PATH] [--agent-log-dir PATH]
+    python3 apply_reintegrate.py <source.zip-or-dir> [--repo PATH] [--agent-log-dir PATH]
         [--card ID ...] [--dry-run]
 """
 
@@ -61,7 +61,7 @@ def _is_report_entry(entry_name: str) -> bool:
 
 def _report_log_name(*, card_ids: list[str], repo: Path, today: str) -> str:
     slug = "-".join(card_ids) if card_ids else repo.name
-    return f"{today}_retour-{slug}.md"
+    return f"{today}_reintegrate-{slug}.md"
 
 
 def _mask_docstrings(tree: ast.AST) -> ast.AST:
@@ -363,7 +363,7 @@ def main() -> int:
         action="append",
         default=[],
         dest="card_ids",
-        help="card id this retour belongs to — used only to name the REPORT.md log entry",
+        help="card id this reintegration belongs to — used only to name the REPORT.md log entry",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

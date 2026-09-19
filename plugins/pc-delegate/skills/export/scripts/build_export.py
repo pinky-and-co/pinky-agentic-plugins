@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the "aller" leg's export zip — select cards by id, move them to `3-in-progress` with an
+"""Build the "export" leg's zip — select cards by id, move them to `3-in-progress` with an
 export marker, and assemble the archive an external agent receives.
 
 The repo code subtree is computed elsewhere (`export_subtree`, the `pc-delegate` MCP tool — the
@@ -14,7 +14,7 @@ disk. A failure at any point before the last step leaves the board untouched —
 (`--out` is removed on failure).
 
 Usage:
-    python3 build_aller.py --chantier PATH --card ID [--card ID ...] --repo PATH
+    python3 build_export.py --chantier PATH --card ID [--card ID ...] --repo PATH
         [--repo-file REL_PATH ...] [--agent-log-dir PATH] [--guide PATH] --out OUT.zip [--dry-run]
 """
 
@@ -31,16 +31,16 @@ import secrets_filter
 _COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress", "4-done")
 
 
-class AllerError(Exception):
+class ExportError(Exception):
     pass
 
 
 def _reject_path_escape(component: str, *, what: str) -> None:
     """A card id or a `--repo-file` entry is a single path component / relative path meant to
-    stay inside its own root — never an absolute path, never a `..` segment. Raises `AllerError`
+    stay inside its own root — never an absolute path, never a `..` segment. Raises `ExportError`
     otherwise; called before that string is ever joined onto a real directory."""
     if component.startswith(("/", "\\")) or ".." in Path(component).parts:
-        raise AllerError(f"{what} escapes its root: {component}")
+        raise ExportError(f"{what} escapes its root: {component}")
 
 
 def find_card(chantier_dir: Path, card_id: str) -> Path:
@@ -52,9 +52,9 @@ def find_card(chantier_dir: Path, card_id: str) -> Path:
         if (chantier_dir / col / f"{card_id}.md").is_file()
     ]
     if not matches:
-        raise AllerError(f"card not found in any column: {card_id}")
+        raise ExportError(f"card not found in any column: {card_id}")
     if len(matches) > 1:
-        raise AllerError(f"card found in more than one column: {card_id}")
+        raise ExportError(f"card found in more than one column: {card_id}")
     return matches[0]
 
 
@@ -63,13 +63,13 @@ def set_frontmatter_field(content: str, field: str, value: str) -> str:
     appending one just before the closing `---`. The card's body (everything after the second
     `---`) is untouched."""
     if "\n" in value:
-        raise AllerError(f"frontmatter value for {field!r} cannot contain a newline")
+        raise ExportError(f"frontmatter value for {field!r} cannot contain a newline")
     lines = content.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
-        raise AllerError("card has no frontmatter block")
+        raise ExportError("card has no frontmatter block")
     end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
     if end is None:
-        raise AllerError("card frontmatter block is not closed")
+        raise ExportError("card frontmatter block is not closed")
     body = [line for line in lines[1:end] if not line.startswith(f"{field}:")]
     body.append(f"{field}: {value}\n")
     return "".join([lines[0], *body, lines[end]] + lines[end + 1 :])
@@ -126,8 +126,8 @@ def _resolve_repo_files(
     repo: Path, repo_files: list[str]
 ) -> tuple[list[Path], list[str]]:
     """*repo_files* (repo-relative) resolved and validated against *repo*'s root — containment
-    checked the same way the "retour" leg's own `apply_retour.py` checks it — split into
-    (kept, denylist-excluded). Raises `AllerError` on a `--repo-file` that escapes *repo*, never
+    checked the same way the "reintegrate" leg's own `apply_reintegrate.py` checks it — split into
+    (kept, denylist-excluded). Raises `ExportError` on a `--repo-file` that escapes *repo*, never
     silently drops it: an escape attempt is a bug in the caller, not a routine exclusion."""
     repo_resolved = repo.resolve()
     kept: list[Path] = []
@@ -136,13 +136,13 @@ def _resolve_repo_files(
         _reject_path_escape(rel, what="repo file")
         candidate = (repo_resolved / rel).resolve()
         if not candidate.is_relative_to(repo_resolved):
-            raise AllerError(f"repo file escapes repo root: {rel}")
+            raise ExportError(f"repo file escapes repo root: {rel}")
         safe_rel = candidate.relative_to(repo_resolved).as_posix()
         if secrets_filter.is_denied(safe_rel):
             excluded.append(safe_rel)
             continue
         if not candidate.is_file():
-            raise AllerError(f"not a file: {rel}")
+            raise ExportError(f"not a file: {rel}")
         kept.append(candidate)
     return kept, excluded
 
@@ -248,7 +248,7 @@ def main() -> int:
 
         for card_path, content in zip(card_paths, cards.values(), strict=True):
             _apply_export(card_path, args.chantier, content)
-    except AllerError as e:
+    except ExportError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
