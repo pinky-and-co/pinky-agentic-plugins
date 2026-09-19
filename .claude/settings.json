@@ -6,6 +6,8 @@
     "pc-craft@pinky-agentic-plugins": true,
     "pc-privacy@pinky-agentic-plugins": true,
     "pyright@claude-code-lsps": true,
-    "pc-autodiscovery@pinky-agentic-plugins": true
+    "pc-autodiscovery@pinky-agentic-plugins": true,
+    "pc-git@pinky-agentic-plugins": true,
+    "pc-delegate@pinky-agentic-plugins": true
   }
 }

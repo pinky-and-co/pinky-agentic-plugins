@@ -1,5 +1,5 @@
 {
-  "description": "Blocks a guarded write on a permanent branch — see branch_guard.py",
+  "description": "Blocks a guarded write on a permanent branch — see branch_guard.py. Guards against overlapping PRs — see pr_overlap_guard.py",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +8,16 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/branch_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pr-overlap/pr_overlap_guard.py\"",
             "timeout": 10
           }
         ]
