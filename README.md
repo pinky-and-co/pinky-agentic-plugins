@@ -193,6 +193,10 @@ pinky-agentic-plugins/
 │   │   │   │   ├── bulk_commit.sh
 │   │   │   │   ├── resolve_policy.py
 │   │   │   │   └── test_bulk_commit.sh
+│   │   │   ├── clean-gone/
+│   │   │   │   └── clean_gone_hook.py
+│   │   │   ├── pr-overlap/
+│   │   │   │   └── pr_overlap_guard.py
 │   │   │   ├── hooks.json
 │   │   │   └── pc_git_policy_lib.py
 │   │   ├── skills/
@@ -200,7 +204,8 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── clean-gone/
 │   │   │   │   ├── scripts/
-│   │   │   │   │   └── bulk_clean_gone.sh
+│   │   │   │   │   ├── bulk_clean_gone.sh
+│   │   │   │   │   └── test_bulk_clean_gone.sh
 │   │   │   │   └── SKILL.md
 │   │   │   ├── commit/
 │   │   │   │   └── SKILL.md
@@ -330,6 +335,7 @@ pinky-agentic-plugins/
 │   ├── test_branch_guard.py
 │   ├── test_build_export.py
 │   ├── test_bulk_commit_sh.py
+│   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
 │   ├── test_drop_card_sh.py
 │   ├── test_guard.py
@@ -345,6 +351,7 @@ pinky-agentic-plugins/
 │   ├── test_pending_gate.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
+│   ├── test_pr_overlap_guard.py
 │   ├── test_privacy_egress.py
 │   ├── test_read_cost.py
 │   ├── test_reconcile.py
