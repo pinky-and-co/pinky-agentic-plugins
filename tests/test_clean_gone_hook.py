@@ -67,6 +67,8 @@ class TestCleanGoneHook:
                 capture_output=True,
                 check=True,
             )
+            git(local_repo, "config", "user.email", "test@example.com")
+            git(local_repo, "config", "user.name", "Test User")
 
             commit_file(local_repo, "file1.txt")
             git(local_repo, "push", "-u", "origin", "main")
@@ -110,6 +112,8 @@ class TestCleanGoneHook:
                 capture_output=True,
                 check=True,
             )
+            git(local_repo, "config", "user.email", "test@example.com")
+            git(local_repo, "config", "user.name", "Test User")
 
             # Create a branch that will be [gone]
             commit_file(local_repo, "file1.txt")
@@ -169,6 +173,8 @@ class TestCleanGoneHook:
                 capture_output=True,
                 check=True,
             )
+            git(local_repo, "config", "user.email", "test@example.com")
+            git(local_repo, "config", "user.name", "Test User")
 
             # Create a branch with live remote
             commit_file(local_repo, "file1.txt")
@@ -219,6 +225,8 @@ class TestCleanGoneHook:
                 capture_output=True,
                 check=True,
             )
+            git(local_repo, "config", "user.email", "test@example.com")
+            git(local_repo, "config", "user.name", "Test User")
 
             # Create a local-only branch (never pushed)
             commit_file(local_repo, "file1.txt")
