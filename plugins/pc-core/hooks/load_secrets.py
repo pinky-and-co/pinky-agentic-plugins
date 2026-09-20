@@ -8,10 +8,18 @@ command. Append, not overwrite — a later `CwdChanged`/another `SessionStart` h
 this file; truncating it would erase a sibling hook's contribution.
 
 Each `keys` entry: `{"reader": "...", "env": "VAR_NAME", ...reader-specific fields}`. `reader`
-dispatches to a wiring function below — `macos_keychain` is the only one wired today (the classic
-keychain, Trousseau d'accès, `security find-generic-password`; NOT the Passwords app, which stores
-in a structurally different, unreachable format — see `docs/how-to/setup-declarative-secrets.md`
-(pinky-bootstrap) for why). An unwired reader (`aws_secretsmanager`, ...) fails loud on stderr and leaves that
+dispatches to a wiring function below; each names its own fields. Two are wired:
+
+- `macos_keychain` (`{"service": ...}`) — the classic keychain, Trousseau d'accès,
+  `security find-generic-password`; NOT the Passwords app, which stores in a structurally
+  different, unreachable format — see `docs/how-to/setup-declarative-secrets.md` (pinky-bootstrap)
+  for why. **Every secret goes here.**
+- `literal` (`{"value": ...}`) — the value sits in `settings.pinky.json` itself, in clear text on
+  disk. **Never a secret, whatever the convenience**: for an account id, a tenant, an endpoint —
+  something already public in a `base_url` or a log. A credential in a `literal` entry defeats the
+  only reason the keychain reader exists.
+
+An unwired reader (`aws_secretsmanager`, ...) fails loud on stderr and leaves that
 variable unset — never a silent skip, never a fabricated value.
 
 This hook must never hang: it runs on every session start, including a scheduled/headless one with
@@ -47,6 +55,15 @@ def read_macos_keychain(entry: dict[str, Any]) -> str | None:
     return _read_keychain(service)
 
 
+def read_literal(entry: dict[str, Any]) -> str | None:
+    """Read a `keys` entry (`{"value": ...}`) holding a non-secret value inline in the settings."""
+    value = entry.get("value")
+    if value is None or value == "":
+        print("[load_secrets] literal entry missing 'value'", file=sys.stderr)
+        return None
+    return str(value)
+
+
 def read_aws_secretsmanager(entry: dict[str, Any]) -> str | None:
     """Not implemented — fails loud rather than pretending to support this reader."""
     print(
@@ -59,6 +76,7 @@ def read_aws_secretsmanager(entry: dict[str, Any]) -> str | None:
 
 READERS = {
     "macos_keychain": read_macos_keychain,
+    "literal": read_literal,
     "aws_secretsmanager": read_aws_secretsmanager,
 }
 
