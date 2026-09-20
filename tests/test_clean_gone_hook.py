@@ -29,12 +29,16 @@ def create_test_repo(path: Path, bare: bool = False) -> Path:
     """Create a test git repository."""
     if bare:
         subprocess.run(
-            ["git", "init", "--bare", str(path)],
+            ["git", "init", "--bare", "-b", "main", str(path)],
             capture_output=True,
             check=True,
         )
     else:
-        subprocess.run(["git", "init", str(path)], capture_output=True, check=True)
+        subprocess.run(
+            ["git", "init", "-b", "main", str(path)],
+            capture_output=True,
+            check=True,
+        )
         git(path, "config", "user.email", "test@example.com")
         git(path, "config", "user.name", "Test User")
     return path
