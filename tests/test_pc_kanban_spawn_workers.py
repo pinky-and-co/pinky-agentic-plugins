@@ -12,14 +12,20 @@ and `--advisor` one tier above (`haiku`->sonnet, `sonnet`->opus, none for opus/f
 `build_claude_command` / `build_spawn_command` / `build_manual_line` / `model_arg` / `advisor_for`
 are pure and get whole-output oracles; the two subprocess boundaries (`_hook`, `resolve_paths`)
 and the spawn (`subprocess.run`) are the fakes.
+
+Default (no `--cmux`) mode: `repo_conventions_block` / `generated_card_block` /
+`build_worker_prompt` / `effective_model` compose the prompt handed to a `card-worker` Agent call —
+also pure, also whole-output oracles, with `shutil.which`/the temp repo's own files as the fakes.
 """
 
 import contextlib
 import io
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = (
     Path(__file__).parent.parent
@@ -151,6 +157,126 @@ class TestBuildManualLine(unittest.TestCase):
         )
 
 
+class TestRepoConventionsBlock(unittest.TestCase):
+    def test_whole_block_pinned_tests_dir_uv_and_prek(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "tests").mkdir()
+            (repo / "uv.lock").write_text("")
+            with mock.patch.object(
+                sw.shutil,
+                "which",
+                side_effect=lambda name: (
+                    f"/usr/bin/{name}" if name in ("prek", "uv") else None
+                ),
+            ):
+                block = sw.repo_conventions_block(repo)
+            self.assertEqual(
+                block,
+                "Repo conventions, probed from disk — do not retype these from memory:\n"
+                "- Python tests: `tests/` at the repo root.\n"
+                "- Run tests: `uv run pytest <file> -q`\n"
+                "- Run gates: `prek run --files <touched files>` — must all pass.\n"
+                f"- {sw._WORKER_INVARIANTS}",
+            )
+
+    def test_no_tests_dir_no_uv_no_gate_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            with mock.patch.object(sw.shutil, "which", return_value=None):
+                block = sw.repo_conventions_block(repo)
+            self.assertEqual(
+                block,
+                "Repo conventions, probed from disk — do not retype these from memory:\n"
+                "- Python tests: colocated with the code under test (no top-level `tests/` "
+                "found).\n"
+                "- Run tests: `pytest <file> -q`\n"
+                f"- {sw._WORKER_INVARIANTS}",
+            )
+
+    def test_pre_commit_used_when_prek_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            with mock.patch.object(
+                sw.shutil,
+                "which",
+                side_effect=lambda name: (
+                    "/usr/bin/pre-commit" if name == "pre-commit" else None
+                ),
+            ):
+                self.assertEqual(
+                    sw.repo_gate_command(repo), "pre-commit run --files <touched files>"
+                )
+
+
+class TestGeneratedCardBlock(unittest.TestCase):
+    def test_whole_block_pinned_no_arbitrage(self):
+        self.assertEqual(
+            sw.generated_card_block(Path("/ws/repo/_KANBAN/c.md"), "org/repo"),
+            "Card to work:\n- Card: /ws/repo/_KANBAN/c.md\n- Repo: org/repo",
+        )
+
+    def test_whole_block_pinned_with_arbitrage(self):
+        self.assertEqual(
+            sw.generated_card_block(
+                Path("/ws/repo/_KANBAN/c.md"), "org/repo", "pick a branch name"
+            ),
+            "Card to work:\n"
+            "- Card: /ws/repo/_KANBAN/c.md\n"
+            "- Repo: org/repo\n"
+            "- Judgment call to resolve: pick a branch name",
+        )
+
+
+class TestBuildWorkerPrompt(unittest.TestCase):
+    def test_contains_both_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            with mock.patch.object(sw.shutil, "which", return_value=None):
+                prompt = sw.build_worker_prompt(
+                    Path("/ws/repo/_KANBAN/c.md"),
+                    repo,
+                    "org/repo",
+                    "pick a branch name",
+                )
+                self.assertEqual(
+                    prompt,
+                    f"{sw.repo_conventions_block(repo)}\n\n"
+                    f"{sw.generated_card_block(Path('/ws/repo/_KANBAN/c.md'), 'org/repo', 'pick a branch name')}",
+                )
+            self.assertIn("Repo conventions, probed from disk", prompt)
+            self.assertIn("Card to work:", prompt)
+
+
+class TestEffectiveModel(unittest.TestCase):
+    def test_requested_wins_over_frontmatter(self):
+        self.assertEqual(sw.effective_model("opus", "sonnet"), "sonnet")
+
+    def test_falls_back_to_frontmatter_when_none_requested(self):
+        self.assertEqual(sw.effective_model("opus", None), "opus")
+
+    def test_empty_requested_falls_back_too(self):
+        self.assertEqual(sw.effective_model("opus", ""), "opus")
+
+
+class TestExtractValuedFlag(unittest.TestCase):
+    def test_absent_flag(self):
+        value, rest = sw._extract_valued_flag(["a", "b"], "--model")
+        self.assertIsNone(value)
+        self.assertEqual(rest, ["a", "b"])
+
+    def test_present_flag_extracted(self):
+        value, rest = sw._extract_valued_flag(
+            ["a", "--model", "sonnet", "b"], "--model"
+        )
+        self.assertEqual(value, "sonnet")
+        self.assertEqual(rest, ["a", "b"])
+
+    def test_flag_with_no_value_aborts(self):
+        with self.assertRaises(SystemExit):
+            sw._extract_valued_flag(["a", "--model"], "--model")
+
+
 class TestSelectRepos(unittest.TestCase):
     def test_no_filter_returns_all_in_declared_order(self):
         self.assertEqual(sw.select_repos(["org/a", "org/b"], []), ["org/a", "org/b"])
@@ -242,7 +368,7 @@ class TestMain(unittest.TestCase):
     def test_dry_run_prints_shlex_joined_spawn_command_per_repo_and_spawns_nothing(
         self,
     ):
-        rc, out, _ = self._run("--dry-run", "0099", "my-card")
+        rc, out, _ = self._run("--cmux", "--dry-run", "0099", "my-card")
         self.assertEqual(rc, 0)
         self.assertEqual(self.spawned, [])
         # hand-pinned, not computed from build_spawn_command — this asserts the whole dry-run
@@ -262,7 +388,7 @@ class TestMain(unittest.TestCase):
         self.assertEqual(self.resolve_root, Path("/home/me/ws"))
 
     def test_repo_filter_spawns_only_that_repo(self):
-        rc, _, _ = self._run("0099", "my-card", "org/two")
+        rc, _, _ = self._run("--cmux", "0099", "my-card", "org/two")
         self.assertEqual(rc, 0)
         self.assertEqual(len(self.spawned), 1)
         self.assertEqual(self.spawned[0][:3], ["cmux", "new-workspace", "--cwd"])
@@ -270,7 +396,7 @@ class TestMain(unittest.TestCase):
 
     def test_outside_any_multiplexer_prints_manual_lines_and_spawns_nothing(self):
         os.environ.pop("CMUX_SURFACE_ID", None)
-        rc, out, _ = self._run("0099", "my-card")
+        rc, out, _ = self._run("--cmux", "0099", "my-card")
         self.assertEqual(rc, 0)
         self.assertEqual(self.spawned, [])
         self.assertIn("open a worker session yourself", out)
@@ -279,7 +405,7 @@ class TestMain(unittest.TestCase):
 
     def test_haiku_card_boots_haiku_not_sonnet(self):
         self.hook_stdout["--card-model"] = "haiku\n"
-        _, out, _ = self._run("--dry-run", "0099", "my-card")
+        _, out, _ = self._run("--cmux", "--dry-run", "0099", "my-card")
         self.assertIn('--model "haiku" --advisor "sonnet"', out)
         self.assertNotIn('--model "sonnet', out)
 
@@ -303,7 +429,7 @@ class TestMain(unittest.TestCase):
 
     def test_haiku_1m_alias_never_emitted(self):
         self.hook_stdout["--card-model"] = "haiku\n"
-        _, out, _ = self._run("--dry-run", "0099", "my-card")
+        _, out, _ = self._run("--cmux", "--dry-run", "0099", "my-card")
         self.assertNotIn("haiku[1m]", out)
 
     def test_too_few_args_is_usage_error(self):
@@ -319,7 +445,7 @@ class TestMain(unittest.TestCase):
 
     def test_matched_project_plugins_are_enabled_per_repo_before_spawn(self):
         self.matched = ["pc-git@mp", "pc-kanban@mp"]
-        rc, _, _ = self._run("0099", "my-card")
+        rc, _, _ = self._run("--cmux", "0099", "my-card")
         self.assertEqual(rc, 0)
         # 2 plugins x 2 repos, each a project-scope install run with cwd on the clone
         self.assertEqual(len(self.enabled), 4)
@@ -342,13 +468,13 @@ class TestMain(unittest.TestCase):
 
     def test_dry_run_enables_nothing(self):
         self.matched = ["pc-git@mp"]
-        self._run("--dry-run", "0099", "my-card")
+        self._run("--cmux", "--dry-run", "0099", "my-card")
         self.assertEqual(self.enabled, [])
 
     def test_a_failed_enable_is_logged_not_fatal(self):
         self.matched = ["pc-git@mp"]
         self.enable_rc = 1
-        rc, _, err = self._run("0099", "my-card", "org/one")
+        rc, _, err = self._run("--cmux", "0099", "my-card", "org/one")
         self.assertEqual(rc, 0)
         self.assertEqual(len(self.spawned), 1)
         self.assertIn("pc-git@mp", err)
@@ -356,8 +482,36 @@ class TestMain(unittest.TestCase):
     def test_a_failed_enable_is_not_retried(self):
         self.matched = ["pc-git@mp"]
         self.enable_rc = 1
-        self._run("0099", "my-card")
+        self._run("--cmux", "0099", "my-card")
         self.assertEqual(len(self.enabled), 2)  # one attempt per repo, no retry
+
+    def test_default_prints_worker_prompt_per_repo_and_spawns_nothing(self):
+        rc, out, _ = self._run("0099", "my-card")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.spawned, [])
+        self.assertEqual(self.enabled, [])
+        self.assertIn("=== worker: one-my-card ===", out)
+        self.assertIn("=== worker: two-my-card ===", out)
+        self.assertIn("model: opus", out)
+        self.assertIn(str(self.card_path), out)
+
+    def test_default_model_override_wins_over_card_frontmatter(self):
+        self.hook_stdout["--card-model"] = "opus\n"
+        rc, out, _ = self._run("--model", "sonnet", "0099", "my-card", "org/one")
+        self.assertEqual(rc, 0)
+        self.assertIn("model: sonnet", out)
+        self.assertNotIn("model: opus", out)
+
+    def test_default_unknown_model_override_aborts(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._run("--model", "gpt-4", "0099", "my-card")
+        self.assertIn("gpt-4", str(cm.exception))
+
+    def test_default_arbitrage_reaches_the_prompt(self):
+        _, out, _ = self._run(
+            "--arbitrage", "pick a branch name", "0099", "my-card", "org/one"
+        )
+        self.assertIn("pick a branch name", out)
 
 
 if __name__ == "__main__":

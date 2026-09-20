@@ -135,7 +135,7 @@ def adversarial(
             for e in model_adversarial.select_for_delegation(
                 model_adversarial.load_pool(), resolved_tier
             )
-            if e["kind"] == "http"
+            if e["kind"] in ("http", "cli")
         ]
     else:
         entries = model_adversarial.select_for_adversarial(
