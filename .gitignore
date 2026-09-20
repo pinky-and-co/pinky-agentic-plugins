@@ -7,8 +7,9 @@ __pycache__/
 # skill-creator eval scratch (sibling <skill>-workspace/ dirs)
 *-workspace/
 
-# Claude Code local session state (permission-change skill), not source
-.claude/.guard-state.json
+# Claude Code local session state, not source
+.claude/
+**/.claude/
 
 # Plugin evaluation results (test output)
 plugins/*/evals/
