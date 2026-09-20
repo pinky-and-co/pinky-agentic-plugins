@@ -19,7 +19,7 @@ module never special-cases a provider name; every entry carries its own call sha
 
 Each entry:
     name           display name
-    kind           "http" (called via call_provider) or "offline" (routed to the separate
+    kind           "http" (called via call_provider), "cli" (called via pi), or "offline" (routed to the separate
                    zero-egress `offline` MCP tool instead — never called from here; see model_offline.py)
     provider       informational label, also used for direct-vs-aggregator ordering
     model          provider-side model id
@@ -73,6 +73,13 @@ MAX_TOKENS = 8000
 TEMPERATURE = 0.2
 
 _TIER_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
+
+# Prédicats de bascule pour le chemin "cli" du pool (`run_pool`, plus bas). Un seul critère :
+# bascule quand le fournisseur refuse de servir, jamais quand le modèle a servi mais répondu mal.
+_RATE_LIMIT_RE = re.compile(r"\b429\b")
+_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory")
+_INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
+_TIMEOUT_RE = re.compile(r"\btimed out\b")
 
 
 class PoolResult(NamedTuple):
@@ -172,6 +179,57 @@ def resolve_api_key_for(entry: dict[str, Any]) -> str | None:
     if env_key:
         return env_key.strip()
     return read_macos_keychain(entry["api_key_env"])
+
+
+def is_rate_limited(text: str) -> bool:
+    """Whether `text` (a `pi` call's combined stdout+stderr) shows a 429 rate-limit error.
+
+    Args:
+        text: the combined output of one `pi` invocation.
+
+    Returns:
+        True if a `429` marker is present.
+    """
+    return bool(_RATE_LIMIT_RE.search(text))
+
+
+def is_out_of_memory(text: str) -> bool:
+    """Whether `text` shows the MLX-SERVE preflight `503 out_of_memory` signal.
+
+    Args:
+        text: the combined output of one `pi` invocation.
+
+    Returns:
+        True if an `out_of_memory` marker is present.
+    """
+    return bool(_OUT_OF_MEMORY_RE.search(text))
+
+
+def is_insufficient_credit(text: str) -> bool:
+    """Whether `text` shows a 402 — the provider refusing to serve for lack of balance, the same
+    family as a 429 or an out-of-memory 503, never a bad answer from a model that did serve.
+
+    Args:
+        text: the combined output of one `pi` invocation.
+
+    Returns:
+        True if a `402` marker is present.
+    """
+    return bool(_INSUFFICIENT_CREDIT_RE.search(text))
+
+
+def is_timeout(text: str) -> bool:
+    """Whether `text` marks a `pi` call that ran past its time budget without answering — the
+    model never served in time, the same family as a 429/503/402, never a bad answer once served.
+
+    Args:
+        text: the message built for a `subprocess.TimeoutExpired` (its own `str()` already reads
+            "... timed out after N seconds").
+
+    Returns:
+        True if a timeout marker is present.
+    """
+    return bool(_TIMEOUT_RE.search(text))
 
 
 _METHODOLOGY_PATH = (
@@ -339,12 +397,70 @@ def run_pool(
     A `kind: "offline"` entry is never dispatched here — it must go through the separate `offline`
     MCP tool, which enforces its own zero-egress guarantee (never returning the answer body).
     Shared by the CLI (`main`) and the MCP tool (`server.py`) so a fallback fix lands once, not twice.
+
+    A `kind: "cli"` entry advances to the next pool entry only when `is_rate_limited` /
+    `is_out_of_memory` / `is_insufficient_credit` / `is_timeout` say the provider refused to serve —
+    never when it served but answered badly; any other non-zero exit is returned as a stop, not a
+    fall-through.
     """
     last_error: str | None = None
     for entry in entries:
         if entry["kind"] == "offline":
             last_error = f"{entry['name']}: offline entries are not callable through the HTTP pool path"
             continue
+
+        if entry["kind"] == "cli":
+            # Call via pi: pi -p --model '<provider>/<id>' -t <tools> --no-session --thinking off "<prompt>"
+            tools = entry.get("tools", "read")
+            model = entry.get("model")
+            if not model:
+                last_error = f"{entry['name']}: cli entries require a 'model' field"
+                continue
+
+            import subprocess
+
+            try:
+                cmd = [
+                    "pi",
+                    "-p",
+                    "--model",
+                    model,
+                    "-t",
+                    tools,
+                    "--no-session",
+                    "--thinking",
+                    "off",
+                    prompt,
+                ]
+                res = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=timeout, check=True
+                )
+                # pi output is expected to be the content directly
+                return PoolResult(
+                    entry, {"choices": [{"message": {"content": res.stdout}}]}
+                )
+            except subprocess.CalledProcessError as e:
+                # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
+                # stdout pendant que stderr porte autre chose.
+                combined = f"{e.stdout or ''}\n{e.stderr or ''}"
+                if (
+                    is_rate_limited(combined)
+                    or is_out_of_memory(combined)
+                    or is_insufficient_credit(combined)
+                    or is_timeout(combined)
+                ):
+                    last_error = f"{entry['name']}: {combined.strip()}"
+                    continue
+                return PoolResult(
+                    None, f"{entry['name']} critical failure: {combined.strip()}"
+                )
+            except subprocess.TimeoutExpired as e:
+                last_error = f"{entry['name']}: {e}"
+                continue
+            except OSError as e:
+                last_error = f"{entry['name']}: {e}"
+                continue
+
         api_key = resolve_api_key_for(entry)  # pragma: allowlist secret
         if not api_key:
             last_error = (

@@ -218,7 +218,11 @@ pinky-agentic-plugins/
 │   │   │       └── SKILL.md
 │   │   └── README.md
 │   ├── pc-kanban/
+│   │   ├── agents/
+│   │   │   └── card-worker.md
 │   │   ├── hooks/
+│   │   │   ├── card-discipline/
+│   │   │   │   └── card_discipline.py
 │   │   │   ├── hooks.json
 │   │   │   ├── orchestrator_freeze.py
 │   │   │   ├── pc_kanban_secret_patterns.py
@@ -329,12 +333,14 @@ pinky-agentic-plugins/
 ├── scripts/
 │   └── hooks/
 ├── tests/
+│   ├── smoke_model_pool.py
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_anonymize.py
 │   ├── test_apply_reintegrate.py
 │   ├── test_branch_guard.py
 │   ├── test_build_export.py
 │   ├── test_bulk_commit_sh.py
+│   ├── test_card_discipline.py
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
 │   ├── test_drop_card_sh.py
@@ -344,6 +350,7 @@ pinky-agentic-plugins/
 │   ├── test_keychain.py
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
+│   ├── test_model_adversarial_cli.py
 │   ├── test_model_panel.py
 │   ├── test_next_card_recommendation.py
 │   ├── test_orchestrator_freeze.py
