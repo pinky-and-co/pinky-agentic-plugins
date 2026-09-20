@@ -76,8 +76,11 @@ means the commit is there, the second that nothing was committed. Derive no stat
 ## Step 2 — Commit
 
 1. `git -C <repo> status`, `git -C <repo> diff HEAD`, `git -C <repo> log --oneline -5`.
-2. Known noise files (`.DS_Store`, etc.) never go in a commit — add them to `.gitignore` silently,
-  no confirmation needed for this specific action.
+2. OS noise never goes in a commit. The set is closed — `.DS_Store`, `Thumbs.db`, `desktop.ini`,
+  the `NOISE_FILES` constant of `hooks/branch-policy/bulk_commit.sh` — and `resolve_noise()`
+  already writes them to `.gitignore` silently, so there is nothing for you to add. Any other path
+  is a decision, not noise: ask. In particular **never write a pattern containing `/` or `*`** — a
+  directory pattern silently swallows files the repo versions on purpose.
 3. **Read** `${CLAUDE_PLUGIN_ROOT}/skills/commit-convention/SKILL.md` — it is the source of truth for
   the emoji/type table and the breaking-change format.
 4. Trust your own judgment on grouping and message wording, same as you would writing prose — you
