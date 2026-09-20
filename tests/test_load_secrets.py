@@ -46,6 +46,38 @@ class TestReadMacosKeychain(unittest.TestCase):
         reader.assert_not_called()
 
 
+class TestReadLiteral(unittest.TestCase):
+    """A non-secret value inline in the settings — no subprocess, no keychain."""
+
+    def test_returns_the_value_field(self):
+        self.assertEqual(
+            ls.read_literal({"value": "41c2b051", "env": "CLOUDFLARE_ACCOUNT_ID"}),
+            "41c2b051",
+        )
+
+    def test_missing_value_field_returns_none(self):
+        self.assertIsNone(ls.read_literal({"env": "CLOUDFLARE_ACCOUNT_ID"}))
+
+    def test_empty_value_returns_none(self):
+        self.assertIsNone(ls.read_literal({"value": "", "env": "X"}))
+
+    def test_non_string_value_is_coerced(self):
+        self.assertEqual(ls.read_literal({"value": 42, "env": "X"}), "42")
+
+    def test_never_touches_the_keychain(self):
+        with unittest.mock.patch.object(ls, "_read_keychain") as reader:
+            ls.read_literal({"value": "public-id", "env": "X"})
+        reader.assert_not_called()
+
+    def test_wired_in_readers_and_produces_an_export_line(self):
+        keys = [
+            {"reader": "literal", "value": "41c2b051", "env": "CLOUDFLARE_ACCOUNT_ID"}
+        ]
+        self.assertEqual(
+            ls.resolve_env_exports(keys), ["export CLOUDFLARE_ACCOUNT_ID=41c2b051"]
+        )
+
+
 class TestReadAwsSecretsmanager(unittest.TestCase):
     def test_always_returns_none_not_implemented(self):
         self.assertIsNone(
