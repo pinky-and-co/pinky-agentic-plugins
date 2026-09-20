@@ -40,12 +40,101 @@ class TestFailoverPredicates(unittest.TestCase):
         self.assertFalse(ma.is_timeout("Mistral API error (400): invalid_model"))
 
 
+class TestCliModelIdJoin(unittest.TestCase):
+    """`run_pool`'s cli branch must always join `entry["provider"]` onto `entry["model"]` before
+    handing it to `pi --model` — the module's own comment documents `'<provider>/<id>'`, but a
+    bare `entry["model"]` was passed straight through. Confirmed live: `openai/gpt-oss-120b`
+    exists under both `groq` and `openrouter`; with no provider prefix, `pi` silently resolved to
+    a third provider, `baseten`, which had no key configured — a routing bug that presented as a
+    missing-key error."""
+
+    def _expected_cmd(self, model_arg: str) -> list[str]:
+        return [
+            "pi",
+            "-p",
+            "--model",
+            model_arg,
+            "-t",
+            "read",
+            "--no-session",
+            "--thinking",
+            "off",
+            "p",
+        ]
+
+    @unittest.mock.patch("subprocess.run")
+    def test_simple_id(self, mock_run):
+        entry = {
+            "name": "gemini-3.6-flash",
+            "kind": "cli",
+            "provider": "gemini",
+            "model": "gemini-3.6-flash",
+            "capacity_tier": "sonnet",
+        }
+        mock_run.return_value = unittest.mock.MagicMock(
+            stdout="ok", stderr="", returncode=0
+        )
+        ma.run_pool([entry], "p")
+        mock_run.assert_called_once_with(
+            self._expected_cmd("gemini/gemini-3.6-flash"),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+
+    @unittest.mock.patch("subprocess.run")
+    def test_id_already_containing_a_slash_gets_two_levels_after_the_provider(
+        self, mock_run
+    ):
+        entry = {
+            "name": "local-qwen3.5",
+            "kind": "cli",
+            "provider": "mlx",
+            "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
+            "capacity_tier": "haiku",
+        }
+        mock_run.return_value = unittest.mock.MagicMock(
+            stdout="ok", stderr="", returncode=0
+        )
+        ma.run_pool([entry], "p")
+        mock_run.assert_called_once_with(
+            self._expected_cmd("mlx/mlx-community/Qwen3.5-9B-MLX-4bit"),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+
+    @unittest.mock.patch("subprocess.run")
+    def test_ambiguous_id_is_prefixed_by_its_own_entrys_provider(self, mock_run):
+        entry = {
+            "name": "groq-gpt-oss-120b",
+            "kind": "cli",
+            "provider": "groq",
+            "model": "openai/gpt-oss-120b",
+            "capacity_tier": "sonnet",
+        }
+        mock_run.return_value = unittest.mock.MagicMock(
+            stdout="ok", stderr="", returncode=0
+        )
+        ma.run_pool([entry], "p")
+        mock_run.assert_called_once_with(
+            self._expected_cmd("groq/openai/gpt-oss-120b"),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
+        )
+
+
 class TestModelAdversarialCLI(unittest.TestCase):
     def setUp(self):
         self.cli_entry = {
             "name": "pi-model",
             "kind": "cli",
-            "model": "anthropic/claude-3-5-sonnet",
+            "provider": "anthropic",
+            "model": "claude-3-5-sonnet",
             "tools": "read",
             "capacity_tier": "opus",
         }

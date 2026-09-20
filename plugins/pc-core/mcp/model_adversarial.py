@@ -22,7 +22,10 @@ Each entry:
     kind           "http" (called via call_provider), "cli" (called via pi), or "offline" (routed to the separate
                    zero-egress `offline` MCP tool instead — never called from here; see model_offline.py)
     provider       informational label, also used for direct-vs-aggregator ordering
-    model          provider-side model id
+    model          provider-side model id — a router id (openrouter's `free`) answers with a
+                   different underlying model on each call: fine for a mechanical check that only
+                   asks whether the answer is right, wrong for anywhere the answering model itself
+                   must stay fixed across calls, e.g. a benchmark
     base_url       OpenAI-compatible chat-completions endpoint (absent/ignored for kind="offline")
     api_key_env    env var checked first; also the macOS keychain service name (see Auth below)
     capacity_tier  rough Claude-tier equivalence: "haiku" | "sonnet" | "opus"
@@ -179,6 +182,19 @@ def resolve_api_key_for(entry: dict[str, Any]) -> str | None:
     if env_key:
         return env_key.strip()
     return read_macos_keychain(entry["api_key_env"])
+
+
+def cli_model_id(entry: dict[str, Any]) -> str:
+    """The `--model` argument for a `kind: "cli"` pool entry: `<provider>/<id>`.
+
+    Always joined, even when `entry["model"]` already contains a `/` (an org/name id, e.g. MLX's
+    `mlx-community/Qwen3.5-9B-MLX-4bit` — `pi` accepts any number of segments after the first).
+    Skipping this join lets `pi` guess among every provider that serves the same bare id: confirmed
+    live, `openai/gpt-oss-120b` exists under both `groq` and `openrouter`, and an unprefixed
+    `--model openai/gpt-oss-120b` resolved to a third provider, `baseten`, with no key configured
+    — a routing bug that read as a missing-key error.
+    """
+    return f"{entry['provider']}/{entry['model']}"
 
 
 def is_rate_limited(text: str) -> bool:
@@ -424,7 +440,7 @@ def run_pool(
                     "pi",
                     "-p",
                     "--model",
-                    model,
+                    cli_model_id(entry),
                     "-t",
                     tools,
                     "--no-session",
