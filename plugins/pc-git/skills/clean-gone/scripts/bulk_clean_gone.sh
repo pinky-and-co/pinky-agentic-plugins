@@ -109,25 +109,26 @@ clean_repo() {
     done
 
     if [ "$failed" -gt 0 ]; then
-        printf '  ❌ %-28s %d supprimée(s), %d échec(s) (voir git branch -vv)\n' \
+        [ "$QUIET" = true ] || printf '  ❌ %-28s %d supprimée(s), %d échec(s) (voir git branch -vv)\n' \
             "$name" "$removed" "$failed"
         FAILED_TOTAL=$((FAILED_TOTAL + 1))
     elif [ "$removed" -gt 0 ]; then
-        printf '  ✅ %-28s %d branche(s) [gone] supprimée(s)\n' "$name" "$removed"
+        [ "$QUIET" = true ] || printf '  ✅ %-28s %d branche(s) [gone] supprimée(s)\n' "$name" "$removed"
         OK_TOTAL=$((OK_TOTAL + 1))
     else
-        printf '  •  %-28s rien à nettoyer\n' "$name"
+        [ "$QUIET" = true ] || printf '  •  %-28s rien à nettoyer\n' "$name"
         NOTHING_TOTAL=$((NOTHING_TOTAL + 1))
     fi
 }
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
-ROOT="$PWD"; FILTER=""
+ROOT="$PWD"; FILTER=""; QUIET=false
 while [ $# -gt 0 ]; do
     case "$1" in
         --root) ROOT="$2"; shift 2 ;;
         --repo) FILTER="$2"; shift 2 ;;
         --all)  shift ;;  # no-op : absence de --repo fait déjà tout le root
+        --quiet) QUIET=true; shift ;;  # Supprime la sortie per-repo
         *)      die "option inconnue : $1" ;;
     esac
 done
@@ -144,5 +145,5 @@ done < <(discover_repos "$ROOT")
 
 [ "$scanned" -gt 0 ] || die "aucun dépôt git trouvé sous $ROOT (ou filtre --repo $FILTER sans correspondance)"
 
-printf '\n✅ %d   •  %d   ❌ %d\n' "$OK_TOTAL" "$NOTHING_TOTAL" "$FAILED_TOTAL"
+[ "$QUIET" = true ] || printf '\n✅ %d   •  %d   ❌ %d\n' "$OK_TOTAL" "$NOTHING_TOTAL" "$FAILED_TOTAL"
 [ "$FAILED_TOTAL" -eq 0 ]
