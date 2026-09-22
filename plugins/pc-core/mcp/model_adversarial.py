@@ -33,6 +33,10 @@ Each entry:
     concurrency    max simultaneous tasks, or null for no known limit (offline: 1 — one local
                    machine; recorded for a future concurrent dispatcher, not enforced here — nothing
                    dispatches more than one task at a time yet)
+    local          true if this entry runs on this machine (e.g. MLX-SERVE via `kind: "cli"`) —
+                   absent/false means a network call. Both selectors below tie-break on it so a
+                   local entry is tried before an equally-ranked remote one, without special-casing
+                   `provider == "mlx"` by name.
 
 Auth (per entry): ``api_key_env`` from the process env, else the macOS keychain item stored under
 that same name. This server's process never receives ``$CLAUDE_ENV_FILE`` (Claude Code sources it
@@ -80,7 +84,7 @@ _TIER_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
 # Prédicats de bascule pour le chemin "cli" du pool (`run_pool`, plus bas). Un seul critère :
 # bascule quand le fournisseur refuse de servir, jamais quand le modèle a servi mais répondu mal.
 _RATE_LIMIT_RE = re.compile(r"\b429\b")
-_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory")
+_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
 _TIMEOUT_RE = re.compile(r"\btimed out\b")
 
@@ -143,7 +147,13 @@ def select_for_adversarial(
         if e["kind"] != "offline"
         and tier_rank(e["capacity_tier"]) >= tier_rank(floor_tier)
     ]
-    return sorted(candidates, key=lambda e: 0 if e["provider"] != "openrouter" else 1)
+    return sorted(
+        candidates,
+        key=lambda e: (
+            0 if e.get("local", False) else 1,
+            0 if e["provider"] != "openrouter" else 1,
+        ),
+    )
 
 
 def select_for_delegation(
@@ -162,7 +172,11 @@ def select_for_delegation(
     ]
     return sorted(
         candidates,
-        key=lambda e: (not e.get("free_tier", False), tier_rank(e["capacity_tier"])),
+        key=lambda e: (
+            not e.get("free_tier", False),
+            tier_rank(e["capacity_tier"]),
+            not e.get("local", False),
+        ),
     )
 
 
@@ -210,13 +224,17 @@ def is_rate_limited(text: str) -> bool:
 
 
 def is_out_of_memory(text: str) -> bool:
-    """Whether `text` shows the MLX-SERVE preflight `503 out_of_memory` signal.
+    """Whether `text` shows an MLX-SERVE memory refusal — either the preflight `503
+    out_of_memory` (before the model loads) or the runtime `400` "requires ~NMB GPU memory but
+    only ~MMB available" (the model is loaded, but this prompt's KV cache doesn't fit) — confirmed
+    live: a large context size accepted at the config level still hits this second form under
+    real memory pressure. Both mean the same thing to a caller: this entry can't serve right now.
 
     Args:
         text: the combined output of one `pi` invocation.
 
     Returns:
-        True if an `out_of_memory` marker is present.
+        True if either memory-refusal marker is present.
     """
     return bool(_OUT_OF_MEMORY_RE.search(text))
 

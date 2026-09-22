@@ -23,6 +23,17 @@ class TestFailoverPredicates(unittest.TestCase):
         self.assertTrue(ma.is_out_of_memory('{"error":{"type":"out_of_memory"}}'))
         self.assertFalse(ma.is_out_of_memory('{"error":{"type":"invalid_model"}}'))
 
+    def test_out_of_memory_runtime_gpu_form(self):
+        # Forme réelle reproduite en direct : 400, pas 503, une fois le modèle déjà chargé —
+        # le préflight `out_of_memory` ne couvre pas ce refus mémoire au moment du prompt.
+        self.assertTrue(
+            ma.is_out_of_memory(
+                '400: {"message":"Prompt (3595 tokens) requires ~2775MB GPU memory but '
+                'only ~1373MB available. Reduce prompt size or use a smaller model.",'
+                '"type":"invalid_request_error","param":null,"code":400}'
+            )
+        )
+
     def test_insufficient_credit(self):
         self.assertTrue(
             ma.is_insufficient_credit(

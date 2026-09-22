@@ -58,6 +58,27 @@ OFFLINE = {
     "free_tier": True,
     "concurrency": 1,
 }
+LOCAL_MLX = {
+    "name": "local-qwen3.5",
+    "kind": "cli",
+    "provider": "mlx",
+    "model": "mlx-community/Qwen3.5-9B-MLX-4bit",
+    "capacity_tier": "haiku",
+    "free_tier": True,
+    "concurrency": 1,
+    "local": True,
+}
+CLOUD_HAIKU = {
+    "name": "openrouter-free",
+    "kind": "cli",
+    "provider": "openrouter",
+    "model": "free",
+    "base_url": "https://openrouter.ai/api/v1/chat/completions",
+    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
+    "capacity_tier": "haiku",
+    "free_tier": True,
+    "concurrency": None,
+}
 POOL = [MISTRAL, GLM, KIMI, OFFLINE]
 
 
@@ -75,6 +96,14 @@ class TestSelectForAdversarial(unittest.TestCase):
     def test_empty_pool_yields_empty_list(self):
         self.assertEqual(ma.select_for_adversarial([]), [])
 
+    def test_local_sorts_before_direct_and_aggregator(self):
+        # File order puts the cloud entries first — `local` must win regardless.
+        pool = [MISTRAL, KIMI, LOCAL_MLX]
+        self.assertEqual(
+            ma.select_for_adversarial(pool, floor_tier="haiku"),
+            [LOCAL_MLX, MISTRAL, KIMI],
+        )
+
 
 class TestSelectForDelegation(unittest.TestCase):
     def test_free_before_paid_then_cheapest_capable_tier(self):
@@ -86,6 +115,23 @@ class TestSelectForDelegation(unittest.TestCase):
     def test_floor_excludes_offline_for_a_sonnet_task(self):
         self.assertEqual(
             ma.select_for_delegation(POOL, task_tier="sonnet"), [KIMI, GLM, MISTRAL]
+        )
+
+    def test_local_beats_cloud_at_equal_tier_and_free_tier(self):
+        # File order puts the cloud entry first — `local` must still come first in the result.
+        pool = [CLOUD_HAIKU, LOCAL_MLX]
+        self.assertEqual(
+            ma.select_for_delegation(pool, task_tier="haiku"), [LOCAL_MLX, CLOUD_HAIKU]
+        )
+
+    def test_tier_rank_still_wins_over_locality(self):
+        # A local entry at a higher tier never jumps ahead of a cheaper cloud entry —
+        # "just capable enough" (tier_rank) stays the primary criterion, `local` only
+        # tie-breaks within the same (free_tier, tier_rank) group.
+        local_sonnet = {**LOCAL_MLX, "capacity_tier": "sonnet"}
+        self.assertEqual(
+            ma.select_for_delegation([local_sonnet, CLOUD_HAIKU], task_tier="haiku"),
+            [CLOUD_HAIKU, local_sonnet],
         )
 
 
