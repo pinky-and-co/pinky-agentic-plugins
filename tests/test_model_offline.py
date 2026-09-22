@@ -67,6 +67,17 @@ class TestIsOutOfMemory(unittest.TestCase):
     def test_absent(self):
         self.assertFalse(mo.is_out_of_memory('{"error":{"type":"invalid_model"}}'))
 
+    def test_detects_runtime_gpu_memory_form(self):
+        # Forme réelle reproduite en direct : 400, pas 503, une fois le modèle déjà chargé —
+        # le préflight `out_of_memory` ne couvre pas ce refus mémoire au moment du prompt.
+        self.assertTrue(
+            mo.is_out_of_memory(
+                '400: {"message":"Prompt (3595 tokens) requires ~2775MB GPU memory but '
+                'only ~1373MB available. Reduce prompt size or use a smaller model.",'
+                '"type":"invalid_request_error","param":null,"code":400}'
+            )
+        )
+
 
 class TestCallMlx(unittest.TestCase):
     """`call_mlx` must build the exact `pi` command `run_pool`'s cli branch already uses."""

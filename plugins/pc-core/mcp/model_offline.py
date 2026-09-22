@@ -54,7 +54,7 @@ PROVIDER = "mlx"
 DEFAULT_TOKEN_BUDGET = 3000
 
 # Signal de refus préflight de MLX-SERVE (corps 503).
-_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory")
+_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 
 
 class FailureHint(NamedTuple):
@@ -93,8 +93,11 @@ def build_prompt(task: str, files: list[str]) -> str:
 
 
 def is_out_of_memory(text: str) -> bool:
-    """Whether `text` (a failed `pi` call's combined stdout+stderr) shows MLX-SERVE's preflight
-    `503 out_of_memory` refusal.
+    """Whether `text` (a failed `pi` call's combined stdout+stderr) shows an MLX-SERVE memory
+    refusal — either the preflight `503 out_of_memory` (before the model loads) or the runtime
+    `400` "requires ~NMB GPU memory but only ~MMB available" (the model is loaded, but this
+    prompt's KV cache doesn't fit) — confirmed live: a large context size accepted at the config
+    level still hits this second form under real memory pressure.
     """
     return bool(_OUT_OF_MEMORY_RE.search(text))
 
