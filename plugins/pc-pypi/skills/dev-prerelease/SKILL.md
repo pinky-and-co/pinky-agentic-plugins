@@ -101,7 +101,8 @@ python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,
    - `offline` (MCP tool `mcp__plugin_pc-core_pc-core-models__offline`) with `task` = the emitted
      prompt. It returns a status line and a local file path (never the answer). `Read` that file —
      you are allowed to: the prompt carries only the feature doc and public signatures, no private
-     bodies. A `[offline] BLOCKED` line means no local Ollama — fall through.
+     bodies. A `[offline] BLOCKED` line means MLX-SERVE unreachable, out of memory, or `pi` missing
+     — fall through.
    - `panel` (MCP tool `mcp__plugin_pc-core_pc-core-models__panel`) with `tasks` = `[the prompt]`
      and `models` = `["mistral-medium-3.5"]`. Pin that model — it is the one cloud pool entry the
      reconcile oracle passes; the unpinned default does not. A `[panel] BLOCKED` line means no key —

@@ -20,13 +20,13 @@ told to emit only problem lines, so a mention = a flag. Crude, but it is exactly
 does at triage, and it is stable across prose phrasings.
 
 Transport: ``--transport offline`` runs the local
-Ollama model via ``model_offline`` (zero egress, the primary reconcile path); ``--transport panel``
+MLX-SERVE model via ``model_offline`` (zero egress, the primary reconcile path); ``--transport panel``
 runs a pool sonnet/opus model via ``model_panel`` (the cloud fallback). ``--model`` overrides the
 pick on either path. NOT a pytest: it calls a live model and scores a probabilistic output — the
 scorer LOGIC is unit-tested in ``tests/test_reconcile_oracle.py`` with a fake.
 
 Usage:
-    reconcile_oracle.py --transport offline                 # score every case on local Ollama
+    reconcile_oracle.py --transport offline                 # score every case on local MLX-SERVE
     reconcile_oracle.py --transport panel --model mistral-medium-3.5
     reconcile_oracle.py --transport offline --show recall_broken_promises   # dump one full answer
 """
@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -178,30 +179,25 @@ def run_case(case: Case, call: Callable[[str], str], brief_mode: str = "all") ->
 
 
 def _offline_call(model: str | None) -> Callable[[str], str]:
-    """A ``prompt -> answer`` function backed by the local Ollama model (``model_offline``).
+    """A ``prompt -> answer`` function backed by MLX-SERVE via ``model_offline``.
 
     Args:
-        model: an explicit Ollama model name, or None for the ``model_offline`` default.
+        model: an explicit MLX model id, or None for the ``model_offline`` default.
 
     Returns:
-        The call function; exits the process if Ollama is not reachable.
+        The call function; exits the process on any call's failure — MLX-SERVE has no cheap
+        upfront reachability check (see ``model_offline``'s own docstring), only a failure the
+        real call surfaces.
     """
-    url = model_offline.resolve_url()
     resolved = model_offline.resolve_model(model)
-    hint = model_offline.preflight(url, resolved)
-    if hint:
-        sys.exit(f"[oracle] offline transport unavailable — {hint}")
-    num_predict = model_offline.resolve_max_tokens(None)
+    timeout = max(900, model_offline.resolve_max_tokens(None) // 3)
 
     def call(prompt: str) -> str:
-        r = model_offline.call_ollama(
-            url,
-            resolved,
-            prompt,
-            model_offline.num_ctx_for(prompt, num_predict),
-            num_predict,
-        )
-        return r.get("response") or ""
+        try:
+            return model_offline.call_mlx(resolved, prompt, timeout)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+            fh = model_offline.failure_hint(e, resolved, timeout)
+            sys.exit(f"[oracle] offline transport unavailable — {fh.hint}")
 
     return call
 
