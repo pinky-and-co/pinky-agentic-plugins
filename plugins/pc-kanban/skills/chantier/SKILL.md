@@ -236,7 +236,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     condition.
 8. Execute the card's work — or, if step 7's grill gate routed to `pc-kanban:grill`, run that
   first, then set the goal (step 7's **Goal** bullet) from the converged `## Done when`, then
-  execute.
+  execute. "Execute" means, per `finishing-a-card.md` § "Who writes the work": a worker session
+  delegates real code changes to `Agent(subagent_type: "pc-kanban:card-worker")` and then reviews,
+  fixes findings, and closes the loop — it does not write the implementation in its own turn,
+  except for the single-mechanical-fix carve-out that section names.
 
 ## Rules
 
