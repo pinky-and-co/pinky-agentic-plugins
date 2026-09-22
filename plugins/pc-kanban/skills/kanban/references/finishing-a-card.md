@@ -15,6 +15,34 @@ code, a real diff pasted — never merely true. `/goal`'s evaluator reads only t
 transcript, never a file or a command it would run itself; an assertion without the underlying
 output in the transcript fools it exactly the way an unverified sub-agent report would.
 
+### Who writes the work
+
+A worker session (`chantier` SKILL.md step 7's **Role** bullet) does not write a card's
+implementation in its own turn. Real code changes go to `Agent(subagent_type:
+"pc-kanban:card-worker")`, called directly by the worker session itself — **never** via the
+`spawn-workers` skill, whose own Rule 1 forbids a worker from invoking it on its own repo (that
+skill relays a card to a *different* repo it doesn't already occupy). The generated prompt still
+needs `spawn-workers`'s fixed block — this repo's own conventions **probed from disk**, never
+retyped from memory (`pc_kanban_spawn_workers.py::repo_conventions_block`: test location, test
+command, gate command; a 2026-09-20 witness run measured exactly what a hand-typed version of this
+missed) — plus the card's absolute path and `## Done when` as the generated block. The agent
+inherits nothing from this session's context.
+
+The loop this closes: worker → hand-back → review (below) → renvoi if KO → acceptance → gates/tests
+green → `pc-git:commit`/`commit-and-pr` → card closed. The session that dispatched the worker never
+writes the implementation itself and never commits mid-loop — a commit outside the `commit`/
+`commit-and-pr` fork skips the gitmoji/commit-message convention those forks load. Two renvois
+maximum: a worker that misses the same point twice on the same card is a brief problem, not a work
+problem — stop and bring it to the user rather than trying a third time.
+
+**Carve-out — a single mechanical fix stays in-session.** A narrow regex widened by one
+alternative, a docstring correction, a single-file caller update with no design decision left open
+— bounded the same way `chantier` SKILL.md's own "obviously mechanical" test is (a doc typo, a
+rename, a one-line config change). Not the same rule as step 6's dispatch decision (that one picks
+between an existing skill and building a new one when none fits; `card-worker` already exists and
+already covers this shape) — a separate, narrower exception: spawning an agent for a one-line fix
+costs more than it returns, so the session makes it directly instead.
+
 ### Reviewing before declaring a card done
 
 The reviewer must not be the generator — a same-model self-check inherits its own blind spots, and
