@@ -7,9 +7,9 @@
 
 Each tool is a thin wrapper around a sibling module's functions (`model_offline.py`,
 `model_adversarial.py`) — no reasoning happens here, this is the deterministic-fetch layer the LLM
-boundary calls for. Neither tool spawns a model on Claude Code's side: `offline` calls a local Ollama
-model, `adversarial` calls a non-Claude cloud model, and both return plain text — no subagent, no
-extra model floor to declare.
+boundary calls for. Neither tool spawns a model on Claude Code's side: `offline` calls a local
+MLX-SERVE model via `pi`, `adversarial` calls a non-Claude cloud model, and both return plain text —
+no subagent, no extra model floor to declare.
 
 Declared via `.mcp.json` at the plugin root (`command: uv, args: [run, --script, .../server.py]`) —
 `uv` resolves the `mcp` dependency on first run from this file's own inline metadata above, no
@@ -18,9 +18,9 @@ install step for the plugin installer beyond having `uv`.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
-import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -41,7 +41,7 @@ def offline(
     model: str | None = None,
     max_tokens: int | None = None,
 ) -> str:
-    """Run a task on a local Ollama model, zero cloud egress.
+    """Run a task on a local MLX-SERVE model via `pi`, zero cloud egress.
 
     Use when a file's content must never reach the cloud model (privacy guard denial, sensitive
     data). Returns ONLY a status line + the local output path — never the answer content. Read the
@@ -50,40 +50,23 @@ def offline(
     """
     files = files or []
     resolved_model = model_offline.resolve_model(model)
-    url = model_offline.resolve_url()
     resolved_max_tokens = model_offline.resolve_max_tokens(max_tokens)
-
-    hint = model_offline.preflight(url, resolved_model)
-    if hint:
-        return f"[offline] BLOCKED — {hint}"
 
     prompt = model_offline.build_prompt(task, files)
     t = time.time()
     timeout = max(900, resolved_max_tokens // 3)
     try:
-        r = model_offline.call_ollama(
-            url,
-            resolved_model,
-            prompt,
-            model_offline.num_ctx_for(prompt, resolved_max_tokens),
-            resolved_max_tokens,
-            timeout,
-        )
-    except (urllib.error.URLError, OSError) as e:
-        return f"[offline] ERROR — Ollama call failed: {e}"
+        body = model_offline.call_mlx(resolved_model, prompt, timeout)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        fh = model_offline.failure_hint(e, resolved_model, timeout)
+        label = "BLOCKED" if fh.code == 2 else "ERROR"
+        return f"[offline] {label} — {fh.hint}"
     dur = time.time() - t
 
     out = model_offline.default_out()
-    body = (
-        r.get("response")
-        or "(empty response — gemma drowns if `think` is not disabled)"
-    )
-    out.write_text(body, encoding="utf-8")
+    out.write_text(body or "(empty response)", encoding="utf-8")
 
-    return (
-        f"[offline] {resolved_model} · {dur:.0f}s · in={r.get('prompt_eval_count')} "
-        f"out={r.get('eval_count')} · done={r.get('done_reason')} → {out}"
-    )
+    return f"[offline] {resolved_model} · {dur:.0f}s → {out}"
 
 
 @m.tool()

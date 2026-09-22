@@ -352,9 +352,11 @@ pinky-agentic-plugins/
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
 │   ├── test_model_adversarial_cli.py
+│   ├── test_model_offline.py
 │   ├── test_model_panel.py
 │   ├── test_next_card_recommendation.py
 │   ├── test_orchestrator_freeze.py
+│   ├── test_pc_core_server_offline.py
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pending_gate.py
 │   ├── test_pi_review.py

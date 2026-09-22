@@ -2,50 +2,66 @@
 """Local runtime — run a task on a LOCAL open-weight model, zero cloud egress.
 
 Escape-hatch pattern: when a task must not reach the cloud model (sensitive file content, a privacy
-guard denial), this runs the task against a local Ollama model instead — so neither the file content
-nor the model's answer ever reaches the cloud model. The answer is written to a local file; **only a
+guard denial), this runs the task against a local model instead — so neither the file content nor
+the model's answer ever reaches the cloud model. The answer is written to a local file; **only a
 status line (never the answer body) goes to stdout**, so a caller capturing this script's output
 cannot leak the result back into the cloud context. That invariant is the whole point — the `offline`
-MCP tool (`mcp/server.py`) that wraps this module's functions must never return the file content
-either, only the status line.
+MCP tool (`mcp/pc_core_server.py`) that wraps this module's functions must never return the file
+content either, only the status line.
 
 Dual-use: this module is both a standalone CLI (below) and an importable library for
-`mcp/server.py`, which calls its functions directly rather than shelling out to a subprocess.
+`mcp/pc_core_server.py`, which calls its functions directly rather than shelling out to a subprocess.
 
-Runtime: Ollama HTTP API, stdlib only. Default model ``gemma4:12b``; ``think:false`` is mandatory or
-gemma drowns and returns an empty response. Override with ``--model`` / ``PINKY_LOCAL_MODEL`` and
-``PINKY_OLLAMA_URL``.
+Runtime: MLX-SERVE via the `pi` CLI (`subprocess.run(["pi", "-p", "--model", "mlx/<id>", ...])`) —
+the same `kind: "cli"` shape `model_adversarial.py`'s pool already uses for local models, resolved
+against the `mlx` provider declared in `~/.pi/agent/models.json` (this script depends on that
+declaration, never duplicates it). Default model ``mlx-community/gemma-4-12b-it-4bit``.
+``--thinking off`` is mandatory — a thinking pass drowns a small local model into an empty answer.
+Override with ``--model`` / ``PINKY_LOCAL_MODEL``.
 
-The default 3000-token generation cap fits summarization/analysis tasks but silently truncates
-(``done=length``) a task that must reproduce something close to the full input (e.g. redacting PII
-in place across a whole document) — override with ``--max-tokens`` / ``PINKY_LOCAL_MAX_TOKENS`` when
-the task is reproductive rather than a distillation.
+MLX-SERVE's own preflight (a `503` body containing `out_of_memory`) fires on the generation request
+itself, not on a cheap upfront ping — a separate pre-call would load the model twice, the exact RAM
+contention this runtime exists to avoid. `failure_hint()` classifies the real call's failure after
+the fact instead: a human-readable hint, never an exception that propagates.
+
+``--max-tokens`` / ``PINKY_LOCAL_MAX_TOKENS`` only scales this script's own subprocess timeout
+budget for a task expected to run long — `pi` itself exposes no generation-length flag to cap.
 
 Usage:
-    pinky_local.py --task "<task>" [--file PATH ...] [--out PATH] [--model NAME] [--max-tokens N]
+    model_offline.py --task "<task>" [--file PATH ...] [--out PATH] [--model NAME] [--max-tokens N]
 """
 
 from __future__ import annotations
 
 import argparse
-import json
+import errno
 import os
+import re
+import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
+# Le codepage console par défaut de Windows (cp1252, pas UTF-8) ne peut pas encoder les ✓/⚠ ci-dessous.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-DEFAULT_MODEL = "gemma4:12b"
-DEFAULT_URL = "http://localhost:11434"
-NUM_PREDICT = 3000
-TEMPERATURE = 0.2
+DEFAULT_MODEL = "mlx-community/gemma-4-12b-it-4bit"
+PROVIDER = "mlx"
+DEFAULT_TOKEN_BUDGET = 3000
+
+# Signal de refus préflight de MLX-SERVE (corps 503).
+_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
+
+
+class FailureHint(NamedTuple):
+    """A `call_mlx` failure classified into an exit code + a fixed, caller-safe hint string."""
+
+    code: int
+    hint: str
 
 
 def resolve_model(cli_model: str | None = None) -> str:
@@ -53,17 +69,15 @@ def resolve_model(cli_model: str | None = None) -> str:
     return cli_model or os.environ.get("PINKY_LOCAL_MODEL") or DEFAULT_MODEL
 
 
-def resolve_url() -> str:
-    """Ollama base URL from PINKY_OLLAMA_URL, default localhost — always a LOCAL endpoint (zero egress)."""
-    return os.environ.get("PINKY_OLLAMA_URL", DEFAULT_URL).rstrip("/")
-
-
 def resolve_max_tokens(cli_value: int | None = None) -> int:
-    """CLI flag > PINKY_LOCAL_MAX_TOKENS env > default. Same override pattern as resolve_model."""
+    """CLI flag > PINKY_LOCAL_MAX_TOKENS env > default. A token *budget* used only to scale this
+    script's own subprocess timeout (`main`'s `timeout = max(900, max_tokens // 3)`) — never a
+    generation cap, `pi` has none. Same override pattern as `resolve_model`.
+    """
     if cli_value is not None:
         return cli_value
     env = os.environ.get("PINKY_LOCAL_MAX_TOKENS")
-    return int(env) if env else NUM_PREDICT
+    return int(env) if env else DEFAULT_TOKEN_BUDGET
 
 
 def build_prompt(task: str, files: list[str]) -> str:
@@ -78,57 +92,66 @@ def build_prompt(task: str, files: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def num_ctx_for(prompt: str, num_predict: int = NUM_PREDICT) -> int:
-    """Pick a context window that fits the prompt + generation. Floor 8192, cap 32768."""
-    est = len(prompt) // 3 + num_predict  # ~3 chars/token, coarse but safe upward
-    for n in (8192, 16384, 32768):
-        if est <= n:
-            return n
-    return 32768
+def is_out_of_memory(text: str) -> bool:
+    """Whether `text` (a failed `pi` call's combined stdout+stderr) shows an MLX-SERVE memory
+    refusal — either the preflight `503 out_of_memory` (before the model loads) or the runtime
+    `400` "requires ~NMB GPU memory but only ~MMB available" (the model is loaded, but this
+    prompt's KV cache doesn't fit) — confirmed live: a large context size accepted at the config
+    level still hits this second form under real memory pressure.
+    """
+    return bool(_OUT_OF_MEMORY_RE.search(text))
 
 
-def preflight(url: str, model: str) -> str | None:
-    """Return a human hint if Ollama isn't running or the model isn't pulled, else None. Never raises."""
-    try:
-        tags = json.load(urllib.request.urlopen(f"{url}/api/tags", timeout=5))  # nosec B310 — url is resolve_url()'s local Ollama endpoint (PINKY_OLLAMA_URL/localhost), never remote/attacker-controlled
-    except (urllib.error.URLError, OSError):
-        return (
-            f"Ollama not reachable at {url}. Start it (`ollama serve` / `brew services start ollama`) "
-            f"and pull the model (`ollama pull {model}`). This runtime needs a local Ollama — nothing "
-            f"is sent to the cloud."
-        )
-    names = {m.get("name", "").split(":")[0] for m in tags.get("models", [])}
-    if model.split(":")[0] not in names:
-        return f"Model `{model}` not pulled. Run `ollama pull {model}` first."
-    return None
+def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
+    """Run `pi -p --model 'mlx/<id>' -t read --no-session --thinking off "<prompt>"`, return stdout.
 
-
-def call_ollama(
-    url: str,
-    model: str,
-    prompt: str,
-    num_ctx: int,
-    num_predict: int = NUM_PREDICT,
-    timeout: int = 900,
-) -> dict:
-    """POST to Ollama /api/generate (non-streaming, think:false mandatory for gemma). Returns the JSON."""
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "think": False,  # mandatory for gemma4 (thinking model → empty response otherwise); harmless elsewhere
-        "options": {
-            "num_ctx": num_ctx,
-            "num_predict": num_predict,
-            "temperature": TEMPERATURE,
-        },
-    }
-    req = urllib.request.Request(
-        f"{url}/api/generate",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+    Raises `subprocess.CalledProcessError` / `subprocess.TimeoutExpired` / `OSError` on failure —
+    callers classify those via `failure_hint()`, never letting `pi`'s own stdout/stderr (which may
+    echo the sensitive prompt) escape past a fixed status string.
+    """
+    cmd = [
+        "pi",
+        "-p",
+        "--model",
+        f"{PROVIDER}/{model}",
+        "-t",
+        "read",
+        "--no-session",
+        "--thinking",
+        "off",
+        prompt,
+    ]
+    res = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=timeout, check=True
     )
-    return json.load(urllib.request.urlopen(req, timeout=timeout))  # nosec B310 — req.full_url is built from resolve_url()'s local Ollama endpoint, never remote/attacker-controlled
+    return res.stdout
+
+
+def failure_hint(exc: Exception, model: str, timeout: int) -> FailureHint:
+    """Map a `call_mlx` failure to a `FailureHint` — the hint is always a fixed string, NEVER `pi`'s
+    own output (it may echo the sensitive prompt). `2` = BLOCKED (environment/provider refused to
+    serve), `1` = ERROR (the call started but didn't finish). Never raises.
+    """
+    if isinstance(exc, subprocess.CalledProcessError):
+        combined = f"{exc.stdout or ''}\n{exc.stderr or ''}"
+        if is_out_of_memory(combined):
+            return FailureHint(
+                2, f"MLX-SERVE out of memory ({model}). Free RAM and retry."
+            )
+        return FailureHint(
+            2, f"MLX-SERVE call failed (exit {exc.returncode}); check it's running."
+        )
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return FailureHint(1, f"MLX-SERVE call timed out after {timeout}s.")
+    if isinstance(exc, FileNotFoundError):
+        return FailureHint(2, "`pi` not found on PATH; install it first.")
+    if isinstance(exc, OSError) and exc.errno == errno.E2BIG:
+        return FailureHint(
+            2,
+            "Prompt too large for a single command-line argument (OS argv limit). "
+            "Shrink the task or the --file inputs.",
+        )
+    return FailureHint(2, f"MLX-SERVE call failed to start: {exc.__class__.__name__}.")
 
 
 def resolve_session_prefix() -> str:
@@ -161,41 +184,28 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     model = resolve_model(args.model)
-    url = resolve_url()
     max_tokens = resolve_max_tokens(args.max_tokens)
-
-    hint = preflight(url, model)
-    if hint:
-        print(f"[local] BLOCKED — {hint}", file=sys.stderr)
-        return 2
 
     prompt = build_prompt(args.task, args.files)
     t = time.time()
     timeout = max(
         900, max_tokens // 3
-    )  # scale past the 900s default for large --max-tokens reproductive tasks
+    )  # dépasse les 900s par défaut pour une grande tâche reproductive via --max-tokens
     try:
-        r = call_ollama(
-            url, model, prompt, num_ctx_for(prompt, max_tokens), max_tokens, timeout
-        )
-    except (urllib.error.URLError, OSError) as e:
-        print(f"[local] ERROR — Ollama call failed: {e}", file=sys.stderr)
-        return 1
+        body = call_mlx(model, prompt, timeout)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        fh = failure_hint(e, model, timeout)
+        label = "BLOCKED" if fh.code == 2 else "ERROR"
+        print(f"[local] {label} — {fh.hint}", file=sys.stderr)
+        return fh.code
     dur = time.time() - t
 
     out = Path(args.out) if args.out else default_out()
-    body = (
-        r.get("response")
-        or "(empty response — gemma drowns if `think` is not disabled)"
-    )
-    out.write_text(body, encoding="utf-8")
+    out.write_text(body or "(empty response)", encoding="utf-8")
 
-    # ZERO-EGRESS INVARIANT: emit the path + metrics only — NEVER the answer body (it may derive from
-    # sensitive input, and this stdout is captured back into the cloud context).
-    print(
-        f"[local] {model} · {dur:.0f}s · in={r.get('prompt_eval_count')} "
-        f"out={r.get('eval_count')} · done={r.get('done_reason')} → {out}"
-    )
+    # INVARIANT ZÉRO-EGRESS : n'émettre que le chemin + les métriques — JAMAIS le corps de la
+    # réponse (il peut dériver d'une entrée sensible, et ce stdout est recapturé côté cloud).
+    print(f"[local] {model} · {dur:.0f}s → {out}")
     return 0
 
 
