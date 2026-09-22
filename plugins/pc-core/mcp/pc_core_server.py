@@ -113,13 +113,9 @@ def adversarial(
             {**model_adversarial._DEFAULT_POOL[0], "model": override, "name": override}
         ]
     elif resolved_tier:
-        entries = [
-            e
-            for e in model_adversarial.select_for_delegation(
-                model_adversarial.load_pool(), resolved_tier
-            )
-            if e["kind"] in ("http", "cli")
-        ]
+        entries = model_adversarial.select_for_delegation_with_fallback(
+            model_adversarial.load_pool(), resolved_tier
+        )
     else:
         entries = model_adversarial.select_for_adversarial(
             model_adversarial.load_pool()

@@ -180,6 +180,32 @@ def select_for_delegation(
     )
 
 
+_TIER_ORDER = ("opus", "sonnet", "haiku")
+
+
+def select_for_delegation_with_fallback(
+    pool: list[dict[str, Any]], tier: str
+) -> list[dict[str, Any]]:
+    """`select_for_delegation` at `tier`, degrading one tier at a time when the pool has
+    nothing at or above it — a diff routed to `opus` (`review_complexity.tier_for`) must not
+    go BLOCKED just because the configured pool tops out at `sonnet`, confirmed live: every
+    entry in this workspace's own `settings.pinky.json` sits at `sonnet` or below.
+
+    Restricted to `kind` in (`http`, `cli`) at every tier tried — the two callable through
+    this pool path, `offline` going through the separate `offline` tool instead.
+    """
+    start = _TIER_ORDER.index(tier) if tier in _TIER_ORDER else 0
+    for fallback_tier in _TIER_ORDER[start:]:
+        candidates = [
+            e
+            for e in select_for_delegation(pool, fallback_tier)
+            if e["kind"] in ("http", "cli")
+        ]
+        if candidates:
+            return candidates
+    return []
+
+
 def resolve_model(cli_model: str | None = None) -> str | None:
     """CLI flag > PINKY_ADVERSARIAL_MODEL env > None (no override — use the pool)."""
     return cli_model or os.environ.get("PINKY_ADVERSARIAL_MODEL")
@@ -464,6 +490,7 @@ def run_pool(
                     "--no-session",
                     "--thinking",
                     "off",
+                    "--",
                     prompt,
                 ]
                 res = subprocess.run(
