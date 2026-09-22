@@ -70,6 +70,7 @@ class TestCliModelIdJoin(unittest.TestCase):
             "--no-session",
             "--thinking",
             "off",
+            "--",
             "p",
         ]
 
@@ -138,6 +139,27 @@ class TestCliModelIdJoin(unittest.TestCase):
             check=True,
         )
 
+    @unittest.mock.patch("subprocess.run")
+    def test_a_prompt_starting_with_dashes_is_not_mistaken_for_an_option(
+        self, mock_run
+    ):
+        # `build_prompt` always starts with "--- TASK ---" — confirmed live: without a `--`
+        # separator, `pi` reads that as an unknown option instead of the positional prompt.
+        entry = {
+            "name": "mistral-medium-3.5",
+            "kind": "cli",
+            "provider": "mistral",
+            "model": "mistral-medium-3.5",
+            "capacity_tier": "sonnet",
+        }
+        prompt = ma.build_prompt("review this", [])
+        mock_run.return_value = unittest.mock.MagicMock(
+            stdout="ok", stderr="", returncode=0
+        )
+        ma.run_pool([entry], prompt)
+        called_args = mock_run.call_args[0][0]
+        self.assertEqual(called_args[-2:], ["--", prompt])
+
 
 class TestModelAdversarialCLI(unittest.TestCase):
     def setUp(self):
@@ -171,6 +193,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             "--no-session",
             "--thinking",
             "off",
+            "--",
             self.prompt,
         ]
         mock_run.assert_called_once_with(

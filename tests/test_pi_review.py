@@ -300,6 +300,7 @@ class TestReviewPoint(unittest.TestCase):
                 "--no-session",
                 "--thinking",
                 "off",
+                "--",
                 pi_review.build_prompt("/repo", "First thing", "detail"),
             ],
             capture_output=True,

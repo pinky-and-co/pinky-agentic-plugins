@@ -135,6 +135,36 @@ class TestSelectForDelegation(unittest.TestCase):
         )
 
 
+class TestSelectForDelegationWithFallback(unittest.TestCase):
+    """A diff-derived `opus` request must not go BLOCKED just because the configured pool
+    tops out at `sonnet` — confirmed live: every pool entry in this workspace's own
+    `settings.pinky.json` is `sonnet` or below, so a large/security-sensitive diff always
+    resolved to zero candidates before this fallback existed."""
+
+    def test_no_fallback_needed_when_the_exact_tier_is_present(self):
+        self.assertEqual(
+            ma.select_for_delegation_with_fallback([MISTRAL, KIMI], "opus"), [MISTRAL]
+        )
+
+    def test_falls_back_to_the_next_tier_when_the_pool_tops_out_below_it(self):
+        self.assertEqual(ma.select_for_delegation_with_fallback([KIMI], "opus"), [KIMI])
+
+    def test_falls_all_the_way_to_haiku_when_nothing_higher_exists(self):
+        self.assertEqual(
+            ma.select_for_delegation_with_fallback([CLOUD_HAIKU], "opus"),
+            [CLOUD_HAIKU],
+        )
+
+    def test_offline_entries_are_excluded_even_after_falling_back(self):
+        offline_sonnet = {**OFFLINE, "capacity_tier": "sonnet"}
+        self.assertEqual(
+            ma.select_for_delegation_with_fallback([offline_sonnet], "opus"), []
+        )
+
+    def test_empty_pool_yields_empty_list(self):
+        self.assertEqual(ma.select_for_delegation_with_fallback([], "opus"), [])
+
+
 class TestLoadPool(unittest.TestCase):
     """Exercises the real `policy_lib` ascending walk — no mock of the resolver itself."""
 
