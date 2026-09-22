@@ -246,7 +246,8 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── requirements.md
 │   │   │   │   │   └── story-template.md
 │   │   │   │   ├── scripts/
-│   │   │   │   │   └── next_card_recommendation.py
+│   │   │   │   │   ├── next_card_recommendation.py
+│   │   │   │   │   └── pi_review.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── permission-change/
 │   │   │   │   ├── scripts/
@@ -356,6 +357,7 @@ pinky-agentic-plugins/
 │   ├── test_orchestrator_freeze.py
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pending_gate.py
+│   ├── test_pi_review.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
 │   ├── test_pr_overlap_guard.py

@@ -33,6 +33,10 @@ Each entry:
     concurrency    max simultaneous tasks, or null for no known limit (offline: 1 — one local
                    machine; recorded for a future concurrent dispatcher, not enforced here — nothing
                    dispatches more than one task at a time yet)
+    local          true if this entry runs on this machine (e.g. MLX-SERVE via `kind: "cli"`) —
+                   absent/false means a network call. Both selectors below tie-break on it so a
+                   local entry is tried before an equally-ranked remote one, without special-casing
+                   `provider == "mlx"` by name.
 
 Auth (per entry): ``api_key_env`` from the process env, else the macOS keychain item stored under
 that same name. This server's process never receives ``$CLAUDE_ENV_FILE`` (Claude Code sources it
@@ -143,7 +147,13 @@ def select_for_adversarial(
         if e["kind"] != "offline"
         and tier_rank(e["capacity_tier"]) >= tier_rank(floor_tier)
     ]
-    return sorted(candidates, key=lambda e: 0 if e["provider"] != "openrouter" else 1)
+    return sorted(
+        candidates,
+        key=lambda e: (
+            0 if e.get("local", False) else 1,
+            0 if e["provider"] != "openrouter" else 1,
+        ),
+    )
 
 
 def select_for_delegation(
@@ -162,7 +172,11 @@ def select_for_delegation(
     ]
     return sorted(
         candidates,
-        key=lambda e: (not e.get("free_tier", False), tier_rank(e["capacity_tier"])),
+        key=lambda e: (
+            not e.get("free_tier", False),
+            tier_rank(e["capacity_tier"]),
+            not e.get("local", False),
+        ),
     )
 
 
