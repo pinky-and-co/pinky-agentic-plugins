@@ -84,7 +84,7 @@ _TIER_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
 # Prédicats de bascule pour le chemin "cli" du pool (`run_pool`, plus bas). Un seul critère :
 # bascule quand le fournisseur refuse de servir, jamais quand le modèle a servi mais répondu mal.
 _RATE_LIMIT_RE = re.compile(r"\b429\b")
-_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory")
+_OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
 _TIMEOUT_RE = re.compile(r"\btimed out\b")
 
@@ -224,13 +224,17 @@ def is_rate_limited(text: str) -> bool:
 
 
 def is_out_of_memory(text: str) -> bool:
-    """Whether `text` shows the MLX-SERVE preflight `503 out_of_memory` signal.
+    """Whether `text` shows an MLX-SERVE memory refusal — either the preflight `503
+    out_of_memory` (before the model loads) or the runtime `400` "requires ~NMB GPU memory but
+    only ~MMB available" (the model is loaded, but this prompt's KV cache doesn't fit) — confirmed
+    live: a large context size accepted at the config level still hits this second form under
+    real memory pressure. Both mean the same thing to a caller: this entry can't serve right now.
 
     Args:
         text: the combined output of one `pi` invocation.
 
     Returns:
-        True if an `out_of_memory` marker is present.
+        True if either memory-refusal marker is present.
     """
     return bool(_OUT_OF_MEMORY_RE.search(text))
 
