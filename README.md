@@ -223,6 +223,7 @@ pinky-agentic-plugins/
 │   │   ├── hooks/
 │   │   │   ├── card-discipline/
 │   │   │   │   └── card_discipline.py
+│   │   │   ├── agent_log_writer.py
 │   │   │   ├── hooks.json
 │   │   │   ├── orchestrator_freeze.py
 │   │   │   ├── pc_kanban_secret_patterns.py
@@ -336,6 +337,7 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── smoke_model_pool.py
 │   ├── test_activate_plugins_for_repos.py
+│   ├── test_agent_log_writer.py
 │   ├── test_anonymize.py
 │   ├── test_apply_reintegrate.py
 │   ├── test_branch_guard.py
