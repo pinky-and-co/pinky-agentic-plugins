@@ -76,5 +76,5 @@
 
 - **`pinky-agentic-plugins-private`** — no external-derived content (proprietary domain knowledge
   only); no NOTICE/CREDITS needed.
-- **Blocking-before-public** (FR-0023-01): re-run this table against each repo's actual state right
+- **Blocking-before-public**: re-run this table against each repo's actual state right
   before flipping any repo public — the plugin set moves.

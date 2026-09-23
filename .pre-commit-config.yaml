@@ -155,6 +155,16 @@ repos:
         language: python
         pass_filenames: true
 
+  # ── Requirement ids: dead references to a story outside the repo (blocking) ─
+  - repo: local
+    hooks:
+      - id: check-requirement-ids
+        name: "[REQ-ID] No requirement ids in repo files"
+        entry: python scripts/hooks/check_requirement_ids.py
+        language: python
+        types: [text]
+        exclude: ^(scripts/hooks/|hygiene/hooks/|tests/test_check_(narrative_comments|requirement_ids)\.py$)
+
   # ── Narrated history in comments and docstrings (warn-only) ───────────────
   # `verbose: true` sur tout hook warn-only : sans lui, pre-commit masque la sortie d'un hook qui passe.
   - repo: local

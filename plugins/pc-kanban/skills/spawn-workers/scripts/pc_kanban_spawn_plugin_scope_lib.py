@@ -271,24 +271,9 @@ def clear_state(session_id: str) -> None:
         pass
 
 
-# --- Shared per-directory backup, session-counted by PID liveness -----------
-#
-# `sync_plugin_scope.py` runs as a short-lived subprocess per hook event
-# (SessionStart/CwdChanged/SessionEnd) — an `fcntl.flock` taken in one of
-# these processes releases at that process's exit, long before the actual
-# Claude Code session (a different, long-lived process) ends. It can never
-# signal "this session is still open". The session's real lifetime is instead
-# tracked by recording, per session, the PID of `sync_plugin_scope.py`'s
-# parent process at `SessionStart` (`os.getppid()` — the long-lived `claude`
-# process itself, since `hooks.json` execs this script directly, no shell
-# in between) and checking that PID's liveness later — a crashed session's
-# entry is then detected and purged without needing anything to stay running.
-#
-# Known residual gap, accepted: unlike a held flock, a PID can be reused by
-# an unrelated process after the real session exits — in that narrow window
-# `_is_alive` reports a crashed session as live, delaying its purge until
-# the unrelated process also exits. Rare on a modern OS's PID space, but not
-# eliminated the way the (infeasible) flock design would have.
+# A session is alive while the `claude` process recorded at SessionStart (`os.getppid()`) is:
+# a flock would release with each short-lived hook process. A reused PID can delay a crashed
+# session's purge until that unrelated process exits.
 
 
 def _dir_key(settings_local: Path) -> str:

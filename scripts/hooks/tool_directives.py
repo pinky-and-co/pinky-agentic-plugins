@@ -148,6 +148,7 @@ NO_DIRECTIVE_HOOKS: list[str] = [
     "check-latex-notation",
     "check-forbidden-keywords",
     "check-narrative-comments",
+    "check-requirement-ids",
     "commit-msg-format",
     "validate-frontmatter",
     "validate-plugins-strict",
