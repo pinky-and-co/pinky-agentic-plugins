@@ -34,6 +34,9 @@ ordinary repo-scoped session shouldn't otherwise have — see the `permission-ch
 - **`stop_handoff.py`** — resolves the boards and agent-log directories mounted on this machine;
   other plugins' guards (see `pc-kanban:permission-change`'s board-dir carve-out) shell out to it
   rather than re-deriving board discovery.
+- **`agent_log_writer.py`** — on SessionEnd, when the session committed or touched the board but
+  wrote nothing under `_AGENT_LOG/`, hands the entry to a detached headless writer (haiku) fed a
+  scrubbed transcript excerpt; the writer may decide nothing is worth logging.
 - **`orchestrator_freeze.py`** — freezes an orchestrator session out of the repos it dispatches to.
 - **`pc_kanban_secret_patterns.py`** — secret-pattern definitions shared by this plugin's guards.
 

@@ -17,9 +17,9 @@ Design:
 - carries the anti-secrets directive: commit subjects are scrubbed before being written.
 
 This deliberately omits a signal comparing the card's declared `model:` to the model that actually
-ran the turn: a `Stop`/`SessionEnd` event carries `session_id`/`cwd`/`hook_event_name`/
-`stop_hook_active`, no model name, no documented `transcript_path` for these events — left out
-rather than faked.
+ran the turn: the event itself carries no model name. The transcript at the event's
+`transcript_path` does (per assistant message), but on `Stop` it is written asynchronously and may
+lag the current turn — not wired in rather than read from a possibly stale file.
 
 Python 3.11+, stdlib only. Exit code is always 0 (a hook failure must never block a Stop/SessionEnd).
 """
