@@ -102,6 +102,7 @@ pinky-agentic-plugins/
 │   │   └── skills/
 │   │       ├── code-conventions/
 │   │       │   ├── references/
+│   │       │   │   ├── cli.md
 │   │       │   │   ├── lib-api.md
 │   │       │   │   ├── repro.md
 │   │       │   │   └── web.md
