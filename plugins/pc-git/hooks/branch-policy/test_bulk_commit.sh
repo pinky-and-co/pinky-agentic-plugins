@@ -712,5 +712,21 @@ check "concurrency capped at BULK_CI_PARALLEL (3)" \
     "$([ "$maxconc" -le 3 ] && [ "$maxconc" -ge 2 ] && echo ok || echo "got $maxconc")" ok
 rm -rf "$PROOT"
 
+# ── Hooks : `prek` tourne DANS le repo scanné, jamais dans le répertoire d'appel ──
+HROOT="$(mktemp -d)"; hookbin="$HROOT/bin"; mkdir -p "$hookbin"
+mkdir -p "$HROOT/hotel" && git -C "$HROOT/hotel" init -q -b develop
+git -C "$HROOT/hotel" commit -q --allow-empty -m init
+printf 'repos: []\n' > "$HROOT/hotel/.pre-commit-config.yaml"
+printf 'change\n' > "$HROOT/hotel/README.md"
+cat > "$hookbin/prek" <<HOOK
+#!/usr/bin/env bash
+pwd -P >> "$HROOT/prek_cwd"
+HOOK
+chmod +x "$hookbin/prek"
+(cd / && PATH="$hookbin:$PATH" "$SCRIPT" plan --root "$HROOT" --repo hotel >/dev/null 2>&1)
+check "prek runs inside the scanned repo, not the caller's directory" \
+    "$(head -1 "$HROOT/prek_cwd" 2>/dev/null)" "$(cd "$HROOT/hotel" && pwd -P)"
+rm -rf "$HROOT"
+
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"
