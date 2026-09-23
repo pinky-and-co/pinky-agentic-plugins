@@ -63,7 +63,7 @@ priority: 1-5          # 1 (low) to 5 (urgent); omitted = 3
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
-requirements: []          # requirement ids this card traces to, e.g. [FR-0042-01]; [] = none
+requirements: []          # requirement ids this card traces to, e.g. [<id>, …]; [] = none
 blocked_by: <card-slug> | null         # a hard dependency, never a mere ordering preference
 ---
 ```

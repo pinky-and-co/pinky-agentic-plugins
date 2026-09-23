@@ -22,7 +22,7 @@ NOISE_FILES=".DS_Store Thumbs.db desktop.ini"
 # revu depuis que le watch tourne par lots parallèles (`BULK_CI_PARALLEL` ci-dessous) :
 # le coût réel plafonne à `ceil(N / BULK_CI_PARALLEL) × durée CI typique`, pas
 # `N × BULK_CI_TIMEOUT` — ce dernier ne se paie que si un repo traîne réellement
-# jusqu'au plafond, pas comme cas moyen. Borne dure (NFR-0025-07) :
+# jusqu'au plafond, pas comme cas moyen. Borne dure :
 # `ceil(N / BULK_CI_PARALLEL) × (BULK_CI_STARTUP_DELAY + BULK_CI_TIMEOUT)` — chaque
 # membre d'un lot est borné par `_bounded_cmd` + le `sleep` fixe de départ, et le
 # `wait` par lot ne rend la main qu'après le plus lent. D'où : watch systématique.
@@ -315,8 +315,8 @@ open_pr() {
 # ── watch CI (`--watch-ci`) ───────────────────────────────────────────────────
 # Après l'ouverture d'une PR/MR, attend le verdict CI et l'émet en UNE ligne
 # machine `<verdict>\t<url>\t<log|->` — verdict ∈ pass | fail | no-ci | timeout.
-# Watch par défaut : sans `--no-watch-ci`, ces appels ont lieu systématiquement (revu
-# depuis NFR-0023-18 — voir le commentaire sur `BULK_CI_TIMEOUT` plus haut).
+# Watch par défaut : sans `--no-watch-ci`, ces appels ont lieu systématiquement —
+# voir le commentaire sur `BULK_CI_TIMEOUT` plus haut.
 #
 # GitHub : pas de boucle de polling maison — `gh pr checks --watch --fail-fast`
 # EST la primitive (elle boucle et sort à la première défaite).
@@ -428,7 +428,7 @@ _watch_ci_github() {
 
 # ── watch CI — GitLab ─────────────────────────────────────────────────────────
 # `iid` de la MR, extrait de son URL (`…/-/merge_requests/<iid>`) — insensible au
-# nombre de (sous-)groupes devant, IMP-0023-28.
+# nombre de (sous-)groupes devant.
 _mr_iid() {
     # `|| true` : sans match, le pipeline sort non-zéro — `_watch_ci_gitlab` gère un
     # `iid` vide (→ `timeout`), mais sous `set -e` l'affectation `iid="$(_mr_iid …)"`
@@ -438,7 +438,7 @@ _mr_iid() {
 
 # Nombre de pipelines DE LA MR (jamais de branche) : `0` si la liste est vide,
 # vide si l'appel échoue (auth, projet introuvable, JSON illisible…) — distinct
-# de `0`, jamais traité comme `no-ci` (FR-0023-49 : `no-ci` n'est tranché que
+# de `0`, jamais traité comme `no-ci` (`no-ci` n'est tranché que
 # sur une liste vide confirmée, pas sur une erreur).
 # `glab api` n'a pas de `--jq` (flag inexistant sur `glab` réel, ex. 1.116.0 —
 # testé en direct, `ERROR: Unknown flag: --jq` ; masqué jusqu'ici par un stub de
@@ -467,7 +467,7 @@ _gl_status() {
 
 # Boucle de secours si `--wait` est indisponible/cassé, ou hang sur un statut
 # non-terminal : poll intervalle fixe 15s, plafonné à `BULK_CI_TIMEOUT` depuis
-# `$3`, PUIS une seule re-probe de grâce (NFR-0023-22 — pas une primitive
+# `$3`, PUIS une seule re-probe de grâce (pas une primitive
 # réutilisable, ce chemin est le seul appelant).
 _gl_poll_fallback() {
     local repo="$1" iid="$2" started="$3" status elapsed
@@ -486,7 +486,7 @@ _gl_poll_fallback() {
 
 # `skipped` au niveau pipeline recouvre deux cas indiscernables sans regarder les
 # jobs : aucune CI réelle (vrai `no-ci`) et un gate manuel jamais déclenché — un
-# choix de process, pas un échec CI (FR-0023-48). GitLab n'expose jamais
+# choix de process, pas un échec CI. GitLab n'expose jamais
 # `status: "manual"` au niveau pipeline pour ce cas (confirmé sur witness réel,
 # repo `pinky-ci-watch-witness` MR `!3` : pipeline `skipped`, job `manual`) —
 # seul le job le porte, d'où ce détour par `…/pipelines/<id>/jobs`.
@@ -503,7 +503,7 @@ _gl_has_manual_job() {
 }
 
 # Extrait de trace (≤80 lignes) du premier job `failed` du pipeline de la MR.
-# `-` si le pipeline, le job ou la trace ne sont pas retrouvables (FR-0023-50).
+# `-` si le pipeline, le job ou la trace ne sont pas retrouvables.
 _gl_fail_log() {
     local repo="$1" iid="$2" pid jid logf
     _bounded_cmd glab "$repo" "$BULK_CI_PROBE_TIMEOUT" \
@@ -537,7 +537,7 @@ _watch_ci_gitlab() {
     [ -n "$iid" ] || { printf 'timeout\t%s\t-\n' "$url"; return 0; }
 
     # `no-ci` tranché AVANT tout wait/poll : liste de pipelines vide confirmée,
-    # jamais sur un appel en échec (FR-0023-49). Re-probe de grâce avant de
+    # jamais sur un appel en échec. Re-probe de grâce avant de
     # conclure : même course post-`mr create` que côté GitHub (cli/cli#7401),
     # et déterminante ici sous « Merged Results Pipelines » (#1017) où le
     # pipeline de MR n'existe qu'après l'événement MR — review bloquante #1.
@@ -560,7 +560,7 @@ _watch_ci_gitlab() {
             success|failed|canceled|skipped|manual) : ;;
             # `--wait` borné par `_bounded_cmd` peut revenir avant un statut
             # terminal (hang sur `manual`/`blocked`, erreur `glab` ambiguë) :
-            # une dernière poll de secours avant de conclure (IMP-0023-27).
+            # une dernière poll de secours avant de conclure.
             *) status="$(_gl_poll_fallback "$repo" "$iid" "$started")" ;;
         esac
     fi
@@ -578,7 +578,7 @@ _watch_ci_gitlab() {
                 printf 'no-ci\t%s\t-\n' "$url"
             fi ;;
         # statut vide/non-terminal persistant (auth KO, projet introuvable…) :
-        # jamais `pass` par défaut (IMP-0023-27).
+        # jamais `pass` par défaut.
         *) printf 'timeout\t%s\t-\n' "$url" ;;
     esac
 }

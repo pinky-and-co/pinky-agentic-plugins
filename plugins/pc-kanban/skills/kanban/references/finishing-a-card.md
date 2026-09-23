@@ -123,7 +123,7 @@ scoping first, never proposed directly), filtered and ordered:
 1. **Exclude** any card whose `blocked_by` points at a card not yet `done` — never propose a
    blocked card, however old. A card missing `date:` is malformed; flag it instead of guessing a
    sort position. **Exception**: a `blocked_by` pointing at a card now `dropped` (§ below) is never
-   excluded this way — it goes through the obsolescence check instead (FR-0025-67), because a dead
+   excluded this way — it goes through the obsolescence check instead, because a dead
    blocker calls the blocked card's own premise into question, not just its availability.
 2. **Sort the rest into two buckets**: cards whose `blocked_by` was resolved in *this same session*
    first, then everything else. Within each bucket, sort by `priority` (skill `kanban` § Card
@@ -139,13 +139,13 @@ skill's job either.
 ### Flagging cards the closed card just made obsolete
 
 The same moment — the closed card's own subject is now known in full — is the cheapest point to
-catch another open card whose premise it just erased (FR-0025-64). No script, no semantic search:
+catch another open card whose premise it just erased. No script, no semantic search:
 read the just-closed card next to the titles/filenames of every other open card (`0-ideas/`,
 `1-todo/`, `2-selected-for-dev/`) **in the same chantier**, and judge whether any is now clearly
 superseded. Two triggers, same proposal:
 
 - **Direct supersession** — the just-closed card's own content makes another open card's need moot.
-- **Dead blocker** (FR-0025-67) — a card `blocked_by` the just-closed card, where the closed card
+- **Dead blocker** — a card `blocked_by` the just-closed card, where the closed card
   was itself `dropped` rather than finished `done`, is not silently unblocked and not left blocked
   forever: name it explicitly, next to the reason (its blocker is dead), same proposal turn as the
   next-card candidate above.
@@ -159,9 +159,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/drop_card.sh" <card-path> <r
 
 Lands the card in `_ARCHIVE/CHANTIER{NNNN}-dropped/`, never `-done/` (that name presupposes
 finished work) — refuses a `4-done/` source, any other column moves, a reason is mandatory and
-gets appended to the card's own body before the move (FR-0025-66). A `sert` chain whose parent is
+gets appended to the card's own body before the move. A `sert` chain whose parent is
 now found `dropped` there degrades exactly like a parent "not found" (`chantier/SKILL.md` step 7):
-say so plainly, append no `auto-parent` block, never invent one (ASS-0025-68).
+say so plainly, append no `auto-parent` block, never invent one.
 
 **Nothing looks obsolete** → say nothing extra; this check produces no line when it finds nothing,
 same discipline as the next-card proposal's own silence.

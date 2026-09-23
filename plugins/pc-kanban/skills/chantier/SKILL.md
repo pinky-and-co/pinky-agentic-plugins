@@ -56,7 +56,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     not paste it whole), then the newest one or two. Not blocking; the fix is a `reviewed (…)` line
     on each, `n/a — mechanical` if there was nothing to review.
   - if the `--list-stale` output names any card in **this chantier**: one line — the count and the
-    most idle one or two. Not blocking (FR-0025-65) — a fallback net behind the closing-time
+    most idle one or two. Not blocking — a fallback net behind the closing-time
     obsolescence check (`finishing-a-card.md` § "Flagging cards the closed card just made
     obsolete"), never a reason to stop and re-triage on its own.
   - if `4-done/` is non-empty: flag it and offer to fold + archive. Only after the user confirms
@@ -111,7 +111,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     nothing here needs a runtime first-time check. If `sert` is non-null, locate the parent card
     (`<sert>.md`) in *this same chantier's* `4-done/` or, once archived, its own
     `_ARCHIVE/CHANTIER<this-chantier's-number>-done/YYYY-MM-DD_<sert>.md` — or, if the parent was
-    `dropped` rather than finished (FR-0025-66), `_ARCHIVE/CHANTIER<this-chantier's-number>-dropped/
+    `dropped` rather than finished, `_ARCHIVE/CHANTIER<this-chantier's-number>-dropped/
     YYYY-MM-DD_<sert>.md`. Never glob other chantiers' archives.
     - Parent found, `done`, and carries both a `## Done when` and a `## Why` → append a managed
       block to the child's body:
@@ -125,7 +125,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
       Idempotent by construction — this bullet only ever runs once per card (see above) — never
       hand-edit between the markers on a later resume.
     - Parent found but has no `## Why` → append the block with `## Done when` only, same markers.
-    - Parent not `done` yet, `dropped` (ASS-0025-68), not found (purged without archive), or
+    - Parent not `done` yet, `dropped`, not found (purged without archive), or
       `sert` orphaned → say so plainly, append nothing, and move on; never invent parent content.
     - A card ending up without this block (older cards, `sert: null`, parent unavailable) parses
       exactly as before — this is appended body content, not a frontmatter field.
