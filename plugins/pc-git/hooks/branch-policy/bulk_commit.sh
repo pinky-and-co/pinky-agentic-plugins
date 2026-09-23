@@ -146,7 +146,7 @@ run_precommit_hooks() {
         return 2
     fi
 
-    if ! "$runner" run --all-files; then
+    if ! (cd "$repo" && "$runner" run --all-files); then
         return 1
     fi
     return 0
