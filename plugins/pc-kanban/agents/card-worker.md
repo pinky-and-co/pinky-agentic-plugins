@@ -1,6 +1,6 @@
 ---
 name: card-worker
-description: Works exactly one kanban card in one repo, from a fully generated prompt (spawn-workers) — reads and edits code, runs the target repo's own tests and gates, never touches git history or the board. Use only via `spawn-workers`; never invoke it with a hand-typed task.
+description: Works exactly one kanban card in one repo, from a fully generated prompt — reads and edits code, runs the target repo's own tests and gates, never touches git history or the board. Invoked by `spawn-workers` from an orchestrator, or directly by a worker session taking a card (skill `chantier`), with the fixed block `pc_kanban_spawn_workers.py` generates; never with a hand-typed task.
 tools: Read, Glob, Grep, LS, Write, Edit, MultiEdit, NotebookEdit, Bash(git checkout:*), Bash(git status:*), Bash(git diff:*), Bash(uv run pytest:*), Bash(pytest:*), Bash(prek run:*), Bash(pre-commit run:*)
 model: sonnet
 color: blue
