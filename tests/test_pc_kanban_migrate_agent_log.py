@@ -33,7 +33,7 @@ class TestMigrate(unittest.TestCase):
         self.old = self.root / "_AGENT_LOG"
         self.new = self.kanban / "_AGENT_LOG"
 
-    def test_moves_every_file_with_identical_content_and_leaves_relative_symlink(self):
+    def test_moves_every_file_with_identical_content_and_removes_the_sibling(self):
         self.old.mkdir()
         (self.old / "2026-09-08_claude-code-Perrine_x.md").write_text("hello\n")
         (self.old / "2026-09-09_claude-code-Perrine_y.md").write_text("world\n")
@@ -41,7 +41,6 @@ class TestMigrate(unittest.TestCase):
         summary = mal.migrate(self.kanban)
 
         self.assertIn("migrated", summary)
-        self.assertFalse(self.new.is_symlink())
         self.assertTrue(self.new.is_dir())
         self.assertEqual(
             (self.new / "2026-09-08_claude-code-Perrine_x.md").read_text(), "hello\n"
@@ -49,24 +48,20 @@ class TestMigrate(unittest.TestCase):
         self.assertEqual(
             (self.new / "2026-09-09_claude-code-Perrine_y.md").read_text(), "world\n"
         )
-        self.assertTrue(self.old.is_symlink())
+        self.assertFalse(self.old.exists())
 
-    def test_symlink_is_relative_not_absolute(self):
-        self.old.mkdir()
-        (self.old / "note.md").write_text("x\n")
-        mal.migrate(self.kanban)
-        target = self.old.readlink()
-        self.assertFalse(target.is_absolute())
-        self.assertEqual(target.as_posix(), "_KANBAN/_AGENT_LOG")
-
-    def test_write_through_old_path_lands_in_nested_dir(self):
+    def test_write_through_old_path_after_migration_creates_a_disjoint_dir(self):
+        """No compat is kept — a write through the old path after migration lands in a fresh,
+        disjoint directory, never the nested one. Accepted tradeoff, not a bug: coordinating
+        every writer's plugin-cache refresh is out of this script's reach."""
         self.old.mkdir()
         (self.old / "note.md").write_text("x\n")
         mal.migrate(self.kanban)
 
+        self.old.mkdir()
         (self.old / "fresh.md").write_text("new entry\n")
 
-        self.assertEqual((self.new / "fresh.md").read_text(), "new entry\n")
+        self.assertFalse((self.new / "fresh.md").exists())
 
     def test_rerun_after_migration_is_a_noop(self):
         self.old.mkdir()
@@ -91,13 +86,18 @@ class TestMigrate(unittest.TestCase):
             mal.migrate(self.kanban)
         self.assertIn("both", str(cm.exception))
 
-    def test_symlink_pointing_elsewhere_is_refused(self):
+    def test_existing_symlink_at_old_path_is_left_untouched(self):
+        """A leftover compat symlink from a board migrated before compat was dropped — this
+        script no longer creates one, and no longer manages one it finds either."""
         other = self.root / "elsewhere"
         other.mkdir()
         self.old.symlink_to(other, target_is_directory=True)
-        with self.assertRaises(SystemExit) as cm:
-            mal.migrate(self.kanban)
-        self.assertIn("not the expected", str(cm.exception))
+
+        summary = mal.migrate(self.kanban)
+
+        self.assertIn("leftover", summary)
+        self.assertTrue(self.old.is_symlink())
+        self.assertEqual(self.old.resolve(), other.resolve())
 
     def test_new_as_a_stray_file_is_refused_not_a_crash(self):
         self.old.mkdir()
@@ -105,19 +105,6 @@ class TestMigrate(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             mal.migrate(self.kanban)
         self.assertIn("not a directory", str(cm.exception))
-
-    def test_interrupted_migration_recovers_the_missing_symlink(self):
-        """Simulates a process killed between `rename` and `symlink_to`: content already at
-        `new`, `old` gone entirely. A rerun must recreate the symlink, not say "nothing to
-        migrate" — that would silently fork content the next time an old-path writer runs."""
-        self.new.mkdir()
-        (self.new / "note.md").write_text("already moved\n")
-
-        summary = mal.migrate(self.kanban)
-
-        self.assertIn("recreated", summary)
-        self.assertTrue(self.old.is_symlink())
-        self.assertEqual((self.old / "note.md").read_text(), "already moved\n")
 
 
 if __name__ == "__main__":

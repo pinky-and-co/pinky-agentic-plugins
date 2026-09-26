@@ -313,7 +313,7 @@ class TestInit(InitTestCase):
         nested = kanban / "_AGENT_LOG"
         self.assertTrue(nested.is_dir())
         self.assertEqual((nested / "entry.md").read_text(encoding="utf-8"), "hello\n")
-        self.assertTrue(sibling.is_symlink())
+        self.assertFalse(sibling.exists())
 
     def test_rerun_on_an_already_scaffolded_root_changes_nothing(self):
         pki.init(self.root)

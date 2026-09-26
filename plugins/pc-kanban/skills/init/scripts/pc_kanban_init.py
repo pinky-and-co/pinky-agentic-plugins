@@ -309,10 +309,10 @@ def _migrate_agent_log(kanban: Path) -> str:
 
     The script itself missing/unable to launch is tolerated (nothing to migrate from either way,
     safe to let the caller's own `mkdir` land an empty nested dir) — but a nonzero exit from a
-    script that DID run means it detected a real problem (both paths real, a foreign symlink, an
-    interrupted rename) and refused; silently proceeding to `mkdir` an empty nested dir right next
-    to a still-populated sibling would create exactly the split-journal state this exists to
-    prevent.
+    script that DID run means it detected a real problem (both paths real, an unexpected file
+    where a directory was expected) and refused; silently proceeding to `mkdir` an empty nested
+    dir right next to a still-populated sibling would create exactly the split-journal state this
+    exists to prevent.
 
     Args:
         kanban: the board's `_KANBAN/` root, already created.
