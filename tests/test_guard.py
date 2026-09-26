@@ -3,6 +3,7 @@
 python3 -m unittest discover tests
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -57,10 +58,22 @@ class TestBoardDirCarveOut(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.base = Path(self._tmp.name).resolve()
+        # `primary` is the board the session discovers as its own nearest ancestor; `ws` is a
+        # second board declared for it in `kanban_boards` — the write-carve-out under test is
+        # about THAT foreign board, not the session's own.
+        self.primary = self.base / "primary"
+        (self.primary / "_KANBAN").mkdir(parents=True)
         self.ws = self.base / "ws"
         (self.ws / "_KANBAN" / "CHANTIER0025" / "3-in-progress").mkdir(parents=True)
-        self.session_root = self.base / "repo"
+        self.session_root = self.primary / "repo"
         self.session_root.mkdir()
+        self.home = self.base / "home"
+        settings = self.home / ".claude" / "settings.pinky.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(
+            json.dumps({"kanban_boards": {str(self.primary): [str(self.ws)]}}),
+            encoding="utf-8",
+        )
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -69,7 +82,7 @@ class TestBoardDirCarveOut(unittest.TestCase):
         return unittest.mock.patch.dict(
             os.environ,
             {
-                "KANBAN_ROOTS": str(self.ws),
+                "HOME": str(self.home),
                 "CLAUDE_PROJECT_DIR": str(self.session_root),
             },
         )
@@ -128,7 +141,10 @@ class TestBoardDirCarveOut(unittest.TestCase):
         card = self.ws / "_KANBAN" / "CHANTIER0025" / "3-in-progress" / "x.md"
         with unittest.mock.patch.dict(
             os.environ,
-            {"KANBAN_ROOTS": str(self.ws), "CLAUDE_PROJECT_DIR": str(self.ws)},
+            {
+                "HOME": str(self.base / "home-empty"),  # isolates SETTINGS_PINKY_PATH
+                "CLAUDE_PROJECT_DIR": str(self.ws),
+            },
         ):
             self.assertIsNone(self._decide(card, root=self.ws))
 

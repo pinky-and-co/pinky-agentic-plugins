@@ -86,30 +86,8 @@ def read_event() -> dict:
         return {}
 
 
-# ── Declared boards — read from the nearest *.code-workspace's folders[] ─────
-CODE_WORKSPACE_GLOB = "*.code-workspace"
-ROOTS_ENV = "KANBAN_ROOTS"
-
-
-def _parse_roots(raw: list[str], base: Path) -> list[Path]:
-    """One dir per entry; blanks and `#` comments skipped; relative entries resolved against `base`."""
-    roots: list[Path] = []
-    for item in raw:
-        item = item.strip()
-        if not item or item.startswith("#"):
-            continue
-        p = Path(item).expanduser()
-        roots.append(p if p.is_absolute() else base / p)
-    return roots
-
-
-def _nearest_code_workspace(start: Path) -> Path | None:
-    """Nearest `*.code-workspace` FILE above `start`, or None."""
-    for base in [start, *start.parents]:
-        matches = [p for p in base.glob(CODE_WORKSPACE_GLOB) if p.is_file()]
-        if matches:
-            return matches[0]
-    return None
+# ── Declared boards — read from `kanban_boards` in the user's settings.pinky.json ────────────
+SETTINGS_PINKY_PATH = Path.home() / ".claude" / "settings.pinky.json"
 
 
 def first_heading(path: Path) -> str:
@@ -124,95 +102,51 @@ def first_heading(path: Path) -> str:
     return ""
 
 
-def _strip_jsonc_comments(text: str) -> str:
-    """Strip `//` and `/* */` comments from JSONC, respecting string literals.
-
-    `*.code-workspace` is JSONC (VSCode's own format), not strict JSON — real files carry `//`
-    banners (path warnings, mount-point rationale) that `json.loads` chokes on. A regex would strip
-    a `//` inside a Windows path string; this walks the text char-by-char instead.
-    """
-    out: list[str] = []
-    i, n = 0, len(text)
-    in_string = False
-    while i < n:
-        c = text[i]
-        if in_string:
-            out.append(c)
-            if c == "\\" and i + 1 < n:
-                out.append(text[i + 1])
-                i += 2
-                continue
-            if c == '"':
-                in_string = False
-            i += 1
-            continue
-        if c == '"':
-            in_string = True
-            out.append(c)
-            i += 1
-            continue
-        if c == "/" and i + 1 < n and text[i + 1] == "/":
-            while i < n and text[i] != "\n":
-                i += 1
-            continue
-        if c == "/" and i + 1 < n and text[i + 1] == "*":
-            i += 2
-            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                i += 1
-            i += 2
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
-
-
-def declared_kanbans(start: Path) -> list[Path]:
-    """Boards declared by this machine — env `KANBAN_ROOTS` > every `folders[]` entry of the
-    nearest `*.code-workspace` above `start`. The VSCode multi-root convention already declares
-    this N-mount for its own reasons (an interpreter per repo) — nothing pinky-specific to keep."""
-    env = os.environ.get(ROOTS_ENV)
-    if env:
-        roots = _parse_roots(env.split(os.pathsep), start)
-        if roots:
-            return [r / "_KANBAN" for r in roots]
-    workspace_file = _nearest_code_workspace(start)
-    if workspace_file is None:
-        return []
+def _kanban_boards() -> dict[str, list[str]]:
+    """The `kanban_boards` dict of `SETTINGS_PINKY_PATH`, or `{}` when absent/malformed/wrong-shaped."""
+    if not SETTINGS_PINKY_PATH.is_file():
+        return {}
     try:
-        raw_text = _strip_jsonc_comments(workspace_file.read_text(encoding="utf-8"))
-        data = json.loads(raw_text)
+        data = json.loads(SETTINGS_PINKY_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return {}
+    boards = data.get("kanban_boards") if isinstance(data, dict) else None
+    return boards if isinstance(boards, dict) else {}
+
+
+def declared_kanbans(primary_root: Path) -> list[Path]:
+    """Boards declared for `primary_root` — `kanban_boards[<primary_root, resolved>]` of
+    `SETTINGS_PINKY_PATH`, the sole source (written by skill `init`). `primary_root` is the parent
+    of the nearest `_KANBAN/` already found by `find_kanbans`, never an arbitrary path — a
+    board declares its extra roots under its own key, not under a subdirectory of it."""
+    roots = _kanban_boards().get(str(primary_root.resolve()))
+    if not isinstance(roots, list):
         return []
-    folders = data.get("folders") if isinstance(data, dict) else None
-    if not isinstance(folders, list):
-        return []
-    base = workspace_file.parent
-    roots = []
-    for entry in folders:
-        raw = entry.get("path") if isinstance(entry, dict) else None
-        if not isinstance(raw, str):
-            continue
-        p = Path(raw).expanduser()
-        roots.append(p if p.is_absolute() else (base / p).resolve())
-    return [r / "_KANBAN" for r in roots]
+    return [Path(r) / "_KANBAN" for r in roots if isinstance(r, str)]
 
 
 def find_kanbans(start: Path) -> list[Path]:
-    """Every `_KANBAN/` this session may write to: the nearest one, plus any declared board."""
+    """Every `_KANBAN/` this session may write to: the nearest one, plus any board declared for
+    it in `kanban_boards`. No nearest board (no `_KANBAN/` ancestor from `start`/
+    `CLAUDE_PROJECT_DIR`) means no primary key to look up — a session with nothing local never
+    sees a declared board either."""
     found: list[Path] = []
     candidates = [start, *start.parents]
     proj = os.environ.get("CLAUDE_PROJECT_DIR")
     if proj:
         p = Path(proj)
         candidates = [p, *p.parents, *candidates]
+    primary_root: Path | None = None
     for base in candidates:
         kanban = base / "_KANBAN"
         if kanban.is_dir():
             found.append(kanban)
+            primary_root = base
             break
-    for kanban in declared_kanbans(start):
-        if kanban.is_dir() and kanban not in found:
-            found.append(kanban)
+    if primary_root is not None:
+        for kanban in declared_kanbans(primary_root):
+            if kanban.is_dir() and kanban not in found:
+                found.append(kanban)
     return found
 
 

@@ -273,84 +273,124 @@ class TestSecretScrubImport(unittest.TestCase):
 
 
 class TestDeclaredKanbans(unittest.TestCase):
-    """Boards declared via `folders[]` of the nearest `*.code-workspace`."""
+    """Boards declared for a primary root via `kanban_boards` in `SETTINGS_PINKY_PATH` — the
+    sole source (written by skill `init`)."""
 
-    def test_folders_of_the_nearest_code_workspace_are_declared(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "pinky.code-workspace").write_text(
-                json.dumps({"folders": [{"path": "."}, {"path": "../shared"}]}),
-                encoding="utf-8",
-            )
-            deep = root / "pinky-core" / "src"
-            deep.mkdir(parents=True)
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.settings = Path(self._tmp.name) / "settings.pinky.json"
+        self._patch = unittest.mock.patch.object(
+            sh, "SETTINGS_PINKY_PATH", self.settings
+        )
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
 
-            self.assertEqual(
-                sh.declared_kanbans(deep),
-                [
-                    root.resolve() / "_KANBAN",
-                    (root / "../shared").resolve() / "_KANBAN",
-                ],
-            )
-
-    def test_absolute_folder_path_used_as_is(self):
+    def test_boards_declared_for_the_primary_root_are_returned(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "ws"
             root.mkdir()
-            shared = Path(tmp) / "elsewhere" / "shared"
-            shared.mkdir(parents=True)
-            (root / "x.code-workspace").write_text(
-                json.dumps({"folders": [{"path": str(shared)}]}), encoding="utf-8"
+            shared = Path(tmp) / "shared"
+            shared.mkdir()
+            self.settings.write_text(
+                json.dumps({"kanban_boards": {str(root.resolve()): [str(shared)]}}),
+                encoding="utf-8",
             )
 
             self.assertEqual(sh.declared_kanbans(root), [shared / "_KANBAN"])
 
-    def test_real_code_workspace_files_are_jsonc_not_strict_json(self):
+    def test_a_different_root_s_entries_are_not_returned(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            shared = root / "shared"
+            root = Path(tmp) / "ws"
+            root.mkdir()
+            other_root = Path(tmp) / "other"
+            other_root.mkdir()
+            shared = Path(tmp) / "shared"
             shared.mkdir()
-            (root / "x.code-workspace").write_text(
-                "// a warning about paths: not http://example.test either\n"
-                "/* block\n   comment */\n"
-                "{\n"
-                '  "folders": [\n'
-                '    { "name": "root", "path": "." }, // trailing note\n'
-                f'    {{ "name": "shared", "path": {json.dumps(str(shared))} }}\n'
-                "  ]\n"
-                "}\n",
+            self.settings.write_text(
+                json.dumps(
+                    {"kanban_boards": {str(other_root.resolve()): [str(shared)]}}
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(sh.declared_kanbans(root), [])
+
+    def test_relative_vs_absolute_lookup_resolve_to_the_same_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ws"
+            root.mkdir()
+            shared = Path(tmp) / "shared"
+            shared.mkdir()
+            self.settings.write_text(
+                json.dumps({"kanban_boards": {str(root.resolve()): [str(shared)]}}),
+                encoding="utf-8",
+            )
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                self.assertEqual(sh.declared_kanbans(Path("ws")), [shared / "_KANBAN"])
+            finally:
+                os.chdir(cwd)
+
+    def test_no_settings_file_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(sh.declared_kanbans(Path(tmp)), [])
+
+    def test_malformed_settings_file_returns_empty_not_a_crash(self):
+        self.settings.write_text("not json", encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(sh.declared_kanbans(Path(tmp)), [])
+
+
+class TestFindKanbans(unittest.TestCase):
+    """`find_kanbans` resolves the primary board first, then looks up its declared boards under
+    that exact key — a session with no primary board never sees a declared one either."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.settings = Path(self._tmp.name) / "settings.pinky.json"
+        self._patch = unittest.mock.patch.object(
+            sh, "SETTINGS_PINKY_PATH", self.settings
+        )
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+    def test_no_primary_board_means_no_declared_board_either(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ws"
+            root.mkdir()
+            declared = Path(tmp) / "declared"
+            (declared / "_KANBAN").mkdir(parents=True)
+            # deliberately keyed under an unrelated root — never discoverable from `root` alone
+            self.settings.write_text(
+                json.dumps(
+                    {
+                        "kanban_boards": {
+                            str((Path(tmp) / "other").resolve()): [str(declared)]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(sh.find_kanbans(root), [])
+
+    def test_primary_plus_its_declared_board(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ws"
+            (root / "_KANBAN").mkdir(parents=True)
+            declared = Path(tmp) / "declared"
+            (declared / "_KANBAN").mkdir(parents=True)
+            self.settings.write_text(
+                json.dumps({"kanban_boards": {str(root.resolve()): [str(declared)]}}),
                 encoding="utf-8",
             )
 
             self.assertEqual(
-                sh.declared_kanbans(root),
-                [root.resolve() / "_KANBAN", shared / "_KANBAN"],
+                sh.find_kanbans(root), [root / "_KANBAN", declared / "_KANBAN"]
             )
-
-    def test_a_slash_slash_inside_a_string_is_not_stripped(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "x.code-workspace").write_text(
-                '{"folders": [{"name": "http://example.test", "path": "."}]}',
-                encoding="utf-8",
-            )
-
-            self.assertEqual(sh.declared_kanbans(root), [root.resolve() / "_KANBAN"])
-
-    def test_no_code_workspace_found_returns_empty(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertEqual(sh.declared_kanbans(Path(tmp)), [])
-
-    def test_env_wins_over_a_declared_code_workspace(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "x.code-workspace").write_text(
-                json.dumps({"folders": [{"path": "."}]}), encoding="utf-8"
-            )
-            other = root / "other"
-            other.mkdir()
-            with unittest.mock.patch.dict(os.environ, {sh.ROOTS_ENV: str(other)}):
-                self.assertEqual(sh.declared_kanbans(root), [other / "_KANBAN"])
 
 
 class TestUnreviewedDoneCards(unittest.TestCase):
@@ -718,7 +758,7 @@ class TestListAgentLogDirsCLI(unittest.TestCase):
                 cwd=tmp,
                 env={
                     **os.environ,
-                    "KANBAN_ROOTS": str(board),
+                    "HOME": tmp,  # isolates SETTINGS_PINKY_PATH from the real ~/.claude
                     "CLAUDE_PROJECT_DIR": str(board),
                 },
                 check=False,
@@ -758,7 +798,7 @@ class TestListAgentLogsCLI(unittest.TestCase):
                 cwd=tmp,
                 env={
                     **os.environ,
-                    "KANBAN_ROOTS": str(board),
+                    "HOME": tmp,  # isolates SETTINGS_PINKY_PATH from the real ~/.claude
                     "CLAUDE_PROJECT_DIR": str(board),
                 },
                 check=False,
@@ -791,7 +831,7 @@ class TestCardCLI(unittest.TestCase):
             cwd=board.parent,
             env={
                 **os.environ,
-                "KANBAN_ROOTS": str(board.parent),
+                "HOME": str(board.parent.parent),  # isolates SETTINGS_PINKY_PATH
                 "CLAUDE_PROJECT_DIR": str(board.parent),
             },
             check=False,

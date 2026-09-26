@@ -9,7 +9,9 @@ corpus. How repos are laid out inside the workspace is a separate, subjective ch
 this mechanism makes no claim about it either way.
 
 `stop_handoff.py --list-kanbans` is what actually finds every board a session may write to — the
-nearest one, plus any additional root a machine-local config declares. Treat that config's exact
-shape as an implementation detail, not something to encode here: it is expected to change (e.g. to
-read multi-root editor config instead of a bespoke file) without altering anything else in this
-skill.
+nearest one (its parent is the session's **primary root**), plus every board declared for that
+exact primary root in `kanban_boards` of `~/.claude/settings.pinky.json` — the sole declaration
+path; a `*.code-workspace`'s `folders[]` and the `KANBAN_ROOTS` env var are read only once, by
+skill `init`, to migrate whatever a workspace already declared that way. Skill `init` writes and
+migrates this key; hand-edit it directly for a board it did not migrate (see that skill's own
+`SKILL.md` § "Declaring a board this skill did not migrate").
