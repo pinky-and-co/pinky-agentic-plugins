@@ -134,7 +134,7 @@ class TestSelectForPanel(unittest.TestCase):
 
 class TestRunPanel(unittest.TestCase):
     def _fake_cli(self, answers_by_model, seen=None):
-        def fake_call_cli(entry, prompt, timeout, tools=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
             if seen is not None:
                 seen[entry["model"]] = (prompt, tools)
             answer = answers_by_model[entry["model"]]
@@ -248,6 +248,25 @@ class TestRunPanel(unittest.TestCase):
                 "mistral-medium-3.5": ("lens B prompt", ["read"]),
             },
         )
+
+
+class TestRunPanelSecrets(unittest.TestCase):
+    def test_keychain_read_once_and_given_to_every_slot(self):
+        envs = []
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            envs.append(env)
+            return "ok"
+
+        with (
+            unittest.mock.patch.object(
+                mp.ma, "secret_env", return_value={"K": "v"}
+            ) as secrets,
+            unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli),
+        ):
+            mp.run_panel([GLM, MISTRAL], ["p1", "p2"])
+        self.assertEqual(secrets.call_count, 1)
+        self.assertEqual(envs, [{"K": "v"}, {"K": "v"}])
 
 
 class TestFormatPanel(unittest.TestCase):

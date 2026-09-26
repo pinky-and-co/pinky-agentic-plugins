@@ -89,6 +89,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.assert_called_once_with(
             self._expected_cmd("gemini/gemini-3.6-flash"),
             stdin=subprocess.DEVNULL,
+            env=unittest.mock.ANY,
             capture_output=True,
             text=True,
             timeout=180,
@@ -113,6 +114,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.assert_called_once_with(
             self._expected_cmd("mlx/mlx-community/Qwen3.5-9B-MLX-4bit"),
             stdin=subprocess.DEVNULL,
+            env=unittest.mock.ANY,
             capture_output=True,
             text=True,
             timeout=180,
@@ -135,6 +137,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.assert_called_once_with(
             self._expected_cmd("groq/openai/gpt-oss-120b"),
             stdin=subprocess.DEVNULL,
+            env=unittest.mock.ANY,
             capture_output=True,
             text=True,
             timeout=180,
@@ -217,6 +220,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         mock_run.assert_called_once_with(
             expected_cmd,
             stdin=subprocess.DEVNULL,
+            env=unittest.mock.ANY,
             capture_output=True,
             text=True,
             timeout=180,

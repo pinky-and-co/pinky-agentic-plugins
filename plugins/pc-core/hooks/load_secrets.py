@@ -92,7 +92,26 @@ def load_keys(project_dir: str) -> list[dict[str, Any]]:
 
 def resolve_env_exports(keys: list[dict[str, Any]]) -> list[str]:
     """`export VAR=value` lines for every entry whose reader resolved a value."""
-    lines = []
+    return [
+        f"export {name}={shlex.quote(value)}"
+        for name, value in resolve_env(keys).items()
+    ]
+
+
+def resolve_env(keys: list[dict[str, Any]]) -> dict[str, str]:
+    """`{VAR: value}` for every entry whose reader resolved a value.
+
+    Also read by pc-core's MCP server (`model_adversarial.secret_env`), whose process never
+    receives `$CLAUDE_ENV_FILE`: it hands the same keys to each `pi` call it makes.
+
+    Args:
+        keys: the `keys` array of `settings.pinky.json`.
+
+    Returns:
+        The resolved variables, in `keys` order; unknown readers and unresolved values are
+        skipped with a line on stderr.
+    """
+    env: dict[str, str] = {}
     for entry in keys:
         reader_name = entry.get("reader")
         env_name = entry.get("env")
@@ -105,8 +124,8 @@ def resolve_env_exports(keys: list[dict[str, Any]]) -> list[str]:
             continue
         value = reader(entry)
         if value:
-            lines.append(f"export {env_name}={shlex.quote(value)}")
-    return lines
+            env[env_name] = value
+    return env
 
 
 def main() -> int:

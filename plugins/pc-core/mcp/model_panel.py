@@ -154,7 +154,11 @@ def select_for_panel(
 
 
 def _dispatch_one(
-    entry: dict, prompt: str, timeout: int, tools: list[str] | None
+    entry: dict,
+    prompt: str,
+    timeout: int,
+    tools: list[str] | None,
+    env: dict[str, str],
 ) -> _SlotResult:
     """Call one model. `answer` set on success, `reason` set on failure — never both, never raises.
 
@@ -162,7 +166,7 @@ def _dispatch_one(
     so one dead entry in a parallel batch cannot take the batch down.
     """
     try:
-        answer = ma.call_cli(entry, prompt, timeout, tools)
+        answer = ma.call_cli(entry, prompt, timeout, tools, env)
     except subprocess.CalledProcessError as exc:
         return _SlotResult(
             entry, None, f"pi exit {exc.returncode}: {ma.failure_detail(exc)}"
@@ -198,6 +202,7 @@ def run_panel(
     skipped: list[Skip] = []
     if not entries:
         return PanelResponse(answers, skipped)
+    env = ma.secret_env()
 
     def worker(entry: dict, prompt: str) -> _SlotResult:
         """Dispatch one (entry, prompt) pair, guarding the offline case that must not be called."""
@@ -207,7 +212,7 @@ def run_panel(
                 None,
                 "offline entry — route through the `offline` tool, not `panel`",
             )
-        return _dispatch_one(entry, prompt, timeout, tools)
+        return _dispatch_one(entry, prompt, timeout, tools, env)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(entries)) as pool:
         for slot, res in enumerate(pool.map(worker, entries, prompts), start=1):

@@ -303,6 +303,7 @@ class TestReviewPoint(unittest.TestCase):
                 pi_review.build_prompt("/repo", "First thing", "detail"),
             ],
             stdin=subprocess.DEVNULL,
+            env=unittest.mock.ANY,
             capture_output=True,
             text=True,
             timeout=60,

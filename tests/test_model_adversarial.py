@@ -4,6 +4,7 @@ python3 -m unittest discover tests
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -229,6 +230,7 @@ class TestCallCli(unittest.TestCase):
                 "p",
             ],
             stdin=subprocess.DEVNULL,
+            env=unittest.mock.ANY,
             capture_output=True,
             text=True,
             timeout=30,
@@ -240,9 +242,50 @@ class TestCallCli(unittest.TestCase):
             ma.call_cli(MISTRAL, "p", 30, ["read", "grep"])
         self.assertEqual(run.call_args[0][0][4:6], ["-t", "read,grep"])
 
+    def test_given_env_is_layered_over_the_process_env(self):
+        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+            ma.call_cli(MISTRAL, "p", 30, env={"PINKY_TEST_VAR": "layered"})
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["PINKY_TEST_VAR"], "layered")
+        self.assertEqual(env["PATH"], os.environ["PATH"])
+
+    def test_without_env_it_reads_secret_env(self):
+        with (
+            unittest.mock.patch.object(ma, "secret_env", return_value={"K": "v"}),
+            unittest.mock.patch("subprocess.run", return_value=self._ok()) as run,
+        ):
+            ma.call_cli(MISTRAL, "p", 30)
+        self.assertEqual(run.call_args.kwargs["env"]["K"], "v")
+
     def test_non_cli_entry_raises(self):
         with self.assertRaises(ValueError):
             ma.call_cli({**MISTRAL, "kind": "http"}, "p", 30)
+
+
+class TestSecretsAreReadOncePerRun(unittest.TestCase):
+    def test_run_pool_reads_the_keychain_once_for_every_entry_it_tries(self):
+        rate_limited = subprocess.CalledProcessError(1, "pi", "", "429 too many")
+        ok = subprocess.CompletedProcess([], 0, "answer", "")
+        with (
+            unittest.mock.patch.object(
+                ma, "secret_env", return_value={"K": "v"}
+            ) as secrets,
+            unittest.mock.patch(
+                "subprocess.run", side_effect=[rate_limited, ok]
+            ) as run,
+        ):
+            ma.run_pool([MISTRAL, GLM], "p")
+        self.assertEqual(secrets.call_count, 1)
+        self.assertEqual([c.kwargs["env"]["K"] for c in run.call_args_list], ["v", "v"])
+
+    def test_check_pool_reads_the_keychain_once(self):
+        ok = subprocess.CompletedProcess([], 0, "OK", "")
+        with (
+            unittest.mock.patch.object(ma, "secret_env", return_value={}) as secrets,
+            unittest.mock.patch("subprocess.run", return_value=ok),
+        ):
+            ma.check_pool([MISTRAL, GLM], timeout=5)
+        self.assertEqual(secrets.call_count, 1)
 
 
 class TestCheckPool(unittest.TestCase):

@@ -14,10 +14,12 @@ seeded from ``CLAUDE_PROJECT_DIR`` (already present in this MCP server's own env
 anywhere in the chain → a single built-in ``mistral-medium-3.5`` entry.
 
 Every remote call goes through ``pi`` (``call_cli``): ``pi -p --model <provider>/<model>``. Provider
-endpoints and keys live in pi's own registry — built-in providers, ``~/.pi/agent/auth.json``, or a
-custom provider in ``~/.pi/agent/models.json`` (whose ``apiKey`` can read the macOS keychain with
-``"!security find-generic-password -a <user> -s <SERVICE> -w"``). Adding a provider pi does not know
-is a ``models.json`` edit, never a code change here.
+endpoints live in pi's registry (built-in, or a custom provider in ``~/.pi/agent/models.json``).
+Keys come from the ``keys`` array of ``settings.pinky.json`` — the same keychain entries
+``load_secrets`` exports for Bash — handed to each pi call as environment variables
+(``secret_env``): this server's process never receives ``$CLAUDE_ENV_FILE``. A custom provider reads
+its key with ``"apiKey": "$<NAME>"``. Adding a provider pi does not know is a ``models.json`` edit
+plus a ``keys`` entry, never a code change here.
 
 Tools are chosen per call, never per entry: none by default (``--no-tools``), or an allowlist
 (``-t read,grep``) when the caller needs the model to look at files itself.
@@ -60,6 +62,7 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
+import load_secrets  # noqa: E402
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
@@ -395,8 +398,23 @@ def _not_callable(entry: dict[str, Any]) -> str:
     return f"{entry['name']}: kind {kind!r} is not callable through pi"
 
 
+def secret_env() -> dict[str, str]:
+    """The keys declared in `settings.pinky.json` (`keys`), resolved from the keychain.
+
+    Returns:
+        `{VAR: value}` for every declared key that resolved — `load_secrets.resolve_env` on the
+        settings seen from `CLAUDE_PROJECT_DIR`.
+    """
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    return load_secrets.resolve_env(load_secrets.load_keys(project_dir))
+
+
 def call_cli(
-    entry: dict[str, Any], prompt: str, timeout: int, tools: list[str] | None = None
+    entry: dict[str, Any],
+    prompt: str,
+    timeout: int,
+    tools: list[str] | None = None,
+    env: dict[str, str] | None = None,
 ) -> str:
     """One `pi -p` call for a `kind: "cli"` entry; its stdout is the answer.
 
@@ -406,6 +424,8 @@ def call_cli(
             never read as an option.
         timeout: seconds before `subprocess.TimeoutExpired`.
         tools: pi tool names to allow (`-t read,grep`); None or empty means `--no-tools`.
+        env: variables layered over this process's environment for pi — the provider keys.
+            None reads them with `secret_env`; a caller making several calls passes them once.
 
     Returns:
         The model's answer, as pi printed it.
@@ -436,6 +456,7 @@ def call_cli(
     return subprocess.run(
         cmd,
         stdin=subprocess.DEVNULL,
+        env={**os.environ, **(secret_env() if env is None else env)},
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -468,6 +489,7 @@ def run_pool(
     served but answered badly; any other non-zero exit is returned as a stop, not a fall-through.
     """
     last_error: str | None = None
+    env = secret_env()
     for entry in entries:
         if entry["kind"] == "offline":
             last_error = (
@@ -481,7 +503,7 @@ def run_pool(
             last_error = f"{entry['name']}: cli entries require a 'model' field"
             continue
         try:
-            return PoolResult(entry, call_cli(entry, prompt, timeout, tools))
+            return PoolResult(entry, call_cli(entry, prompt, timeout, tools, env))
         except subprocess.CalledProcessError as e:
             # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
             # stdout pendant que stderr porte autre chose.
@@ -506,7 +528,7 @@ def run_pool(
     return PoolResult(None, last_error)
 
 
-def _check_one(entry: dict[str, Any], timeout: int) -> PoolCheck:
+def _check_one(entry: dict[str, Any], timeout: int, env: dict[str, str]) -> PoolCheck:
     """Send `CHECK_PROMPT` to one entry, with no tools, and time the answer."""
     if entry.get("kind") == "offline":
         return PoolCheck(
@@ -514,7 +536,7 @@ def _check_one(entry: dict[str, Any], timeout: int) -> PoolCheck:
         )
     start = time.monotonic()
     try:
-        answer = call_cli(entry, CHECK_PROMPT, timeout).strip()
+        answer = call_cli(entry, CHECK_PROMPT, timeout, env=env).strip()
     except subprocess.CalledProcessError as e:
         detail = failure_detail(e)
     except subprocess.TimeoutExpired:
@@ -541,8 +563,9 @@ def check_pool(
     Returns:
         One `PoolCheck` per entry, in `pool` order.
     """
+    env = secret_env()
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        return list(ex.map(lambda e: _check_one(e, timeout), pool))
+        return list(ex.map(lambda e: _check_one(e, timeout, env), pool))
 
 
 _CHECK_MARKERS = {"ok": "✅", "failed": "❌", "skipped": "• "}
