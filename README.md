@@ -370,6 +370,7 @@ pinky-agentic-plugins/
 │   ├── test_pc_kanban_migrate_agent_log.py
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pending_gate.py
+│   ├── test_pending_user_action_channel.py
 │   ├── test_pi_review.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py

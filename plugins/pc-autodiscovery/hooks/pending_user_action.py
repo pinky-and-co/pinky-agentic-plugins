@@ -15,12 +15,19 @@ messages and empties the queue — the gate calls it once, so each `require`
 nags once, not on every tool call; a source that still needs the action
 calls `require` again on its next trigger.
 
-Library: `require`/`resolve`/`surface`/`pending`/`clear_all`, all taking an
-explicit `session_id`. CLI (for skill bodies, which cannot import it):
+Each entry also carries `surfaced`: True when the message was already shown
+to the user in-band (e.g. printed in the response text that queued it), so a
+consumer can drop it on the next turn without waiting for `pending_gate` to
+actually deny a tool call first — `clear_surfaced()` is that drop. Entries
+still needing the `ask`-carrying nag (the default) keep `surfaced=False`.
 
-    pending_user_action.py require <key> <message>
+Library: `require`/`resolve`/`surface`/`pending`/`clear_surfaced`/
+`clear_all`, all taking an explicit `session_id`. CLI (for skill bodies,
+which cannot import it):
+
+    pending_user_action.py require <key> <message> [--surfaced]
     pending_user_action.py resolve <key>
-    pending_user_action.py pending          # one 'key\\tmessage' per line
+    pending_user_action.py pending          # one 'key\tmessage' per line
 
 The CLI reads the session id from CLAUDE_CODE_SESSION_ID.
 """
@@ -31,6 +38,13 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import TypedDict
+
+
+class _Entry(TypedDict):
+    message: str
+    surfaced: bool
+
 
 STATE_DIR = Path.home() / ".claude" / "pinky-plugin-scope"
 
@@ -39,24 +53,35 @@ def _queue_path(session_id: str) -> Path:
     return STATE_DIR / f"{session_id}.pending.json"
 
 
-def _load(session_id: str) -> dict[str, str]:
+def _load(session_id: str) -> dict[str, _Entry]:
     try:
         data = json.loads(_queue_path(session_id).read_text())
     except (OSError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    queue: dict[str, _Entry] = {}
+    for key, entry in data.items():
+        if isinstance(entry, str):
+            queue[key] = {"message": entry, "surfaced": False}
+        elif isinstance(entry, dict) and isinstance(entry.get("message"), str):
+            queue[key] = {
+                "message": entry["message"],
+                "surfaced": bool(entry.get("surfaced", False)),
+            }
+    return queue
 
 
-def _save(session_id: str, queue: dict[str, str]) -> None:
+def _save(session_id: str, queue: dict[str, _Entry]) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     _queue_path(session_id).write_text(json.dumps(queue))
 
 
-def require(session_id: str, key: str, message: str) -> None:
+def require(session_id: str, key: str, message: str, surfaced: bool = False) -> None:
     """Add (or replace) the pending action under `key`. Re-calling with the
-    same key just refreshes the message — the queue never holds duplicates."""
+    same key just refreshes the entry — the queue never holds duplicates."""
     queue = _load(session_id)
-    queue[key] = message
+    queue[key] = {"message": message, "surfaced": surfaced}
     _save(session_id, queue)
 
 
@@ -69,7 +94,7 @@ def resolve(session_id: str, key: str) -> None:
 
 def pending(session_id: str) -> dict[str, str]:
     """The current queue, `{key: message}`, without touching it."""
-    return _load(session_id)
+    return {key: entry["message"] for key, entry in _load(session_id).items()}
 
 
 def surface(session_id: str) -> list[str]:
@@ -78,9 +103,19 @@ def surface(session_id: str) -> list[str]:
     queue = _load(session_id)
     if not queue:
         return []
-    messages = list(queue.values())
+    messages = [entry["message"] for entry in queue.values()]
     _save(session_id, {})
     return messages
+
+
+def clear_surfaced(session_id: str) -> None:
+    """Drop every entry queued with `surfaced=True` — a no-op when there is
+    none. The entries left behind (`surfaced=False`) still need the
+    `ask`-carrying nag, so they are not touched here."""
+    queue = _load(session_id)
+    remaining = {key: entry for key, entry in queue.items() if not entry["surfaced"]}
+    if len(remaining) != len(queue):
+        _save(session_id, remaining)
 
 
 def clear_all(session_id: str) -> None:
@@ -99,6 +134,8 @@ def _cli(argv: list[str]) -> int:
     match argv:
         case ["require", key, message]:
             require(session_id, key, message)
+        case ["require", key, message, "--surfaced"]:
+            require(session_id, key, message, surfaced=True)
         case ["resolve", key]:
             resolve(session_id, key)
         case ["pending"]:
@@ -106,7 +143,7 @@ def _cli(argv: list[str]) -> int:
                 print(f"{key}\t{message}")
         case _:
             print(
-                "usage: pending_user_action.py require <key> <message> | "
+                "usage: pending_user_action.py require <key> <message> [--surfaced] | "
                 "resolve <key> | pending",
                 file=sys.stderr,
             )
