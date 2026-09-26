@@ -121,8 +121,15 @@ def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
         "off",
         prompt,
     ]
+    # stdin fermé : pi lit l'entrée standard dont il hérite, et celle du serveur MCP est le canal
+    # JSON-RPC — l'appel resterait bloqué jusqu'au timeout.
     res = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout, check=True
+        cmd,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=True,
     )
     return res.stdout
 

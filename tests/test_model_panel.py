@@ -5,8 +5,8 @@ python3 -m unittest discover tests
 
 import sys
 import unittest
+import subprocess
 import unittest.mock
-import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
@@ -15,55 +15,45 @@ import model_panel as mp
 
 MISTRAL = {
     "name": "mistral-medium-3.5",
-    "kind": "http",
+    "kind": "cli",
     "provider": "mistral",
     "model": "mistral-medium-3.5",
-    "base_url": "https://api.mistral.ai/v1/chat/completions",
-    "api_key_env": "MISTRAL_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "opus",
     "free_tier": True,
     "concurrency": None,
 }
 GLM = {
     "name": "glm-5-2",
-    "kind": "http",
+    "kind": "cli",
     "provider": "openrouter",
     "model": "z-ai/glm-5-2",
-    "base_url": "https://openrouter.ai/api/v1/chat/completions",
-    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "opus",
     "free_tier": True,
     "concurrency": None,
 }
 KIMI = {
     "name": "kimi-k2.6",
-    "kind": "http",
+    "kind": "cli",
     "provider": "openrouter",  # same family as GLM — only one of the two may enter a panel
     "model": "moonshotai/kimi-k2.6:free",
-    "base_url": "https://openrouter.ai/api/v1/chat/completions",
-    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "sonnet",
     "free_tier": True,
     "concurrency": None,
 }
 GEMINI = {
     "name": "gemini-3.6-flash",
-    "kind": "http",
+    "kind": "cli",
     "provider": "gemini",
     "model": "gemini-3.6-flash",
-    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    "api_key_env": "GEMINI_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "sonnet",
     "free_tier": True,
     "concurrency": None,
 }
 COHERE_R7B = {
     "name": "cohere-command-r7b",
-    "kind": "http",
+    "kind": "cli",
     "provider": "cohere",
     "model": "command-r7b-12-2024",
-    "base_url": "https://api.cohere.com/compatibility/v1/chat/completions",
-    "api_key_env": "COHERE_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "haiku",  # too weak for an advisor slot — must never be picked
     "free_tier": True,
     "concurrency": None,
@@ -123,7 +113,7 @@ class TestSelectForPanel(unittest.TestCase):
 
     def test_tiers_restricts_selection_to_the_named_capacity_tier(self):
         # explicit opt-in past the default sonnet/opus advisor filter — cohere-r7b is the only
-        # haiku-tier http entry; the opus/sonnet models are now out
+        # haiku-tier entry; the opus/sonnet models are now out
         self.assertEqual(mp.select_for_panel(POOL, n=5, tiers={"haiku"}), [COHERE_R7B])
 
     def test_tiers_still_excludes_offline_entries(self):
@@ -143,30 +133,28 @@ class TestSelectForPanel(unittest.TestCase):
 
 
 class TestRunPanel(unittest.TestCase):
-    def _fake_provider(self, answers_by_model):
-        def fake_call_provider(
-            base_url, api_key, model, prompt, timeout=180, max_tokens=mp.ma.MAX_TOKENS
-        ):
-            if isinstance(answers_by_model.get(model), Exception):
-                raise answers_by_model[model]
-            return {"choices": [{"message": {"content": answers_by_model[model]}}]}
+    def _fake_cli(self, answers_by_model, seen=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            if seen is not None:
+                seen[entry["model"]] = (prompt, tools)
+            answer = answers_by_model[entry["model"]]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
 
-        return fake_call_provider
+        return fake_call_cli
 
     def test_answers_come_back_in_entry_order_tagged_with_their_slot(self):
-        with (
-            unittest.mock.patch.object(
-                mp.ma,
-                "call_provider",
-                self._fake_provider(
-                    {
-                        "z-ai/glm-5-2": "glm says",
-                        "mistral-medium-3.5": "mistral says",
-                        "gemini-3.6-flash": "gemini says",
-                    }
-                ),
+        with unittest.mock.patch.object(
+            mp.ma,
+            "call_cli",
+            self._fake_cli(
+                {
+                    "z-ai/glm-5-2": "glm says",
+                    "mistral-medium-3.5": "mistral says",
+                    "gemini-3.6-flash": "gemini says",
+                }
             ),
-            unittest.mock.patch.object(mp.ma, "resolve_api_key_for", return_value="k"),
         ):
             resp = mp.run_panel([GLM, MISTRAL, GEMINI], ["p1", "p2", "p3"])
         self.assertEqual(
@@ -180,23 +168,20 @@ class TestRunPanel(unittest.TestCase):
         self.assertEqual(resp.skipped, [])
 
     def test_middle_slot_skipped_keeps_the_slot_numbers_of_the_survivors(self):
-        def key_for(entry):
-            return None if entry["name"] == "mistral-medium-3.5" else "k"
-
-        with (
-            unittest.mock.patch.object(
-                mp.ma,
-                "call_provider",
-                self._fake_provider(
-                    {"z-ai/glm-5-2": "glm", "gemini-3.6-flash": "gemini"}
-                ),
-            ),
-            unittest.mock.patch.object(
-                mp.ma, "resolve_api_key_for", side_effect=key_for
+        failure = subprocess.CalledProcessError(1, "pi", "", "401 unauthorized\n")
+        with unittest.mock.patch.object(
+            mp.ma,
+            "call_cli",
+            self._fake_cli(
+                {
+                    "z-ai/glm-5-2": "glm",
+                    "mistral-medium-3.5": failure,
+                    "gemini-3.6-flash": "gemini",
+                }
             ),
         ):
             resp = mp.run_panel([GLM, MISTRAL, GEMINI], ["p1", "p2", "p3"])
-        # slot 2 died; survivors keep slots 1 and 3, not 1 and 2 — the caller maps slot -> lens
+        # le slot 2 est mort ; les survivants gardent 1 et 3 — l'appelant associe slot -> lentille
         self.assertEqual(
             resp.answers,
             [
@@ -204,58 +189,56 @@ class TestRunPanel(unittest.TestCase):
                 mp.Answer(3, "gemini-3.6-flash", "gemini"),
             ],
         )
-        self.assertEqual(resp.skipped[0].slot, 2)
-        self.assertEqual(resp.skipped[0].model, "mistral-medium-3.5")
-        self.assertIn("no API key", resp.skipped[0].reason)
+        self.assertEqual(
+            resp.skipped,
+            [mp.Skip(2, "mistral-medium-3.5", "pi exit 1: 401 unauthorized")],
+        )
 
     def test_timeout_is_a_skipped_slot_with_no_retry(self):
-        calls: list[str] = []
-
-        def fake_call_provider(
-            base_url, api_key, model, prompt, timeout=180, max_tokens=mp.ma.MAX_TOKENS
-        ):
-            calls.append(model)
-            raise TimeoutError("timed out")
-
-        with (
-            unittest.mock.patch.object(mp.ma, "call_provider", fake_call_provider),
-            unittest.mock.patch.object(mp.ma, "resolve_api_key_for", return_value="k"),
+        seen: dict = {}
+        with unittest.mock.patch.object(
+            mp.ma,
+            "call_cli",
+            self._fake_cli(
+                {"z-ai/glm-5-2": subprocess.TimeoutExpired("pi", 180)}, seen
+            ),
         ):
             resp = mp.run_panel([GLM], ["p1"])
         self.assertEqual(resp.answers, [])
-        self.assertEqual(resp.skipped[0].slot, 1)
-        self.assertEqual(resp.skipped[0].model, "glm-5-2")
-        self.assertIn("TimeoutError", resp.skipped[0].reason)
-        self.assertEqual(calls, ["z-ai/glm-5-2"])  # tried once, no retry
+        self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "no answer within 180s")])
+        self.assertEqual(list(seen), ["z-ai/glm-5-2"])  # une seule tentative
 
-    def test_http_error_from_one_model_does_not_sink_the_batch(self):
-        with (
-            unittest.mock.patch.object(
-                mp.ma,
-                "call_provider",
-                self._fake_provider(
-                    {
-                        "z-ai/glm-5-2": urllib.error.HTTPError(
-                            "u",
-                            429,
-                            "rate",
-                            {},
-                            None,  # type: ignore[arg-type]
-                        ),
-                        "mistral-medium-3.5": "ok",
-                    }
-                ),
-            ),
-            unittest.mock.patch.object(mp.ma, "resolve_api_key_for", return_value="k"),
+    def test_empty_answer_is_a_skipped_slot(self):
+        with unittest.mock.patch.object(
+            mp.ma, "call_cli", self._fake_cli({"z-ai/glm-5-2": "  \n"})
         ):
-            resp = mp.run_panel([GLM, MISTRAL], ["p1", "p2"])
-        self.assertEqual(resp.answers, [mp.Answer(2, "mistral-medium-3.5", "ok")])
-        self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "HTTP 429")])
+            resp = mp.run_panel([GLM], ["p1"])
+        self.assertEqual(resp.answers, [])
+        self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "empty answer")])
+
+    def test_entry_timeout_is_passed_and_reported(self):
+        seen: dict = {}
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            seen["timeout"] = timeout
+            raise subprocess.TimeoutExpired("pi", timeout)
+
+        with unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli):
+            resp = mp.run_panel([{**GLM, "timeout": 300}], ["p1"])
+        self.assertEqual(seen["timeout"], 300)
+        self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "no answer within 300s")])
+
+    def test_http_entry_is_skipped_never_raised(self):
+        http_entry = {**MISTRAL, "kind": "http"}
+        resp = mp.run_panel([http_entry], ["p1"])
+        self.assertEqual(resp.answers, [])
+        self.assertEqual(resp.skipped[0].slot, 1)
+        self.assertIn("kind 'http' is no longer supported", resp.skipped[0].reason)
 
     def test_offline_entry_slipping_through_is_skipped_never_called(self):
-        with unittest.mock.patch.object(mp.ma, "call_provider") as cp:
+        with unittest.mock.patch.object(mp.ma, "call_cli") as cc:
             resp = mp.run_panel([OFFLINE], ["p1"])
-        cp.assert_not_called()
+        cc.assert_not_called()
         self.assertEqual(resp.answers, [])
         self.assertEqual(resp.skipped[0].slot, 1)
         self.assertIn("offline", resp.skipped[0].reason)
@@ -268,22 +251,42 @@ class TestRunPanel(unittest.TestCase):
         with self.assertRaises(ValueError):
             mp.run_panel([GLM, MISTRAL], ["only one prompt"])
 
-    def test_each_slot_gets_its_own_prompt(self):
-        seen: dict[str, str] = {}
-
-        def fake_call_provider(
-            base_url, api_key, model, prompt, timeout=180, max_tokens=mp.ma.MAX_TOKENS
+    def test_each_slot_gets_its_own_prompt_and_the_requested_tools(self):
+        seen: dict = {}
+        with unittest.mock.patch.object(
+            mp.ma,
+            "call_cli",
+            self._fake_cli({"z-ai/glm-5-2": "ok", "mistral-medium-3.5": "ok"}, seen),
         ):
-            seen[model] = prompt
-            return {"choices": [{"message": {"content": "ok"}}]}
+            mp.run_panel(
+                [GLM, MISTRAL], ["lens A prompt", "lens B prompt"], tools=["read"]
+            )
+        self.assertEqual(
+            seen,
+            {
+                "z-ai/glm-5-2": ("lens A prompt", ["read"]),
+                "mistral-medium-3.5": ("lens B prompt", ["read"]),
+            },
+        )
+
+
+class TestRunPanelSecrets(unittest.TestCase):
+    def test_keychain_read_once_and_given_to_every_slot(self):
+        envs = []
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            envs.append(env)
+            return "ok"
 
         with (
-            unittest.mock.patch.object(mp.ma, "call_provider", fake_call_provider),
-            unittest.mock.patch.object(mp.ma, "resolve_api_key_for", return_value="k"),
+            unittest.mock.patch.object(
+                mp.ma, "secret_env", return_value={"K": "v"}
+            ) as secrets,
+            unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli),
         ):
-            mp.run_panel([GLM, MISTRAL], ["lens A prompt", "lens B prompt"])
-        self.assertEqual(seen["z-ai/glm-5-2"], "lens A prompt")
-        self.assertEqual(seen["mistral-medium-3.5"], "lens B prompt")
+            mp.run_panel([GLM, MISTRAL], ["p1", "p2"])
+        self.assertEqual(secrets.call_count, 1)
+        self.assertEqual(envs, [{"K": "v"}, {"K": "v"}])
 
 
 class TestFormatPanel(unittest.TestCase):

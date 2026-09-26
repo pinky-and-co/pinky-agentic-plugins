@@ -3,13 +3,13 @@
 # requires-python = ">=3.12"
 # dependencies = ["mcp"]
 # ///
-"""pc-core model-routing MCP server — exposes `offline` and `adversarial` as native tools.
+"""pc-core model-routing MCP server — `offline`, `adversarial`, `panel` and `pool_check` as native tools.
 
 Each tool is a thin wrapper around a sibling module's functions (`model_offline.py`,
-`model_adversarial.py`) — no reasoning happens here, this is the deterministic-fetch layer the LLM
-boundary calls for. Neither tool spawns a model on Claude Code's side: `offline` calls a local
-MLX-SERVE model via `pi`, `adversarial` calls a non-Claude cloud model, and both return plain text —
-no subagent, no extra model floor to declare.
+`model_adversarial.py`, `model_panel.py`) — no reasoning happens here, this is the
+deterministic-fetch layer the LLM boundary calls for. No tool spawns a model on Claude Code's side:
+every model is called through `pi` (`offline` a local MLX-SERVE model, the others non-Claude pool
+models), and every tool returns plain text — no subagent, no extra model floor to declare.
 
 Declared via `.mcp.json` at the plugin root (`command: uv, args: [run, --script, .../server.py]`) —
 `uv` resolves the `mcp` dependency on first run from this file's own inline metadata above, no
@@ -77,6 +77,7 @@ def adversarial(
     stack: str | None = None,
     tier: str | None = None,
     diff: str | None = None,
+    tools: list[str] | None = None,
 ) -> str:
     """Challenge THIS session's own output with a contrarian second opinion from a non-Claude model.
 
@@ -95,6 +96,9 @@ def adversarial(
     capacity — free before paid — instead of the default adversarial selection. `diff` (a path to
     a unified diff) derives that tier deterministically from the change size and risk factors when
     `tier` is not passed explicitly.
+
+    `tools` (pi tool names, e.g. `["read", "grep"]`) lets the model open files itself; omitted →
+    no tools, the model sees only the prompt and the inlined `files`.
     """
     files = files or []
     override = model_adversarial.resolve_model(model)
@@ -128,13 +132,10 @@ def adversarial(
     adversarial_task = (methodology + "\n\n" if methodology else "") + task
     prompt = model_adversarial.build_prompt(adversarial_task, files)
 
-    pool_result = model_adversarial.run_pool(entries, prompt)
+    pool_result = model_adversarial.run_pool(entries, prompt, tools=tools)
     if pool_result.entry is None:
         return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
-    response = pool_result.result
-    assert isinstance(response, dict)
-    content = model_adversarial.extract_content(response)
-    return f"[answered by {pool_result.entry['name']}]\n\n{content}"
+    return f"[answered by {pool_result.entry['name']}]\n\n{pool_result.result}"
 
 
 @m.tool()
@@ -142,6 +143,7 @@ def panel(
     tasks: list[str],
     models: list[str] | None = None,
     tier: str | list[str] | None = None,
+    tools: list[str] | None = None,
 ) -> str:
     """Send one prompt PER SLOT to a DIFFERENT model family each, in parallel; return every answer.
 
@@ -150,11 +152,12 @@ def panel(
     repeat it (`["Q", "Q", "Q"]`). `len(tasks)` distinct families are selected from the pool, or
     `models` (by pool name, order kept). Unlike `adversarial`, no review posture is injected — each
     prompt is sent verbatim. Each answer is labelled with the model that produced it; the header
-    reports answered/requested and names any slot skipped (no key / HTTP error / timeout — no retry)
+    reports answered/requested and names any slot skipped (pi error / timeout — no retry)
     or left unfilled (pool has fewer eligible families than requested). `offline` entries are never
     used. By default only sonnet/opus-tier models are eligible; pass `tier` (a `capacity_tier` name
     or a list of them, e.g. `"haiku"`) to select from those tiers instead — for a non-advisor task
-    that wants a small deterministic model.
+    that wants a small deterministic model. `tools` (pi tool names) is given to every slot;
+    omitted → no tools.
     """
     if not tasks:
         return "[panel] BLOCKED — no task given."
@@ -164,12 +167,22 @@ def panel(
     )
     if not entries:
         want = "sonnet/opus" if tier is None else tier
-        return f"[panel] BLOCKED — no eligible model in the pool (need kind=http, tier {want})."
+        return f"[panel] BLOCKED — no eligible model in the pool (need kind=cli, tier {want})."
 
-    response = model_panel.run_panel(entries, tasks[: len(entries)])
+    response = model_panel.run_panel(entries, tasks[: len(entries)], tools=tools)
     if not response.answers:
         return f"[panel] BLOCKED — every candidate failed. Skipped: {response.skipped}"
     return model_panel.format_panel(response, len(tasks))
+
+
+@m.tool()
+def pool_check() -> str:
+    """Send a one-line prompt to every `model_pool` entry through `pi`, with no tools, and report
+    which answer: one line per entry with its latency, or the provider's own error (bad key, rate
+    limit, unknown model, timeout). `offline` entries are skipped — `pinky doctor` checks those.
+    """
+    results = model_adversarial.check_pool(model_adversarial.load_pool())
+    return model_adversarial.render_pool_check(results)
 
 
 if __name__ == "__main__":

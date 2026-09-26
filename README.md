@@ -361,6 +361,7 @@ pinky-agentic-plugins/
 ├── scripts/
 │   └── hooks/
 ├── tests/
+│   ├── conftest.py
 │   ├── smoke_model_pool.py
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_agent_log_writer.py

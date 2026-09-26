@@ -110,7 +110,7 @@ CLI_ENTRY = {
     "free_tier": True,
     "concurrency": 1,
     "local": True,
-    "tools": "bash",  # doit être écrasé par review_candidates() malgré cette valeur
+    "tools": "bash",  # ignoré : les outils se passent à l'appel, jamais lus dans le pool
 }
 CLI_ENTRY_2 = {
     "name": "openrouter-free",
@@ -171,11 +171,10 @@ class TestSplitPoints(unittest.TestCase):
 
 
 class TestReviewCandidates(unittest.TestCase):
-    def test_excludes_http_and_offline_forces_read_tools(self):
+    def test_excludes_http_and_offline(self):
         pool = [HTTP_ENTRY, OFFLINE_ENTRY, CLI_ENTRY]
         entries = pi_review.review_candidates(pool)
         self.assertEqual([e["name"] for e in entries], ["local-qwen3.5"])
-        self.assertEqual(entries[0]["tools"], "read")
 
 
 class TestReviewPoint(unittest.TestCase):
@@ -298,11 +297,11 @@ class TestReviewPoint(unittest.TestCase):
                 "-t",
                 "read",
                 "--no-session",
-                "--thinking",
-                "off",
                 "--",
                 pi_review.build_prompt("/repo", "First thing", "detail"),
             ],
+            stdin=subprocess.DEVNULL,
+            env=unittest.mock.ANY,
             capture_output=True,
             text=True,
             timeout=60,

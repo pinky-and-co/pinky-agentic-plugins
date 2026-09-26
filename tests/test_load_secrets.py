@@ -85,6 +85,27 @@ class TestReadAwsSecretsmanager(unittest.TestCase):
         )
 
 
+class TestResolveEnv(unittest.TestCase):
+    def test_resolved_entries_become_a_name_to_value_mapping(self):
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="sk-abc123\n", stderr=""
+        )
+        keys = [
+            {"reader": "literal", "value": "41c2b051", "env": "CLOUDFLARE_ACCOUNT_ID"},
+            {
+                "reader": "macos_keychain",
+                "service": "GROQ_API_KEY",
+                "env": "GROQ_API_KEY",
+            },
+            {"reader": "vault", "service": "x", "env": "SKIPPED"},
+        ]
+        with unittest.mock.patch("subprocess.run", return_value=completed):
+            self.assertEqual(
+                ls.resolve_env(keys),
+                {"CLOUDFLARE_ACCOUNT_ID": "41c2b051", "GROQ_API_KEY": "sk-abc123"},
+            )
+
+
 class TestResolveEnvExports(unittest.TestCase):
     def test_unknown_reader_is_skipped_not_raised(self):
         keys = [{"reader": "vault", "service": "x", "env": "X"}]

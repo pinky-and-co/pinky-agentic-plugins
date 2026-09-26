@@ -10,10 +10,10 @@ when it carries no such subheadings). Never edits, commits, or moves the card �
 triage stays with the orchestrator that invoked this script.
 
 Model choice: `model_adversarial.select_for_delegation(pool, "haiku")`, filtered to `kind == "cli"`
-— the only entries with real read tools via `pi`; an `http`/`offline` entry would review a pasted
-prompt blind, the exact failure this script exists to avoid. `local` pool entries (MLX-SERVE) sort
-first automatically. Every invocation forces `tools: "read"` regardless of what the pool entry
-declares — the containment this script promises must not depend on pool config being honest.
+— the entries `pi` can call with its `read` tool; an `offline` entry would review a pasted prompt
+blind, the exact failure this script exists to avoid. `local` pool entries (MLX-SERVE) sort first
+automatically. Every call passes `REVIEW_TOOLS` (`read` only) — the containment this script promises
+is fixed here, never read from pool config.
 
 Runtime: Python 3.12+, stdlib only, imports `model_adversarial` for pool loading/dispatch.
 """
@@ -75,13 +75,12 @@ def build_prompt(repo: str, title: str, body: str) -> str:
     return _PROMPT_TEMPLATE.format(repo=repo, title=title, body=body)
 
 
+REVIEW_TOOLS = ["read"]
+
+
 def review_candidates(pool: list[dict]) -> list[dict]:
-    """Cheap, real-read-tools candidates: `kind == "cli"` only, local-first, `tools` forced to
-    `"read"` regardless of what the pool entry declares."""
-    cli_entries = [
-        e for e in ma.select_for_delegation(pool, "haiku") if e["kind"] == "cli"
-    ]
-    return [{**e, "tools": "read"} for e in cli_entries]
+    """Cheap candidates `pi` can call with a read tool: `kind == "cli"` only, local-first."""
+    return [e for e in ma.select_for_delegation(pool, "haiku") if e["kind"] == "cli"]
 
 
 def review_point(
@@ -93,7 +92,7 @@ def review_point(
     verdict.
     """
     prompt = build_prompt(repo, title, body)
-    result = ma.run_pool(entries, prompt, timeout=timeout)
+    result = ma.run_pool(entries, prompt, timeout=timeout, tools=REVIEW_TOOLS)
     if result.entry is None:
         return {
             "point": title,
@@ -101,10 +100,7 @@ def review_point(
             "detail": str(result.result),
             "model": None,
         }
-    assert isinstance(
-        result.result, dict
-    )  # guaranteed by `run_pool` when `entry` is set
-    content = ma.extract_content(result.result).strip()
+    content = (result.result or "").strip()
     status_match = re.search(r"STATUS:\s*(OK|GAP)", content, re.IGNORECASE)
     status = status_match.group(1).upper() if status_match else "ERROR"
     detail = content if status_match else f"unparseable response: {content}"
