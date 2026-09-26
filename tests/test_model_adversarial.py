@@ -319,6 +319,47 @@ class TestEntryTimeout(unittest.TestCase):
         self.assertEqual(result.detail, "no answer within 300s")
 
 
+class TestFilterPool(unittest.TestCase):
+    def test_no_filter_keeps_the_whole_pool(self):
+        self.assertEqual(ma.filter_pool(POOL), POOL)
+
+    def test_provider_keeps_only_its_entries(self):
+        self.assertEqual(ma.filter_pool(POOL, provider="openrouter"), [GLM, KIMI])
+
+    def test_names_keep_only_those_entries_in_pool_order(self):
+        self.assertEqual(
+            ma.filter_pool(POOL, names=["kimi-k2.6", "mistral-medium-3.5"]),
+            [MISTRAL, KIMI],
+        )
+
+    def test_provider_and_names_both_apply(self):
+        self.assertEqual(
+            ma.filter_pool(POOL, provider="openrouter", names=["mistral-medium-3.5"]),
+            [],
+        )
+
+
+def test_check_pool_cli_says_when_a_filter_matches_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(ma, "load_pool", lambda: POOL)
+    assert ma.main(["--check-pool", "--provider", "nvidai"]) == 2
+    assert capsys.readouterr().err == (
+        "[pool] no entry matches provider 'nvidai' — check the spelling against model_pool\n"
+    )
+
+
+def test_check_pool_cli_checks_only_the_filtered_entries(monkeypatch, capsys):
+    seen: list[str] = []
+
+    def fake_check_pool(pool, timeout=60, workers=ma.CHECK_WORKERS):
+        seen.extend(e["name"] for e in pool)
+        return [ma.PoolCheck(e["name"], "ok", "OK", 1.0) for e in pool]
+
+    monkeypatch.setattr(ma, "load_pool", lambda: POOL)
+    monkeypatch.setattr(ma, "check_pool", fake_check_pool)
+    assert ma.main(["--check-pool", "--name", "glm-5-2"]) == 0
+    assert seen == ["glm-5-2"]
+
+
 class TestCheckPool(unittest.TestCase):
     def test_one_result_per_entry_offline_skipped(self):
         def fake_run(cmd, **kw):
