@@ -10,8 +10,12 @@ allowed-tools: mcp__plugin_pc-delegate_pc-delegate__export_subtree, Bash(python3
 ## Step 1 — Resolve the touched files
 
 From the selected cards' own content (and, when relevant, `git status`/`git diff` on the target
-repo), name the files the external agent actually needs to see or edit. This is a judgment call —
-never guess silently; if it is unclear, ask.
+repo), name the files the external agent actually needs to see or edit — plus any hygiene hook or
+test that targets one of them (a `repo: local` hook whose own script is a file in the repo and
+whose `files:` pattern matches an edited file, the test module covering an edited one). A hook with
+no file of its own (a third-party one like `trailing-whitespace`) has nothing to add here. This is
+the one list passed to `export_subtree` below (so its own direct imports resolve the same way) and
+later to `--repo-file`. This is a judgment call — never guess silently; if it is unclear, ask.
 
 ## Step 2 — Compute the subtree
 

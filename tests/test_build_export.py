@@ -314,6 +314,98 @@ class TestSuggestedPrompt:
         assert "REPORT.md" in prompt
         assert "AGENTS.md" in prompt
 
+    def test_full_prompt_for_one_card(self) -> None:
+        assert be.suggested_prompt(["card-a"]) == (
+            "I've uploaded a zip containing AGENTS.md (read it first — it's the instructions) and "
+            "cards/<id>.md for each card (card-a) — the exact task is described there.\n"
+            "\n"
+            "If a hook or test covering a file you changed is included under repo/ and your "
+            "environment can execute code, run it and paste the command, its output, and its "
+            "exit code into REPORT.md before you finish.\n"
+            "\n"
+            "When you're done, give me back a zip containing:\n"
+            "- only the files you created or modified, paths preserved exactly as in the archive "
+            "you received (not under repo/)\n"
+            "- a REPORT.md at the root of the zip: what you did, any scope decisions you made, any "
+            "bug/issue you found but left alone because it was out of scope, and anything a human "
+            "reviewer should know before trusting the change.\n"
+        )
+
+    def test_self_check_reminder_present_regardless_of_card_list(self) -> None:
+        prompt = be.suggested_prompt(["x", "y"])
+        assert "REPORT.md before you finish" in prompt
+
+
+class TestHookInclusionByRepoFile:
+    def test_repo_file_lands_at_its_real_nested_path_in_the_zip(
+        self, tmp_path: Path, chantier: Path
+    ) -> None:
+        """`--repo-file` places a nested hook or test script at its real repo-relative path under
+        `repo/`, through the same generic mechanism as any other repo file."""
+        _write_card(chantier, "1-todo", "touches-req-ids")
+        repo = tmp_path / "repo"
+        (repo / "scripts" / "hooks").mkdir(parents=True)
+        (repo / "src.py").write_text("x = 1\n")
+        (repo / "scripts" / "hooks" / "check_requirement_ids.py").write_text("# hook\n")
+        out = tmp_path / "export.zip"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "build_export.py"),
+                "--chantier",
+                str(chantier),
+                "--card",
+                "touches-req-ids",
+                "--repo",
+                str(repo),
+                "--repo-file",
+                "src.py",
+                "--repo-file",
+                "scripts/hooks/check_requirement_ids.py",
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        with zipfile.ZipFile(out) as zf:
+            names = set(zf.namelist())
+        assert "repo/src.py" in names
+        assert "repo/scripts/hooks/check_requirement_ids.py" in names
+
+
+class TestGuideHooksCarveOut:
+    GUIDE_PATH = (
+        Path(__file__).parent.parent
+        / "plugins"
+        / "pc-delegate"
+        / "skills"
+        / "export"
+        / "references"
+        / "GUIDE.md"
+    )
+
+    def test_carves_out_running_an_included_hook_or_test(self) -> None:
+        text = self.GUIDE_PATH.read_text(encoding="utf-8")
+        normalized = " ".join(text.split())
+        assert "REPORT.md" in text
+        assert "hook" in text.lower()
+        assert "exit code" in text
+        assert "pass the file(s) you touched as its argument" in normalized
+        assert (
+            "unless editing that hook or test is what your task actually asked for"
+            in normalized
+        )
+        assert "pytest" not in text
+
+    def test_does_not_promise_the_full_suite_runs_here(self) -> None:
+        text = self.GUIDE_PATH.read_text(encoding="utf-8")
+        assert "does not replace the reintegration step" in text
+        assert "runs the project's own checks in full" in text
+
 
 class TestMainAtomicity:
     def test_repo_file_escape_leaves_board_and_output_untouched(

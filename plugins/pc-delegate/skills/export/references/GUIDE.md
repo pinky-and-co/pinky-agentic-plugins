@@ -19,11 +19,23 @@ applied to the repository — write it as you would a short handoff note, not as
 
 ## What you cannot do here — and do not need to
 
-You cannot commit, push, run the project's own lint/type-check/test suite, or move a file between
-folders in a way that reaches back to the local filesystem. None of that is your job in this
-session — it happens after your archive is reintegrated. Write clean code by the conventions
-already visible in the files you touch; the reintegration step runs the project's own checks and
-will flag anything mechanical or ask a human about anything requiring judgment.
+You cannot commit, push, run the project's own full lint/type-check/test suite, or move a file
+between folders in a way that reaches back to the local filesystem. None of that is your job in
+this session — it happens after your archive is reintegrated.
+
+One exception: if a hygiene hook or a test targeting a file you touched is present under `repo/`
+and your environment can execute code, run it against your change before you finish — pass the
+file(s) you touched as its argument (e.g. `python3 repo/scripts/hooks/some_check.py repo/path/to/
+the/file/you/touched.py`); running it with no argument tells you nothing about your change. Paste
+the command, its full output, and its exit code into `REPORT.md` — this checks your own change, it
+does not replace the reintegration step, which still runs the project's own checks in full. If it
+fails, fix the file you touched, not the hook or test itself, unless editing that hook or test is
+what your task actually asked for — otherwise it was shipped to verify your change, not to be
+edited by it.
+
+Write clean code by the conventions already visible in the files you touch; the reintegration step
+runs the project's own checks and will flag anything mechanical or ask a human about anything
+requiring judgment.
 
 ## Scope discipline
 
