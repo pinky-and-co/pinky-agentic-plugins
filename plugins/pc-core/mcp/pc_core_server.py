@@ -176,12 +176,18 @@ def panel(
 
 
 @m.tool()
-def pool_check() -> str:
+def pool_check(provider: str | None = None, names: list[str] | None = None) -> str:
     """Send a one-line prompt to every `model_pool` entry through `pi`, with no tools, and report
     which answer: one line per entry with its latency, or the provider's own error (bad key, rate
     limit, unknown model, timeout). `offline` entries are skipped — `pinky doctor` checks those.
+
+    `provider` and/or `names` narrow the check to the entries just added — each entry checked is
+    one real call against that provider's quota.
     """
-    results = model_adversarial.check_pool(model_adversarial.load_pool())
+    pool = model_adversarial.filter_pool(model_adversarial.load_pool(), provider, names)
+    if not pool:
+        return model_adversarial.filter_miss(provider, names)
+    results = model_adversarial.check_pool(pool)
     return model_adversarial.render_pool_check(results)
 
 

@@ -50,7 +50,7 @@ model id through pi.
 
 Usage:
     model_adversarial.py --task "<task>" [--file PATH ...] [--model NAME] [--tool NAME ...]
-    model_adversarial.py --check-pool
+    model_adversarial.py --check-pool [--provider NAME] [--name ENTRY ...]
 """
 
 from __future__ import annotations
@@ -562,6 +562,39 @@ def _check_one(entry: dict[str, Any], timeout: int, env: dict[str, str]) -> Pool
     return PoolCheck(entry["name"], "failed", detail, time.monotonic() - start)
 
 
+def filter_pool(
+    pool: list[dict[str, Any]],
+    provider: str | None = None,
+    names: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """The pool entries matching `provider` and/or `names`, in pool order.
+
+    Args:
+        pool: the entries to filter.
+        provider: keep only entries of this provider; None keeps every provider.
+        names: keep only entries with one of these names; None or empty keeps every name.
+
+    Returns:
+        The matching entries — the whole pool when no filter is given.
+    """
+    return [
+        e
+        for e in pool
+        if (provider is None or e.get("provider") == provider)
+        and (not names or e.get("name") in names)
+    ]
+
+
+def filter_miss(provider: str | None, names: list[str] | None) -> str:
+    """The report line for a filter that matched no entry, naming what was asked for."""
+    asked = []
+    if provider is not None:
+        asked.append(f"provider '{provider}'")
+    if names:
+        asked.append("name " + ", ".join(f"'{n}'" for n in names))
+    return f"[pool] no entry matches {' and '.join(asked)} — check the spelling against model_pool"
+
+
 def check_pool(
     pool: list[dict[str, Any]], timeout: int = 60, workers: int = CHECK_WORKERS
 ) -> list[PoolCheck]:
@@ -622,10 +655,25 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="send a one-line prompt to every pool entry and report which answer",
     )
+    ap.add_argument(
+        "--provider",
+        help="with --check-pool: only the entries of this provider",
+    )
+    ap.add_argument(
+        "--name",
+        action="append",
+        default=[],
+        dest="names",
+        help="with --check-pool: only this pool entry (repeatable)",
+    )
     args = ap.parse_args(argv)
 
     if args.check_pool:
-        results = check_pool(load_pool())
+        pool = filter_pool(load_pool(), args.provider, args.names)
+        if not pool:
+            print(filter_miss(args.provider, args.names), file=sys.stderr)
+            return 2
+        results = check_pool(pool)
         print(render_pool_check(results))
         return 1 if any(r.status == "failed" for r in results) else 0
     if not args.task:
