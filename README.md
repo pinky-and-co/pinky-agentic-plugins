@@ -2,7 +2,7 @@
 
 <!-- pinky:readme-tagline:start -->
 
-Public Claude Code plugin marketplace — generic, reusable workspace mechanics (git workflow, policy injection, permission guards).
+Public Claude Code plugin marketplace — generic, reusable workspace mechanics: git workflow, kanban, session-hygiene hooks, engineering conventions.
 
 <!-- pinky:readme-tagline:end -->
 
@@ -20,23 +20,42 @@ Public Claude Code plugin marketplace — generic, reusable workspace mechanics 
 </div>
 <!-- pinky:readme-badges:end -->
 
-Public Claude Code plugin marketplace — generic, reusable workspace mechanics with zero
-profile-resolved values (no product codename, no employer reference, nothing that only makes
-sense inside a specific org). Installable by anyone via `claude plugin marketplace add`.
+Every plugin carries zero profile-resolved values — no product codename, no employer reference,
+nothing that only makes sense inside one org. Values that differ per repo (chat language, default
+branch, branch strategy) are read from that repo's own `.claude/settings.pinky.json`.
 
 ## Plugins
 
 | Plugin | What it ships |
 |--------|----------------|
-| [`pc-core`](plugins/pc-core/) | Generic workspace mechanics: gitmoji git workflow (`commit`, `commit-and-pr`, `clean-gone`, `branch-workflow`), the `inject_policies` hook and its `settings.pinky.json` contract, and permission guards (`careful`, `freeze`, `guard`) |
-| [`pc-snow`](plugins/pc-snow/) | Snowflake anti-training-bias knowledge (distilled, provenance-tracked) — not yet populated |
+| [`pc-core`](plugins/pc-core/) | Session hygiene hooks (per-repo language/branch policies, costly-read and secret-read guards, post-edit lint, keychain secrets), the `reviewer` agent, skills `apply-pattern`, `council`, `document-to-md`, `review-guidelines`, and the `offline`/`adversarial`/`panel` model MCP tools |
+| [`pc-git`](plugins/pc-git/) | Gitmoji commit workflow (`commit`, `commit-and-pr`, `commit-convention`), `branch-workflow`, `clean-gone` (also run at session start), the `git-workflow` agent, and hooks guarding permanent branches and overlapping PRs |
+| [`pc-kanban`](plugins/pc-kanban/) | File-based kanban mechanics — chantiers and cards (`kanban`, `chantier`, `grill`, `init`, `spawn-workers`, `yt`), the `card-worker` agent, permission guards (`careful`/`freeze`/`deny`/`guard`), card-discipline and handoff hooks |
+| [`pc-autodiscovery`](plugins/pc-autodiscovery/) | Always-on activation of the project-scoped plugins matching where the session sits, and a gate on the next tool call while a user-only slash command is pending |
+| [`pc-craft`](plugins/pc-craft/) | Engineering conventions: `code-conventions`, `debug-brief`, `fastapi`, `improve` |
+| [`pc-delegate`](plugins/pc-delegate/) | `export`/`reintegrate`: hand kanban cards and code to an agent working outside Claude Code, then bring its results back safely |
+| [`pc-privacy`](plugins/pc-privacy/) | Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools — no LLM |
+| [`pc-pypi`](plugins/pc-pypi/) | `dev-prerelease`: cut a dev pre-release of a PyPI library, stopping before the publishing tag |
+| [`pc-snow`](plugins/pc-snow/) | Snowflake knowledge against training bias: `snowflake`, `snowpark`, `streamlit`, `cortex`, `snowpark-to-sql`, `sql-to-snowpark` |
+| [`pc-statusline`](plugins/pc-statusline/) | Multi-line status line — model, effort, context, cache hit, cost, rate limits — plus a per-subagent row |
 
 ## Install
 
-```
+Prerequisites: Python 3.12+; [`uv`](https://docs.astral.sh/uv/) for the plugins shipping an MCP
+server (`pc-core`, `pc-delegate`, `pc-privacy`), which resolves their dependencies with no
+`pip install` step.
+
+```bash
 claude plugin marketplace add pinky-and-co/pinky-agentic-plugins
-claude plugin install pc-core@pinky-agentic-plugins
+claude plugin install pc-git@pinky-agentic-plugins      # any plugin from the table
 ```
+
+Inside a pinky workspace, `pinky claude-plugin install <plugin>` also asks which folders enable it
+and distributes the plugin's rules. `pc-statusline` needs it: a status line has no plugin-manifest
+slot, so `pinky` wires it into `~/.claude/settings.json`.
+
+Developing a plugin from a local clone: see *Where an installed plugin runs from* in
+[AGENTS.md](AGENTS.md) — what reloads on its own, and what needs `/reload-plugins`.
 
 <!-- pinky:readme-why:start -->
 
