@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""`pc-kanban:init` — scaffold a board's `_KANBAN/INDEX.md` + nested `_AGENT_LOG/`, and record its
-declared boards in `~/.claude/settings.pinky.json`.
+"""`pc-kanban:init` — scaffold a board's `_KANBAN/INDEX.md` + nested `_AGENT_LOG/`, declare it in
+`~/.claude/settings.pinky.json` (`kanban_boards`), and grant every declared board native
+read/write access via `~/.claude/settings.json` (`permissions.additionalDirectories`).
 
 Generic, no repo-specific default: `--workspace <path>` or the current directory. Idempotent — a
-rerun on an already-scaffolded root changes nothing (`INDEX.md` is never overwritten;
-`settings.pinky.json` is only rewritten when the merged `kanban_boards` value actually differs from
-what is already there). Never scaffolds a first chantier — that is skill `grill`'s job.
+rerun on an already-scaffolded root changes nothing beyond filling in what a directly-edited
+`kanban_boards` entry newly needs in `additionalDirectories`. Never scaffolds a first chantier —
+that is skill `grill`'s job.
 
-Also migrates, once, whatever extra board root was already visible for this workspace via the
-retired discovery mechanism (a `*.code-workspace`'s `folders[]`, or the `KANBAN_ROOTS` env var) —
-union-merged into `kanban_boards[<root>]`, never dropping an entry already declared there.
+`init` reads nothing outside `_KANBAN`'s own tree and the two settings files above — no
+`*.code-workspace`, no environment variable. An additional board for an already-initialized root
+is a hand edit to `kanban_boards[<root>]`, the same convention `model_pool`/`keys` already use in
+that same file; the next `init` run then grants it in `additionalDirectories` on its own.
 
 Python 3.11+, stdlib only.
 """
@@ -18,13 +20,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 SETTINGS_PINKY_PATH = Path.home() / ".claude" / "settings.pinky.json"
+CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
 _MIGRATE_AGENT_LOG = (
     Path(__file__).resolve().parents[3]
@@ -32,9 +34,6 @@ _MIGRATE_AGENT_LOG = (
     / "agent-log-migration"
     / "pc_kanban_migrate_agent_log.py"
 )
-
-_ROOTS_ENV = "KANBAN_ROOTS"
-_CODE_WORKSPACE_GLOB = "*.code-workspace"
 
 _CHANTIER_DIR_RE = re.compile(r"^CHANTIER(\d{4})-(.+)$")
 
@@ -44,175 +43,60 @@ LEGEND = (
 )
 
 
-# ── Legacy discovery — only ever read here, for the one-time migration ───────────────────────
+# ── Shared JSON read/write — atomic, refuses a malformed file rather than guessing ────────────
 
 
-def _strip_jsonc_comments(text: str) -> str:
-    """Strip `//` and `/* */` comments from JSONC, respecting string literals.
-
-    `*.code-workspace` is JSONC (VSCode's own format), not strict JSON — real files carry `//`
-    banners (path warnings, mount-point rationale) that `json.loads` chokes on. A regex would strip
-    a `//` inside a Windows path string; this walks the text char-by-char instead.
-    """
-    out: list[str] = []
-    i, n = 0, len(text)
-    in_string = False
-    while i < n:
-        c = text[i]
-        if in_string:
-            out.append(c)
-            if c == "\\" and i + 1 < n:
-                out.append(text[i + 1])
-                i += 2
-                continue
-            if c == '"':
-                in_string = False
-            i += 1
-            continue
-        if c == '"':
-            in_string = True
-            out.append(c)
-            i += 1
-            continue
-        if c == "/" and i + 1 < n and text[i + 1] == "/":
-            while i < n and text[i] != "\n":
-                i += 1
-            continue
-        if c == "/" and i + 1 < n and text[i + 1] == "*":
-            i += 2
-            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                i += 1
-            i += 2
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
-
-
-def _nearest_code_workspace(start: Path) -> Path | None:
-    """Nearest `*.code-workspace` FILE above `start`, or None."""
-    for base in [start, *start.parents]:
-        matches = [p for p in base.glob(_CODE_WORKSPACE_GLOB) if p.is_file()]
-        if matches:
-            return matches[0]
-    return None
-
-
-def _parse_roots(raw: list[str], base: Path) -> list[Path]:
-    """One dir per entry; blanks and `#` comments skipped; relative entries resolved against `base`."""
-    roots: list[Path] = []
-    for item in raw:
-        item = item.strip()
-        if not item or item.startswith("#"):
-            continue
-        p = Path(item).expanduser()
-        roots.append(p if p.is_absolute() else base / p)
-    return roots
-
-
-def _workspace_folders(workspace_file: Path) -> list[Path]:
-    """Every `folders[]` entry of `workspace_file`, resolved against its own directory — `[]` on
-    any parse failure."""
-    try:
-        raw_text = _strip_jsonc_comments(workspace_file.read_text(encoding="utf-8"))
-        data = json.loads(raw_text)
-    except (OSError, json.JSONDecodeError):
-        return []
-    folders = data.get("folders") if isinstance(data, dict) else None
-    if not isinstance(folders, list):
-        return []
-    base = workspace_file.parent
-    roots: list[Path] = []
-    for entry in folders:
-        raw = entry.get("path") if isinstance(entry, dict) else None
-        if not isinstance(raw, str):
-            continue
-        p = Path(raw).expanduser()
-        roots.append(p if p.is_absolute() else base / p)
-    return roots
-
-
-def legacy_declared_roots(root: Path) -> list[Path]:
-    """Additional board roots visible for `root` via the retired discovery mechanism — env
-    `KANBAN_ROOTS` (if set) else every `folders[]` entry of the nearest `*.code-workspace` above
-    `root` — restricted to what that mechanism actually surfaced: an entry resolving to `root`
-    itself is never its own additional board, and an entry with no `_KANBAN/` of its own was never
-    surfaced either.
+def _load_json_object(path: Path, *, purpose: str) -> dict:
+    """The whole parsed `path`, or `{}` when it does not exist yet.
 
     Args:
-        root: the workspace root being initialized.
-
-    Returns:
-        Resolved, deduplicated candidate roots, in discovery order.
-    """
-    env = os.environ.get(_ROOTS_ENV)
-    if env:
-        candidates = _parse_roots(env.split(os.pathsep), root)
-    else:
-        workspace_file = _nearest_code_workspace(root)
-        candidates = _workspace_folders(workspace_file) if workspace_file else []
-    resolved_root = root.resolve()
-    seen: list[Path] = []
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if resolved == resolved_root:
-            continue
-        if not (resolved / "_KANBAN").is_dir():
-            continue
-        if resolved not in seen:
-            seen.append(resolved)
-    return seen
-
-
-# ── settings.pinky.json — kanban_boards ───────────────────────────────────────────────────────
-
-
-def _load_settings() -> dict:
-    """The whole parsed `SETTINGS_PINKY_PATH`, or `{}` when the file does not exist yet.
+        path: the JSON file to read.
+        purpose: one phrase naming what else this file carries, for the refusal message.
 
     Returns:
         The parsed JSON object, or `{}` when the file is simply absent.
 
     Raises:
         SystemExit: the file exists but is not valid JSON, or its top level is not an object —
-            this file also carries `model_pool`/`keys`, so writing `kanban_boards` into that
-            state would silently discard them. A human must look, not a script guessing.
+            never guessed past, since a blind rewrite would silently discard `purpose`.
     """
-    if not SETTINGS_PINKY_PATH.is_file():
+    if not path.is_file():
         return {}
     try:
-        data = json.loads(SETTINGS_PINKY_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(
-            f"refusing: {SETTINGS_PINKY_PATH} exists but is not valid JSON ({exc}) — "
-            "resolve by hand before running init"
+            f"refusing: {path} exists but is not valid JSON ({exc}) — it also carries "
+            f"{purpose}, resolve by hand"
         ) from exc
     if not isinstance(data, dict):
         raise SystemExit(
-            f"refusing: {SETTINGS_PINKY_PATH} exists but its top level is not a JSON "
-            "object — resolve by hand before running init"
+            f"refusing: {path} exists but its top level is not a JSON object — it also "
+            f"carries {purpose}, resolve by hand"
         )
     return data
 
 
-def _write_settings(data: dict) -> None:
-    """Write `data` to `SETTINGS_PINKY_PATH` via a temp file + atomic rename — this file also
-    holds API keys, so a crash mid-write must never leave it half-written."""
-    SETTINGS_PINKY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = SETTINGS_PINKY_PATH.with_suffix(SETTINGS_PINKY_PATH.suffix + ".tmp")
+def _write_json_object(path: Path, data: dict) -> None:
+    """Write `data` to `path` via a temp file + atomic rename — both files this module writes
+    also hold live harness/secrets config, so a crash mid-write must never leave either
+    half-written."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    tmp.replace(SETTINGS_PINKY_PATH)
+    tmp.replace(path)
+
+
+# ── settings.pinky.json — kanban_boards ───────────────────────────────────────────────────────
 
 
 def write_kanban_boards(root: Path) -> str:
-    """Merge `legacy_declared_roots(root)` into `kanban_boards[<root>]` of `SETTINGS_PINKY_PATH` —
-    union with whatever is already declared there, persisted only when a genuinely new entry
-    needs adding. Already-stored strings are kept byte-for-byte (a hand-added `~/...` or relative
-    entry is never re-anchored to whatever `root` happens to be at this call) — only the resolved
-    form is used to decide whether a legacy entry is already represented. Every other top-level
-    key (`model_pool`, `keys`, …) is read back untouched.
+    """Ensure `kanban_boards[<root>]` exists in `SETTINGS_PINKY_PATH` — an empty list on a fresh
+    root, left untouched if already present (an additional board declared there by hand since
+    the last `init` is never overwritten). Every other top-level key (`model_pool`, `keys`, …) is
+    read back untouched.
 
     Args:
         root: the workspace root being initialized, used as the resolved `kanban_boards` key.
@@ -222,27 +106,64 @@ def write_kanban_boards(root: Path) -> str:
     """
     resolved_root = root.resolve()
     key = str(resolved_root)
-    data = _load_settings()
+    data = _load_json_object(SETTINGS_PINKY_PATH, purpose="model_pool/keys")
     boards = data.get("kanban_boards")
     boards = dict(boards) if isinstance(boards, dict) else {}
-    key_present = key in boards
-    existing_raw = boards.get(key)
+    if key in boards:
+        existing = boards[key] if isinstance(boards[key], list) else []
+        return f"kanban_boards[{key}] unchanged ({len(existing)} board(s))"
+    boards[key] = []
+    data["kanban_boards"] = boards
+    _write_json_object(SETTINGS_PINKY_PATH, data)
+    return f"kanban_boards[{key}] = []"
+
+
+# ── settings.json — permissions.additionalDirectories ─────────────────────────────────────────
+
+
+def write_additional_directories(root: Path) -> str:
+    """Grant native read/write access to `root`'s own `_KANBAN/` and every board already declared
+    for it in `kanban_boards` — `permissions.additionalDirectories` in `CLAUDE_SETTINGS_PATH`.
+    Union only: an entry already there (this mechanism's own, or anything else) is never removed,
+    and every other top-level key (`hooks`, `enabledPlugins`, `model`, …) is read back untouched.
+
+    Args:
+        root: the workspace root just initialized (its `kanban_boards` key).
+
+    Returns:
+        A one-line summary of what changed, or that nothing did.
+    """
+    resolved_root = root.resolve()
+    pinky_data = _load_json_object(SETTINGS_PINKY_PATH, purpose="model_pool/keys")
+    declared = pinky_data.get("kanban_boards")
+    extra_raw = declared.get(str(resolved_root)) if isinstance(declared, dict) else None
+    extra = (
+        [p for p in extra_raw if isinstance(p, str)]
+        if isinstance(extra_raw, list)
+        else []
+    )
+    wanted = {str(resolved_root / "_KANBAN")} | {
+        str(Path(p).resolve() / "_KANBAN") for p in extra
+    }
+
+    data = _load_json_object(
+        CLAUDE_SETTINGS_PATH, purpose="the harness's own live settings"
+    )
+    permissions = data.get("permissions")
+    permissions = dict(permissions) if isinstance(permissions, dict) else {}
+    existing_raw = permissions.get("additionalDirectories")
     existing = (
         [p for p in existing_raw if isinstance(p, str)]
         if isinstance(existing_raw, list)
         else []
     )
-    existing_resolved = {str(Path(p).resolve()) for p in existing}
-    new_legacy = sorted(
-        {str(p) for p in legacy_declared_roots(resolved_root)} - existing_resolved
-    )
-    if key_present and not new_legacy:
-        return f"kanban_boards[{key}] unchanged ({len(existing)} board(s))"
-    merged = existing + new_legacy
-    boards[key] = merged
-    data["kanban_boards"] = boards
-    _write_settings(data)
-    return f"kanban_boards[{key}] = {merged}"
+    missing = sorted(wanted - set(existing))
+    if not missing:
+        return f"additionalDirectories already covers {len(wanted)} board dir(s)"
+    permissions["additionalDirectories"] = existing + missing
+    data["permissions"] = permissions
+    _write_json_object(CLAUDE_SETTINGS_PATH, data)
+    return f"additionalDirectories += {missing}"
 
 
 # ── INDEX.md ───────────────────────────────────────────────────────────────────────────────────
@@ -366,15 +287,15 @@ def _ancestor_kanban(root: Path) -> Path | None:
 
 
 def init(root: Path) -> str:
-    """Scaffold `root`'s board — `_KANBAN/INDEX.md` + nested `_AGENT_LOG/` — and record its
-    declared boards in `settings.pinky.json`. No-op on whatever already exists; never overwrites
-    an `INDEX.md` already there, never scaffolds a first chantier.
+    """Scaffold `root`'s board — `_KANBAN/INDEX.md` + nested `_AGENT_LOG/` — declare it in
+    `settings.pinky.json`, and grant native access in `settings.json`. No-op on whatever already
+    exists; never overwrites an `INDEX.md` already there, never scaffolds a first chantier.
 
     Args:
         root: the workspace root to initialize.
 
     Returns:
-        A multi-line summary of what was created, migrated, or left untouched.
+        A multi-line summary of what was created, declared, granted, or left untouched.
 
     Raises:
         SystemExit: an ancestor of `root` already boards this workspace — initializing here
@@ -413,6 +334,7 @@ def init(root: Path) -> str:
         )
 
     messages.append(write_kanban_boards(root))
+    messages.append(write_additional_directories(root))
     return "\n".join(messages)
 
 
