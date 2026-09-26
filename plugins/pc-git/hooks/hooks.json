@@ -1,5 +1,5 @@
 {
-  "description": "Blocks a guarded write on a permanent branch — see branch_guard.py. Guards against overlapping PRs — see pr_overlap_guard.py. Automatically cleans [gone] branches (remote deleted) on SessionEnd — see clean-gone/clean_gone_hook.py",
+  "description": "Blocks a guarded write on a permanent branch — see branch_guard.py. Guards against overlapping PRs — see pr_overlap_guard.py. Starts every session on a clean, up-to-date base (fast-forward, [gone] branches removed) on SessionStart — see clean-gone/clean_gone_hook.py",
   "hooks": {
     "PreToolUse": [
       {
@@ -23,7 +23,7 @@
         ]
       }
     ],
-    "SessionEnd": [
+    "SessionStart": [
       {
         "hooks": [
           {
