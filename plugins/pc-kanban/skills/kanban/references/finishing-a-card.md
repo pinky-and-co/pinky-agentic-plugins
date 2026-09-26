@@ -139,10 +139,17 @@ skill's job either.
 ### Flagging cards the closed card just made obsolete
 
 The same moment — the closed card's own subject is now known in full — is the cheapest point to
-catch another open card whose premise it just erased. No script, no semantic search:
-read the just-closed card next to the titles/filenames of every other open card (`0-ideas/`,
-`1-todo/`, `2-selected-for-dev/`) **in the same chantier**, and judge whether any is now clearly
-superseded. Two triggers, same proposal:
+catch another open card whose premise it just erased. List every other open card (`0-ideas/`,
+`1-todo/`, `2-selected-for-dev/`) **in the same chantier** with the opening of its goal, not just
+its title:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/open_cards_brief.py" <chantier-dir>
+```
+
+A title alone hides the overlap — "Worker = un agent" closed without flagging "Explorer `/goal` +
+équipes d'agents", whose remaining goal it had just delivered. Read the just-closed card next to
+that listing and judge whether any is now clearly superseded. Two triggers, same proposal:
 
 - **Direct supersession** — the just-closed card's own content makes another open card's need moot.
 - **Dead blocker** — a card `blocked_by` the just-closed card, where the closed card
@@ -163,8 +170,12 @@ gets appended to the card's own body before the move. A `sert` chain whose paren
 now found `dropped` there degrades exactly like a parent "not found" (`chantier/SKILL.md` step 7):
 say so plainly, append no `auto-parent` block, never invent one.
 
-**Nothing looks obsolete** → say nothing extra; this check produces no line when it finds nothing,
-same discipline as the next-card proposal's own silence.
+Record the check on the closed card, next to its `reviewed` line:
+`- [x] obsolescence (none)`, or `- [x] obsolescence (<slug>, …)` naming the cards proposed for a
+drop. Without it, "checked, nothing found" and "never checked" look the same.
+
+**Nothing looks obsolete** → say nothing extra in the conversation; the `obsolescence (none)` line on
+the card is the only trace, same discipline as the next-card proposal's own silence.
 
 ### Recommending session vs spawn, next to the proposal
 

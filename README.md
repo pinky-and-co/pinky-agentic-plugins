@@ -274,6 +274,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   └── story-template.md
 │   │   │   │   ├── scripts/
 │   │   │   │   │   ├── next_card_recommendation.py
+│   │   │   │   │   ├── open_cards_brief.py
 │   │   │   │   │   └── pi_review.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── permission-change/
@@ -384,6 +385,7 @@ pinky-agentic-plugins/
 │   ├── test_model_offline.py
 │   ├── test_model_panel.py
 │   ├── test_next_card_recommendation.py
+│   ├── test_open_cards_brief.py
 │   ├── test_orchestrator_freeze.py
 │   ├── test_pc_core_server_offline.py
 │   ├── test_pc_kanban_init.py
