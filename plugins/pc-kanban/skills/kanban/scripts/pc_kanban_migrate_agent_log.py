@@ -3,14 +3,15 @@
 
 `agent_log_dir()` (`stop_handoff.py`) resolves `<kanban_root>/_AGENT_LOG`; a board whose journal
 still sits next to `_KANBAN/` (the pre-nesting layout) needs its files moved there once. This
-script does that move and leaves a relative symlink at the old sibling path, so a writer whose
-plugin cache has not refreshed yet still lands its file in the same physical directory as a
-writer already on the nested path — no content forked between the two.
+script does that move — no compat is kept at the old path: a writer whose plugin cache still
+hardcodes the sibling path creates a fresh, disjoint directory there instead of landing in the
+same place as a reader using the nested resolution. Accepted: coordinating every writer's cache
+refresh is out of this script's reach.
 
-Idempotent: rerunning on an already-migrated board (symlink already in place, or the board never
-had a sibling `_AGENT_LOG/` at all) is a no-op, exit 0. Both paths present as real directories at
-once is refused rather than merged — that state means something unexpected already happened and
-a human should look, not a script guessing which side wins.
+Idempotent: rerunning on an already-migrated board (no sibling left, or the board never had one
+at all) is a no-op, exit 0. Both paths present as real directories at once is refused rather than
+merged — that state means something unexpected already happened and a human should look, not a
+script guessing which side wins.
 
 Python 3.11+, stdlib only.
 """
@@ -18,32 +19,25 @@ Python 3.11+, stdlib only.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 
 def migrate(kanban: Path) -> str:
-    """Move `kanban`'s sibling `_AGENT_LOG/` under `kanban/` and leave a compat symlink at the
-    old path. Returns a one-line summary; raises `SystemExit` on a refusal.
+    """Move `kanban`'s sibling `_AGENT_LOG/` under `kanban/`. Returns a one-line summary; raises
+    `SystemExit` on a refusal.
 
-    The rename and the symlink are two separate filesystem calls — if the process dies between
-    them, `old` no longer exists but `new` already holds the content, with no symlink yet. A
-    rerun in that state must not conclude "nothing to migrate": it recreates the symlink instead,
-    so a rerun is always safe whether it landed before, between, or after the two calls."""
+    A leftover symlink at the old path (from a board migrated before compat was dropped) is left
+    untouched — cleaning it up is a separate, explicit decision, not this script's job."""
     kanban = kanban.resolve()
     if not kanban.is_dir():
         raise SystemExit(f"not a directory: {kanban}")
     old = kanban.parent / "_AGENT_LOG"
     new = kanban / "_AGENT_LOG"
-    relative_target = os.path.relpath(new, old.parent)
 
     if old.is_symlink():
-        target = old.resolve()
-        if new.is_dir() and target == new.resolve():
-            return f"already migrated — {old} is a compat symlink to {new}"
-        raise SystemExit(
-            f"refusing: {old} is a symlink to {target}, not the expected {new}"
+        return (
+            f"nothing to migrate — {old} is a leftover compat symlink, left untouched"
         )
     if old.exists() and not old.is_dir():
         raise SystemExit(f"refusing: {old} exists and is not a directory")
@@ -56,11 +50,9 @@ def migrate(kanban: Path) -> str:
 
     if old.is_dir():
         old.rename(new)
-        old.symlink_to(relative_target, target_is_directory=True)
-        return f"migrated {old} -> {new}, compat symlink left at {old} -> {relative_target}"
+        return f"migrated {old} -> {new}"
     if new.is_dir():
-        old.symlink_to(relative_target, target_is_directory=True)
-        return f"compat symlink recreated at {old} -> {relative_target} (content already at {new})"
+        return f"already migrated — {new} exists, no sibling {old}"
     return f"nothing to migrate — no sibling {old}"
 
 
