@@ -15,8 +15,11 @@ Being invoked is the confirmation — this only touches branches the remote has 
 
 `scripts/bulk_clean_gone.sh` owns everything deterministic: `fetch --prune` before ever reading
 `[gone]` status (a branch deleted on GitHub/GitLab stays invisible locally until this runs),
-switching off a branch before deleting it, pulling the base branch once landed there, and removing
-any worktree tied to a branch it deletes. No subagent per repo — one process, one pass, same shape
+fast-forwarding the base branch (checked out or not), switching HEAD to the base only when HEAD
+itself is `[gone]`, and removing any worktree tied to a branch it deletes. A branch pushed without
+`-u` has no upstream and never shows `[gone]`; it counts as gone when `origin/<name>` is absent and
+its tip is the second parent of a merge on `origin/<base>`. The `pc-git` SessionStart hook runs the
+same script on the session's own repo. No subagent per repo — one process, one pass, same shape
 as `commit-and-pr`'s `bulk_commit.sh`.
 
 ```bash
@@ -31,5 +34,6 @@ A named repo as argument → add `--repo <name>` (basename match against every r
 discovery finds — `find <root> -maxdepth 4 -name .git`, `node_modules` excluded, identical to
 `bulk_commit.sh`'s, reused not reinvented). No argument or `--all` → no `--repo`, the whole root.
 
-Report its output verbatim, per repo: a branch count removed, or "rien à nettoyer". Nothing found
+Report its output verbatim, per repo: what changed (HEAD moved, base commits gained, branches
+removed by name), or "rien à nettoyer". Nothing found
 across the whole run → say so, nothing to do.

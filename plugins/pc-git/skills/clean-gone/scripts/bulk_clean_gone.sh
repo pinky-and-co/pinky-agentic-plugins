@@ -56,10 +56,46 @@ worktree_for_branch() {
     done < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
 }
 
+# Vrai si `$1` figure parmi les arguments suivants (comparaison littérale).
+in_list() {
+    local needle="$1" item
+    shift
+    for item in "$@"; do [ "$item" = "$needle" ] && return 0; done
+    return 1
+}
+
+# Joint les arguments 2..n avec le séparateur `$1`.
+join_by() {
+    local sep="$1" out="$2" item
+    shift 2
+    for item in "$@"; do out="$out$sep$item"; done
+    printf '%s' "$out"
+}
+
+# Avance la branche de base locale jusqu'à `origin/<base>`, en fast-forward uniquement, et imprime
+# le nombre de commits gagnés (rien si zéro ou impossible). Checkoutée : `merge --ff-only`, qui
+# refuse de lui-même d'écraser une modification locale en conflit. Sinon : `fetch .` met la ref à
+# jour sans toucher HEAD ni l'arbre de travail, et refuse tout ce qui n'est pas un fast-forward.
+update_base() {
+    local repo="$1" base="$2" head="$3" before after
+    before="$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$base")" || return 0
+    if [ "$head" = "$base" ]; then
+        git -C "$repo" merge --ff-only "origin/$base" >/dev/null 2>&1 || return 0
+    else
+        git -C "$repo" fetch . "origin/$base:$base" >/dev/null 2>&1 || return 0
+    fi
+    after="$(git -C "$repo" rev-parse "refs/heads/$base")"
+    [ "$before" = "$after" ] || git -C "$repo" rev-list --count "$before..$after"
+}
+
 # ── un repo ───────────────────────────────────────────────────────────────────
 clean_repo() {
     local repo="$1" name base head wt
     name="$(basename "$repo")"
+
+    # Pas de remote `origin` : rien ne peut y être [gone] ni en avance — silence, pas un échec.
+    git -C "$repo" remote get-url origin >/dev/null 2>&1 \
+        || { NOTHING_TOTAL=$((NOTHING_TOTAL + 1)); return 0; }
 
     git -C "$repo" fetch --prune origin >/dev/null 2>&1 \
         || { printf '  ❌ %-28s fetch --prune échoué\n' "$name"; FAILED_TOTAL=$((FAILED_TOTAL + 1)); return 1; }
@@ -76,44 +112,59 @@ clean_repo() {
         esac
     done < <(git -C "$repo" branch -vv)
 
-    if [ ${#gone[@]} -eq 0 ]; then
-        printf '  •  %-28s rien à nettoyer\n' "$name"
-        NOTHING_TOTAL=$((NOTHING_TOTAL + 1))
-        return 0
-    fi
-
+    # Une branche poussée sans `-u` n'a pas d'upstream : `branch -vv` ne l'affichera jamais
+    # `: gone]`. Elle compte comme [gone] si `origin/<nom>` a disparu ET que sa pointe est le
+    # second parent d'un merge de `origin/<base>` — la trace exacte d'une PR fusionnée. Être
+    # simple ancêtre de la base ne suffit pas : une branche fraîchement créée, sans commit, l'est.
     base="$(resolve_base "$repo")"
+    local merged_tips
+    merged_tips="$(git -C "$repo" log --merges --first-parent --format='%P' "origin/$base" 2>/dev/null \
+        | awk '{print $2}')"
+    local branch upstream tip
+    while IFS=' ' read -r branch upstream; do
+        [ -z "$upstream" ] && [ "$branch" != "$base" ] || continue
+        git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch" && continue
+        tip="$(git -C "$repo" rev-parse "refs/heads/$branch")"
+        printf '%s\n' "$merged_tips" | grep -qxF "$tip" && gone+=("$branch")
+    done < <(git -C "$repo" for-each-ref --format='%(refname:short) %(upstream:short)' refs/heads)
+
     head="$(git -C "$repo" symbolic-ref --short HEAD 2>/dev/null || true)"
 
-    # `branch -D` refuse sur la branche courante : bascule sur la base avant toute suppression,
-    # que HEAD soit une branche [gone] elle-même ou une autre branche non concernée.
-    if [ "$head" != "$base" ]; then
+    # `branch -D` refuse sur la branche courante : bascule sur la base seulement si HEAD est
+    # lui-même [gone]. Une branche vivante reste checkoutée — le hook tourne au démarrage d'une
+    # session, l'en déloger casserait le travail en cours.
+    local -a report=()
+    if [ "$head" != "$base" ] && in_list "$head" ${gone[@]+"${gone[@]}"}; then
         git -C "$repo" checkout "$base" >/dev/null 2>&1 \
             || { printf '  ❌ %-28s checkout %s impossible\n' "$name" "$base"; \
                  FAILED_TOTAL=$((FAILED_TOTAL + 1)); return 1; }
+        report+=("HEAD $head → $base")
+        head="$base"
     fi
-    # Toujours après bascule, même si HEAD y était déjà : un HEAD resté sur la base depuis avant
-    # le merge qui vient de justifier ce nettoyage est tout aussi en retard.
-    git -C "$repo" pull --ff-only >/dev/null 2>&1 || true
 
-    local branch removed=0 failed=0
-    for branch in "${gone[@]}"; do
+    local pulled
+    pulled="$(update_base "$repo" "$base" "$head")"
+    [ -z "$pulled" ] || report+=("$base +$pulled commit(s)")
+
+    local -a removed=()
+    local failed=0
+    for branch in ${gone[@]+"${gone[@]}"}; do
         [ "$branch" != "$base" ] || continue
         wt="$(worktree_for_branch "$repo" "$branch")"
         [ -z "$wt" ] || git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
         if git -C "$repo" branch -D "$branch" >/dev/null 2>&1; then
-            removed=$((removed + 1))
+            removed+=("$branch")
         else
             failed=$((failed + 1))
         fi
     done
+    [ ${#removed[@]} -eq 0 ] || report+=("supprimée(s) : $(join_by ', ' "${removed[@]}")")
 
     if [ "$failed" -gt 0 ]; then
-        [ "$QUIET" = true ] || printf '  ❌ %-28s %d supprimée(s), %d échec(s) (voir git branch -vv)\n' \
-            "$name" "$removed" "$failed"
+        printf '  ❌ %-28s %d échec(s) de suppression (voir git branch -vv)\n' "$name" "$failed"
         FAILED_TOTAL=$((FAILED_TOTAL + 1))
-    elif [ "$removed" -gt 0 ]; then
-        [ "$QUIET" = true ] || printf '  ✅ %-28s %d branche(s) [gone] supprimée(s)\n' "$name" "$removed"
+    elif [ ${#report[@]} -gt 0 ]; then
+        printf '  ✅ %-28s %s\n' "$name" "$(join_by ' · ' "${report[@]}")"
         OK_TOTAL=$((OK_TOTAL + 1))
     else
         [ "$QUIET" = true ] || printf '  •  %-28s rien à nettoyer\n' "$name"
