@@ -54,188 +54,82 @@ class TestCardColumn(unittest.TestCase):
             self.assertIsNone(cd.card_column(str(path)))
 
 
-class TestWithinHandoffBlock(unittest.TestCase):
-    def test_true_when_inside(self):
-        text = f"# Card\n\n{cd.BLOCK_START}\nold state\n{cd.BLOCK_END}\n"
-        self.assertTrue(cd.within_handoff_block(text, "old state"))
+def _write_event(path: Path) -> dict:
+    """A `Write` of `path` — the shape both a creation and a full rewrite take."""
+    return {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(path), "content": "x"},
+    }
 
-    def test_false_when_outside(self):
-        text = f"# Card\n\nintro\n\n{cd.BLOCK_START}\nstate\n{cd.BLOCK_END}\n"
-        self.assertFalse(cd.within_handoff_block(text, "intro"))
 
-    def test_false_when_no_block(self):
-        text = "# Card\n\nno block here\n"
-        self.assertFalse(cd.within_handoff_block(text, "no block here"))
-
-    def test_false_when_spans_outside_block(self):
-        text = f"before\n{cd.BLOCK_START}\nstate\n{cd.BLOCK_END}\nafter"
-        self.assertFalse(cd.within_handoff_block(text, "state\nafter"))
+def _edit_event(path: Path) -> dict:
+    """An `Edit` of `path` replacing `a` with `b`."""
+    return {
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(path), "old_string": "a", "new_string": "b"},
+    }
 
 
 class TestDecide(unittest.TestCase):
-    def test_ideas_asks(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "0-ideas")
-            path.write_text("# idea\n")
-            event = {
-                "tool_name": "Write",
-                "tool_input": {"file_path": str(path), "content": "x"},
-            }
-            decision = cd.decide(event)
-            self.assertIsNotNone(decision)
-            self.assertEqual(
-                decision["hookSpecificOutput"]["permissionDecision"], "ask"
-            )
-
-    def test_todo_passes(self):
+    def test_ask_decision_is_the_full_envelope(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = _card_path(Path(tmp), "1-todo")
             path.write_text("# todo\n")
-            event = {
-                "tool_name": "Write",
-                "tool_input": {"file_path": str(path), "content": "x"},
-            }
-            self.assertIsNone(cd.decide(event))
-
-    def test_selected_for_dev_passes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "2-selected-for-dev")
-            path.write_text("# selected\n")
-            event = {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": str(path),
-                    "old_string": "a",
-                    "new_string": "b",
-                },
-            }
-            self.assertIsNone(cd.decide(event))
-
-    def test_in_progress_outside_markers_asks(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "3-in-progress")
-            path.write_text(
-                f"# card\n\nnarrative\n\n{cd.BLOCK_START}\nold\n{cd.BLOCK_END}\n"
-            )
-            event = {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": str(path),
-                    "old_string": "narrative",
-                    "new_string": "rewritten",
-                },
-            }
-            decision = cd.decide(event)
-            self.assertIsNotNone(decision)
             self.assertEqual(
-                decision["hookSpecificOutput"]["permissionDecision"], "ask"
-            )
-
-    def test_in_progress_within_markers_passes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "3-in-progress")
-            path.write_text(f"# card\n\n{cd.BLOCK_START}\nold state\n{cd.BLOCK_END}\n")
-            event = {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": str(path),
-                    "old_string": "old state",
-                    "new_string": "new state",
+                cd.decide(_edit_event(path)),
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "ask",
+                        "permissionDecisionReason": cd._REASON,
+                    }
                 },
-            }
-            self.assertIsNone(cd.decide(event))
-
-    def test_in_progress_write_within_markers_still_asks(self):
-        """A `Write` replaces the whole file — it can never be "between the markers"."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "3-in-progress")
-            path.write_text(f"# card\n\n{cd.BLOCK_START}\nold state\n{cd.BLOCK_END}\n")
-            event = {
-                "tool_name": "Write",
-                "tool_input": {"file_path": str(path), "content": "whatever"},
-            }
-            decision = cd.decide(event)
-            self.assertIsNotNone(decision)
-            self.assertEqual(
-                decision["hookSpecificOutput"]["permissionDecision"], "ask"
             )
 
-    def test_in_progress_multi_edit_all_within_markers_passes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "3-in-progress")
-            path.write_text(
-                f"# card\n\n{cd.BLOCK_START}\nold state\nold branch\n{cd.BLOCK_END}\n"
-            )
-            event = {
-                "tool_name": "MultiEdit",
-                "tool_input": {
-                    "file_path": str(path),
-                    "edits": [
-                        {"old_string": "old state", "new_string": "new state"},
-                        {"old_string": "old branch", "new_string": "new branch"},
-                    ],
-                },
-            }
-            self.assertIsNone(cd.decide(event))
+    def test_framing_columns_ask_on_edit(self):
+        for column in ("0-ideas", "1-todo", "2-selected-for-dev"):
+            with self.subTest(column=column), tempfile.TemporaryDirectory() as tmp:
+                path = _card_path(Path(tmp), column)
+                path.write_text("# card\n")
+                decision = cd.decide(_edit_event(path))
+                self.assertIsNotNone(decision)
+                self.assertEqual(
+                    decision["hookSpecificOutput"]["permissionDecision"], "ask"
+                )
 
-    def test_in_progress_multi_edit_one_entry_outside_markers_asks(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "3-in-progress")
-            path.write_text(
-                f"# card\n\nnarrative\n\n{cd.BLOCK_START}\nold state\n{cd.BLOCK_END}\n"
-            )
-            event = {
-                "tool_name": "MultiEdit",
-                "tool_input": {
-                    "file_path": str(path),
-                    "edits": [
-                        {"old_string": "old state", "new_string": "new state"},
-                        {"old_string": "narrative", "new_string": "rewritten"},
-                    ],
-                },
-            }
-            decision = cd.decide(event)
-            self.assertIsNotNone(decision)
-            self.assertEqual(
-                decision["hookSpecificOutput"]["permissionDecision"], "ask"
-            )
+    def test_framing_columns_ask_on_card_creation(self):
+        """Creating a card is gated too — the file does not exist yet."""
+        for column in ("0-ideas", "1-todo", "2-selected-for-dev"):
+            with self.subTest(column=column), tempfile.TemporaryDirectory() as tmp:
+                path = _card_path(Path(tmp), column)
+                decision = cd.decide(_write_event(path))
+                self.assertIsNotNone(decision)
+                self.assertEqual(
+                    decision["hookSpecificOutput"]["permissionDecision"], "ask"
+                )
 
-    def test_in_progress_notebook_edit_asks(self):
-        """`NotebookEdit` carries no `old_string` at all — it can never qualify for the
-        auto-handoff exception and always falls through to the column rule."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "3-in-progress")
-            path.write_text(f"# card\n\n{cd.BLOCK_START}\nold state\n{cd.BLOCK_END}\n")
-            event = {
-                "tool_name": "NotebookEdit",
-                "tool_input": {
-                    "notebook_path": str(path),
-                    "new_source": "print('hi')",
-                },
-            }
-            decision = cd.decide(event)
-            self.assertIsNotNone(decision)
-            self.assertEqual(
-                decision["hookSpecificOutput"]["permissionDecision"], "ask"
-            )
-
-    def test_done_asks(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "4-done")
-            path.write_text("# done\n")
-            event = {
-                "tool_name": "Edit",
-                "tool_input": {
-                    "file_path": str(path),
-                    "old_string": "a",
-                    "new_string": "b",
-                },
-            }
-            decision = cd.decide(event)
-            self.assertIsNotNone(decision)
-            self.assertEqual(
-                decision["hookSpecificOutput"]["permissionDecision"], "ask"
-            )
+    def test_engaged_columns_pass_every_guarded_tool(self):
+        for column in ("3-in-progress", "4-done"):
+            with self.subTest(column=column), tempfile.TemporaryDirectory() as tmp:
+                path = _card_path(Path(tmp), column)
+                path.write_text("# card\n\nnarrative\n")
+                events = [
+                    _edit_event(path),
+                    _write_event(path),
+                    {
+                        "tool_name": "MultiEdit",
+                        "tool_input": {
+                            "file_path": str(path),
+                            "edits": [{"old_string": "narrative", "new_string": "x"}],
+                        },
+                    },
+                    {
+                        "tool_name": "NotebookEdit",
+                        "tool_input": {"notebook_path": str(path), "new_source": "x"},
+                    },
+                ]
+                for event in events:
+                    self.assertIsNone(cd.decide(event), event["tool_name"])
 
     def test_ignores_read(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -286,7 +180,7 @@ class TestMainEndToEnd(unittest.TestCase):
 
     def test_asks_over_stdin(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "3-in-progress")
+            path = _card_path(Path(tmp), "1-todo")
             path.write_text("# card\n")
             result = self._run(
                 {
@@ -297,9 +191,9 @@ class TestMainEndToEnd(unittest.TestCase):
             output = json.loads(result.stdout)
             self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "ask")
 
-    def test_silent_on_todo(self):
+    def test_silent_on_in_progress(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _card_path(Path(tmp), "1-todo")
+            path = _card_path(Path(tmp), "3-in-progress")
             path.write_text("# card\n")
             result = self._run(
                 {
