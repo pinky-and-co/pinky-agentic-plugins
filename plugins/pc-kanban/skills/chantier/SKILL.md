@@ -59,8 +59,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     most idle one or two. Not blocking — a fallback net behind the closing-time
     obsolescence check (`finishing-a-card.md` § "Flagging cards the closed card just made
     obsolete"), never a reason to stop and re-triage on its own.
-  - if `4-done/` is non-empty: flag it and offer to fold + archive. Only after the user confirms
-    the rationale is folded into the story/an ADR, archive via:
+  - if `4-done/` is non-empty: flag it and offer to archive, naming any card that carries a
+    durable decision (a rejected alternative written nowhere else) as an ADR candidate — never a
+    fold into the story. Once the user has settled the ADR candidates, archive via:
 ```bash
     bash "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh" <card-path>
 ```

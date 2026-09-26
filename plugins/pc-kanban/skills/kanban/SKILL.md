@@ -18,7 +18,7 @@ _KANBAN/
 │   ├── 2-selected-for-dev/   ← commitment point — next session takes the highest `priority:`,
 │   │                            file position tie-breaks
 │   ├── 3-in-progress/        ← active — the card carries its handoff
-│   └── 4-done/               ← done (airlock) — fold the "why" into the story/an ADR, then purge
+│   └── 4-done/               ← done (airlock) — an ADR if it carries a durable decision, then archive
 └── _ARCHIVE/
     └── CHANTIER{NNNN}-done/
         ├── .nav.yml              ← display only: sort: {direction: desc, by: filename} — scoped to
@@ -234,8 +234,9 @@ sequentially between workers; see `references/finishing-a-card.md` § "Relaying 
 - Durable facts (user profile, conventions, contract constraints) live in the agent's persistent
   memory, not here — `_KANBAN/_FACTS.md` is a human-readable mirror, not the source.
 - A file open in an editor is not a task; do not fold IDE context into a card.
-- `4-done/` is an airlock: once a card's rationale is folded into the story or an ADR, `/chantier`
-  archives it to `_ARCHIVE/CHANTIER{NNNN}-done/`, prefixed with the archive date —
+- `4-done/` is an airlock. A card that carries a durable decision — a rejected alternative written
+  nowhere else (code, skill, existing ADR) — gets an ADR first; every other card is archived as is.
+  Nothing goes into the story: it holds the chantier's current state, never a card's history.
+  Archiving moves the card to `_ARCHIVE/CHANTIER{NNNN}-done/`, prefixed with the archive date —
   `YYYY-MM-DD_<filename>.md`, underscore, computed at archive time, not the card's own `date:` field
-  (still "done since"). Never a bare `mv`; see `chantier` skill for the archiving mechanics. A card
-  not yet folded stays in `4-done/`.
+  (still "done since"). Never a bare `mv`; see `chantier` skill for the archiving mechanics.
