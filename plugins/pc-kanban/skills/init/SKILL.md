@@ -1,14 +1,14 @@
 ---
 name: init
-description: Scaffold a fresh `_KANBAN/INDEX.md` + nested `_AGENT_LOG/` at a workspace root, and declare its additional board roots in `~/.claude/settings.pinky.json` (`kanban_boards`). Use before a board exists at all, or to migrate a workspace still declaring its extra boards through a `*.code-workspace`'s `folders[]` / `KANBAN_ROOTS`.
+description: Scaffold a fresh `_KANBAN/INDEX.md` + nested `_AGENT_LOG/` at a workspace root, declare it in `~/.claude/settings.pinky.json` (`kanban_boards`), and grant it native access in `~/.claude/settings.json` (`permissions.additionalDirectories`). Use before a board exists at all, or to grant access to one already declared by hand.
 argument-hint: "[--workspace <path>]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/init/scripts/pc_kanban_init.py:*)
 ---
 
-# init — scaffold a board, declare its extra roots
+# init — scaffold a board, declare it, grant it
 
 Every other `pc-kanban` skill assumes `_KANBAN/` already exists. This one creates it — the one time
-a workspace has none yet, or is still declaring its additional boards the pre-`kanban_boards` way.
+a workspace has none yet.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/init/scripts/pc_kanban_init.py" [--workspace <path>]
@@ -26,18 +26,24 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/init/scripts/pc_kanban_init.py" [--workspa
    `CHANTIER{NNNN}-<slug>/` directory already on disk so an existing chantier is never rendered
    invisible by an empty table). Everything else a hand-maintained `INDEX.md` accretes over time —
    conventions, product topology — is this workspace's own prose, not scaffolded here.
-4. Merges whatever extra board root was already visible for this workspace via the retired
-   discovery mechanism (a `*.code-workspace`'s `folders[]`, or `KANBAN_ROOTS`) into
-   `kanban_boards[<root>]` of `~/.claude/settings.pinky.json` — union with anything already
-   declared there, `model_pool`/`keys` and every other top-level key read back untouched.
+4. Ensures `kanban_boards[<root>]` exists in `~/.claude/settings.pinky.json` — an empty list on a
+   fresh root, left untouched if already present. `model_pool`/`keys` and every other top-level key
+   are read back untouched.
+5. Grants native access to `<root>/_KANBAN` and every board already listed in `kanban_boards[<root>]`
+   — `permissions.additionalDirectories` in `~/.claude/settings.json`, union only, every other
+   top-level key (`hooks`, `enabledPlugins`, `model`, …) read back untouched.
 
-Idempotent throughout: a rerun on an already-scaffolded root changes nothing on disk. Never
-scaffolds a first chantier — that is skill `grill`'s job.
+Idempotent throughout: a rerun on an already-scaffolded root changes nothing beyond granting a
+board declared by hand since the last run. Never scaffolds a first chantier — that is skill
+`grill`'s job. Reads nothing outside `_KANBAN`'s own tree and the two settings files above — no
+`*.code-workspace`, no environment variable.
 
-## Declaring a board this skill did not migrate
+## Declaring an additional board
 
 Skill `kanban` (§ Orgs, `references/multi-board.md`) reads every additional board exclusively from
-`kanban_boards[<primary-root>]` — there is no other declaration path. To hand-declare one without a
-`*.code-workspace` to migrate from, edit `~/.claude/settings.pinky.json` directly: the key is the
-primary root's resolved absolute path, the value a list of resolved absolute paths to each
-additional board's own root (never the root's own path in its own list).
+`kanban_boards[<primary-root>]` — there is no other declaration path. Edit
+`~/.claude/settings.pinky.json` directly, the same convention `model_pool`/`keys` already use in
+that file: the key is the primary root's resolved absolute path, the value a list of resolved
+absolute paths to each additional board's own root (never the root's own path in its own list).
+Then rerun `init` on the primary root — it grants the newly-declared board in
+`additionalDirectories` on its own.
