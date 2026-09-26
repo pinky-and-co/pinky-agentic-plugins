@@ -67,8 +67,6 @@ class TestCliModelIdJoin(unittest.TestCase):
             model_arg,
             "--no-tools",
             "--no-session",
-            "--thinking",
-            "off",
             "--",
             "p",
         ]
@@ -212,8 +210,6 @@ class TestModelAdversarialCLI(unittest.TestCase):
             "anthropic/claude-3-5-sonnet",
             "--no-tools",
             "--no-session",
-            "--thinking",
-            "off",
             "--",
             self.prompt,
         ]

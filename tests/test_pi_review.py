@@ -297,8 +297,6 @@ class TestReviewPoint(unittest.TestCase):
                 "-t",
                 "read",
                 "--no-session",
-                "--thinking",
-                "off",
                 "--",
                 pi_review.build_prompt("/repo", "First thing", "detail"),
             ],

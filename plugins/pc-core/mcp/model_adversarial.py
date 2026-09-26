@@ -42,6 +42,8 @@ Each entry:
                    before an equally-ranked remote one, without special-casing a provider name.
     timeout        optional seconds to wait for this entry, overriding the caller's default — for a
                    slow provider that still answers well (NVIDIA NIM: 9–47s for a one-line reply)
+    thinking       optional pi thinking level (`off`, `low`, `medium`, …); absent → pi's own default.
+                   `off` for a small local model, which a thinking pass drowns into an empty answer
 
 Explicit ``--model``/``PINKY_ADVERSARIAL_MODEL`` override bypasses the pool and calls that Mistral
 model id through pi.
@@ -453,8 +455,7 @@ def call_cli(
         cli_model_id(entry),
         *tool_args,
         "--no-session",
-        "--thinking",
-        "off",
+        *(["--thinking", entry["thinking"]] if entry.get("thinking") else []),
         "--",
         prompt,
     ]

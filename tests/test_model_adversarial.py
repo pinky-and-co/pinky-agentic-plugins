@@ -224,8 +224,6 @@ class TestCallCli(unittest.TestCase):
                 "mistral/mistral-medium-3.5",
                 "--no-tools",
                 "--no-session",
-                "--thinking",
-                "off",
                 "--",
                 "p",
             ],
@@ -236,6 +234,16 @@ class TestCallCli(unittest.TestCase):
             timeout=30,
             check=True,
         )
+
+    def test_entry_thinking_is_passed_before_the_prompt(self):
+        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+            ma.call_cli({**MISTRAL, "thinking": "off"}, "p", 30)
+        self.assertEqual(run.call_args[0][0][-4:], ["--thinking", "off", "--", "p"])
+
+    def test_no_entry_thinking_sends_no_thinking_flag(self):
+        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+            ma.call_cli(MISTRAL, "p", 30)
+        self.assertNotIn("--thinking", run.call_args[0][0])
 
     def test_tools_become_a_comma_separated_allowlist(self):
         with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
