@@ -665,8 +665,33 @@ class TestBoundedBoardLines(unittest.TestCase):
 
 
 class TestAgentLogDir(unittest.TestCase):
-    def test_sibling_of_the_board_kanban(self):
-        self.assertEqual(sh.agent_log_dir(Path("/ws/_KANBAN")), Path("/ws/_AGENT_LOG"))
+    def test_nested_under_the_board_kanban(self):
+        self.assertEqual(
+            sh.agent_log_dir(Path("/ws/_KANBAN")), Path("/ws/_KANBAN/_AGENT_LOG")
+        )
+
+    def test_falls_back_to_the_sibling_when_not_yet_migrated(self):
+        """A board whose migration script has never run (real sibling `_AGENT_LOG/`, no nested
+        one) still resolves to its actual content — not a directory nobody has created yet."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kanban = root / "_KANBAN"
+            kanban.mkdir()
+            sibling = root / "_AGENT_LOG"
+            sibling.mkdir()
+            (sibling / "2026-09-08_claude-code-Perrine_x.md").write_text("hello\n")
+            self.assertEqual(sh.agent_log_dir(kanban), sibling)
+
+    def test_prefers_nested_once_migrated_even_with_a_compat_symlink_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kanban = root / "_KANBAN"
+            nested = kanban / "_AGENT_LOG"
+            nested.mkdir(parents=True)
+            (root / "_AGENT_LOG").symlink_to(
+                "_KANBAN/_AGENT_LOG", target_is_directory=True
+            )
+            self.assertEqual(sh.agent_log_dir(kanban), nested)
 
 
 class TestListAgentLogDirsCLI(unittest.TestCase):
@@ -699,7 +724,52 @@ class TestListAgentLogDirsCLI(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout.strip(), str(board / "_AGENT_LOG"))
+            self.assertEqual(
+                result.stdout.strip(), str(board / "_KANBAN" / "_AGENT_LOG")
+            )
+
+
+class TestListAgentLogsCLI(unittest.TestCase):
+    SCRIPT = str(
+        Path(__file__).parent.parent
+        / "plugins"
+        / "pc-kanban"
+        / "hooks"
+        / "stop_handoff.py"
+    )
+
+    def test_reads_the_nested_dir_a_stale_sibling_never_appears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board = Path(tmp) / "ws"
+            nested = board / "_KANBAN" / "_AGENT_LOG"
+            nested.mkdir(parents=True)
+            (nested / "2026-09-26_claude-code-Perrine_a.md").write_text(
+                "# Nested entry\nbody\n"
+            )
+            stale = board / "_AGENT_LOG"  # pre-nesting sibling, no longer read
+            stale.mkdir()
+            (stale / "2026-09-25_claude-code-Perrine_b.md").write_text(
+                "# Stale entry\nbody\n"
+            )
+            result = subprocess.run(
+                [sys.executable, self.SCRIPT, "--list-agent-logs"],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                env={
+                    **os.environ,
+                    "KANBAN_ROOTS": str(board),
+                    "CLAUDE_PROJECT_DIR": str(board),
+                },
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(
+                result.stdout,
+                f"=== ORG: {board}\n"
+                "2026-09-26_claude-code-Perrine_a.md — Nested entry\n\n",
+            )
+            self.assertNotIn("b.md", result.stdout)
 
 
 class TestCardCLI(unittest.TestCase):

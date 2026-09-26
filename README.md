@@ -249,6 +249,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   └── story-template.md
 │   │   │   │   ├── scripts/
 │   │   │   │   │   ├── next_card_recommendation.py
+│   │   │   │   │   ├── pc_kanban_migrate_agent_log.py
 │   │   │   │   │   └── pi_review.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── permission-change/
@@ -360,6 +361,7 @@ pinky-agentic-plugins/
 │   ├── test_next_card_recommendation.py
 │   ├── test_orchestrator_freeze.py
 │   ├── test_pc_core_server_offline.py
+│   ├── test_pc_kanban_migrate_agent_log.py
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pending_gate.py
 │   ├── test_pi_review.py

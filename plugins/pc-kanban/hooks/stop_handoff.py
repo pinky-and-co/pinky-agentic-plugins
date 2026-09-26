@@ -217,10 +217,16 @@ def find_kanbans(start: Path) -> list[Path]:
 
 
 def agent_log_dir(kanban: Path) -> Path:
-    """The cross-agent journal directory paired with a board's `_KANBAN/` — its sibling today
-    (`consolider-agent-log-sous-kanban` may move it under `_KANBAN/`). Defined once so a consumer
-    resolving where agent logs live never hardcodes the sibling-vs-child choice."""
-    return kanban.parent / "_AGENT_LOG"
+    """The cross-agent journal directory for a board — nested under its `_KANBAN/` root once
+    migrated (`pc_kanban_migrate_agent_log.py`), the pre-migration sibling until then. Falls back
+    to the sibling only when the nested dir does not exist and the sibling does — a board never
+    migrated (or mounted read-only from a machine that hasn't run the script yet) still resolves
+    to its real content instead of a directory nobody has created."""
+    nested = kanban / "_AGENT_LOG"
+    sibling = kanban.parent / "_AGENT_LOG"
+    if not nested.is_dir() and sibling.is_dir():
+        return sibling
+    return nested
 
 
 def inprogress_cards(kanban: Path) -> list[Path]:

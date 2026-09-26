@@ -194,8 +194,12 @@ discovered — read it on a workspace that mounts more than one.
 
 ## Cross-agent log
 
-`_AGENT_LOG/` (next to `_KANBAN/`) is the async narrative channel between sessions/agents sharing an
-org — what a session did, cross-chantier, that no single card's handoff would hold. One file per
+`_AGENT_LOG/` (nested under `_KANBAN/`) is the async narrative channel between sessions/agents sharing an
+org. A board still on the pre-nesting layout (a real sibling `_AGENT_LOG/` next to `_KANBAN/`, no
+nested one yet) needs a one-time run of `skills/kanban/scripts/pc_kanban_migrate_agent_log.py
+--kanban <path-to-_KANBAN>` — `agent_log_dir()` (`stop_handoff.py`) resolves the sibling in the
+meantime, so nothing breaks before that run, but the migration itself never happens on its own.
+What a session did, cross-chantier, that no single card's handoff would hold. One file per
 `(date, agent)`, append-only, filename `YYYY-MM-DD_<tool>-<agent-identity>.md`. `<agent-identity>` is
 `git config user.name` (already declared for real reasons, no separate value to maintain). `<tool>`
 names which agentic tool wrote the entry — needed because more than one tool can share the same git

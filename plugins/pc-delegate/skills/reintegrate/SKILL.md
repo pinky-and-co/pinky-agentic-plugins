@@ -11,7 +11,7 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/app
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/apply_reintegrate.py" <source> --repo <path> \
-  --agent-log-dir <chantier-workspace>/_AGENT_LOG --card <id>
+  --agent-log-dir <chantier-workspace>/_KANBAN/_AGENT_LOG --card <id>
 ```
 
 `--agent-log-dir`/`--card` are optional — pass them whenever the reintegration belongs to a known

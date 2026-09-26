@@ -104,6 +104,19 @@ class TestWroteLog(ScanCase):
         s = self.scan(_assistant(_tool("Bash", command="ls _AGENT_LOG/")))
         self.assertFalse(s.wrote_log)
 
+    def test_nested_agent_log_write_also_matches_kanban_but_wrote_log_wins(self):
+        """`_AGENT_LOG/` now nests under `_KANBAN/`, so a log-only write also matches the
+        `_KANBAN` substring — `did_work` turns True alongside `wrote_log`. `main()`'s own gate
+        (`not did_work or wrote_log`) short-circuits on `wrote_log` regardless, so this stays a
+        no-op for the writer."""
+        s = self.scan(
+            _assistant(
+                _tool("Write", file_path="/w/_KANBAN/_AGENT_LOG/2026-09-23_x.md")
+            )
+        )
+        self.assertTrue(s.did_work)
+        self.assertTrue(s.wrote_log)
+
 
 class TestExcerpt(ScanCase):
     def test_keeps_text_and_paths_drops_tool_results(self):
@@ -189,7 +202,7 @@ class TestMain(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         (root / "_KANBAN").mkdir()
-        self.log_dir = root / "_AGENT_LOG"
+        self.log_dir = root / "_KANBAN" / "_AGENT_LOG"
         self.log_dir.mkdir()
         self.cwd = root / "repo"
         self.cwd.mkdir()
@@ -229,6 +242,14 @@ class TestMain(unittest.TestCase):
         self.run_main(
             _assistant(_tool("Bash", command="git commit -m x")),
             _assistant(_tool("Write", file_path=str(self.log_dir / "2026-09-23_x.md"))),
+        )
+        self.launch_writer.assert_not_called()
+
+    def test_log_only_write_launches_nothing(self):
+        """A write under the now-nested `_AGENT_LOG/` also matches `_KANBAN` (`did_work` True),
+        but `wrote_log` alone still short-circuits `main()` — no card/board edit at all here."""
+        self.run_main(
+            _assistant(_tool("Write", file_path=str(self.log_dir / "2026-09-26_x.md")))
         )
         self.launch_writer.assert_not_called()
 
