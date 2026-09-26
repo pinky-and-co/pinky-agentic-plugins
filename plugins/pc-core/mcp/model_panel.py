@@ -163,8 +163,10 @@ def _dispatch_one(
     """Call one model. `answer` set on success, `reason` set on failure — never both, never raises.
 
     Every failure mode (pi error, timeout, missing `pi`, a non-`cli` entry) becomes a reason string,
-    so one dead entry in a parallel batch cannot take the batch down.
+    so one dead entry in a parallel batch cannot take the batch down. An empty answer is a failure
+    too. The entry's own `timeout`, when set, replaces the batch default.
     """
+    timeout = ma.entry_timeout(entry, timeout)
     try:
         answer = ma.call_cli(entry, prompt, timeout, tools, env)
     except subprocess.CalledProcessError as exc:
@@ -175,7 +177,9 @@ def _dispatch_one(
         return _SlotResult(entry, None, f"no answer within {timeout}s")
     except (OSError, ValueError) as exc:
         return _SlotResult(entry, None, str(exc))
-    return _SlotResult(entry, answer.strip() or "(empty response)", None)
+    if not answer.strip():
+        return _SlotResult(entry, None, "empty answer")
+    return _SlotResult(entry, answer.strip(), None)
 
 
 def run_panel(

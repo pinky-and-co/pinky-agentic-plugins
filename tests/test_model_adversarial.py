@@ -288,6 +288,29 @@ class TestSecretsAreReadOncePerRun(unittest.TestCase):
         self.assertEqual(secrets.call_count, 1)
 
 
+class TestEntryTimeout(unittest.TestCase):
+    def test_entry_timeout_overrides_the_call_default(self):
+        self.assertEqual(ma.entry_timeout({**MISTRAL, "timeout": 300}, 180), 300)
+
+    def test_missing_entry_timeout_keeps_the_call_default(self):
+        self.assertEqual(ma.entry_timeout(MISTRAL, 180), 180)
+
+    def test_run_pool_gives_each_entry_its_own_timeout(self):
+        ok = subprocess.CompletedProcess([], 0, "answer", "")
+        slow = {**GLM, "timeout": 300}
+        with unittest.mock.patch("subprocess.run", return_value=ok) as run:
+            ma.run_pool([slow], "p", timeout=180)
+        self.assertEqual(run.call_args.kwargs["timeout"], 300)
+
+    def test_check_pool_waits_the_entry_timeout(self):
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired("pi", 300)
+        ) as run:
+            (result,) = ma.check_pool([{**GLM, "timeout": 300}], timeout=60)
+        self.assertEqual(run.call_args.kwargs["timeout"], 300)
+        self.assertEqual(result.detail, "no answer within 300s")
+
+
 class TestCheckPool(unittest.TestCase):
     def test_one_result_per_entry_offline_skipped(self):
         def fake_run(cmd, **kw):

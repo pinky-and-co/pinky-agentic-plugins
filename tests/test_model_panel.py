@@ -208,6 +208,26 @@ class TestRunPanel(unittest.TestCase):
         self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "no answer within 180s")])
         self.assertEqual(list(seen), ["z-ai/glm-5-2"])  # une seule tentative
 
+    def test_empty_answer_is_a_skipped_slot(self):
+        with unittest.mock.patch.object(
+            mp.ma, "call_cli", self._fake_cli({"z-ai/glm-5-2": "  \n"})
+        ):
+            resp = mp.run_panel([GLM], ["p1"])
+        self.assertEqual(resp.answers, [])
+        self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "empty answer")])
+
+    def test_entry_timeout_is_passed_and_reported(self):
+        seen: dict = {}
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            seen["timeout"] = timeout
+            raise subprocess.TimeoutExpired("pi", timeout)
+
+        with unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli):
+            resp = mp.run_panel([{**GLM, "timeout": 300}], ["p1"])
+        self.assertEqual(seen["timeout"], 300)
+        self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "no answer within 300s")])
+
     def test_http_entry_is_skipped_never_raised(self):
         http_entry = {**MISTRAL, "kind": "http"}
         resp = mp.run_panel([http_entry], ["p1"])

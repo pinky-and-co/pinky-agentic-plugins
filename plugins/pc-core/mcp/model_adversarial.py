@@ -40,6 +40,8 @@ Each entry:
     local          true if this entry runs on this machine (e.g. MLX-SERVE) — absent/false means a
                    network call. Both selectors below tie-break on it so a local entry is tried
                    before an equally-ranked remote one, without special-casing a provider name.
+    timeout        optional seconds to wait for this entry, overriding the caller's default — for a
+                   slow provider that still answers well (NVIDIA NIM: 9–47s for a one-line reply)
 
 Explicit ``--model``/``PINKY_ADVERSARIAL_MODEL`` override bypasses the pool and calls that Mistral
 model id through pi.
@@ -398,6 +400,11 @@ def _not_callable(entry: dict[str, Any]) -> str:
     return f"{entry['name']}: kind {kind!r} is not callable through pi"
 
 
+def entry_timeout(entry: dict[str, Any], default: int) -> int:
+    """The entry's own `timeout` when it sets one, else the caller's `default`."""
+    return int(entry.get("timeout", default))
+
+
 def secret_env() -> dict[str, str]:
     """The keys declared in `settings.pinky.json` (`keys`), resolved from the keychain.
 
@@ -503,7 +510,10 @@ def run_pool(
             last_error = f"{entry['name']}: cli entries require a 'model' field"
             continue
         try:
-            return PoolResult(entry, call_cli(entry, prompt, timeout, tools, env))
+            return PoolResult(
+                entry,
+                call_cli(entry, prompt, entry_timeout(entry, timeout), tools, env),
+            )
         except subprocess.CalledProcessError as e:
             # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
             # stdout pendant que stderr porte autre chose.
@@ -534,6 +544,7 @@ def _check_one(entry: dict[str, Any], timeout: int, env: dict[str, str]) -> Pool
         return PoolCheck(
             entry["name"], "skipped", "offline — checked by `pinky doctor`", 0.0
         )
+    timeout = entry_timeout(entry, timeout)
     start = time.monotonic()
     try:
         answer = call_cli(entry, CHECK_PROMPT, timeout, env=env).strip()
