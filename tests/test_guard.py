@@ -90,7 +90,7 @@ class TestBoardDirCarveOut(unittest.TestCase):
 
     def test_agent_log_write_allowed_before_the_dir_exists(self):
         entry = (
-            self.ws / "_AGENT_LOG" / "2026-09-09_claude.md"
+            self.ws / "_KANBAN" / "_AGENT_LOG" / "2026-09-09_claude.md"
         )  # _AGENT_LOG not created
         with self._env():
             self.assertIsNone(self._decide(entry))

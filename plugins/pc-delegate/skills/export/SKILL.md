@@ -29,7 +29,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/export/scripts/build_export.py" \
   --card <id> [--card <id> ...] \
   --repo <repo-path> \
   --repo-file <path> [--repo-file <path> ...] \
-  --agent-log-dir <chantier-workspace>/_AGENT_LOG \
+  --agent-log-dir <chantier-workspace>/_KANBAN/_AGENT_LOG \
   --guide "${CLAUDE_PLUGIN_ROOT}/skills/export/references/GUIDE.md" \
   --out <output.zip>
 ```

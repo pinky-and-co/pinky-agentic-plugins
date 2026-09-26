@@ -26,7 +26,7 @@ class TestApplyOrchestratorScope(unittest.TestCase):
         self.base = Path(self._tmp.name).resolve()
         self.ws = self.base / "ws"
         (self.ws / "_KANBAN").mkdir(parents=True)
-        self.agentlog = self.ws / "_AGENT_LOG"
+        self.agentlog = self.ws / "_KANBAN" / "_AGENT_LOG"
 
     def tearDown(self):
         self._tmp.cleanup()

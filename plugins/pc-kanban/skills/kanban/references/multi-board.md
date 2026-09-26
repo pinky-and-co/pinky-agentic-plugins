@@ -4,7 +4,7 @@ Referenced from `SKILL.md`. Read this on a workspace mounting several boards. Th
 and anti-secret rule that goes with it stays in `SKILL.md`, where it is read every time.
 
 Nothing here requires it, but the mechanism does not assume a single board either: a session can
-mount more than one `_KANBAN/` root, each optionally paired with its own `_AGENT_LOG/` and knowledge
+mount more than one `_KANBAN/` root, each carrying its own nested `_AGENT_LOG/` and knowledge
 corpus. How repos are laid out inside the workspace is a separate, subjective choice per installer —
 this mechanism makes no claim about it either way.
 
