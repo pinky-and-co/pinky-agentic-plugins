@@ -4,6 +4,7 @@ python3 -m unittest discover tests
 """
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,33 +19,27 @@ import model_adversarial as ma
 
 MISTRAL = {
     "name": "mistral-medium-3.5",
-    "kind": "http",
+    "kind": "cli",
     "provider": "mistral",
     "model": "mistral-medium-3.5",
-    "base_url": "https://api.mistral.ai/v1/chat/completions",
-    "api_key_env": "MISTRAL_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "opus",
     "free_tier": False,
     "concurrency": None,
 }
 GLM = {
     "name": "glm-5-2",
-    "kind": "http",
+    "kind": "cli",
     "provider": "openrouter",
     "model": "z-ai/glm-5-2",
-    "base_url": "https://openrouter.ai/api/v1/chat/completions",
-    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "opus",
     "free_tier": True,
     "concurrency": None,
 }
 KIMI = {
     "name": "kimi-k2.6",
-    "kind": "http",
+    "kind": "cli",
     "provider": "openrouter",
     "model": "moonshotai/kimi-k2.6:free",
-    "base_url": "https://openrouter.ai/api/v1/chat/completions",
-    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "sonnet",
     "free_tier": True,
     "concurrency": None,
@@ -73,8 +68,6 @@ CLOUD_HAIKU = {
     "kind": "cli",
     "provider": "openrouter",
     "model": "free",
-    "base_url": "https://openrouter.ai/api/v1/chat/completions",
-    "api_key_env": "OPENROUTER_API_KEY",  # pragma: allowlist secret
     "capacity_tier": "haiku",
     "free_tier": True,
     "concurrency": None,
@@ -189,7 +182,7 @@ class TestLoadPool(unittest.TestCase):
         self.assertEqual(ma.load_pool(), ma._DEFAULT_POOL)
 
     def test_model_pool_key_from_settings_pinky_json_is_returned(self):
-        custom_pool = [{"name": "custom", "kind": "http", "capacity_tier": "haiku"}]
+        custom_pool = [{"name": "custom", "kind": "cli", "capacity_tier": "haiku"}]
         (self.project_dir / ".claude").mkdir()
         (self.project_dir / ".claude" / "settings.pinky.json").write_text(
             json.dumps({"model_pool": custom_pool})
@@ -197,81 +190,104 @@ class TestLoadPool(unittest.TestCase):
         self.assertEqual(ma.load_pool(), custom_pool)
 
 
-class TestResolveApiKeyFor(unittest.TestCase):
-    def test_env_var_wins_and_keychain_is_not_consulted(self):
-        import os
-
-        os.environ["OPENROUTER_API_KEY"] = "env-value"  # pragma: allowlist secret
-        try:
-            with unittest.mock.patch.object(ma, "read_macos_keychain") as kc:
-                self.assertEqual(ma.resolve_api_key_for(GLM), "env-value")
-            kc.assert_not_called()
-        finally:
-            del os.environ["OPENROUTER_API_KEY"]
-
-    def test_falls_back_to_keychain_keyed_on_the_env_name(self):
-        import os
-
-        os.environ.pop("OPENROUTER_API_KEY", None)
-        with unittest.mock.patch.object(
-            ma, "read_macos_keychain", return_value="kc-value"
-        ) as kc:
-            self.assertEqual(ma.resolve_api_key_for(GLM), "kc-value")
-        kc.assert_called_once_with("OPENROUTER_API_KEY")
-
-    def test_neither_env_nor_keychain_returns_none(self):
-        import os
-
-        os.environ.pop("OPENROUTER_API_KEY", None)
-        with unittest.mock.patch.object(ma, "read_macos_keychain", return_value=None):
-            self.assertIsNone(ma.resolve_api_key_for(GLM))
-
-
 class TestRunPool(unittest.TestCase):
-    def test_offline_entry_never_reaches_call_provider(self):
-        # only offline in the pool, nothing else to try → must fail without calling call_provider
+    def test_offline_entry_is_never_called(self):
+        # seulement une entrée offline : échec sans jamais appeler pi
         result = ma.run_pool([OFFLINE], "prompt")
         self.assertIsNone(result.entry)
         self.assertIn("offline entries are not callable", result.result)
 
-    def test_non_https_base_url_is_refused(self):
+    def test_http_entry_is_refused_with_how_to_migrate(self):
+        http_entry = {**MISTRAL, "kind": "http"}
+        result = ma.run_pool([http_entry], "prompt")
+        self.assertIsNone(result.entry)
+        self.assertEqual(
+            result.result,
+            "mistral-medium-3.5: kind 'http' is no longer supported — declare the provider "
+            "in pi (~/.pi/agent/models.json) and set kind 'cli'",
+        )
+
+
+class TestCallCli(unittest.TestCase):
+    def _ok(self):
+        return subprocess.CompletedProcess([], 0, "answer\n", "")
+
+    def test_default_argv_has_no_tools_and_closes_stdin(self):
+        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+            self.assertEqual(ma.call_cli(MISTRAL, "p", 30), "answer\n")
+        run.assert_called_once_with(
+            [
+                "pi",
+                "-p",
+                "--model",
+                "mistral/mistral-medium-3.5",
+                "--no-tools",
+                "--no-session",
+                "--thinking",
+                "off",
+                "--",
+                "p",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+
+    def test_tools_become_a_comma_separated_allowlist(self):
+        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+            ma.call_cli(MISTRAL, "p", 30, ["read", "grep"])
+        self.assertEqual(run.call_args[0][0][4:6], ["-t", "read,grep"])
+
+    def test_non_cli_entry_raises(self):
         with self.assertRaises(ValueError):
-            ma.call_provider(
-                "http://insecure.example/v1/chat/completions", "key", "m", "prompt"
-            )
+            ma.call_cli({**MISTRAL, "kind": "http"}, "p", 30)
 
-    def test_entry_max_tokens_overrides_the_global_default(self):
-        captured = {}
 
-        def fake_call_provider(
-            base_url, api_key, model, prompt, timeout=180, max_tokens=ma.MAX_TOKENS
+class TestCheckPool(unittest.TestCase):
+    def test_one_result_per_entry_offline_skipped(self):
+        def fake_run(cmd, **kw):
+            if cmd[3] == "openrouter/z-ai/glm-5-2":
+                raise subprocess.CalledProcessError(1, cmd, "", "401 unauthorized\n")
+            return subprocess.CompletedProcess(cmd, 0, "OK\n", "")
+
+        with unittest.mock.patch("subprocess.run", side_effect=fake_run):
+            results = ma.check_pool([MISTRAL, GLM, OFFLINE], timeout=5)
+
+        self.assertEqual(
+            [(r.name, r.status, r.detail) for r in results],
+            [
+                ("mistral-medium-3.5", "ok", "OK"),
+                ("glm-5-2", "failed", "401 unauthorized"),
+                ("local-ollama", "skipped", "offline — checked by `pinky doctor`"),
+            ],
+        )
+
+    def test_timeout_is_a_failure(self):
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired("pi", 5)
         ):
-            captured["max_tokens"] = max_tokens
-            return {"choices": [{"message": {"content": "ok"}}]}
+            (result,) = ma.check_pool([MISTRAL], timeout=5)
+        self.assertEqual(
+            (result.status, result.detail), ("failed", "no answer within 5s")
+        )
 
-        entry = {**MISTRAL, "max_tokens": 50}
-        with (
-            unittest.mock.patch.object(ma, "call_provider", fake_call_provider),
-            unittest.mock.patch.object(ma, "resolve_api_key_for", return_value="k"),
-        ):
-            ma.run_pool([entry], "prompt")
-        self.assertEqual(captured["max_tokens"], 50)
-
-    def test_missing_max_tokens_falls_back_to_global_default(self):
-        captured = {}
-
-        def fake_call_provider(
-            base_url, api_key, model, prompt, timeout=180, max_tokens=ma.MAX_TOKENS
-        ):
-            captured["max_tokens"] = max_tokens
-            return {"choices": [{"message": {"content": "ok"}}]}
-
-        with (
-            unittest.mock.patch.object(ma, "call_provider", fake_call_provider),
-            unittest.mock.patch.object(ma, "resolve_api_key_for", return_value="k"),
-        ):
-            ma.run_pool([MISTRAL], "prompt")
-        self.assertEqual(captured["max_tokens"], ma.MAX_TOKENS)
+    def test_render_pool_check(self):
+        results = [
+            ma.PoolCheck("mistral-medium-3.5", "ok", "OK", 1.24),
+            ma.PoolCheck("glm-5-2", "failed", "401 unauthorized", 0.5),
+            ma.PoolCheck(
+                "local-ollama", "skipped", "offline — checked by `pinky doctor`", 0.0
+            ),
+        ]
+        self.assertEqual(
+            ma.render_pool_check(results),
+            "[pool] 1/2 answered\n"
+            "✅ mistral-medium-3.5  1.2s\n"
+            "❌ glm-5-2             401 unauthorized\n"
+            "•  local-ollama        offline — checked by `pinky doctor`",
+        )
 
 
 class TestLoadMethodology(unittest.TestCase):
@@ -364,9 +380,9 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
 
     captured: dict[str, str] = {}
 
-    def fake_run_pool(entries, prompt, timeout=180):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None):
         captured["prompt"] = prompt
-        return ma.PoolResult(entries[0], {"choices": [{"message": {"content": "ok"}}]})
+        return ma.PoolResult(entries[0], "ok")
 
     monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
 
@@ -407,21 +423,13 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
     monkeypatch.setattr(
         server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180: ma.PoolResult(
-            entries[0], {"choices": [{"message": {"content": "ok"}}]}
+        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+            entries[0], "ok"
         ),
     )
 
     server.adversarial(task="review", tier="turbo-9000")
     assert "adversarial" in seen and "delegation" not in seen
-
-
-class TestKeylessPoolDegrades(unittest.TestCase):
-    def test_all_keyless_entries_yield_none_not_raise(self):
-        with unittest.mock.patch.object(ma, "resolve_api_key_for", return_value=None):
-            result = ma.run_pool([MISTRAL, GLM], "prompt")
-        self.assertIsNone(result.entry)
-        self.assertIn("no API key", result.result)
 
 
 if __name__ == "__main__":

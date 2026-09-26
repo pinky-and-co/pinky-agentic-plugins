@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """keychain — read one secret from the macOS classic keychain (Trousseau d'accès).
 
-Shared by two callers with nothing else in common: `load_secrets.py` (SessionStart hook — wires
-declared keys into `$CLAUDE_ENV_FILE` for Bash-land) and `model_adversarial.py` (the `adversarial`
-MCP tool, whose long-lived server process never receives that env file). Same
-`security find-generic-password` call either way, so it lives in one neutral module rather than
-being duplicated or reached across from one concern into the other — same reasoning as
-`policy_lib.py`.
+Used by `load_secrets.py` (SessionStart hook — wires declared keys into `$CLAUDE_ENV_FILE` for
+Bash-land). Pool models get their keys from pi's own registry instead (`~/.pi/agent/`), which can
+run the same `security find-generic-password` itself.
 
 Classic keychain only — `security` cannot see the Passwords app's data-protection keychain
 (`setup-declarative-secrets.md` in pinky-bootstrap for why). A read succeeds only while the `login`

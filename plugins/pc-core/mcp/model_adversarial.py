@@ -1,72 +1,65 @@
 #!/usr/bin/env python3
 """Adversarial runtime — run a task on a contrarian cloud model, from a configurable pool.
 
-Called by the `adversarial` MCP tool (`mcp/server.py`): it challenges **this session's own output**
-(Claude), so a same-family reviewer is exactly what to avoid — the model here must not share Claude's
-blind spots.
+Called by the `adversarial` MCP tool (`mcp/pc_core_server.py`): it challenges **this session's own
+output** (Claude), so a same-family reviewer is exactly what to avoid — the model here must not
+share Claude's blind spots.
 
-Dual-use: this module is both a standalone CLI (below) and an importable library for
-`mcp/server.py`, which calls its functions directly rather than shelling out to a subprocess.
+Dual-use: this module is both a standalone CLI (below) and an importable library for the MCP server,
+which calls its functions directly rather than shelling out to a subprocess.
 
 Pool: the ``model_pool`` key of ``settings.pinky.json``, resolved by the same ascending walk-up as
 every other pinky setting (``policy_lib.load_policies`` — repo → parent directories → ``~/.claude/``),
-seeded from ``CLAUDE_PROJECT_DIR`` (already present in this MCP server's own environment — no
-``project_dir``/``file_path`` parameter needed on the tool itself). No file anywhere in the chain →
-a single built-in entry reproducing the original hardcoded default (``mistral-medium-3.5``), so an
-unconfigured install behaves exactly as before. Adding a provider is a config edit only — this
-module never special-cases a provider name; every entry carries its own call shape (OpenAI-compatible
-``/v1/chat/completions``), key resolution, and capability/cost metadata.
+seeded from ``CLAUDE_PROJECT_DIR`` (already present in this MCP server's own environment). No file
+anywhere in the chain → a single built-in ``mistral-medium-3.5`` entry.
+
+Every remote call goes through ``pi`` (``call_cli``): ``pi -p --model <provider>/<model>``. Provider
+endpoints and keys live in pi's own registry — built-in providers, ``~/.pi/agent/auth.json``, or a
+custom provider in ``~/.pi/agent/models.json`` (whose ``apiKey`` can read the macOS keychain with
+``"!security find-generic-password -a <user> -s <SERVICE> -w"``). Adding a provider pi does not know
+is a ``models.json`` edit, never a code change here.
+
+Tools are chosen per call, never per entry: none by default (``--no-tools``), or an allowlist
+(``-t read,grep``) when the caller needs the model to look at files itself.
 
 Each entry:
     name           display name
-    kind           "http" (called via call_provider), "cli" (called via pi), or "offline" (routed to the separate
-                   zero-egress `offline` MCP tool instead — never called from here; see model_offline.py)
-    provider       informational label, also used for direct-vs-aggregator ordering
+    kind           "cli" (called via pi), or "offline" (routed to the separate zero-egress
+                   `offline` MCP tool instead — never called from here; see model_offline.py)
+    provider       pi provider name — joined onto `model` as pi's `--model <provider>/<model>`,
+                   also used for direct-vs-aggregator ordering
     model          provider-side model id — a router id (openrouter's `free`) answers with a
                    different underlying model on each call: fine for a mechanical check that only
                    asks whether the answer is right, wrong for anywhere the answering model itself
                    must stay fixed across calls, e.g. a benchmark
-    base_url       OpenAI-compatible chat-completions endpoint (absent/ignored for kind="offline")
-    api_key_env    env var checked first; also the macOS keychain service name (see Auth below)
     capacity_tier  rough Claude-tier equivalence: "haiku" | "sonnet" | "opus"
     free_tier      true if this entry has no marginal cost (drives delegation's cost order)
-    concurrency    max simultaneous tasks, or null for no known limit (offline: 1 — one local
-                   machine; recorded for a future concurrent dispatcher, not enforced here — nothing
-                   dispatches more than one task at a time yet)
-    local          true if this entry runs on this machine (e.g. MLX-SERVE via `kind: "cli"`) —
-                   absent/false means a network call. Both selectors below tie-break on it so a
-                   local entry is tried before an equally-ranked remote one, without special-casing
-                   `provider == "mlx"` by name.
+    concurrency    max simultaneous tasks, or null for no known limit — recorded, not enforced
+    local          true if this entry runs on this machine (e.g. MLX-SERVE) — absent/false means a
+                   network call. Both selectors below tie-break on it so a local entry is tried
+                   before an equally-ranked remote one, without special-casing a provider name.
 
-Auth (per entry): ``api_key_env`` from the process env, else the macOS keychain item stored under
-that same name. This server's process never receives ``$CLAUDE_ENV_FILE`` (Claude Code sources it
-for Bash commands only, never for an MCP server), so the keychain is the real path — the env branch
-only catches a value exported into the session by hand. Keychain reads need the ``login`` keychain
-unlocked: a headless/SSH caller with it locked gets no key and the entry is skipped.
-
-Explicit ``--model``/``PINKY_ADVERSARIAL_MODEL`` override bypasses the pool entirely and calls that
-model id directly against the Mistral endpoint — the original single-provider override behavior,
-unchanged.
+Explicit ``--model``/``PINKY_ADVERSARIAL_MODEL`` override bypasses the pool and calls that Mistral
+model id through pi.
 
 Usage:
-    model_adversarial.py --task "<task>" [--file PATH ...] [--model NAME]
+    model_adversarial.py --task "<task>" [--file PATH ...] [--model NAME] [--tool NAME ...]
+    model_adversarial.py --check-pool
 """
 
 from __future__ import annotations
 
 import argparse
-import json
+import concurrent.futures
 import os
 import re
+import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
-from keychain import read_macos_keychain  # noqa: E402
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
@@ -74,14 +67,13 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 DEFAULT_MODEL = "mistral-medium-3.5"
-MAX_TOKENS = 8000
-TEMPERATURE = 0.2
+CHECK_PROMPT = "Reply with exactly: OK"
+CHECK_WORKERS = 4
 
 _TIER_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
 
-# Prédicats de bascule pour le chemin "cli" du pool (`run_pool`, plus bas). Un seul critère :
+# Prédicats de bascule du pool (`run_pool`, plus bas). Un seul critère :
 # bascule quand le fournisseur refuse de servir, jamais quand le modèle a servi mais répondu mal.
 _RATE_LIMIT_RE = re.compile(r"\b429\b")
 _OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
@@ -90,20 +82,27 @@ _TIMEOUT_RE = re.compile(r"\btimed out\b")
 
 
 class PoolResult(NamedTuple):
-    """Pool result: entry + response, or None + error message."""
+    """Pool result: the entry that answered + its answer text, or None + the last error."""
 
     entry: dict[str, Any] | None
-    result: dict[str, Any] | str | None
+    result: str | None
+
+
+class PoolCheck(NamedTuple):
+    """One `check_pool` line: `ok` (answered), `failed` (with the reason), or `skipped`."""
+
+    name: str
+    status: Literal["ok", "failed", "skipped"]
+    detail: str
+    seconds: float
 
 
 _DEFAULT_POOL: list[dict[str, Any]] = [
     {
         "name": DEFAULT_MODEL,
-        "kind": "http",
+        "kind": "cli",
         "provider": "mistral",
         "model": DEFAULT_MODEL,
-        "base_url": MISTRAL_API_URL,
-        "api_key_env": "MISTRAL_API_KEY",  # pragma: allowlist secret
         "capacity_tier": "opus",
         "free_tier": False,
         "concurrency": None,
@@ -165,7 +164,7 @@ def select_for_delegation(
 
     Offline is a real candidate here (free, `capacity_tier: haiku`) — a caller that resolves to a
     `kind: "offline"` entry must route to the separate `offline` MCP tool, never call it through
-    `call_provider` (that would break its zero-egress guarantee).
+    `call_cli` (that would break its zero-egress guarantee).
     """
     candidates = [
         e for e in pool if tier_rank(e["capacity_tier"]) >= tier_rank(task_tier)
@@ -191,15 +190,13 @@ def select_for_delegation_with_fallback(
     go BLOCKED just because the configured pool tops out at `sonnet`, confirmed live: every
     entry in this workspace's own `settings.pinky.json` sits at `sonnet` or below.
 
-    Restricted to `kind` in (`http`, `cli`) at every tier tried — the two callable through
-    this pool path, `offline` going through the separate `offline` tool instead.
+    Restricted to `kind: "cli"` at every tier tried — the one kind callable through this pool
+    path, `offline` going through the separate `offline` tool instead.
     """
     start = _TIER_ORDER.index(tier) if tier in _TIER_ORDER else 0
     for fallback_tier in _TIER_ORDER[start:]:
         candidates = [
-            e
-            for e in select_for_delegation(pool, fallback_tier)
-            if e["kind"] in ("http", "cli")
+            e for e in select_for_delegation(pool, fallback_tier) if e["kind"] == "cli"
         ]
         if candidates:
             return candidates
@@ -209,19 +206,6 @@ def select_for_delegation_with_fallback(
 def resolve_model(cli_model: str | None = None) -> str | None:
     """CLI flag > PINKY_ADVERSARIAL_MODEL env > None (no override — use the pool)."""
     return cli_model or os.environ.get("PINKY_ADVERSARIAL_MODEL")
-
-
-def resolve_api_key_for(entry: dict[str, Any]) -> str | None:
-    """`entry["api_key_env"]` from the process env, else the macOS keychain item of the same name.
-
-    The keychain lookup keys on `api_key_env` directly — it works because this suite's `keys`
-    array (`settings.pinky.json`) names each keychain service identically to its env var. Nothing
-    enforces that: an item stored under a different service name would not be found.
-    """
-    env_key = os.environ.get(entry["api_key_env"])
-    if env_key:
-        return env_key.strip()
-    return read_macos_keychain(entry["api_key_env"])
 
 
 def cli_model_id(entry: dict[str, Any]) -> str:
@@ -397,186 +381,220 @@ def build_prompt(task: str, files: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def call_provider(
-    base_url: str,
-    api_key: str,  # gitleaks:allow
-    model: str,
-    prompt: str,
-    timeout: int = 180,
-    max_tokens: int = MAX_TOKENS,
-) -> dict:
-    """POST to any OpenAI-compatible /v1/chat/completions endpoint (non-streaming).
+_HTTP_REFUSAL = (
+    "kind 'http' is no longer supported — declare the provider in pi "
+    "(~/.pi/agent/models.json) and set kind 'cli'"
+)
 
-    `base_url` now comes from a config file rather than a hardcoded constant, so it is checked
-    https-only before use — the trust level changed even though the file is user-owned, not
-    attacker-supplied.
 
-    `max_tokens` overridable per call: Groq's free tier caps `openai/gpt-oss-120b` at 8000
-    tokens/minute (TPM) — the global default alone exceeds that budget, confirmed via a real 413
-    from the API, not assumed. A pool entry sets its own via `max_tokens` (see `run_pool`).
+def _not_callable(entry: dict[str, Any]) -> str:
+    """Why `entry` cannot go through pi — the migration hint for a leftover `http` entry."""
+    kind = entry.get("kind")
+    if kind == "http":
+        return f"{entry['name']}: {_HTTP_REFUSAL}"
+    return f"{entry['name']}: kind {kind!r} is not callable through pi"
+
+
+def call_cli(
+    entry: dict[str, Any], prompt: str, timeout: int, tools: list[str] | None = None
+) -> str:
+    """One `pi -p` call for a `kind: "cli"` entry; its stdout is the answer.
+
+    Args:
+        entry: the pool entry — `provider` and `model` form pi's `--model`.
+        prompt: sent as the positional argument after `--`, so a prompt opening with `---` is
+            never read as an option.
+        timeout: seconds before `subprocess.TimeoutExpired`.
+        tools: pi tool names to allow (`-t read,grep`); None or empty means `--no-tools`.
+
+    Returns:
+        The model's answer, as pi printed it.
+
+    Raises:
+        ValueError: the entry is not `kind: "cli"`.
+        subprocess.CalledProcessError: pi exited non-zero (stdout/stderr carry the reason).
+        subprocess.TimeoutExpired: no answer within `timeout`.
+        OSError: `pi` is not installed or not executable.
     """
-    if not base_url.startswith("https://"):
-        raise ValueError(f"refusing non-https base_url from pool config: {base_url}")
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": TEMPERATURE,
-        "max_tokens": max_tokens,
-        "stream": False,
-    }
-    req = urllib.request.Request(
-        base_url,
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            # urllib's default User-Agent ("Python-urllib/x.y") gets blocked by some providers'
-            # WAF (Cloudflare error 1010 on Groq, confirmed) — a plain UA string is enough to pass.
-            "User-Agent": "pinky-adversarial/1.0",
-        },
-    )
-    return json.load(urllib.request.urlopen(req, timeout=timeout))  # nosec B310 — base_url is checked https-only above
+    if entry.get("kind") != "cli":
+        raise ValueError(_not_callable(entry))
+    tool_args = ["-t", ",".join(tools)] if tools else ["--no-tools"]
+    cmd = [
+        "pi",
+        "-p",
+        "--model",
+        cli_model_id(entry),
+        *tool_args,
+        "--no-session",
+        "--thinking",
+        "off",
+        "--",
+        prompt,
+    ]
+    # stdin fermé : pi lit l'entrée standard quand il en hérite une, et celle du serveur MCP est
+    # le canal JSON-RPC — l'appel resterait bloqué jusqu'au timeout.
+    return subprocess.run(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=True,
+    ).stdout
 
 
-def call_mistral(
-    api_key: str,  # gitleaks:allow
-    model: str,
-    prompt: str,
-    timeout: int = 180,
-) -> dict:
-    """Back-compat shim for the explicit --model override path (Mistral only)."""
-    return call_provider(MISTRAL_API_URL, api_key, model, prompt, timeout)
+def failure_detail(exc: subprocess.CalledProcessError) -> str:
+    """The last non-empty line of a failed pi call's stdout + stderr — the provider's own error."""
+    combined = f"{exc.stdout or ''}\n{exc.stderr or ''}"
+    lines = [line.strip() for line in combined.splitlines() if line.strip()]
+    return lines[-1] if lines else f"exit {exc.returncode}, no output"
 
 
 def run_pool(
-    entries: list[dict[str, Any]], prompt: str, timeout: int = 180
+    entries: list[dict[str, Any]],
+    prompt: str,
+    timeout: int = 180,
+    tools: list[str] | None = None,
 ) -> PoolResult:
     """Try each entry in order, first success wins.
 
-    Returns (entry, response) on success, or (None, last_error) once every entry has failed.
+    Returns (entry, answer) on success, or (None, last_error) once every entry has failed.
     A `kind: "offline"` entry is never dispatched here — it must go through the separate `offline`
     MCP tool, which enforces its own zero-egress guarantee (never returning the answer body).
-    Shared by the CLI (`main`) and the MCP tool (`server.py`) so a fallback fix lands once, not twice.
+    Shared by the CLI (`main`), the MCP tool and `pi_review`, so a fallback fix lands once.
 
-    A `kind: "cli"` entry advances to the next pool entry only when `is_rate_limited` /
-    `is_out_of_memory` / `is_insufficient_credit` / `is_timeout` say the provider refused to serve —
-    never when it served but answered badly; any other non-zero exit is returned as a stop, not a
-    fall-through.
+    An entry advances to the next one only when `is_rate_limited` / `is_out_of_memory` /
+    `is_insufficient_credit` / `is_timeout` say the provider refused to serve — never when it
+    served but answered badly; any other non-zero exit is returned as a stop, not a fall-through.
     """
     last_error: str | None = None
     for entry in entries:
         if entry["kind"] == "offline":
-            last_error = f"{entry['name']}: offline entries are not callable through the HTTP pool path"
-            continue
-
-        if entry["kind"] == "cli":
-            # Call via pi: pi -p --model '<provider>/<id>' -t <tools> --no-session --thinking off "<prompt>"
-            tools = entry.get("tools", "read")
-            model = entry.get("model")
-            if not model:
-                last_error = f"{entry['name']}: cli entries require a 'model' field"
-                continue
-
-            import subprocess
-
-            try:
-                cmd = [
-                    "pi",
-                    "-p",
-                    "--model",
-                    cli_model_id(entry),
-                    "-t",
-                    tools,
-                    "--no-session",
-                    "--thinking",
-                    "off",
-                    "--",
-                    prompt,
-                ]
-                res = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=timeout, check=True
-                )
-                # pi output is expected to be the content directly
-                return PoolResult(
-                    entry, {"choices": [{"message": {"content": res.stdout}}]}
-                )
-            except subprocess.CalledProcessError as e:
-                # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
-                # stdout pendant que stderr porte autre chose.
-                combined = f"{e.stdout or ''}\n{e.stderr or ''}"
-                if (
-                    is_rate_limited(combined)
-                    or is_out_of_memory(combined)
-                    or is_insufficient_credit(combined)
-                    or is_timeout(combined)
-                ):
-                    last_error = f"{entry['name']}: {combined.strip()}"
-                    continue
-                return PoolResult(
-                    None, f"{entry['name']} critical failure: {combined.strip()}"
-                )
-            except subprocess.TimeoutExpired as e:
-                last_error = f"{entry['name']}: {e}"
-                continue
-            except OSError as e:
-                last_error = f"{entry['name']}: {e}"
-                continue
-
-        api_key = resolve_api_key_for(entry)  # pragma: allowlist secret
-        if not api_key:
             last_error = (
-                f"{entry['name']}: no API key — {entry['api_key_env']} not in env, "
-                f"and no keychain item of that name (or the keychain is locked)"
+                f"{entry['name']}: offline entries are not callable through the pool"
             )
+            continue
+        if entry["kind"] != "cli":
+            last_error = _not_callable(entry)
+            continue
+        if not entry.get("model"):
+            last_error = f"{entry['name']}: cli entries require a 'model' field"
             continue
         try:
-            r = call_provider(
-                entry["base_url"],
-                api_key,
-                entry["model"],
-                prompt,
-                timeout,
-                entry.get("max_tokens", MAX_TOKENS),
+            return PoolResult(entry, call_cli(entry, prompt, timeout, tools))
+        except subprocess.CalledProcessError as e:
+            # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
+            # stdout pendant que stderr porte autre chose.
+            combined = f"{e.stdout or ''}\n{e.stderr or ''}"
+            if (
+                is_rate_limited(combined)
+                or is_out_of_memory(combined)
+                or is_insufficient_credit(combined)
+                or is_timeout(combined)
+            ):
+                last_error = f"{entry['name']}: {combined.strip()}"
+                continue
+            return PoolResult(
+                None, f"{entry['name']} critical failure: {combined.strip()}"
             )
-        except urllib.error.HTTPError as e:
-            last_error = f"{entry['name']}: HTTP {e.code}"
-            continue
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
+        except subprocess.TimeoutExpired as e:
             last_error = f"{entry['name']}: {e}"
             continue
-        return PoolResult(entry, r)
+        except OSError as e:
+            last_error = f"{entry['name']}: {e}"
+            continue
     return PoolResult(None, last_error)
 
 
-def extract_content(r: dict) -> str:
-    """Pull the final answer text out of a chat-completions response.
+def _check_one(entry: dict[str, Any], timeout: int) -> PoolCheck:
+    """Send `CHECK_PROMPT` to one entry, with no tools, and time the answer."""
+    if entry.get("kind") == "offline":
+        return PoolCheck(
+            entry["name"], "skipped", "offline — checked by `pinky doctor`", 0.0
+        )
+    start = time.monotonic()
+    try:
+        answer = call_cli(entry, CHECK_PROMPT, timeout).strip()
+    except subprocess.CalledProcessError as e:
+        detail = failure_detail(e)
+    except subprocess.TimeoutExpired:
+        detail = f"no answer within {timeout}s"
+    except (OSError, ValueError) as e:
+        detail = str(e)
+    else:
+        if answer:
+            return PoolCheck(entry["name"], "ok", answer[:40], time.monotonic() - start)
+        detail = "empty answer"
+    return PoolCheck(entry["name"], "failed", detail, time.monotonic() - start)
 
-    Reasoning models return content as a list of typed blocks
-    [{"type":"thinking",...}, {"type":"text","text":...}] — keep only the final answer text.
+
+def check_pool(
+    pool: list[dict[str, Any]], timeout: int = 60, workers: int = CHECK_WORKERS
+) -> list[PoolCheck]:
+    """Ping every pool entry through pi, `workers` at a time, in pool order.
+
+    Args:
+        pool: the entries to check — `offline` ones are skipped (`pinky doctor` checks them).
+        timeout: seconds allowed per entry.
+        workers: concurrent pi calls.
+
+    Returns:
+        One `PoolCheck` per entry, in `pool` order.
     """
-    choice = r.get("choices", [{}])[0]
-    message = choice.get("message", {})
-    content = (
-        message.get("content") or message.get("reasoning_content") or "(empty response)"
-    )
-    if isinstance(content, list):
-        texts = [
-            b.get("text", "")
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        ]
-        content = "\n".join(t for t in texts if t) or "(no text block — reasoning only)"
-    return content
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(lambda e: _check_one(e, timeout), pool))
+
+
+_CHECK_MARKERS = {"ok": "✅", "failed": "❌", "skipped": "• "}
+
+
+def render_pool_check(results: list[PoolCheck]) -> str:
+    """The `--check-pool` report: an answered/called header, then one aligned line per entry.
+
+    Args:
+        results: what `check_pool` returned.
+
+    Returns:
+        The report text; a single header line when `results` is empty.
+    """
+    called = [r for r in results if r.status != "skipped"]
+    answered = sum(1 for r in called if r.status == "ok")
+    lines = [f"[pool] {answered}/{len(called)} answered"]
+    width = max((len(r.name) for r in results), default=0)
+    for r in results:
+        text = f"{r.seconds:.1f}s" if r.status == "ok" else r.detail
+        lines.append(f"{_CHECK_MARKERS[r.status]} {r.name.ljust(width)}  {text}")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Run a task on an adversarial cloud model (pool, or an explicit --model override)."
+        description="Run a task on an adversarial cloud model (pool, or an explicit --model "
+        "override), or check every pool entry."
     )
-    ap.add_argument("--task", required=True)
+    ap.add_argument("--task")
     ap.add_argument("--file", action="append", default=[], dest="files")
     ap.add_argument("--model")
+    ap.add_argument(
+        "--tool",
+        action="append",
+        default=[],
+        dest="tools",
+        help="a pi tool the model may use (repeatable); none by default",
+    )
+    ap.add_argument(
+        "--check-pool",
+        action="store_true",
+        help="send a one-line prompt to every pool entry and report which answer",
+    )
     args = ap.parse_args(argv)
+
+    if args.check_pool:
+        results = check_pool(load_pool())
+        print(render_pool_check(results))
+        return 1 if any(r.status == "failed" for r in results) else 0
+    if not args.task:
+        ap.error("--task is required unless --check-pool is given")
 
     override = resolve_model(args.model)
     prompt = build_prompt(args.task, args.files)
@@ -593,7 +611,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     t = time.time()
-    pool_result = run_pool(entries, prompt)
+    pool_result = run_pool(entries, prompt, tools=args.tools or None)
     if pool_result.entry is None:
         print(
             f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}",
@@ -601,17 +619,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    dur = time.time() - t
-    response = pool_result.result
-    assert isinstance(response, dict)  # guardrail for mypy
-    usage = response.get("usage", {})
-    choice = response.get("choices", [{}])[0]
     print(
-        f"[adversarial] {pool_result.entry['name']} · {dur:.0f}s · in={usage.get('prompt_tokens')} "
-        f"out={usage.get('completion_tokens')} · finish={choice.get('finish_reason')}",
+        f"[adversarial] {pool_result.entry['name']} · {time.time() - t:.0f}s",
         file=sys.stderr,
     )
-    print(extract_content(response))
+    print(pool_result.result)
     return 0
 
 

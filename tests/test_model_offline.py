@@ -103,6 +103,7 @@ class TestCallMlx(unittest.TestCase):
                 "off",
                 "do the task",
             ],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=120,

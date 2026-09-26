@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Panel runtime — dispatch one prompt PER SLOT to a different model family each, in parallel.
 
-Called by the `panel` MCP tool (`mcp/server.py`). Where `adversarial` runs a single contrarian
+Called by the `panel` MCP tool (`mcp/pc_core_server.py`). Where `adversarial` runs a single contrarian
 check and `offline` runs one local model, `panel` fans a batch of prompts out across several
 *different* model families at once — `prompts[i]` to the i-th selected model — and returns every
 answer, each labelled with the model that produced it. It exists for a council of advisor voices
@@ -10,12 +10,11 @@ question to N models, repeat it in the batch. **No review posture is injected** 
 `adversarial`, which prepends the shared review methodology): each prompt is sent verbatim, because
 a council's lenses are not all adversarial.
 
-Dual-use: standalone CLI (below) and an importable library for `mcp/server.py`, which calls these
-functions directly. Pool resolution, key resolution, the HTTP call and response parsing are all
-reused from `model_adversarial` — this module only adds the selection policy and the parallel
-dispatch.
+Dual-use: standalone CLI (below) and an importable library for the MCP server, which calls these
+functions directly. Pool resolution and the `pi` call (`call_cli`, tools none by default) are reused
+from `model_adversarial` — this module only adds the selection policy and the parallel dispatch.
 
-Eligibility for a slot: `kind` is `http` (never `offline` — that has its own zero-egress tool) and
+Eligibility for a slot: `kind` is `cli` (never `offline` — that has its own zero-egress tool) and
 `capacity_tier` is `sonnet` or `opus` by default (a `haiku`-tier model cannot hold an advisor
 analysis, and mixing one in reads as model diversity when it is really a quality gap — see
 `pinky-bootstrap/docs/adr/0006-council-advisors-cross-modele.md`). A caller that is not running a
@@ -23,17 +22,16 @@ council can pass an explicit `tiers` to `select_for_panel` to opt past that defa
 deterministic model for a non-advisor task.
 
 Usage:
-    model_panel.py --task "<prompt>" [--task "<prompt>" ...] [--model NAME ...]
+    model_panel.py --task "<prompt>" [--task "<prompt>" ...] [--model NAME ...] [--tool NAME ...]
 """
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import json
+import subprocess
 import sys
 import time
-import urllib.error
 from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple
@@ -82,9 +80,9 @@ def _eligible(entry: dict, tiers: frozenset[str] = ADVISOR_TIERS) -> bool:
 
     `tiers` defaults to the sonnet/opus advisor set; a caller passing an explicit set (e.g. a
     non-advisor consumer that wants a small deterministic model) opts past that default. The
-    `kind != "offline"` half is never relaxed — offline has its own zero-egress tool.
+    `kind == "cli"` half is never relaxed — offline has its own zero-egress tool.
     """
-    return entry.get("kind") != "offline" and entry.get("capacity_tier") in tiers
+    return entry.get("kind") == "cli" and entry.get("capacity_tier") in tiers
 
 
 def _normalize_tiers(tiers: str | Iterable[str] | None) -> frozenset[str]:
@@ -155,37 +153,32 @@ def select_for_panel(
     return _distinct_families(ranked, n)
 
 
-def _dispatch_one(entry: dict, prompt: str, timeout: int) -> _SlotResult:
+def _dispatch_one(
+    entry: dict, prompt: str, timeout: int, tools: list[str] | None
+) -> _SlotResult:
     """Call one model. `answer` set on success, `reason` set on failure — never both, never raises.
 
-    Every failure mode (no key, HTTP error, transport error, malformed body) becomes a reason
-    string, so one dead entry in a parallel batch cannot take the batch down.
+    Every failure mode (pi error, timeout, missing `pi`, a non-`cli` entry) becomes a reason string,
+    so one dead entry in a parallel batch cannot take the batch down.
     """
-    api_key = ma.resolve_api_key_for(entry)  # pragma: allowlist secret
-    if not api_key:
-        return _SlotResult(
-            entry,
-            None,
-            f"no API key ({entry['api_key_env']} absent from env and keychain)",
-        )
     try:
-        raw = ma.call_provider(
-            entry["base_url"],
-            api_key,
-            entry["model"],
-            prompt,
-            timeout,
-            entry.get("max_tokens", ma.MAX_TOKENS),
+        answer = ma.call_cli(entry, prompt, timeout, tools)
+    except subprocess.CalledProcessError as exc:
+        return _SlotResult(
+            entry, None, f"pi exit {exc.returncode}: {ma.failure_detail(exc)}"
         )
-    except urllib.error.HTTPError as exc:
-        return _SlotResult(entry, None, f"HTTP {exc.code}")
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError) as exc:
-        return _SlotResult(entry, None, f"{type(exc).__name__}: {exc}")
-    return _SlotResult(entry, ma.extract_content(raw), None)
+    except subprocess.TimeoutExpired:
+        return _SlotResult(entry, None, f"no answer within {timeout}s")
+    except (OSError, ValueError) as exc:
+        return _SlotResult(entry, None, str(exc))
+    return _SlotResult(entry, answer.strip() or "(empty response)", None)
 
 
 def run_panel(
-    entries: list[dict], prompts: list[str], timeout: int = DEFAULT_TIMEOUT
+    entries: list[dict],
+    prompts: list[str],
+    timeout: int = DEFAULT_TIMEOUT,
+    tools: list[str] | None = None,
 ) -> PanelResponse:
     """Send `prompts[i]` to `entries[i]` in parallel; collect answers in the entries' own order.
 
@@ -195,6 +188,7 @@ def run_panel(
     `entries` is expected pre-filtered by `select_for_panel`, which guarantees one entry per
     provider, so the fan-out never sends two concurrent calls to one provider and no per-provider
     `concurrency` cap is consulted. An `offline` entry slipping through is skipped, never called.
+    `tools` goes to every slot's `pi` call — none by default.
     """
     if len(entries) != len(prompts):
         raise ValueError(
@@ -213,7 +207,7 @@ def run_panel(
                 None,
                 "offline entry — route through the `offline` tool, not `panel`",
             )
-        return _dispatch_one(entry, prompt, timeout)
+        return _dispatch_one(entry, prompt, timeout, tools)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(entries)) as pool:
         for slot, res in enumerate(pool.map(worker, entries, prompts), start=1):
@@ -267,19 +261,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--task", action="append", default=[], dest="tasks", required=True)
     ap.add_argument("--model", action="append", default=None, dest="models")
+    ap.add_argument(
+        "--tool",
+        action="append",
+        default=[],
+        dest="tools",
+        help="a pi tool every model may use (repeatable); none by default",
+    )
     args = ap.parse_args(argv)
 
     entries = select_for_panel(ma.load_pool(), len(args.tasks), args.models)
     if not entries:
         print(
-            "[panel] BLOCKED — no eligible model in the pool (need kind=http, tier sonnet/opus).",
+            "[panel] BLOCKED — no eligible model in the pool (need kind=cli, tier sonnet/opus).",
             file=sys.stderr,
         )
         return 2
 
     prompts = args.tasks[: len(entries)]
     start = time.time()
-    response = run_panel(entries, prompts)
+    response = run_panel(entries, prompts, tools=args.tools or None)
     if not response.answers:
         print(
             f"[panel] BLOCKED — every candidate failed. Skipped: {response.skipped}",

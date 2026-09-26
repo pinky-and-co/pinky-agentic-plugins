@@ -65,8 +65,7 @@ class TestCliModelIdJoin(unittest.TestCase):
             "-p",
             "--model",
             model_arg,
-            "-t",
-            "read",
+            "--no-tools",
             "--no-session",
             "--thinking",
             "off",
@@ -89,6 +88,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         ma.run_pool([entry], "p")
         mock_run.assert_called_once_with(
             self._expected_cmd("gemini/gemini-3.6-flash"),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=180,
@@ -112,6 +112,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         ma.run_pool([entry], "p")
         mock_run.assert_called_once_with(
             self._expected_cmd("mlx/mlx-community/Qwen3.5-9B-MLX-4bit"),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=180,
@@ -133,6 +134,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         ma.run_pool([entry], "p")
         mock_run.assert_called_once_with(
             self._expected_cmd("groq/openai/gpt-oss-120b"),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=180,
@@ -160,6 +162,23 @@ class TestCliModelIdJoin(unittest.TestCase):
         called_args = mock_run.call_args[0][0]
         self.assertEqual(called_args[-2:], ["--", prompt])
 
+    @unittest.mock.patch("subprocess.run")
+    def test_requested_tools_become_an_allowlist(self, mock_run):
+        entry = {
+            "name": "groq-gpt-oss-120b",
+            "kind": "cli",
+            "provider": "groq",
+            "model": "openai/gpt-oss-120b",
+            "capacity_tier": "sonnet",
+        }
+        mock_run.return_value = unittest.mock.MagicMock(
+            stdout="ok", stderr="", returncode=0
+        )
+        ma.run_pool([entry], "p", tools=["read", "grep"])
+        called_args = mock_run.call_args[0][0]
+        self.assertEqual(called_args[4:6], ["-t", "read,grep"])
+        self.assertNotIn("--no-tools", called_args)
+
 
 class TestModelAdversarialCLI(unittest.TestCase):
     def setUp(self):
@@ -182,14 +201,13 @@ class TestModelAdversarialCLI(unittest.TestCase):
 
         result = ma.run_pool([self.cli_entry], self.prompt)
 
-        # Verify the command structure
+        # Le champ `tools` de l'entrée n'est plus lu : les outils se demandent à l'appel.
         expected_cmd = [
             "pi",
             "-p",
             "--model",
             "anthropic/claude-3-5-sonnet",
-            "-t",
-            "read",
+            "--no-tools",
             "--no-session",
             "--thinking",
             "off",
@@ -197,13 +215,16 @@ class TestModelAdversarialCLI(unittest.TestCase):
             self.prompt,
         ]
         mock_run.assert_called_once_with(
-            expected_cmd, capture_output=True, text=True, timeout=180, check=True
+            expected_cmd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=True,
         )
 
         self.assertEqual(result.entry, self.cli_entry)
-        self.assertEqual(
-            result.result["choices"][0]["message"]["content"], "The code is correct."
-        )
+        self.assertEqual(result.result, "The code is correct.")
 
     @unittest.mock.patch("subprocess.run")
     def test_cli_failover_on_rate_limit(self, mock_run):
@@ -222,9 +243,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         result = ma.run_pool(pool, self.prompt)
 
         self.assertEqual(result.entry["name"], "pi-model-2")
-        self.assertEqual(
-            result.result["choices"][0]["message"]["content"], "Success on second try"
-        )
+        self.assertEqual(result.result, "Success on second try")
 
     @unittest.mock.patch("subprocess.run")
     def test_cli_failover_on_oom(self, mock_run):
