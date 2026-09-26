@@ -196,7 +196,7 @@ discovered — read it on a workspace that mounts more than one.
 
 `_AGENT_LOG/` (nested under `_KANBAN/`) is the async narrative channel between sessions/agents sharing an
 org. A board still on the pre-nesting layout (a real sibling `_AGENT_LOG/` next to `_KANBAN/`, no
-nested one yet) needs a one-time run of `skills/kanban/scripts/pc_kanban_migrate_agent_log.py
+nested one yet) needs a one-time run of `hooks/agent-log-migration/pc_kanban_migrate_agent_log.py
 --kanban <path-to-_KANBAN>` — `agent_log_dir()` (`stop_handoff.py`) resolves the sibling in the
 meantime, so nothing breaks before that run, but the migration itself never happens on its own.
 What a session did, cross-chantier, that no single card's handoff would hold. One file per

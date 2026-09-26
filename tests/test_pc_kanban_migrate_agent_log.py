@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-kanban/skills/kanban/scripts/pc_kanban_migrate_agent_log.py — run with:
+"""Tests for plugins/pc-kanban/hooks/agent-log-migration/pc_kanban_migrate_agent_log.py — run with:
 python3 -m unittest discover tests
 """
 
@@ -15,9 +15,8 @@ sys.path.insert(
         Path(__file__).parent.parent
         / "plugins"
         / "pc-kanban"
-        / "skills"
-        / "kanban"
-        / "scripts"
+        / "hooks"
+        / "agent-log-migration"
     ),
 )
 
