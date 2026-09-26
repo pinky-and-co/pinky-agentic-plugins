@@ -20,16 +20,35 @@ Every plugin stays at `0.1.0` until it is actually released. A feature does not 
 the version moves at a release, not at a merge. Nothing here is published yet, so a version number
 that tracks development effort just counts commits.
 
-The cost is not cosmetic: a plugin shipping a status line is wired into `~/.claude/settings.json`
-through an absolute path carrying its version (`statusLine` has no plugin-manifest slot). Bumping
-lands a new cache directory while the old one survives, so the wired path stays valid and silently
-serves the previous build — no error, no signal. `pinky claude-plugin install <name>` re-points it.
+## Where an installed plugin runs from
 
-Refreshing the *content* of a version already in the cache is a separate step: `claude plugin
-install`/`update` fills a cache directory only when it is absent, so editing a plugin without
-bumping leaves the installed copy stale. `pinky claude-plugin install <name> --force` clears
-`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` before fetching, so the working tree
-is picked up in the same command — no more manual `rm -rf` + separate re-run.
+This repo is registered as a `directory` marketplace. `${CLAUDE_PLUGIN_ROOT}` then resolves to the
+working tree (`plugins/<name>/`), not to the copy under
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` — measured on Claude Code 2.1.283
+(a marker added only to the cache copy never reached a skill or a hook; `ps` shows MCP servers
+started from `plugins/<name>/mcp/`).
+
+| Component | Runs from | After an edit |
+|---|---|---|
+| Hook script | working tree | next matching tool call — re-executed every time |
+| Skill `scripts/` | working tree | next invocation — run as a fresh process |
+| Skill body | working tree | a new session or `/reload-plugins` — a skill already loaded in a session is not re-read |
+| MCP server | working tree | `/reload-plugins` — the running process keeps its code |
+| `hooks.json`, skill/agent frontmatter | working tree | `/reload-plugins` |
+| Status line (`pc-statusline`) | **cache** | `pinky claude-plugin refresh pc-statusline` |
+
+The `/reload-plugins` rows follow from how each is loaded — a long-lived process, a read at session
+or reload time — and were not measured one by one.
+
+The status line is the one cache consumer: `statusLine` has no plugin-manifest slot, so
+`pinky claude-plugin install` wires an absolute path into `~/.claude/settings.json`, taken from
+`installed_plugins.json` — a cache directory carrying the version. `claude plugin install`/`update`
+never refresh a cache directory that already exists; `refresh` clears and refetches it. A version
+bump lands a new cache directory while the wired path keeps pointing at the old one — no error, no
+signal — until `pinky claude-plugin install <name>` re-points it.
+
+When an edit seems ignored, check what actually loaded it before refreshing anything: a skill's
+"Base directory" line, `ps` for an MCP server, the `statusLine` path.
 
 ## Naming glossary
 
