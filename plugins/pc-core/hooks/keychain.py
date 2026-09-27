@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """keychain — read one secret from the macOS classic keychain (Trousseau d'accès).
 
-Used through `load_secrets.py`, whose `resolve_env` serves two callers: the SessionStart hook
-(declared keys into `$CLAUDE_ENV_FILE` for Bash-land) and `model_adversarial.secret_env` (the same
-keys handed to each `pi` call of the MCP server, whose process never receives that env file).
+Used through `load_secrets.py`'s `resolve_env`, called on demand by `model_adversarial.secret_env`
+and handed straight to each `pi` call's own `env=` — never into `$CLAUDE_ENV_FILE`, so a keychain
+secret is never present in a session's inherited Bash environment.
 
 Classic keychain only — `security` cannot see the Passwords app's data-protection keychain
 (`setup-declarative-secrets.md` in pinky-bootstrap for why). A read succeeds only while the `login`

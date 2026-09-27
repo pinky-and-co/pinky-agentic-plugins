@@ -18,12 +18,12 @@ import load_secrets as ls
 _real_subprocess_run = subprocess.run
 
 
-def _fake_security_only(cmd, *args, **kwargs):
-    """Only mock the `security` call — `resolve_repo_root`'s own `git rev-parse` must stay real,
-    or a global `subprocess.run` mock would hijack it too and resolve a garbage repo root."""
+def _fail_if_security_called(cmd, *args, **kwargs):
+    """`resolve_repo_root`'s own `git rev-parse` must stay real — only `security` is asserted
+    against, proof that the `SessionStart` export path never reaches the keychain."""
     if cmd[0] == "security":
-        return subprocess.CompletedProcess(
-            args=cmd, returncode=0, stdout="sk-real\n", stderr=""
+        raise AssertionError(
+            "the SessionStart export path must never invoke `security`"
         )
     return _real_subprocess_run(cmd, *args, **kwargs)
 
@@ -77,6 +77,12 @@ class TestReadLiteral(unittest.TestCase):
             ls.resolve_env_exports(keys), ["export CLOUDFLARE_ACCOUNT_ID=41c2b051"]
         )
 
+    def test_value_with_special_characters_is_shell_quoted(self):
+        keys = [{"reader": "literal", "value": "va'lue with spaces", "env": "X"}]
+        self.assertEqual(
+            ls.resolve_env_exports(keys), ["export X='va'\"'\"'lue with spaces'"]
+        )
+
 
 class TestReadAwsSecretsmanager(unittest.TestCase):
     def test_always_returns_none_not_implemented(self):
@@ -105,20 +111,26 @@ class TestResolveEnv(unittest.TestCase):
                 {"CLOUDFLARE_ACCOUNT_ID": "41c2b051", "GROQ_API_KEY": "sk-abc123"},
             )
 
+    def test_entry_missing_env_is_skipped(self):
+        keys = [{"reader": "literal", "value": "x"}]
+        self.assertEqual(ls.resolve_env(keys), {})
+
 
 class TestResolveEnvExports(unittest.TestCase):
+    """`SessionStart` boot path — `literal` only, every other reader filtered out before it is
+    resolved."""
+
     def test_unknown_reader_is_skipped_not_raised(self):
         keys = [{"reader": "vault", "service": "x", "env": "X"}]
         self.assertEqual(ls.resolve_env_exports(keys), [])
 
     def test_entry_missing_env_is_skipped(self):
-        keys = [{"reader": "macos_keychain", "service": "x"}]
+        keys = [{"reader": "literal", "value": "x"}]
         self.assertEqual(ls.resolve_env_exports(keys), [])
 
-    def test_wired_reader_produces_export_line(self):
-        completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="sk-abc123\n", stderr=""
-        )
+    def test_macos_keychain_entry_produces_no_export_line_and_never_reads_the_keychain(
+        self,
+    ):
         keys = [
             {
                 "reader": "macos_keychain",
@@ -126,19 +138,11 @@ class TestResolveEnvExports(unittest.TestCase):
                 "env": "OPENROUTER_API_KEY",
             }
         ]
-        with unittest.mock.patch("subprocess.run", return_value=completed):
-            self.assertEqual(
-                ls.resolve_env_exports(keys), ["export OPENROUTER_API_KEY=sk-abc123"]
-            )
-
-    def test_value_with_special_characters_is_shell_quoted(self):
-        completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="va'lue with spaces\n", stderr=""
-        )
-        keys = [{"reader": "macos_keychain", "service": "X", "env": "X"}]
-        with unittest.mock.patch("subprocess.run", return_value=completed):
-            lines = ls.resolve_env_exports(keys)
-        self.assertEqual(lines, ["export X='va'\"'\"'lue with spaces'"])
+        with unittest.mock.patch.object(
+            ls, "_read_keychain", return_value="sk-fake"
+        ) as reader:
+            self.assertEqual(ls.resolve_env_exports(keys), [])
+        reader.assert_not_called()
 
     def test_unwired_reader_produces_no_line_but_does_not_raise(self):
         keys = [{"reader": "aws_secretsmanager", "secret_id": "prod/x", "env": "X"}]
@@ -162,11 +166,14 @@ class TestLoadKeys(unittest.TestCase):
 
 
 class TestMainEndToEnd(unittest.TestCase):
-    def test_writes_export_lines_to_env_file(self):
+    def test_writes_only_the_literal_export_line_and_never_touches_the_keychain(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / ".claude").mkdir()
-            keys = [{"reader": "macos_keychain", "service": "X", "env": "X_KEY"}]
+            keys = [
+                {"reader": "literal", "value": "acct-123", "env": "ACCOUNT_ID"},
+                {"reader": "macos_keychain", "service": "X", "env": "X_KEY"},
+            ]
             (root / ".claude" / "settings.pinky.json").write_text(
                 json.dumps({"keys": keys})
             )
@@ -177,10 +184,34 @@ class TestMainEndToEnd(unittest.TestCase):
                     "os.environ",
                     {"CLAUDE_PROJECT_DIR": str(root), "CLAUDE_ENV_FILE": str(env_file)},
                 ),
-                unittest.mock.patch("subprocess.run", side_effect=_fake_security_only),
+                unittest.mock.patch(
+                    "subprocess.run", side_effect=_fail_if_security_called
+                ),
             ):
                 self.assertEqual(ls.main(), 0)
-            self.assertEqual(env_file.read_text(), "export X_KEY=sk-real\n")
+            self.assertEqual(env_file.read_text(), "export ACCOUNT_ID=acct-123\n")
+
+    def test_keychain_only_keys_write_nothing_and_never_touch_the_keychain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude").mkdir()
+            keys = [{"reader": "macos_keychain", "service": "X", "env": "X_KEY"}]
+            (root / ".claude" / "settings.pinky.json").write_text(
+                json.dumps({"keys": keys})
+            )
+            env_file = root / "env_file.sh"
+            env_file.write_text("")
+            with (
+                unittest.mock.patch.dict(
+                    "os.environ",
+                    {"CLAUDE_PROJECT_DIR": str(root), "CLAUDE_ENV_FILE": str(env_file)},
+                ),
+                unittest.mock.patch(
+                    "subprocess.run", side_effect=_fail_if_security_called
+                ),
+            ):
+                self.assertEqual(ls.main(), 0)
+            self.assertEqual(env_file.read_text(), "")
 
     def test_no_env_file_var_is_a_silent_noop(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -196,7 +227,7 @@ class TestMainEndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / ".claude").mkdir()
-            keys = [{"reader": "macos_keychain", "service": "X", "env": "X_KEY"}]
+            keys = [{"reader": "literal", "value": "acct-123", "env": "ACCOUNT_ID"}]
             (root / ".claude" / "settings.pinky.json").write_text(
                 json.dumps({"keys": keys})
             )
@@ -207,11 +238,14 @@ class TestMainEndToEnd(unittest.TestCase):
                     "os.environ",
                     {"CLAUDE_PROJECT_DIR": str(root), "CLAUDE_ENV_FILE": str(env_file)},
                 ),
-                unittest.mock.patch("subprocess.run", side_effect=_fake_security_only),
+                unittest.mock.patch(
+                    "subprocess.run", side_effect=_fail_if_security_called
+                ),
             ):
                 ls.main()
             self.assertEqual(
-                env_file.read_text(), "export ALREADY_HERE=1\nexport X_KEY=sk-real\n"
+                env_file.read_text(),
+                "export ALREADY_HERE=1\nexport ACCOUNT_ID=acct-123\n",
             )
 
 
