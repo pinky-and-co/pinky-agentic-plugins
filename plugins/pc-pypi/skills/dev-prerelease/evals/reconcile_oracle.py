@@ -27,7 +27,7 @@ scorer LOGIC is unit-tested in ``tests/test_reconcile_oracle.py`` with a fake.
 
 Usage:
     reconcile_oracle.py --transport offline                 # score every case on local MLX-SERVE
-    reconcile_oracle.py --transport panel --model mistral-medium-3.5
+    reconcile_oracle.py --transport panel --model nvidia-glm-5.3
     reconcile_oracle.py --transport offline --show recall_broken_promises   # dump one full answer
 """
 
