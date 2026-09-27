@@ -11,7 +11,7 @@ which calls its functions directly rather than shelling out to a subprocess.
 Pool: the ``model_pool`` key of ``settings.pinky.json``, resolved by the same ascending walk-up as
 every other pinky setting (``policy_lib.load_policies`` — repo → parent directories → ``~/.claude/``),
 seeded from ``CLAUDE_PROJECT_DIR`` (already present in this MCP server's own environment). No file
-anywhere in the chain → a single built-in ``mistral-medium-3.5`` entry.
+anywhere in the chain → a single built-in ``nvidia/z-ai/glm-5.3`` entry.
 
 Every remote call goes through ``pi`` (``call_cli``): ``pi -p --model <provider>/<model>``. Provider
 endpoints live in pi's registry (built-in, or a custom provider in ``~/.pi/agent/models.json``).
@@ -63,6 +63,8 @@ import re
 import subprocess
 import sys
 import time
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
@@ -75,14 +77,15 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-DEFAULT_MODEL = "mistral-medium-3.5"
+DEFAULT_MODEL = "z-ai/glm-5.3"
 CHECK_PROMPT = "Reply with exactly: OK"
 CHECK_WORKERS = 4
 
 _TIER_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
 
-# Prédicats de bascule du pool (`run_pool`, plus bas). Un seul critère :
-# bascule quand le fournisseur refuse de servir, jamais quand le modèle a servi mais répondu mal.
+# Prédicats de bascule du pool. Rate limit, out of memory et insufficient credit sont définitifs
+# (abandon sans retour) ; timeout, comme une réponse vide, est transitoire (un seul retour en fin
+# de file).
 _RATE_LIMIT_RE = re.compile(r"\b429\b")
 _OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
@@ -107,13 +110,14 @@ class PoolCheck(NamedTuple):
 
 _DEFAULT_POOL: list[dict[str, Any]] = [
     {
-        "name": DEFAULT_MODEL,
+        "name": "nvidia-glm-5.3",
         "kind": "cli",
-        "provider": "mistral",
+        "provider": "nvidia",
         "model": DEFAULT_MODEL,
         "capacity_tier": "opus",
-        "free_tier": False,
+        "free_tier": True,
         "concurrency": None,
+        "timeout": 300,
     }
 ]
 
@@ -272,7 +276,8 @@ def is_insufficient_credit(text: str) -> bool:
 
 def is_timeout(text: str) -> bool:
     """Whether `text` marks a `pi` call that ran past its time budget without answering — the
-    model never served in time, the same family as a 429/503/402, never a bad answer once served.
+    model never served in time, never a bad answer once served. Unlike a 429/503/402, `run_pool`
+    treats this as transient rather than definitive: the entry gets one requeue.
 
     Args:
         text: the message built for a `subprocess.TimeoutExpired` (its own `str()` already reads
@@ -480,42 +485,112 @@ def failure_detail(exc: subprocess.CalledProcessError) -> str:
     return lines[-1] if lines else f"exit {exc.returncode}, no output"
 
 
+def build_pool_log_line(when: datetime, name: str, kind: str) -> str:
+    """One `run_pool` debug log line: an ISO-8601 UTC timestamp, the entry name, the failure kind.
+
+    Args:
+        when: the event's timestamp — passed in rather than read internally, so a caller can pin
+            it and assert the line's exact text.
+        name: the pool entry's `name`, or `"(pool)"` for the final pool-exhaustion event.
+        kind: a short label for what failed (`"empty answer"`, `"timeout"`, `"exhausted"`, ...).
+
+    Returns:
+        The line, newline-terminated.
+    """
+    return f"{when.isoformat()} {name} {kind}\n"
+
+
+def _pool_log_path() -> Path:
+    """This session's `run_pool` debug log path — keyed by `CLAUDE_CODE_SESSION_ID`.
+
+    `standalone` when unset — a caller outside a Claude Code session still gets one shared file
+    rather than no log at all. Shares the env var and the `standalone` fallback string with
+    `model_offline`'s own session naming, not its id truncation or its `/tmp` location: this file
+    lives under `~/.claude/debug/`, the same durable directory Claude Code already uses for its own
+    per-session debug output, keyed by the full untruncated session id.
+    """
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "standalone")
+    return (
+        Path.home() / ".claude" / "debug" / f"{session_id}_mcp__pc-core__model-pool.txt"
+    )
+
+
+def log_pool_event(name: str, kind: str) -> None:
+    """Best-effort append of one `build_pool_log_line` line to `run_pool`'s debug log.
+
+    Swallows any failure to write it silently (missing `~/.claude/debug/` and unable to create it,
+    permission issue, full disk, an unresolvable home directory) — a logging failure must never
+    break a `run_pool` call that otherwise succeeded.
+
+    Args:
+        name: the pool entry's `name`, or `"(pool)"` for the final pool-exhaustion event.
+        kind: a short label for what failed.
+    """
+    line = build_pool_log_line(datetime.now(timezone.utc), name, kind)
+    try:
+        path = _pool_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line)
+    except (OSError, RuntimeError):
+        pass
+
+
 def run_pool(
     entries: list[dict[str, Any]],
     prompt: str,
     timeout: int = 180,
     tools: list[str] | None = None,
 ) -> PoolResult:
-    """Try each entry in order, first success wins.
+    """Try each queued entry in order, first non-empty success wins.
 
-    Returns (entry, answer) on success, or (None, last_error) once every entry has failed.
-    A `kind: "offline"` entry is never dispatched here — it must go through the separate `offline`
+    Returns (entry, answer) on success, or (None, last_error) once the queue is exhausted. A
+    `kind: "offline"` entry is never dispatched here — it must go through the separate `offline`
     MCP tool, which enforces its own zero-egress guarantee (never returning the answer body).
     Shared by the CLI (`main`), the MCP tool and `pi_review`, so a fallback fix lands once.
 
-    An entry advances to the next one only when `is_rate_limited` / `is_out_of_memory` /
-    `is_insufficient_credit` / `is_timeout` say the provider refused to serve — never when it
-    served but answered badly; any other non-zero exit is returned as a stop, not a fall-through.
+    `is_rate_limited` / `is_out_of_memory` / `is_insufficient_credit` mean the provider refuses
+    to serve for the rest of this run: the entry is dropped for good, never requeued. An empty
+    answer or a timeout (`is_timeout`, or a `subprocess.TimeoutExpired`) is transient: the entry
+    is appended to the end of the remaining queue once; a second such failure from the same entry
+    drops it for good — at most `2 * len(entries)` attempts, never an infinite loop. Trade-off: a
+    pool where every entry times out now takes up to twice as long to exhaust, since each gets a
+    second attempt before being dropped — deliberate, in exchange for surviving a transient blip.
+    Any other non-zero exit is a terminal stop for the whole pool, not a fall-through.
+
+    Every failure signal, and the pool's own exhaustion, is logged through `log_pool_event`,
+    best-effort.
     """
     last_error: str | None = None
     env = secret_env()
-    for entry in entries:
+    queue: deque[int] = deque(range(len(entries)))
+    requeued: set[int] = set()
+
+    def requeue_once(idx: int) -> None:
+        """Append `idx` to the end of the queue on its first transient failure only."""
+        if idx not in requeued:
+            requeued.add(idx)
+            queue.append(idx)
+
+    while queue:
+        idx = queue.popleft()
+        entry = entries[idx]
         if entry["kind"] == "offline":
             last_error = (
                 f"{entry['name']}: offline entries are not callable through the pool"
             )
+            log_pool_event(entry["name"], "not callable (offline)")
             continue
         if entry["kind"] != "cli":
             last_error = _not_callable(entry)
+            log_pool_event(entry["name"], "not callable")
             continue
         if not entry.get("model"):
             last_error = f"{entry['name']}: cli entries require a 'model' field"
+            log_pool_event(entry["name"], "missing model field")
             continue
         try:
-            return PoolResult(
-                entry,
-                call_cli(entry, prompt, entry_timeout(entry, timeout), tools, env),
-            )
+            answer = call_cli(entry, prompt, entry_timeout(entry, timeout), tools, env)
         except subprocess.CalledProcessError as e:
             # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
             # stdout pendant que stderr porte autre chose.
@@ -524,19 +599,40 @@ def run_pool(
                 is_rate_limited(combined)
                 or is_out_of_memory(combined)
                 or is_insufficient_credit(combined)
-                or is_timeout(combined)
             ):
+                # Signal définitif : évalué avant `is_timeout` pour qu'un message qui porte les
+                # deux marqueurs à la fois (ex. un 429 dont le corps mentionne aussi un timeout
+                # amont) reste jamais-requeue plutôt que transitoire.
                 last_error = f"{entry['name']}: {combined.strip()}"
+                log_pool_event(
+                    entry["name"], "rate limit / out of memory / insufficient credit"
+                )
                 continue
+            if is_timeout(combined):
+                last_error = f"{entry['name']}: {combined.strip()}"
+                log_pool_event(entry["name"], "timeout")
+                requeue_once(idx)
+                continue
+            log_pool_event(entry["name"], "critical failure")
             return PoolResult(
                 None, f"{entry['name']} critical failure: {combined.strip()}"
             )
         except subprocess.TimeoutExpired as e:
             last_error = f"{entry['name']}: {e}"
+            log_pool_event(entry["name"], "timeout")
+            requeue_once(idx)
             continue
         except OSError as e:
             last_error = f"{entry['name']}: {e}"
+            log_pool_event(entry["name"], "os error")
             continue
+        else:
+            if answer.strip():
+                return PoolResult(entry, answer)
+            last_error = f"{entry['name']}: empty answer"
+            log_pool_event(entry["name"], "empty answer")
+            requeue_once(idx)
+    log_pool_event("(pool)", "exhausted")
     return PoolResult(None, last_error)
 
 

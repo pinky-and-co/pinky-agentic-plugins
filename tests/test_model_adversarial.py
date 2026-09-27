@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Tests for plugins/pc-core/mcp/model_adversarial.py — run with:
-python3 -m unittest discover tests
+pytest tests/test_model_adversarial.py
+
+Never `python3 -m unittest discover tests`: it does not load `conftest.py`, so the autouse
+fixture isolating `run_pool`'s debug log (`_isolate_pool_log`) never applies, and a real
+`~/.claude/debug/` file gets written under the developer's own session id.
 """
 
 import json
@@ -10,6 +14,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -207,6 +212,194 @@ class TestRunPool(unittest.TestCase):
             "mistral-medium-3.5: kind 'http' is no longer supported — declare the provider "
             "in pi (~/.pi/agent/models.json) and set kind 'cli'",
         )
+
+
+class TestRunPoolRequeue(unittest.TestCase):
+    """Empty answer / timeout are transient: requeued once, at the end of the queue; a second
+    such failure from the same entry drops it for good. Rate-limit/OOM/insufficient-credit stay
+    definitive — never requeued."""
+
+    def _empty(self):
+        return subprocess.CompletedProcess([], 0, "   \n", "")
+
+    def _ok(self, text="answer"):
+        return subprocess.CompletedProcess([], 0, text, "")
+
+    def test_empty_answer_then_success_on_requeue(self):
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=[self._empty(), self._ok("answer")]
+        ) as run:
+            result = ma.run_pool([MISTRAL], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
+
+    def test_timeout_then_success_on_requeue(self):
+        with unittest.mock.patch(
+            "subprocess.run",
+            side_effect=[subprocess.TimeoutExpired("pi", 180), self._ok("answer")],
+        ) as run:
+            result = ma.run_pool([MISTRAL], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
+
+    def test_timeout_marker_in_a_process_error_is_transient_too(self):
+        timeout_error = subprocess.CalledProcessError(1, "pi", "", "504 timed out")
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=[timeout_error, self._ok("answer")]
+        ) as run:
+            result = ma.run_pool([MISTRAL], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
+
+    def test_second_failure_after_requeue_drops_the_entry_for_good(self):
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=[self._empty(), self._empty()]
+        ) as run:
+            result = ma.run_pool([MISTRAL], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertIsNone(result.entry)
+        self.assertEqual(result.result, "mistral-medium-3.5: empty answer")
+
+    def test_requeue_order_is_end_of_queue_not_in_place(self):
+        # Deux entrées toujours vides : la file doit suivre A, B, A, B — jamais en place (A, A,
+        # B, B) — avant de s'épuiser au bout de 2*N tentatives.
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=[self._empty()] * 4
+        ) as run:
+            result = ma.run_pool([MISTRAL, GLM], "p")
+        self.assertEqual(
+            [call.args[0][3] for call in run.call_args_list],
+            [
+                "mistral/mistral-medium-3.5",
+                "openrouter/z-ai/glm-5-2",
+                "mistral/mistral-medium-3.5",
+                "openrouter/z-ai/glm-5-2",
+            ],
+        )
+        self.assertIsNone(result.entry)
+
+    def test_rate_limited_entry_is_never_requeued(self):
+        rate_limited = subprocess.CalledProcessError(1, "pi", "", "429 too many")
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=[rate_limited, rate_limited]
+        ) as run:
+            result = ma.run_pool([MISTRAL, GLM], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertIsNone(result.entry)
+
+    def test_out_of_memory_entry_is_never_requeued(self):
+        oom = subprocess.CalledProcessError(1, "pi", "", "503 out_of_memory")
+        with unittest.mock.patch("subprocess.run", side_effect=[oom, oom]) as run:
+            result = ma.run_pool([MISTRAL, GLM], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertIsNone(result.entry)
+
+    def test_insufficient_credit_entry_is_never_requeued(self):
+        credit = subprocess.CalledProcessError(1, "pi", "", "402 payment required")
+        with unittest.mock.patch("subprocess.run", side_effect=[credit, credit]) as run:
+            result = ma.run_pool([MISTRAL, GLM], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertIsNone(result.entry)
+
+    def test_definitive_marker_wins_over_an_ambiguous_timeout_marker(self):
+        # Un 3e appel (au-delà des 2 valeurs de `side_effect`) lèverait `StopIteration` — la
+        # preuve que MISTRAL n'a pas été requeue.
+        ambiguous = subprocess.CalledProcessError(
+            1, "pi", "", "429 too many, gateway timed out"
+        )
+        rate_limited = subprocess.CalledProcessError(1, "pi", "", "429 too many")
+        with unittest.mock.patch(
+            "subprocess.run", side_effect=[ambiguous, rate_limited]
+        ) as run:
+            result = ma.run_pool([MISTRAL, GLM], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertIsNone(result.entry)
+
+
+class _FixedDatetime(datetime):
+    """A `datetime` subclass whose `.now()` always answers the same instant — freezes
+    `log_pool_event`'s timestamp so a test can assert the whole log line, not a fragment."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2026, 1, 1, tzinfo=tz)
+
+
+class TestPoolLog(unittest.TestCase):
+    def test_build_pool_log_line_is_pinned(self):
+        when = datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual(
+            ma.build_pool_log_line(when, "mistral-medium-3.5", "empty answer"),
+            "2026-09-27T12:00:00+00:00 mistral-medium-3.5 empty answer\n",
+        )
+
+
+def test_log_pool_event_writes_the_session_scoped_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "abc123")
+    (tmp_path / ".claude" / "debug").mkdir(parents=True)
+    monkeypatch.setattr(ma, "datetime", _FixedDatetime)
+
+    ma.log_pool_event("mistral-medium-3.5", "timeout")
+
+    log_path = tmp_path / ".claude" / "debug" / "abc123_mcp__pc-core__model-pool.txt"
+    assert log_path.read_text(encoding="utf-8") == (
+        "2026-01-01T00:00:00+00:00 mistral-medium-3.5 timeout\n"
+    )
+
+
+def test_log_pool_event_with_no_session_id_falls_back_to_standalone(
+    tmp_path, monkeypatch
+):
+    (tmp_path / ".claude" / "debug").mkdir(parents=True)
+    monkeypatch.setattr(ma, "datetime", _FixedDatetime)
+
+    ma.log_pool_event("mistral-medium-3.5", "timeout")
+
+    log_path = (
+        tmp_path / ".claude" / "debug" / "standalone_mcp__pc-core__model-pool.txt"
+    )
+    assert log_path.exists()
+
+
+def test_log_pool_event_swallows_an_io_error(tmp_path, monkeypatch):
+    # Le chemin de log cible est lui-même un répertoire : `open("a")` lève `IsADirectoryError`,
+    # jamais laissée remonter.
+    debug_dir = tmp_path / ".claude" / "debug"
+    debug_dir.mkdir(parents=True)
+    (debug_dir / "standalone_mcp__pc-core__model-pool.txt").mkdir()
+    ma.log_pool_event("mistral-medium-3.5", "timeout")
+
+
+def test_transient_failure_with_a_broken_log_path_still_returns_success(
+    tmp_path, monkeypatch
+):
+    # Le chemin de log est lui-même un répertoire : `open("a")` lève `IsADirectoryError` (une
+    # sous-classe d'OSError), avalée en silence — un run par ailleurs réussi ne doit jamais être
+    # cassé par une écriture de log qui échoue.
+    debug_dir = tmp_path / ".claude" / "debug"
+    debug_dir.mkdir(parents=True)
+    (debug_dir / "standalone_mcp__pc-core__model-pool.txt").mkdir()
+    empty = subprocess.CompletedProcess([], 0, "   ", "")
+    ok = subprocess.CompletedProcess([], 0, "answer", "")
+    with unittest.mock.patch("subprocess.run", side_effect=[empty, ok]) as run:
+        result = ma.run_pool([MISTRAL], "p")
+    assert run.call_count == 2
+    assert result == ma.PoolResult(MISTRAL, "answer")
+
+
+def test_pool_exhaustion_logs_every_failure_and_the_final_event(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess1")
+    (tmp_path / ".claude" / "debug").mkdir(parents=True)
+    monkeypatch.setattr(ma, "datetime", _FixedDatetime)
+    empty = subprocess.CompletedProcess([], 0, "", "")
+    with unittest.mock.patch("subprocess.run", side_effect=[empty, empty]):
+        ma.run_pool([MISTRAL], "p")
+    log_path = tmp_path / ".claude" / "debug" / "sess1_mcp__pc-core__model-pool.txt"
+    assert log_path.read_text(encoding="utf-8") == (
+        "2026-01-01T00:00:00+00:00 mistral-medium-3.5 empty answer\n"
+        "2026-01-01T00:00:00+00:00 mistral-medium-3.5 empty answer\n"
+        "2026-01-01T00:00:00+00:00 (pool) exhausted\n"
+    )
 
 
 class TestCallCli(unittest.TestCase):
@@ -545,6 +738,30 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
 
     server.adversarial(task="review", tier="turbo-9000")
     assert "adversarial" in seen and "delegation" not in seen
+
+
+def test_adversarial_tool_reports_pool_exhaustion_without_raising(monkeypatch):
+    """`run_pool` returning `entry=None` (a fully exhausted pool) must read as a BLOCKED report,
+    never a `TypeError` on `entry['name']`."""
+    pytest.importorskip("mcp")
+    sys.path.insert(
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+    )
+    import pc_core_server
+
+    monkeypatch.setattr(
+        pc_core_server.model_adversarial,
+        "run_pool",
+        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+            None, "everything failed"
+        ),
+    )
+
+    # `model="x"` bypasses `load_pool` via the override path, straight to `run_pool`.
+    out = pc_core_server.adversarial(task="review", model="x")
+    assert (
+        out == "[adversarial] BLOCKED — every candidate failed. Last: everything failed"
+    )
 
 
 if __name__ == "__main__":
