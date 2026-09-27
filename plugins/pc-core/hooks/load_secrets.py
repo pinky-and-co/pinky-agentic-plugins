@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""load_secrets — SessionStart hook that exports declared API keys as environment variables.
+"""load_secrets — SessionStart hook that exports declared non-secret keys as environment variables.
 
 Reads the `keys` array from `.claude/settings.pinky.json` (ascending resolution — see
-`policy_lib.py`, the same mechanism `model_pool`/`branch_workflow` already use) and appends
-`export <env>=<value>` lines to `$CLAUDE_ENV_FILE`, which Claude Code sources before every Bash
-command. Append, not overwrite — a later `CwdChanged`/another `SessionStart` hook may also write to
-this file; truncating it would erase a sibling hook's contribution.
+`policy_lib.py`, the same mechanism `model_pool`/`branch_workflow` already use). At `SessionStart`,
+only `literal` entries are appended as `export <env>=<value>` lines to `$CLAUDE_ENV_FILE`, which
+Claude Code sources before every Bash command — every session's env is otherwise readable by any
+tool that dumps it (`pgrep -fl`, `env`, a command's own argv expansion), so a secret has no business
+sitting there for the session's whole lifetime. Append, not overwrite — a later `CwdChanged`/another
+`SessionStart` hook may also write to this file; truncating it would erase a sibling hook's
+contribution.
 
 Each `keys` entry: `{"reader": "...", "env": "VAR_NAME", ...reader-specific fields}`. `reader`
 dispatches to a wiring function below; each names its own fields. Two are wired:
@@ -13,25 +16,33 @@ dispatches to a wiring function below; each names its own fields. Two are wired:
 - `macos_keychain` (`{"service": ...}`) — the classic keychain, Trousseau d'accès,
   `security find-generic-password`; NOT the Passwords app, which stores in a structurally
   different, unreachable format — see `docs/how-to/setup-declarative-secrets.md` (pinky-bootstrap)
-  for why. **Every secret goes here.**
+  for why. **Every secret goes here.** Declared the same way as a `literal` entry, but never
+  exported at boot: resolved on demand instead, only inside the process that needs it (`secret_env`
+  in `model_adversarial.py`, handed straight to a `pi` subprocess's own `env=`).
 - `literal` (`{"value": ...}`) — the value sits in `settings.pinky.json` itself, in clear text on
   disk. **Never a secret, whatever the convenience**: for an account id, a tenant, an endpoint —
   something already public in a `base_url` or a log. A credential in a `literal` entry defeats the
-  only reason the keychain reader exists.
+  only reason the keychain reader exists. The one reader kind safe to export for the whole session,
+  and the only one `resolve_env_exports` (below) resolves.
 
-An unwired reader (`aws_secretsmanager`, ...) fails loud on stderr and leaves that
-variable unset — never a silent skip, never a fabricated value.
+An unwired reader (`aws_secretsmanager`, ...) fails loud on stderr and leaves that variable unset —
+never a silent skip, never a fabricated value — wherever it is actually resolved (on demand via
+`secret_env`, or at boot for a `literal` entry). A non-`literal` entry is filtered out before
+dispatch on the `SessionStart` path itself (`resolve_env_exports`), so an unwired reader declared
+there produces no stderr line at boot; it still fails loud the moment something calls
+`secret_env()` for it.
 
 This hook must never hang: it runs on every session start, including a scheduled/headless one with
-no physical user to unlock a keychain or answer a Touch ID prompt. Every subprocess call carries a
-short timeout; a timeout, a missing item, or a locked keychain all degrade to "skip this entry,
-log why" — never a hang, never a crash that blocks the session from starting.
+no physical user to unlock a keychain or answer a Touch ID prompt. Resolving only `literal` entries
+at boot already removes the keychain/Touch-ID prompt from this path entirely; the timeout on every
+subprocess call in `keychain.py` guards the on-demand path (`secret_env`) instead — a timeout, a
+missing item, or a locked keychain there still degrades to "skip this entry, log why", never a hang.
 
 Registered as a `SessionStart` hook in `hooks/hooks.json` with no matcher: every sub-type
 (`startup`, `resume`, `clear`) must run this, since a reattached/resumed session is exactly as
-likely to need its keys freshly exported as a cold start (confirmed the hard way: scoping this to
-`matcher: "startup"` meant a resumed session — same session id, new harness process — never got
-them).
+likely to need its `literal` keys freshly exported as a cold start (confirmed the hard way: scoping
+this to `matcher: "startup"` meant a resumed session — same session id, new harness process — never
+got them).
 """
 
 from __future__ import annotations
@@ -91,18 +102,34 @@ def load_keys(project_dir: str) -> list[dict[str, Any]]:
 
 
 def resolve_env_exports(keys: list[dict[str, Any]]) -> list[str]:
-    """`export VAR=value` lines for every entry whose reader resolved a value."""
+    """`export VAR=value` lines for `SessionStart` — `literal` entries only.
+
+    Filters *before* resolving, not after: a `macos_keychain`/`aws_secretsmanager` entry must never
+    reach its reader on this path, or every session start pays the keychain/Touch-ID round trip for
+    a value it then throws away. Allowlisted on `literal` rather than denylisted on the secret
+    readers, so a future reader defaults to "not exported at boot" until proven safe.
+
+    Args:
+        keys: the `keys` array of `settings.pinky.json`.
+
+    Returns:
+        One `export` line per `literal` entry that resolved a value, in `keys` order.
+    """
+    literal_keys = [entry for entry in keys if entry.get("reader") == "literal"]
     return [
         f"export {name}={shlex.quote(value)}"
-        for name, value in resolve_env(keys).items()
+        for name, value in resolve_env(literal_keys).items()
     ]
 
 
 def resolve_env(keys: list[dict[str, Any]]) -> dict[str, str]:
-    """`{VAR: value}` for every entry whose reader resolved a value.
+    """`{VAR: value}` for every entry whose reader resolved a value — every reader, keychain
+    included: this function itself does no filtering by reader.
 
-    Also read by pc-core's MCP server (`model_adversarial.secret_env`), whose process never
-    receives `$CLAUDE_ENV_FILE`: it hands the same keys to each `pi` call it makes.
+    Called by pc-core's MCP server (`model_adversarial.secret_env`), whose process never receives
+    `$CLAUDE_ENV_FILE`: it hands the resolved values to each `pi` call it makes, on demand, never
+    into a session-wide env. `resolve_env_exports` (the `SessionStart` path) calls this too, but
+    pre-filtered down to `literal` entries only.
 
     Args:
         keys: the `keys` array of `settings.pinky.json`.
