@@ -98,7 +98,7 @@ clean_repo() {
         || { NOTHING_TOTAL=$((NOTHING_TOTAL + 1)); return 0; }
 
     git -C "$repo" fetch --prune origin >/dev/null 2>&1 \
-        || { printf '  ❌ %-28s fetch --prune échoué\n' "$name"; FAILED_TOTAL=$((FAILED_TOTAL + 1)); return 1; }
+        || { printf '  ❌ %-28s fetch --prune failed\n' "$name"; FAILED_TOTAL=$((FAILED_TOTAL + 1)); return 1; }
 
     local -a gone=()
     while IFS= read -r line; do
@@ -136,7 +136,7 @@ clean_repo() {
     local -a report=()
     if [ "$head" != "$base" ] && in_list "$head" ${gone[@]+"${gone[@]}"}; then
         git -C "$repo" checkout "$base" >/dev/null 2>&1 \
-            || { printf '  ❌ %-28s checkout %s impossible\n' "$name" "$base"; \
+            || { printf '  ❌ %-28s cannot check out %s\n' "$name" "$base"; \
                  FAILED_TOTAL=$((FAILED_TOTAL + 1)); return 1; }
         report+=("HEAD $head → $base")
         head="$base"
@@ -158,16 +158,18 @@ clean_repo() {
             failed=$((failed + 1))
         fi
     done
-    [ ${#removed[@]} -eq 0 ] || report+=("supprimée(s) : $(join_by ', ' "${removed[@]}")")
+
+    BRANCHES_TOTAL=$((BRANCHES_TOTAL + ${#removed[@]}))
+    [ ${#removed[@]} -eq 0 ] || report+=("removed: $(join_by ', ' "${removed[@]}")")
 
     if [ "$failed" -gt 0 ]; then
-        printf '  ❌ %-28s %d échec(s) de suppression (voir git branch -vv)\n' "$name" "$failed"
+        printf '  ❌ %-28s %d branch deletion(s) failed (see git branch -vv)\n' "$name" "$failed"
         FAILED_TOTAL=$((FAILED_TOTAL + 1))
     elif [ ${#report[@]} -gt 0 ]; then
         printf '  ✅ %-28s %s\n' "$name" "$(join_by ' · ' "${report[@]}")"
         OK_TOTAL=$((OK_TOTAL + 1))
     else
-        [ "$QUIET" = true ] || printf '  •  %-28s rien à nettoyer\n' "$name"
+        [ "$QUIET" = true ] || printf '  •  %-28s nothing to clean\n' "$name"
         NOTHING_TOTAL=$((NOTHING_TOTAL + 1))
     fi
 }
@@ -180,12 +182,12 @@ while [ $# -gt 0 ]; do
         --repo) FILTER="$2"; shift 2 ;;
         --all)  shift ;;  # no-op : absence de --repo fait déjà tout le root
         --quiet) QUIET=true; shift ;;  # Supprime la sortie per-repo
-        *)      die "option inconnue : $1" ;;
+        *)      die "unknown option: $1" ;;
     esac
 done
 
 scanned=0
-OK_TOTAL=0; NOTHING_TOTAL=0; FAILED_TOTAL=0
+OK_TOTAL=0; NOTHING_TOTAL=0; FAILED_TOTAL=0; BRANCHES_TOTAL=0
 while IFS= read -r repo; do
     [ -n "$repo" ] || continue
     name="$(basename "$repo")"
@@ -194,7 +196,8 @@ while IFS= read -r repo; do
     clean_repo "$repo" || true
 done < <(discover_repos "$ROOT")
 
-[ "$scanned" -gt 0 ] || die "aucun dépôt git trouvé sous $ROOT (ou filtre --repo $FILTER sans correspondance)"
+[ "$scanned" -gt 0 ] || die "no git repository found under $ROOT (or --repo $FILTER matched nothing)"
 
-[ "$QUIET" = true ] || printf '\n✅ %d   •  %d   ❌ %d\n' "$OK_TOTAL" "$NOTHING_TOTAL" "$FAILED_TOTAL"
+[ "$QUIET" = true ] || printf '\nsummary: %d repo(s) cleaned · %d nothing to clean · %d failed · %d branch(es) removed\n' \
+    "$OK_TOTAL" "$NOTHING_TOTAL" "$FAILED_TOTAL" "$BRANCHES_TOTAL"
 [ "$FAILED_TOTAL" -eq 0 ]
