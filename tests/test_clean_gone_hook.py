@@ -175,9 +175,9 @@ class TestCleanGoneHook:
         assert result.returncode == 0
         assert branches(local) == ["main"]
         assert system_message(result) == (
-            "clean-gone :\n"
+            "clean-gone:\n"
             "  ✅ test-repo                    "
-            "HEAD feature/gone-branch → main · supprimée(s) : feature/gone-branch"
+            "HEAD feature/gone-branch → main · removed: feature/gone-branch"
         )
 
     def test_hook_removes_worktree_for_gone_branch(
@@ -296,7 +296,7 @@ class TestCleanGoneHook:
         assert result.returncode == 0
         assert git(local, "rev-parse", "main") == git(other, "rev-parse", "main")
         assert system_message(result) == (
-            "clean-gone :\n  ✅ test-repo                    main +1 commit(s)"
+            "clean-gone:\n  ✅ test-repo                    main +1 commit(s)"
         )
 
     def test_hook_fast_forwards_base_without_leaving_live_branch(

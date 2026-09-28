@@ -34,6 +34,17 @@ A named repo as argument → add `--repo <name>` (basename match against every r
 discovery finds — `find <root> -maxdepth 4 -name .git`, `node_modules` excluded, identical to
 `bulk_commit.sh`'s, reused not reinvented). No argument or `--all` → no `--repo`, the whole root.
 
-Report its output verbatim, per repo: what changed (HEAD moved, base commits gained, branches
-removed by name), or "rien à nettoyer". Nothing found
-across the whole run → say so, nothing to do.
+## Report
+
+Reproduce the script's stdout **verbatim** in one fenced code block — same lines, same order. It is already the complete report: per repo, what changed (HEAD moved, base
+commits gained, branches removed by name) or `nothing to clean`, then a final `summary:` line.
+
+- **Add nothing.** No lead-in ("Done."), no closing recap, no bold, no table, no prose rewrite, no
+  translation.
+- **Count nothing.** The `summary:` line is the only tally, and it mixes units on purpose: the first
+  three counters are **repos**, the last one is **branches**. Never restate them in another unit
+  ("1 branch cleaned" from a `1 repo(s) cleaned` is a guess).
+- **Exit code first.** A non-zero exit means the run failed: reproduce the `❌` lines, then the exit
+  code and whatever the script wrote on stderr (`clean-gone: …`). Never describe a non-zero run as a
+  success.
+- Empty stdout with exit 0 → say exactly that; never fill the silence with a recap.

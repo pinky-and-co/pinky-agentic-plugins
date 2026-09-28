@@ -58,7 +58,7 @@ def project_root(event: dict | None = None) -> Path:
 
 def build_hook_output(report: str) -> dict:
     """The SessionStart JSON envelope carrying the script's report to user and model."""
-    message = f"clean-gone :\n{report}"
+    message = f"clean-gone:\n{report}"
     return {
         "systemMessage": message,
         "hookSpecificOutput": {
