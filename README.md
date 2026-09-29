@@ -134,6 +134,12 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       └── improve/
 │   │           └── SKILL.md
+│   ├── pc-customize/
+│   │   ├── output-styles/
+│   │   │   └── skim-and-push.md
+│   │   ├── themes/
+│   │   │   └── lisible.json
+│   │   └── README.md
 │   ├── pc-delegate/
 │   │   ├── mcp/
 │   │   │   ├── pc_delegate_server.py
