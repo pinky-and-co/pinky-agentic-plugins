@@ -380,3 +380,58 @@ def test_a_column_of_real_person_names_is_still_flagged(tmp_path):
     )
     findings = anonymize.detect_findings([str(f)])
     assert any(x.column == "who" and "PERSON" in x.reason for x in findings)
+
+
+@requires_model
+def test_text_scan_stops_at_the_line_budget_and_says_so(tmp_path):
+    """A long free-text file is scanned line by line at ~3 ms a line: past the budget only the
+    first lines are read, and the caller is told the rest was not analyzed."""
+    p = tmp_path / "long.log"
+    p.write_text(
+        "".join(f"[INFO] line {i} ok\n" for i in range(50))
+        + "[WARN] contact jean.dupont@example.fr\n",
+        encoding="utf-8",
+    )
+    seen: list[bool] = []
+    findings = anonymize.detect_findings(
+        [str(p)], text_max_lines=20, truncated=lambda name: seen.append(True)
+    )
+    assert findings == []  # the email sits past line 20: not read
+    assert seen == [True]
+    # within the budget the same email is found
+    assert anonymize.detect_findings([str(p)], text_max_lines=100)
+
+
+@requires_model
+def test_a_short_number_is_not_a_phone_but_real_numbers_are(tmp_path):
+    """Presidio reads a bare `1640` as a phone number (0.4). A real one has at least 8 digits, in
+    any of the usual spellings."""
+    p = tmp_path / "requests.log"
+    p.write_text(
+        "".join(f"[INFO] request {n} handled ok\n" for n in range(1640, 1660)),
+        encoding="utf-8",
+    )
+    assert anonymize.detect_findings([str(p)]) == []
+
+    for spelled in ("06 12 34 56 78", "0612345678", "+33 6 12 34 56 78"):
+        q = tmp_path / "contacts.log"
+        q.write_text(f"[INFO] rappeler {spelled} demain\n" * 3, encoding="utf-8")
+        flagged = anonymize.detect_findings([str(q)])
+        assert any("PHONE_NUMBER" in f.column for f in flagged), spelled
+
+
+@requires_model
+def test_a_siret_column_is_not_reported_as_a_credit_card(tmp_path):
+    """A Luhn-valid 14-digit SIRET also passes as a card number: the same span must be reported
+    once, as the SIRET."""
+    f = _csv(
+        tmp_path / "companies.csv",
+        [
+            {"ref": "73282932000074", "note": "x"},
+            {"ref": "55210055400013", "note": "y"},
+            {"ref": "81362157000007", "note": "z"},
+        ],
+    )
+    (finding,) = [x for x in anonymize.detect_findings([str(f)]) if x.column == "ref"]
+    assert "FR_SIRET" in finding.reason
+    assert "CREDIT_CARD" not in finding.reason

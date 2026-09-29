@@ -226,3 +226,95 @@ def test_source_and_doc_extensions_are_code_never_scanned(tmp_path):
     sql = tmp_path / "dump.sql"
     sql.write_text("INSERT INTO t VALUES ('jean@example.fr');\n", encoding="utf-8")
     assert anonymize.detect_format(sql) != "code"
+
+
+def test_csv_whose_first_column_holds_times_is_not_config(tmp_path):
+    """`12:30,jean@…` has a colon but no space after it — a time, not `key: value`. Such a CSV
+    used to be classed `config` and never scanned."""
+    p = tmp_path / "planning.csv"
+    rows = "".join(f"{h}:30,jean{h}@example.fr,x\n" for h in range(8, 14))
+    p.write_text("heure,contact,note\n" + rows, encoding="utf-8")
+    assert anonymize.detect_format(p) == "csv"
+
+
+def test_key_value_shapes_still_read_as_config(tmp_path):
+    """`key: value`, `key=value` and dotenv lines stay config after the colon rule."""
+    for name, body in (
+        ("a.txt", "host: db\nport: 5432\nuser: app\n"),
+        ("b.txt", "host=db\nport=5432\nuser=app\n"),
+        ("c.txt", "HOST=db\nPORT=5432\nMAIL_TO=ops@example.fr\n"),
+    ):
+        p = tmp_path / name
+        p.write_text(body, encoding="utf-8")
+        assert anonymize.detect_format(p) == "config", name
+
+
+def test_format_detection_reads_only_the_head(tmp_path, monkeypatch):
+    """Naming a multi-MB csv touches at most the head: the bytes handed back by every `open().read`
+    stay within the 64 KiB window, and nothing reads the whole file."""
+    p = tmp_path / "big.csv"
+    with p.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["a", "b"])
+        for i in range(200_000):
+            w.writerow([str(i), "x"])
+    assert p.stat().st_size > 1_000_000
+
+    read = []
+    real_open = Path.open
+
+    class Counting:
+        def __init__(self, fh):
+            self._fh = fh
+
+        def read(self, *args):
+            data = self._fh.read(*args)
+            read.append(len(data))
+            return data
+
+        def __getattr__(self, name):
+            return getattr(self._fh, name)
+
+        def __enter__(self):
+            self._fh.__enter__()
+            return self
+
+        def __exit__(self, *exc):
+            return self._fh.__exit__(*exc)
+
+    monkeypatch.setattr(
+        Path, "open", lambda self, *a, **k: Counting(real_open(self, *a, **k))
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda *a, **k: pytest.fail("format detection read the whole file"),
+    )
+    assert anonymize.detect_format(p) == "csv"
+    assert read, "instrumentation saw no read"
+    assert sum(read) <= 65536
+
+
+def test_a_zip_that_is_not_a_workbook_is_binary_even_without_file(
+    tmp_path, monkeypatch
+):
+    """Without the `file` command a docx/zip starts with `PK` like an xlsx; only a workbook part
+    inside makes it one — anything else is skipped, not sent to the xlsx reader to fail."""
+    monkeypatch.setattr(anonymize.shutil, "which", lambda name: None)
+    docx = tmp_path / "letter.docx"
+    with zipfile.ZipFile(docx, "w") as z:
+        z.writestr("word/document.xml", "<w:document/>")
+    assert anonymize.detect_format(docx) == "binary"
+
+    book = tmp_path / "book.dat"
+    with zipfile.ZipFile(book, "w") as z:
+        z.writestr("xl/workbook.xml", "<workbook/>")
+    assert anonymize.detect_format(book) == "xlsx"
+
+
+def test_a_single_column_csv_is_scanned_line_by_line(tmp_path):
+    """A one-column file has no delimiter to sniff, so it takes the line-by-line route (masked
+    entity by entity) rather than the column route. Pinned so the routing is a decision."""
+    p = tmp_path / "names.csv"
+    p.write_text("name\nAlice\nBob\nCharlie\n", encoding="utf-8")
+    assert anonymize.detect_format(p) == "text"
