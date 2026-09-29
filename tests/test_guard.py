@@ -240,6 +240,13 @@ class TestBashFreeze(unittest.TestCase):
         self.scratchpad = self.base / "claude-999" / "sess" / "scratchpad"
         self.scratchpad.mkdir(parents=True)
         self.freeze = [str(self.repo)]
+        # The tmp dir itself may sit under a system prefix (`/tmp` on Linux) the guard ignores.
+        prefixes = tuple(
+            p for p in g._BASH_SYSTEM_PREFIXES if not str(self.base).startswith(p)
+        )
+        patcher = unittest.mock.patch.object(g, "_BASH_SYSTEM_PREFIXES", prefixes)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self._tmp.cleanup()
