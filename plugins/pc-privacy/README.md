@@ -32,7 +32,8 @@ internal id is not flagged. La Poste identifiers do not follow Luhn and are miss
 rules out most all-caps words (`APPROVED`) but not those that happen to carry one (`TRANSACTION`).
 
 A `PERSON` guess whose text contains an underscore (`COST_CENTER`) is dropped: an identifier, not a
-name. A `PHONE_NUMBER` guess overlapping a higher-scored date (`2021-10-01-07:00`) is dropped too.
+name. A `PHONE_NUMBER` guess overlapping a higher-scored date (`2021-10-01-07:00`), or with fewer than 8
+digits (a bare `1640`), is dropped too.
 
 Fixed-format identifiers (`BIC_SWIFT`, `FR_SIREN`, `FR_SIRET`) are judged like a data-profiling
 rule: a value conforms only if the match covers the **whole** value, and the column is flagged when
@@ -77,6 +78,9 @@ runs the same detection as `anonymize_detect`.
   Values already shaped like the plugin's own pseudonyms (`LAST_NAME_a48ea4d9`) are ignored too,
   since the NLP model takes roughly one in ten for a person's name. A real value left in it is
   still caught.
+- A file scanned line by line (a log, a positional export) costs ~3 ms a line, so only its first
+  `PII_GUARD_MAX_TEXT_LINES` lines (default 3000) are read; past that the `ask` says the rest was
+  NOT fully analyzed, even when the lines read are clean.
 - Files above `PII_GUARD_MAX_MB` (default 100) are not scanned; the `ask` says the file was NOT
   analyzed.
 - Cost: about 2 s per `Read` of a dataset, mostly the spaCy model load. Each scan is
@@ -141,5 +145,5 @@ fresh random salt, returned in the result.
 
 `uv` on `PATH` (as for any plugin shipping an `mcp/` server). The `file` command improves format
 detection and is present by default on Linux and macOS; without it (native Windows) detection
-falls back to the file's content and extension alone; that path is covered by a mock only, and a
-zip container (docx, zip) is then tried as xlsx and errors — the hook fails open on it.
+falls back to the file's content and extension alone; that path is covered by a mock only. A zip
+container counts as an xlsx only if it holds `xl/workbook.xml`, otherwise it is skipped as binary.

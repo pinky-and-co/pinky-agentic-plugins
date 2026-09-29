@@ -62,7 +62,10 @@ def anonymize_apply(
     this call (joins survive), and across calls that pass the same `salt`. Pass the `salt` from a
     previous call's output to keep a later batch joinable with it; omit it for a fresh random salt,
     which is returned in the result. `columns` are column names for CSV/JSON/Parquet, tag local
-    names for XML. Returns only output filenames + counts + the salt — never the anonymized content.
+    names for XML, `Sheet!Column` for XLSX. A file with no columns (a log, a fixed-width export) is
+    masked entity by entity automatically and `columns` does not apply to it. Config, code and binary
+    files are skipped. Returns only output filenames + counts + the salt — never the anonymized
+    content.
     """
     try:
         outcome = anonymize.apply_anonymization(files, columns, salt)

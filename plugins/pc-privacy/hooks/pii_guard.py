@@ -43,6 +43,11 @@ if sys.platform == "win32":
 # rather than the hook silently allowing it or hanging until the hook timeout.
 MAX_BYTES = int(os.environ.get("PII_GUARD_MAX_MB", "100")) * 1024 * 1024
 
+# A file scanned line by line (a log, a positional export) costs ~3 ms a line with no sampling, so
+# the byte cap alone would let a few MB run into the hook timeout. Past this many lines only the
+# first ones are read and the person is told the rest was NOT analyzed.
+MAX_TEXT_LINES = int(os.environ.get("PII_GUARD_MAX_TEXT_LINES", "3000"))
+
 
 def _import_anonymize():
     """Import `anonymize.py` from the plugin, wherever it sits relative to this hook."""
@@ -83,7 +88,8 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
         return None
     # Cheap classification first (reads the head of the file only). Config/code/binary never pay
     # the NLP model load and never trigger an alert.
-    if anonymize.detect_format(path) in anonymize._SKIP_FORMATS:
+    fmt = anonymize.detect_format(path)
+    if fmt in anonymize._SKIP_FORMATS:
         return None
     if size > MAX_BYTES:
         return (
@@ -91,18 +97,27 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
             f"`{path.name}` is {size // (1024 * 1024)} MB — above the {MAX_BYTES // (1024 * 1024)} MB "
             "limit of the PII scan, so it was NOT analyzed. It may contain personal data.",
         )
+    kwargs: dict = {}
     # An anonymized copy keeps its column names: only its values can still betray a leak.
     if ".anon." in path.name:
-        findings = anonymize.detect_findings([str(path)], values_only=True)
-    else:
-        findings = anonymize.detect_findings([str(path)])
+        kwargs["values_only"] = True
+    cut: list[str] = []
+    if fmt == "text":
+        kwargs["text_max_lines"] = MAX_TEXT_LINES
+        kwargs["truncated"] = cut.append
+    findings = anonymize.detect_findings([str(path)], **kwargs)
+    note = (
+        f"Only the first {MAX_TEXT_LINES} lines of `{path.name}` were analyzed; the rest was "
+        "NOT fully analyzed. It may contain personal data."
+    )
     if not findings:
-        return None
+        return ("oversize", note) if cut else None
     listing = "\n".join(f"  - {f.column}: {f.reason}" for f in findings)
     return (
         "pii",
         f"Personal data detected in `{path.name}` — reading it puts it into the model's context "
-        f"(and whatever cloud sits behind it):\n{listing}",
+        f"(and whatever cloud sits behind it):\n{listing}"
+        + (f"\n{note}" if cut else ""),
     )
 
 

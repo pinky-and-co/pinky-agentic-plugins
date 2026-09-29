@@ -71,6 +71,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import zipfile
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -234,8 +235,9 @@ CODE_EXTENSIONS = {
     ".lock",
 }
 
-# `key: value` / `key = value` — one non-comment line of INI/YAML/dotenv-style config.
-_KV_LINE_RE = re.compile(r"^[ \t]*[\w.\-]+[ \t]*[:=][ \t]*\S")
+# `key: value` / `key=value` — one non-comment line of INI/YAML/dotenv-style config. A colon needs
+# a space after it: `12:30,...` is a time in a CSV row, not a key.
+_KV_LINE_RE = re.compile(r"^[ \t]*[\w.\-]+[ \t]*(?:=[ \t]*\S|:[ \t]+\S)")
 
 # Leaf tag = no nested `<` in its content — a container (e.g. <Legal_Name><First_Name>…) never
 # matches `[^<]*` and is correctly skipped; namespace prefix (peci:, ptdf:, …) stripped to local name.
@@ -540,9 +542,13 @@ def detect_format(path: Path) -> str:
     except OSError as e:
         raise AnonymizeError(f"{path.name}: cannot read ({e})") from e
     if head[:2] == b"PK":
-        # Zip container `file` called generic (or `file` absent): try xlsx — if it isn't one,
-        # openpyxl raises cleanly and the caller turns that into AnonymizeError.
-        return "xlsx"
+        # Zip container `file` called generic (or `file` absent): only a workbook part inside makes
+        # it an xlsx — a docx or plain zip is not a dataset.
+        try:
+            with zipfile.ZipFile(path) as z:
+                return "xlsx" if "xl/workbook.xml" in z.namelist() else "binary"
+        except zipfile.BadZipFile:
+            return "binary"
     if b"\x00" in head or head.startswith(b"%PDF"):
         return "binary"
 
@@ -774,6 +780,8 @@ def _maskable_results(results, text: str) -> list:
       genuine phone number is never dropped;
     - a `PERSON` whose text holds an underscore: `COST_CENTER` is an identifier, a name never has
       one, whatever the NLP model guesses.
+    - a `PHONE_NUMBER` with fewer than 8 digits: Presidio reads a bare `1640` as a phone (0.4), and
+      no real number is that short.
 
     Args:
         results: Presidio ``RecognizerResult`` list for `text`.
@@ -794,6 +802,10 @@ def _maskable_results(results, text: str) -> list:
             )
         )
         and not (r.entity_type == "PERSON" and "_" in text[r.start : r.end])
+        and not (
+            r.entity_type == "PHONE_NUMBER"
+            and sum(c.isdigit() for c in text[r.start : r.end]) < 8
+        )
     ]
 
 
@@ -802,16 +814,37 @@ def _maskable_results(results, text: str) -> list:
 _STRICT_TEXT_ENTITIES = DEFAULT_MASK_ENTITIES - {"PERSON"}
 
 
-def _text_line_findings(path: Path, analyzer) -> list[Finding]:
+def _text_line_findings(
+    path: Path,
+    analyzer,
+    max_lines: int | None = None,
+    truncated: Callable[[str], None] | None = None,
+) -> list[Finding]:
     """Scan every non-empty line of an unrecognized tabular file — no sampling, no columns.
 
     Only format-checkable entities are reported (see `_STRICT_TEXT_ENTITIES`); masking in
     :func:`_mask_text` still covers `PERSON`.
+
+    Args:
+        path: The file to scan.
+        analyzer: A built Presidio ``AnalyzerEngine``.
+        max_lines: Scan at most this many lines (about 3 ms each); None scans them all.
+        truncated: Called with the file name when `max_lines` cut the scan short.
+
+    Returns:
+        One Finding per entity type found on the scanned lines.
+
+    Raises:
+        AnonymizeError: The file cannot be read.
     """
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError as e:
         raise AnonymizeError(f"{path.name}: cannot read ({e})") from e
+    if max_lines is not None and len(lines) > max_lines:
+        lines = lines[:max_lines]
+        if truncated is not None:
+            truncated(path.name)
     hits: Counter[str] = Counter()
     for line in lines:
         if not line.strip():
@@ -833,6 +866,9 @@ def _mask_text(path: Path, analyzer) -> tuple[Path, int]:
     No column confirmation (there are none) and no coherent pseudonym/salt (no schema to preserve
     joins over) — every matched span is masked automatically. Same-length substitution means
     offsets never shift, so a fixed-width file's external column boundaries stay valid.
+
+    The file is read leniently and written as UTF-8: character offsets are preserved, but a file in
+    another encoding (latin-1) is re-encoded, so byte offsets shift on non-ASCII lines.
     """
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines(
@@ -903,7 +939,12 @@ def _column_samples(path: Path, fmt: str) -> dict[str, list[str]]:
     }
 
 
-def detect_findings(files: list[str], values_only: bool = False) -> list[Finding]:
+def detect_findings(
+    files: list[str],
+    values_only: bool = False,
+    text_max_lines: int | None = None,
+    truncated: Callable[[str], None] | None = None,
+) -> list[Finding]:
     """Run Presidio + the name heuristic over sampled values of every column/tag in `files`.
 
     Format is decided per file by :func:`detect_format` (content-based, not extension) — a file
@@ -917,6 +958,8 @@ def detect_findings(files: list[str], values_only: bool = False) -> list[Finding
         values_only: For an anonymized copy, which keeps its column/tag names (`IBAN`,
             `First_Name`) and only replaces the values: skip the column-name heuristic and the
             values already shaped like our pseudonyms.
+        text_max_lines: Line budget for a file scanned line by line (None: no limit).
+        truncated: Called with the file name when that budget cut a scan short.
 
     Returns:
         One Finding per column/tag/line judged sensitive, across all files.
@@ -934,7 +977,9 @@ def detect_findings(files: list[str], values_only: bool = False) -> list[Finding
         if analyzer is None:
             analyzer = _build_analyzer()
         if fmt == "text":
-            findings.extend(_text_line_findings(path, analyzer))
+            findings.extend(
+                _text_line_findings(path, analyzer, text_max_lines, truncated)
+            )
             continue
         for name, values in _column_samples(path, fmt).items():
             if values_only:
@@ -1074,9 +1119,11 @@ def apply_anonymization(
     """Write an anonymized copy of each file, pseudonymizing `columns` coherently across all of them.
 
     Args:
-        files: Paths to CSV/JSON/Parquet/XML files.
-        columns: Column names (CSV/JSON/Parquet) or tag local names (XML) to mask. Order and
-            duplicates are irrelevant.
+        files: Paths to CSV, JSON, JSONL, Parquet, XML, XLSX or line-scanned text files. Config,
+            code and binary files are skipped and get no copy.
+        columns: Column names (CSV/JSON/JSONL/Parquet), `Sheet!Column` (XLSX) or tag local
+            names (XML) to mask. Ignored for a file scanned line by line, which is masked entity
+            by entity. Order and duplicates are irrelevant.
         salt: Pin the salt to keep several runs joinable. Default: a fresh random salt, returned
             in the outcome so the caller can reuse it.
 

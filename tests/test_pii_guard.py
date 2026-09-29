@@ -76,7 +76,7 @@ def test_read_on_a_dataset_with_pii_asks_without_leaking_values(
     monkeypatch.setattr(
         anonymize,
         "detect_findings",
-        lambda files: [
+        lambda files, **kw: [
             anonymize.Finding("clients.csv", "contact", "detected EMAIL_ADDRESS (3/3)")
         ],
     )
@@ -116,7 +116,7 @@ def test_an_internal_failure_fails_open(tmp_path, monkeypatch, capsys):
     exits 0, and prints nothing on stdout."""
     data = _csv(tmp_path / "c.csv", [{"contact": "a@example.fr", "note": "x"}])
 
-    def boom(files: list[str]) -> None:
+    def boom(files: list[str], **kw) -> None:
         raise RuntimeError("simulated guard bug")
 
     monkeypatch.setattr(anonymize, "detect_findings", boom)
@@ -134,7 +134,9 @@ def test_an_oversize_file_asks_not_analyzed_without_scanning(tmp_path, monkeypat
     data.write_text("contact,note\n" + "user@example.fr,x\n" * 80_000, encoding="utf-8")
     monkeypatch.setattr(pii_guard, "MAX_BYTES", 1024 * 1024)
     scanned = []
-    monkeypatch.setattr(anonymize, "detect_findings", lambda files: scanned.append(1))
+    monkeypatch.setattr(
+        anonymize, "detect_findings", lambda files, **kw: scanned.append(1)
+    )
 
     decision = pii_guard.decide(_read_event(data), anonymize)
 
@@ -173,7 +175,7 @@ def _flag_csv(monkeypatch):
     monkeypatch.setattr(
         anonymize,
         "detect_findings",
-        lambda files: [
+        lambda files, **kw: [
             anonymize.Finding(
                 Path(files[0]).name, "contact", "detected EMAIL_ADDRESS (3/3)"
             )
@@ -205,7 +207,7 @@ def test_prompt_without_at_mentions_is_left_alone(tmp_path, monkeypatch, capsys)
     data = _csv(tmp_path / "clients.csv", [{"contact": "jean@example.fr"}] * 3)
     scanned = []
     monkeypatch.setattr(
-        anonymize, "detect_findings", lambda files: scanned.append(files) or []
+        anonymize, "detect_findings", lambda files, **kw: scanned.append(files) or []
     )
     _feed_event(monkeypatch, _prompt_event(f"lis {data} stp", tmp_path))
     assert pii_guard.run_hook() == 0
@@ -241,7 +243,7 @@ def test_prompt_hook_fails_open(tmp_path, monkeypatch, capsys):
     """An internal error in the prompt path lets the message through, with a stderr line."""
     data = _csv(tmp_path / "clients.csv", [{"contact": "jean@example.fr"}] * 3)
 
-    def boom(files):
+    def boom(files, **kw):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(anonymize, "detect_findings", boom)
@@ -261,7 +263,7 @@ def test_prompt_with_the_bypass_marker_is_never_blocked_nor_scanned(
     monkeypatch.setattr(
         anonymize,
         "detect_findings",
-        lambda files: pytest.fail("must not scan when the marker is present"),
+        lambda files, **kw: pytest.fail("must not scan when the marker is present"),
     )
     _feed_event(monkeypatch, _prompt_event(f"pii:ok lis @{data}", tmp_path))
     assert pii_guard.run_hook() == 0
@@ -297,3 +299,27 @@ def test_only_anonymized_copies_are_scanned_on_values_alone(
     _feed_event(monkeypatch, _read_event(data))
     assert pii_guard.run_hook() == 0
     assert seen == [values_only]
+
+
+def test_a_long_text_file_asks_not_fully_analyzed(tmp_path, monkeypatch, capsys):
+    """Past the line budget the hook asks with a 'NOT fully analyzed' message even when the lines
+    it did read are clean — rather than allowing silently or hanging until the hook timeout."""
+    data = tmp_path / "big.log"
+    data.write_text(
+        "".join(f"[INFO] line {i} ok\n" for i in range(50)), encoding="utf-8"
+    )
+    monkeypatch.setattr(pii_guard, "MAX_TEXT_LINES", 20)
+
+    def fake(files, values_only=False, text_max_lines=None, truncated=None):
+        assert text_max_lines == 20
+        if truncated:
+            truncated(Path(files[0]).name)
+        return []
+
+    monkeypatch.setattr(anonymize, "detect_findings", fake)
+    _feed_event(monkeypatch, _read_event(data))
+    assert pii_guard.run_hook() == 0
+    decision = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "ask"
+    assert "NOT fully analyzed" in decision["permissionDecisionReason"]
+    assert "20" in decision["permissionDecisionReason"]
