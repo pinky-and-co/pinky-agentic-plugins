@@ -1,5 +1,5 @@
 {
-  "description": "Blocks a guarded write on a permanent branch — see branch_guard.py. Guards against overlapping PRs — see pr_overlap_guard.py. Starts every session on a clean, up-to-date base (fast-forward, [gone] branches removed) on SessionStart — see clean-gone/clean_gone_hook.py",
+  "description": "Blocks a guarded write on a permanent branch — see branch_guard.py. Guards against overlapping PRs — see pr_overlap_guard.py. Starts every session on a clean, up-to-date base (fast-forward, [gone] branches removed) on SessionStart — see clean-gone/clean_gone_hook.py. Runs the deterministic skill script directly, with no model call, when `/pc-git:clean-gone` is typed with conforming arguments (UserPromptExpansion).",
   "hooks": {
     "PreToolUse": [
       {
@@ -30,6 +30,18 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/clean-gone/clean_gone_hook.py\"",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "^pc-git:clean-gone$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_git_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh\" --interpreter bash --timeout 100 --grammar '{\"forms\":[{\"match\":[],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\"]},{\"match\":[\"--all\"],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\"]},{\"match\":[{\"re\":\"[A-Za-z0-9][A-Za-z0-9._-]*\"}],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\",\"--repo\",\"{0}\"]}]}'",
+            "timeout": 120
           }
         ]
       }
