@@ -424,6 +424,7 @@ pinky-agentic-plugins/
 │   ├── test_read_cost.py
 │   ├── test_reconcile.py
 │   ├── test_reconcile_oracle.py
+│   ├── test_repo_path_flag.py
 │   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
 │   ├── test_settings_commit_nudge.py

@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_git_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh\" --interpreter bash --timeout 100 --grammar '{\"forms\":[{\"match\":[],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\"]},{\"match\":[\"--all\"],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\"]},{\"match\":[{\"re\":\"[A-Za-z0-9][A-Za-z0-9._-]*\"}],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\",\"--repo\",\"{0}\"]}]}'",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_git_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh\" --interpreter bash --timeout 100 --grammar '{\"forms\":[{\"match\":[],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\"]},{\"match\":[\"--all\"],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\"]},{\"match\":[{\"re\":\"[A-Za-z0-9][A-Za-z0-9._-]*\"}],\"emit\":[\"--root\",\"{env:CLAUDE_PROJECT_DIR}\",\"--repo\",\"{0}\"]},{\"match\":[{\"re\":\"/(?!.*\\\\.\\\\.)[\\\\w@%+:,./-]+\"}],\"emit\":[\"--repo-path\",\"{0}\"]}]}'",
             "timeout": 120
           }
         ]

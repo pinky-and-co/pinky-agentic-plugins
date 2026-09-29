@@ -1,11 +1,11 @@
 ---
 name: clean-gone
 description: Delete local git branches marked [gone] (deleted on the remote, e.g. after a merge) and their worktrees. Auto — nothing here is destructive to unmerged work, [gone] means the remote already dropped it. --all sweeps every repo under the workspace root in one pass, symmetric with commit-and-pr --all.
-argument-hint: "<repository-name> or --all"
+argument-hint: "<repository-name | /absolute/repo/path> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh:*), Bash(test -e:*)
 ---
 
 # Clean up merged/gone branches
@@ -33,6 +33,13 @@ not missing information: it means the whole root, same as `--all` below, never a
 A named repo as argument → add `--repo <name>` (basename match against every repo the same
 discovery finds — `find <root> -maxdepth 4 -name .git`, `node_modules` excluded, identical to
 `bulk_commit.sh`'s, reused not reinvented). No argument or `--all` → no `--repo`, the whole root.
+
+An absolute path (starts with `/`) combined with `--all` or with any other repo name or path: stop
+with a plain error, run nothing. Alone, it must be exactly a repo's own directory: run `test -e "<path>/.git"`
+(quote the path). If it fails — a subdirectory of a repo, or a directory that merely contains repos,
+is not a repo path — say so plainly and stop, never guess another repo. Otherwise run the script above with `--repo-path "<path>"` **instead of** both `--root` and
+`--repo` (the script then acts on that one repo alone, nested repos excluded). An explicit argument
+always wins over the session location.
 
 ## Report
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the `UserPromptExpansion` registries of pc-git and pc-kanban — run with: python3 -m pytest tests/test_direct_command_hooks.py"""
 
+import importlib.util
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -86,3 +88,73 @@ def test_permission_change_accepts_a_real_path_but_not_a_flag_or_bare_dot_dot_fl
     assert out["decision"] == "block"
     assert "deny:" in out["reason"]
     assert _fire(entry[0], entry[2], "deny -x", tmp_path) == ""
+
+
+def _clean_gone_entry():
+    (entry,) = [e for e in _entries() if e[1] == "^pc-git:clean-gone$"]
+    return entry
+
+
+def _git_init(path):
+    path.mkdir(parents=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q", str(path)], check=True, env=env)
+    return path
+
+
+def test_clean_gone_absolute_repo_path_targets_that_repo(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    repo = _git_init(tmp_path / "sibling-repo")
+    plugin, _, command = _clean_gone_entry()
+    out = json.loads(_fire(plugin, command, str(repo), session))
+    assert out["decision"] == "block"
+    last = out["reason"].strip().splitlines()[-1]
+    assert last.startswith("summary:")
+    assert "1 nothing to clean" in last
+
+
+def test_clean_gone_absolute_path_is_silent_unless_it_is_exactly_a_repo(tmp_path):
+    repo = _git_init(tmp_path / "proj")
+    _git_init(repo / "nested")
+    plugin, _, command = _clean_gone_entry()
+    assert (
+        json.loads(_fire(plugin, command, str(repo), tmp_path))["decision"] == "block"
+    )
+    bad = [
+        f"{repo}/../proj",
+        f"{repo} --all",
+        f"{repo}/\n",
+        "//",
+        "/",
+        str(tmp_path),
+        str(tmp_path / "missing"),
+        f"{repo}/nested/../..",
+    ]
+    for arg in bad:
+        assert _fire(plugin, command, arg, tmp_path) == "", arg
+
+
+def test_clean_gone_grammar_rejects_dotdot_spaces_and_flags():
+    plugin, _, command = _clean_gone_entry()
+    argv = _argv(plugin, command)
+    grammar = json.loads(argv[argv.index("--grammar") + 1])
+    runner = _load_runner(Path(argv[1]))
+    select = runner._select_argv
+    assert select(grammar, ["/a/b"], "/") == ["--repo-path", "/a/b"]
+    for tokens in (["/a/../b"], ["/a b"], ["-x"], ["/a", "/b"], ["--repo-path", "/a"]):
+        assert select(grammar, tokens, "/") is None, tokens
+
+
+def _load_runner(path):
+    spec = importlib.util.spec_from_file_location("pc_git_runner", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("skill", ["commit", "commit-and-pr", "clean-gone"])
+def test_git_skills_argument_hint_accepts_an_absolute_path(skill):
+    text = (PLUGINS / "pc-git" / "skills" / skill / "SKILL.md").read_text()
+    (hint,) = [ln for ln in text.splitlines() if ln.startswith("argument-hint:")]
+    assert "/absolute/repo/path" in hint

@@ -15,6 +15,10 @@ die() { printf 'clean-gone: %s\n' "$1" >&2; exit 1; }
 
 discover_repos() {
     local root="$1"
+    if [ "$REPO_PATH_SET" = "yes" ]; then
+        printf '%s\n' "$REPO_PATH"
+        return 0
+    fi
     find "$root" -maxdepth 4 -name .git -not -path '*/node_modules/*' -print 2>/dev/null \
         | while IFS= read -r g; do dirname "$g"; done | sort
 }
@@ -175,16 +179,31 @@ clean_repo() {
 }
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
-ROOT="$PWD"; FILTER=""; QUIET=false
+ROOT="$PWD"; ROOT_SET="no"; REPO_PATH_SET="no"; REPO_PATH=""; FILTER=""; QUIET=false
 while [ $# -gt 0 ]; do
     case "$1" in
-        --root) ROOT="$2"; shift 2 ;;
+        --root) ROOT="$2"; ROOT_SET="yes"; shift 2 ;;
+        --repo-path) [ $# -ge 2 ] || die "--repo-path needs a value"; REPO_PATH="$2"; REPO_PATH_SET="yes"; shift 2 ;;
         --repo) FILTER="$2"; shift 2 ;;
         --all)  shift ;;  # no-op : absence de --repo fait déjà tout le root
         --quiet) QUIET=true; shift ;;  # Supprime la sortie per-repo
         *)      die "unknown option: $1" ;;
     esac
 done
+
+# `--repo-path` désigne EXACTEMENT un repo : chemin absolu, dossier existant portant un `.git`
+# (fichier ou dossier — un worktree compte), sans `..`. Incompatible avec `--root`/`--repo`.
+if [ "$REPO_PATH_SET" = "yes" ]; then
+    [ "$ROOT_SET" = "no" ] && [ -z "$FILTER" ] || die "--repo-path cannot be combined with --root or --repo"
+    case "$REPO_PATH" in
+        /*) ;;
+        *) die "--repo-path must be an absolute path: $REPO_PATH" ;;
+    esac
+    case "/$REPO_PATH/" in
+        */../*) die "--repo-path must not contain '..': $REPO_PATH" ;;
+    esac
+    [ -d "$REPO_PATH" ] && [ -e "$REPO_PATH/.git" ] || die "--repo-path is not a git repository: $REPO_PATH"
+fi
 
 scanned=0
 OK_TOTAL=0; NOTHING_TOTAL=0; FAILED_TOTAL=0; BRANCHES_TOTAL=0

@@ -1,11 +1,11 @@
 ---
 name: commit
 description: Commit the current changes using the gitmoji convention. Bulk mode (--all) commits every dirty repo in one deterministic pass.
-argument-hint: "<repository-to-commit> or --all"
+argument-hint: "<repository-to-commit | /absolute/repo/path> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Read, Write
+allowed-tools: Bash(test -e:*), Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Read, Write
 ---
 
 # Commit — gitmoji convention
@@ -19,16 +19,22 @@ consent already exists.)
 
 `args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
 at all means no argument was passed** — that is the normal, expected shape for a bare invocation,
-not missing information. Go straight to step 3 below; never ask for one instead.
+not missing information. Go straight to step 4 below; never ask for one instead.
 
 The target passed to Step 2 is **always an absolute worktree root**, never a bare name. Resolve it
 in this order:
 
-1. **`--all`, or an argument naming several repos** → the bulk branch below.
-2. **An argument naming one repo** → resolve the name to a path via the same sweep the bulk branch
+1. **An absolute repo path** (starts with `/`) → checked first. Combined with `--all`, or with any
+   other repo name or path, stop with a plain error before any tool call — a path is never mixed
+   with another target. Otherwise the path must be exactly a repo's own directory: run
+   `test -e "<path>/.git"` (quote the path). If it fails — a subdirectory of a repo, or a directory
+   that merely contains repos, is not a repo path — say so plainly and stop, never guess another
+   repo. Then that path is the target: go to Step 2 with it and never run the bulk script.
+2. **`--all`, or an argument naming several repos** → the bulk branch below.
+3. **An argument naming one repo** → resolve the name to a path via the same sweep the bulk branch
   uses (below): the candidate whose basename matches the argument. No match → say so, stop. Then go
   to Step 2 with that path.
-3. **No argument** → resolve by session location:
+4. **No argument** → resolve by session location:
 
   ```
   git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
