@@ -63,7 +63,7 @@ def test_same_value_gets_same_pseudonym_across_files(tmp_path):
 
 
 def test_salt_is_stable_across_runs_and_changes_the_output(tmp_path):
-    data = [{"name": "Alice"}]
+    data = [{"name": "Alice", "note": "x"}]
     a = anonymize.apply_anonymization(
         [str(_csv(tmp_path / "a.csv", data))], ["name"], salt="s1"
     )
@@ -84,12 +84,14 @@ def test_salt_is_stable_across_runs_and_changes_the_output(tmp_path):
 
 def test_generated_salt_is_returned_when_not_pinned(tmp_path):
     outcome = anonymize.apply_anonymization(
-        [str(_csv(tmp_path / "x.csv", [{"name": "Bob"}]))], ["name"]
+        [str(_csv(tmp_path / "x.csv", [{"name": "Bob", "note": "x"}]))], ["name"]
     )
     assert outcome.salt and len(outcome.salt) >= 8
     # reusing the returned salt reproduces the pseudonyms
     again = anonymize.apply_anonymization(
-        [str(_csv(tmp_path / "y.csv", [{"name": "Bob"}]))], ["name"], salt=outcome.salt
+        [str(_csv(tmp_path / "y.csv", [{"name": "Bob", "note": "x"}]))],
+        ["name"],
+        salt=outcome.salt,
     )
     assert (tmp_path / "x.anon.csv").read_text(encoding="utf-8") == (
         tmp_path / "y.anon.csv"
@@ -99,7 +101,7 @@ def test_generated_salt_is_returned_when_not_pinned(tmp_path):
 
 def test_apply_skips_a_file_with_no_matching_column(tmp_path):
     orders = _csv(tmp_path / "orders.csv", [{"customer": "Jean", "amount": "10"}])
-    other = _csv(tmp_path / "other.csv", [{"widget": "x"}])
+    other = _csv(tmp_path / "other.csv", [{"widget": "x", "status": "ok"}])
 
     outcome = anonymize.apply_anonymization(
         [str(orders), str(other)], ["customer"], salt="s"
@@ -147,7 +149,7 @@ def test_detect_report_never_contains_a_sampled_value():
 
 def test_apply_report_carries_the_salt_and_no_values(tmp_path):
     outcome = anonymize.apply_anonymization(
-        [str(_csv(tmp_path / "d.csv", [{"name": "Jean Dupont"}]))],
+        [str(_csv(tmp_path / "d.csv", [{"name": "Jean Dupont", "amount": "1"}]))],
         ["name"],
         salt="abc123",
     )
@@ -165,23 +167,24 @@ def test_empty_findings_report_tells_the_user_to_verify_manually():
 # ── IO errors raise instead of exiting the process ──────────────────────────
 
 
-def test_unsupported_extension_raises_anonymize_error(tmp_path):
+def test_read_rows_guards_an_unsupported_format(tmp_path):
+    """Only the row-based formats reach `_read_rows` — anything else raises, not returns junk."""
     bad = tmp_path / "data.txt"
     bad.write_text("x", encoding="utf-8")
     with pytest.raises(anonymize.AnonymizeError):
-        anonymize._read_rows(bad)
+        anonymize._read_rows(bad, "text")
 
 
 def test_non_array_json_raises_anonymize_error(tmp_path):
     bad = tmp_path / "data.json"
     bad.write_text(json.dumps({"not": "an array"}), encoding="utf-8")
     with pytest.raises(anonymize.AnonymizeError):
-        anonymize._read_rows(bad)
+        anonymize._read_rows(bad, "json")
 
 
-def test_write_rows_guards_an_unsupported_extension(tmp_path):
+def test_write_rows_guards_an_unsupported_format(tmp_path):
     with pytest.raises(anonymize.AnonymizeError):
-        anonymize._write_rows(tmp_path / "x.txt", ["a"], [{"a": "1"}])
+        anonymize._write_rows(tmp_path / "x.txt", "text", ["a"], [{"a": "1"}])
 
 
 # ── the MCP tools themselves (needs `mcp`) ──────────────────────────────────
@@ -193,12 +196,12 @@ def test_server_apply_tool_runs_offline(tmp_path):
     sys.path.insert(
         0, str(Path(__file__).parent.parent / "plugins" / "pc-privacy" / "mcp")
     )
-    import server
+    import pc_privacy_server
 
     csv_path = _csv(
         tmp_path / "orders.csv", [{"customer": "Jean Dupont", "amount": "9"}]
     )
-    out = server.anonymize_apply([str(csv_path)], ["customer"], salt="s")
+    out = pc_privacy_server.anonymize_apply([str(csv_path)], ["customer"], salt="s")
     assert "salt: s" in out
     assert "Jean Dupont" not in out
     assert "Jean Dupont" not in (tmp_path / "orders.anon.csv").read_text(
@@ -207,14 +210,19 @@ def test_server_apply_tool_runs_offline(tmp_path):
 
 
 def test_server_detect_tool_returns_blocked_without_presidio(tmp_path, monkeypatch):
+    """A missing model surfaces as a BLOCKED status line, not a stack trace to the caller."""
     pytest.importorskip("mcp")
     sys.path.insert(
         0, str(Path(__file__).parent.parent / "plugins" / "pc-privacy" / "mcp")
     )
-    import server
+    import pc_privacy_server
 
-    monkeypatch.setattr(server.anonymize, "preflight", lambda: "model missing")
-    out = server.anonymize_detect([str(_csv(tmp_path / "c.csv", [{"name": "x"}]))])
+    monkeypatch.setattr(
+        pc_privacy_server.anonymize, "preflight", lambda: "model missing"
+    )
+    out = pc_privacy_server.anonymize_detect(
+        [str(_csv(tmp_path / "c.csv", [{"name": "x", "note": "y"}]))]
+    )
     assert out.startswith("[anonymize_detect] BLOCKED")
 
 
@@ -320,10 +328,9 @@ def test_detect_flags_a_bic_swift_column_by_pattern(tmp_path):
     defaults to IGNORECASE, which would otherwise turn this into a false-positive machine on
     everyday words.
 
-    Known remaining gap, not pinned here as a passing case (documented, not silently claimed
-    fixed): an ALL-CAPS 8/11-letter word — a realistic status enum (`APPROVED`, `TEMPLATE`) or an
-    upper-case business field — still matches, since the pattern has no country-code or checksum
-    validation. Dropping IGNORECASE only rules out lowercase/mixed-case false positives.
+    An ALL-CAPS 8/11-letter word is only flagged when its letters 5-6 happen to be an ISO 3166
+    country code (`TEMPLATE` -> `LA`); words without one (`APPROVED`) are not — see
+    `test_all_caps_words_without_a_valid_country_code_are_not_bic`.
     """
     f = _csv(
         tmp_path / "bank.csv",

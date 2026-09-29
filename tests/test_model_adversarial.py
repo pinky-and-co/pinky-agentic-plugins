@@ -679,7 +679,7 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
     sys.path.insert(
         0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
     )
-    import server
+    import pc_core_server
 
     src = tmp_path / "api.py"
     src.write_text(
@@ -692,9 +692,9 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
         captured["prompt"] = prompt
         return ma.PoolResult(entries[0], "ok")
 
-    monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
+    monkeypatch.setattr(pc_core_server.model_adversarial, "run_pool", fake_run_pool)
 
-    out = server.adversarial(task="review this", files=[str(src)])
+    out = pc_core_server.adversarial(task="review this", files=[str(src)])
     # a phrase unique to the FastAPI review reference, not the generic methodology
     assert "N+1 query pattern" in captured["prompt"]
     assert out.startswith("[answered by ")
@@ -706,7 +706,7 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
     sys.path.insert(
         0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
     )
-    import server
+    import pc_core_server
 
     seen: dict[str, list] = {}
 
@@ -719,24 +719,24 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
         return [MISTRAL]
 
     monkeypatch.setattr(
-        server.model_adversarial,
+        pc_core_server.model_adversarial,
         "select_for_adversarial",
         fake_select_for_adversarial,
     )
     monkeypatch.setattr(
-        server.model_adversarial,
+        pc_core_server.model_adversarial,
         "select_for_delegation",
         fake_select_for_delegation,
     )
     monkeypatch.setattr(
-        server.model_adversarial,
+        pc_core_server.model_adversarial,
         "run_pool",
         lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
             entries[0], "ok"
         ),
     )
 
-    server.adversarial(task="review", tier="turbo-9000")
+    pc_core_server.adversarial(task="review", tier="turbo-9000")
     assert "adversarial" in seen and "delegation" not in seen
 
 
