@@ -353,8 +353,12 @@ pinky-agentic-plugins/
 │   │   │       └── SKILL.md
 │   │   └── README.md
 │   └── pc-statusline/
+│       ├── hooks/
+│       │   ├── hooks.json
+│       │   └── quota_refresh.py
 │       ├── scripts/
 │       │   ├── _common.py
+│       │   ├── _quota.py
 │       │   ├── statusline.py
 │       │   └── subagent_statusline.py
 │       ├── README.md
@@ -398,6 +402,8 @@ pinky-agentic-plugins/
 │   ├── test_post_edit_lint.py
 │   ├── test_pr_overlap_guard.py
 │   ├── test_privacy_egress.py
+│   ├── test_quota.py
+│   ├── test_quota_hook.py
 │   ├── test_read_cost.py
 │   ├── test_reconcile.py
 │   ├── test_reconcile_oracle.py

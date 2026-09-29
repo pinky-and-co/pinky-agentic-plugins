@@ -37,6 +37,7 @@ from _common import (
     force_utf8_stdout,
     render_bar,
 )
+from _quota import provider_rate_limits
 
 enable_ansi_on_windows()
 force_utf8_stdout()
@@ -219,6 +220,65 @@ def _fmt_duration_until(epoch_seconds):
         return f"{minutes} min"
     except Exception:
         return "?"
+
+
+_RATE_LIMIT_WINDOW_S = {"five_hour": 5 * 3600, "seven_day": 7 * 24 * 3600}
+# Floor per window below which nothing is shown: the 5h window burns fast, so it warns earlier;
+# on the weekly one, 90% still leaves a lot of room.
+_RATE_LIMIT_FLOOR_PCT = {"five_hour": 75, "seven_day": 90}
+# With less than this before the reset, the wall is not worth a warning: the window is about to
+# renew anyway.
+_RATE_LIMIT_MIN_RESET_S = 3600
+
+
+def _rate_limit_wall_seconds(used_pct, resets_at, window_s, now=None):
+    """Seconds until the quota runs out at the window's average pace so far — or `None` when the
+    quota will last until the reset, when the reset is under `_RATE_LIMIT_MIN_RESET_S` away, or
+    on a payload that can't be projected (nothing consumed, `resets_at` further out than the
+    window is long).
+
+    The wall comes before the reset exactly when `used_fraction > elapsed_fraction` (linear pace
+    assumption): that predicate is the whole test, and the returned value is `elapsed * (100 -
+    used) / used`. The average pace is pessimistic after a quiet stretch — it warns early rather
+    than late."""
+    if now is None:
+        now = datetime.now().timestamp()
+    if not used_pct or used_pct <= 0 or not resets_at:
+        return None
+    until_reset = resets_at - now
+    elapsed = window_s - until_reset
+    if until_reset <= _RATE_LIMIT_MIN_RESET_S or elapsed <= 0:
+        return None
+    if used_pct / 100 <= elapsed / window_s:
+        return None
+    return elapsed * (100 - used_pct) / used_pct
+
+
+def _rate_limit_warning(label, key, used, resets_at):
+    """One warning fragment for a rate-limit window, or `None` to stay silent.
+
+    Silent below the window's floor (`_RATE_LIMIT_FLOOR_PCT`). At 100% or with no `resets_at`,
+    the percentage is all there is to show. Otherwise a warning only appears when the projection
+    says the quota won't last until the reset, expressed as time rather than a percentage."""
+    if used is None or used < _RATE_LIMIT_FLOOR_PCT[key]:
+        return None
+    if not resets_at:
+        return f"{label}: {used:.0f}% (reset ?)"
+    if used >= 100:
+        return (
+            f"{label}: {used:.0f}% (in {_fmt_duration_until(resets_at)}, "
+            f"reset {_fmt_epoch(resets_at)})"
+        )
+    now = datetime.now().timestamp()
+    wall = _rate_limit_wall_seconds(used, resets_at, _RATE_LIMIT_WINDOW_S[key], now)
+    if wall is None:
+        return None
+    wall_txt = _fmt_duration_until(now + wall)
+    wall_txt = "<1 min" if wall_txt == "now" else f"~{wall_txt}"
+    return (
+        f"{label}: limit in {wall_txt} "
+        f"(reset in {_fmt_duration_until(resets_at)}, {_fmt_epoch(resets_at)})"
+    )
 
 
 def _count_subagents(transcript_path, session_id):
@@ -491,27 +551,45 @@ def _forge_repo_slug(remote_url: str):
     return (m.group(1), m.group(2)) if m else None
 
 
-def _repo_url(start_dir):
+def _payload_repo_slug(repo: object) -> tuple[str, str] | None:
+    """`(hostname, "owner/name")` from the payload's `workspace.repo` block, or `None` when the
+    block is absent, not a dict, or missing one of `host`/`owner`/`name` — the caller then asks
+    git."""
+    if not isinstance(repo, dict):
+        return None
+    host, owner, name = repo.get("host"), repo.get("owner"), repo.get("name")
+    if not (host and owner and name):
+        return None
+    return (host, f"{owner}/{name}")
+
+
+def _repo_url(start_dir: str, repo: object = None) -> str | None:
     """URL of the current branch's page on GitHub/GitLab for the repo `start_dir` sits in, or the
     repo's root page when the branch has no upstream yet (a fresh local branch has no remote tree
     to link to — the branch-specific URL would 404), or `None` outside a repo / no `origin` remote
     / an unrecognised forge / any lookup failure. Matched by "github"/"gitlab" appearing in the
-    remote's hostname, which covers both the public services and the common self-hosted case."""
+    remote's hostname, which covers both the public services and the common self-hosted case.
+
+    `repo` is the payload's `workspace.repo` block (`host`/`owner`/`name`) when Claude Code
+    provides one; it saves the `git remote get-url origin` call. Absent or incomplete, the slug
+    comes from git."""
     if not start_dir:
         return None
     try:
-        remote = subprocess.run(
-            ["git", "-C", start_dir, "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT_S,
-            check=False,
-        )
-        if remote.returncode != 0:
-            return None
-        slug = _forge_repo_slug(remote.stdout)
+        slug = _payload_repo_slug(repo)
         if not slug:
-            return None
+            remote = subprocess.run(
+                ["git", "-C", start_dir, "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=_GIT_TIMEOUT_S,
+                check=False,
+            )
+            if remote.returncode != 0:
+                return None
+            slug = _forge_repo_slug(remote.stdout)
+            if not slug:
+                return None
         host, path = slug
         if "github" in host:
             base, tree_sep = f"https://{host}/{path}", "tree"
@@ -576,22 +654,17 @@ def build_lines(data: dict) -> list[str]:
 
     version = _safe_get(data, "version", "?")
     line0_right_parts = [f"{DIM}v{version}{RESET}"]
-    # ---------- Optional line : rate limits > 90% ----------
+    # ---------- Optional line : rate limits about to run out ----------
     warnings = []
     bg = YELLOW_BG
     for label, key in (("Session", "five_hour"), ("Weekly", "seven_day")):
         used = _safe_get(data, f"rate_limits.{key}.used_percentage")
         resets_at = _safe_get(data, f"rate_limits.{key}.resets_at")
-        if used is not None and used > 90:
-            if resets_at:
-                warnings.append(
-                    f"{label}: {used:.0f}% (in {_fmt_duration_until(resets_at)}, "
-                    f"reset {_fmt_epoch(resets_at)})"
-                )
-            else:
-                warnings.append(f"{label}: {used:.0f}% (reset ?)")
-            if used >= 100:
-                bg = RED_BG
+        warning = _rate_limit_warning(label, key, used, resets_at)
+        if warning:
+            warnings.append(warning)
+        if used is not None and used >= 100:
+            bg = RED_BG
 
     if warnings:
         line0_left_parts = [f"{bg} ⚠ RATE LIMIT — {' | '.join(warnings)} {RESET}"]
@@ -655,7 +728,7 @@ def build_lines(data: dict) -> list[str]:
     repo_branch = _repo_branch(repo_dir)
     repo_line_left_parts: list[str] = []
     if repo_branch:
-        repo_url = _repo_url(repo_dir)
+        repo_url = _repo_url(repo_dir, _safe_get(data, "workspace.repo"))
         repo_txt = f"📁 {repo_branch}"
         repo_line_left_parts.append(
             _hyperlink(repo_txt, repo_url) if repo_url else repo_txt
@@ -729,6 +802,13 @@ def main():
     except Exception:
         print("[status line: invalid JSON]")
         return
+    # The harness's own `rate_limits` always wins; only when it is absent (any non-Anthropic
+    # provider) is the active provider's quota injected — before the state write, so pc-kanban
+    # reads the quota of the provider this session is actually spending.
+    if isinstance(data, dict) and not data.get("rate_limits"):
+        injected = provider_rate_limits()
+        if injected:
+            data["rate_limits"] = injected
     _write_rate_limit_state(data, _safe_get(data, "session_id"))
     try:
         print("\n".join(build_lines(data)))

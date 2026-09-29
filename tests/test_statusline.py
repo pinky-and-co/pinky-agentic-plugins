@@ -464,7 +464,9 @@ def test_rate_limit_labels_are_english_no_profile_language_leak():
     assert not any("Hebdo" in ln for ln in stripped)
 
 
-def test_build_lines_rate_limit_warning_includes_duration_until_reset(monkeypatch):
+def test_build_lines_rate_limit_warning_silent_when_reset_is_imminent(monkeypatch):
+    """Under `_RATE_LIMIT_MIN_RESET_S` before the reset, the window is about to renew on its own
+    — a warning would be noise, so the line stays silent even well above the floor."""
     import datetime as dt_mod
 
     class _FixedDatetime(dt_mod.datetime):
@@ -478,7 +480,52 @@ def test_build_lines_rate_limit_warning_includes_duration_until_reset(monkeypatc
         "rate_limits": {"five_hour": {"used_percentage": 95, "resets_at": resets_at}}
     }
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
-    assert any("Session: 95% (in 27 min, reset 18:27)" in ln for ln in stripped)
+    assert not any("RATE LIMIT" in ln for ln in stripped)
+
+
+def test_build_lines_rate_limit_warning_shows_projected_wall_time(monkeypatch):
+    """Past the floor, with the reset far enough away, the line projects when the quota runs out
+    at the window's average pace rather than just restating the percentage."""
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    resets_at = dt_mod.datetime(
+        2026, 8, 12, 21, 0, 0
+    ).timestamp()  # 2h elapsed of a 5h window
+    data = {
+        "rate_limits": {"five_hour": {"used_percentage": 80, "resets_at": resets_at}}
+    }
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert any(
+        "Session: limit in ~30 min (reset in 3h, 21:00)" in ln for ln in stripped
+    )
+
+
+def test_build_lines_rate_limit_weekly_wall_projection_end_to_end(monkeypatch):
+    """Regression pin for the scenario that motivated the projection: 97% consumed 136h into the
+    7-day window warns with a wall a few hours out, not just a raw 97%."""
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    resets_at = _FixedDatetime.now().timestamp() + 7 * 24 * 3600 - 136 * 3600
+    data = {
+        "rate_limits": {"seven_day": {"used_percentage": 97, "resets_at": resets_at}}
+    }
+    stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
+    assert any(
+        "Weekly: limit in ~4h 12min (reset in 32h, 14/08 02:00)" in ln
+        for ln in stripped
+    )
 
 
 def test_build_lines_rate_limit_warning_no_resets_at_falls_back_to_question_mark():
@@ -492,6 +539,80 @@ def test_build_lines_no_rate_limit_line_below_threshold():
     data = {"rate_limits": {"five_hour": {"used_percentage": 50, "resets_at": None}}}
     stripped = [_strip_ansi(ln) for ln in sl.build_lines(data)]
     assert not any("RATE LIMIT" in ln for ln in stripped)
+
+
+def test_build_lines_rate_limit_five_hour_floor_is_lower_than_weekly():
+    """The two windows don't share a floor: 80% sits above the 5h one (75) but below the weekly
+    one (90), since the 5h window burns through its quota much faster."""
+    five_hour_data = {
+        "rate_limits": {"five_hour": {"used_percentage": 80, "resets_at": None}}
+    }
+    weekly_data = {
+        "rate_limits": {"seven_day": {"used_percentage": 80, "resets_at": None}}
+    }
+    five_hour_lines = [_strip_ansi(ln) for ln in sl.build_lines(five_hour_data)]
+    weekly_lines = [_strip_ansi(ln) for ln in sl.build_lines(weekly_data)]
+    assert any("Session: 80%" in ln for ln in five_hour_lines)
+    assert not any("RATE LIMIT" in ln for ln in weekly_lines)
+
+
+# --- _rate_limit_wall_seconds / _rate_limit_warning — the pure projection helpers, each with a
+# direct equality oracle per this file's own convention (see module docstring) ------------------
+
+
+def test_rate_limit_wall_seconds_oracle_pace_outruns_the_reset():
+    now = 1_000_000.0
+    window = 5 * 3600
+    resets_at = now + 2 * 3600  # 2h left -> 3h already elapsed of the 5h window
+    wall = sl._rate_limit_wall_seconds(80, resets_at, window, now=now)
+    assert wall == _pytest.approx(3 * 3600 * 20 / 80)  # elapsed * (100 - used) / used
+
+
+def test_rate_limit_wall_seconds_none_when_pace_lasts_until_reset():
+    now = 1_000_000.0
+    window = 5 * 3600
+    resets_at = now + 3 * 3600  # 2h elapsed -> elapsed_fraction 0.4
+    assert (
+        sl._rate_limit_wall_seconds(30, resets_at, window, now=now) is None
+    )  # 0.3 <= 0.4
+
+
+def test_rate_limit_wall_seconds_none_when_reset_is_imminent():
+    now = 1_000_000.0
+    window = 5 * 3600
+    resets_at = now + 1800  # 30 min left, under the 1h floor
+    assert sl._rate_limit_wall_seconds(95, resets_at, window, now=now) is None
+
+
+def test_rate_limit_wall_seconds_none_on_missing_usage_or_reset():
+    window = 5 * 3600
+    assert sl._rate_limit_wall_seconds(0, 1_000_000.0, window, now=0.0) is None
+    assert sl._rate_limit_wall_seconds(50, None, window, now=0.0) is None
+
+
+def test_rate_limit_warning_silent_below_each_windows_own_floor():
+    assert sl._rate_limit_warning("Session", "five_hour", 74, None) is None
+    assert sl._rate_limit_warning("Weekly", "seven_day", 89, None) is None
+
+
+def test_rate_limit_warning_at_100pct_always_shows_the_percentage(monkeypatch):
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    resets_at = dt_mod.datetime(2026, 8, 13, 0, 0, 0).timestamp()
+    warning = sl._rate_limit_warning("Weekly", "seven_day", 100, resets_at)
+    assert warning == "Weekly: 100% (in 6h, reset 13/08 00:00)"
+
+
+def test_rate_limit_warning_no_resets_at_falls_back_to_the_percentage():
+    assert sl._rate_limit_warning("Session", "five_hour", 80, None) == (
+        "Session: 80% (reset ?)"
+    )
 
 
 # --- rate-limit state file — the only exposure point for the server-aggregated 5h/7d quota,
@@ -534,6 +655,132 @@ def test_write_rate_limit_state_missing_rate_limits_is_noop(tmp_path, monkeypatc
     monkeypatch.setattr(sl.tempfile, "gettempdir", lambda: str(tmp_path))
     sl._write_rate_limit_state({}, "sess-2")
     assert list(tmp_path.iterdir()) == []
+
+
+# --- non-Anthropic quota: `main()` injects the active provider's cached quota, but only when the
+# harness sent no `rate_limits` — the adapter itself is covered in test_quota.py ------------------
+
+
+def _run_main(payload, base_url, tmp_path):
+    """Run the real entry point (subprocess, real stdin/stdout) with the provider host set and
+    every temp file — the provider cache and the pc-kanban state — redirected into `tmp_path`."""
+    import json
+    import os
+
+    env = {**os.environ, "TMPDIR": str(tmp_path)}
+    env.pop("ANTHROPIC_BASE_URL", None)
+    if base_url:
+        env["ANTHROPIC_BASE_URL"] = base_url
+    return subprocess.run(
+        [sys.executable, str(HOOKS / "statusline.py")],
+        input=payload if isinstance(payload, str) else json.dumps(payload),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+        env=env,
+        check=False,
+    )
+
+
+def _write_zai_cache(tmp_path, now, five_hour_pct, seven_day_pct):
+    """A `pc-statusline-quota-zai-<uid>.json` as the hook writes it (reset times in epoch ms)."""
+    import json
+    import os
+
+    def window(pct, number, reset_s):
+        return {
+            "type": "TOKENS_LIMIT",
+            "percentage": pct,
+            "number": number,
+            "nextResetTime": reset_s * 1000,
+        }
+
+    payload = {
+        "data": {
+            "limits": [
+                window(five_hour_pct, 5, now + 3600),
+                window(seven_day_pct, 7, now + 300_000),
+            ]
+        }
+    }
+    path = tmp_path / f"pc-statusline-quota-zai-{os.getuid()}.json"
+    path.write_text(
+        json.dumps({"fetched_at": now, "payload": payload}), encoding="utf-8"
+    )
+
+
+def _state_file(tmp_path, session_id):
+    import os
+
+    return tmp_path / f"pc-statusline-ratelimits-{os.getuid()}-{session_id}.json"
+
+
+_ZAI_BASE_URL = "https://api.z.ai/api/anthropic"
+
+
+def test_main_injects_the_active_providers_quota_before_the_state_write(tmp_path):
+    """End to end: no `rate_limits` in the harness payload, Z.ai as the provider -> the warning
+    renders AND the pc-kanban state file carries the injected quota."""
+    import json
+    import time
+
+    now = int(time.time())
+    _write_zai_cache(tmp_path, now, five_hour_pct=100, seven_day_pct=30)
+    result = _run_main({"session_id": "sess-e2e"}, _ZAI_BASE_URL, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "Session: 100%" in _strip_ansi(result.stdout)
+    state = json.loads(_state_file(tmp_path, "sess-e2e").read_text(encoding="utf-8"))
+    assert state == {
+        "five_hour": {"used_percentage": 100, "resets_at": now + 3600},
+        "seven_day": {"used_percentage": 30, "resets_at": now + 300_000},
+    }
+
+
+def test_main_keeps_the_harness_rate_limits_over_the_provider_quota(tmp_path):
+    import json
+    import time
+
+    now = int(time.time())
+    _write_zai_cache(tmp_path, now, five_hour_pct=100, seven_day_pct=100)
+    native = {"five_hour": {"used_percentage": 50, "resets_at": now + 1800}}
+    result = _run_main(
+        {"session_id": "sess-native", "rate_limits": native}, _ZAI_BASE_URL, tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RATE LIMIT" not in _strip_ansi(result.stdout)
+    state = json.loads(_state_file(tmp_path, "sess-native").read_text(encoding="utf-8"))
+    assert state == {"five_hour": {"used_percentage": 50, "resets_at": now + 1800}}
+
+
+def test_main_never_reads_a_provider_cache_on_an_anthropic_session(tmp_path):
+    """The Anthropic path stays what it was: whether the base URL is unset or its own host, a
+    leftover Z.ai cache is ignored — no warning, and no state file (nothing to write)."""
+    import time
+
+    now = int(time.time())
+    _write_zai_cache(tmp_path, now, five_hour_pct=100, seven_day_pct=100)
+    for base_url in (None, "https://api.anthropic.com"):
+        result = _run_main({"session_id": "sess-anthropic"}, base_url, tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "RATE LIMIT" not in _strip_ansi(result.stdout)
+        assert not _state_file(tmp_path, "sess-anthropic").exists()
+
+
+def test_main_is_silent_under_a_provider_whose_cache_is_missing(tmp_path):
+    result = _run_main({"session_id": "sess-nocache"}, _ZAI_BASE_URL, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "RATE LIMIT" not in _strip_ansi(result.stdout)
+    assert not _state_file(tmp_path, "sess-nocache").exists()
+
+
+def test_main_never_crashes_on_non_object_json_under_a_provider(tmp_path):
+    """The injection touches `data` before the guarded render — a non-object payload must stay a
+    harmless no-op there, not a traceback."""
+    for raw in ("null", "[]", "3", '"str"'):
+        result = _run_main(raw, _ZAI_BASE_URL, tmp_path)
+        assert result.returncode == 0, f"{raw!r}: {result.stderr}"
+        assert result.stdout.strip(), f"empty stdout on {raw!r}"
 
 
 def _git(*args, cwd):
@@ -633,6 +880,53 @@ def test_forge_repo_slug_parses_ssh_and_https():
 
 def test_forge_repo_slug_none_on_unparseable_url():
     assert sl._forge_repo_slug("not a url") is None
+
+
+def test_payload_repo_slug_oracle_on_the_documented_payload_shape():
+    """`workspace.repo` as the statusline input schema documents it: host/owner/name, the owner
+    being the full namespace path (slashes included) on a subgroup GitLab project."""
+    assert sl._payload_repo_slug(
+        {"host": "github.com", "owner": "anthropics", "name": "claude-code"}
+    ) == ("github.com", "anthropics/claude-code")
+    assert sl._payload_repo_slug(
+        {"host": "gitlab.com", "owner": "group/subgroup", "name": "api"}
+    ) == ("gitlab.com", "group/subgroup/api")
+
+
+def test_payload_repo_slug_none_outside_a_repo_or_on_an_incomplete_block():
+    for repo in (
+        None,
+        "text",
+        3,
+        {},
+        {"host": "github.com"},
+        {"host": "github.com", "owner": "acme", "name": ""},
+    ):
+        assert sl._payload_repo_slug(repo) is None
+
+
+def test_repo_line_links_the_payloads_workspace_repo_block(tmp_path):
+    """Regression pin: the payload's repo identity lives at `workspace.repo` per the statusline
+    input schema — reading a top-level `repo` key silently disabled the shortcut and every render
+    paid the `git remote get-url` subprocess. The repo below carries no `origin` remote, so the
+    URL can only come from the payload block."""
+    repo = tmp_path / "my-repo"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "t@t.t", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    (repo / "f.txt").write_text("x")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-q", "-m", "x", cwd=repo)
+    data = {
+        "workspace": {
+            "current_dir": str(repo),
+            "repo": {"host": "github.com", "owner": "acme", "name": "api"},
+        },
+        "transcript_path": "/t.jsonl",
+    }
+    lines = sl.build_lines(data)
+    assert any("https://github.com/acme/api" in ln for ln in lines)
 
 
 def test_repo_url_github_branch_tree_when_pushed(tmp_path):
