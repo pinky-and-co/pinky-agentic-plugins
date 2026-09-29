@@ -100,7 +100,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     `orchestrator_freeze.py`'s own `SessionStart` check, applied here at a different call site (this
     skill's own body, not a hook payload) — the duplication is intentional, not drift.
      - **Orchestrator + the card has `repos:` non-empty** → do not take it: no `mv`, no freeze, no
-       **Session name**, no **Grill gate**, no **Goal**. Invoke `pc-kanban:spawn-workers
+       **Grill gate**, no **Goal**. Invoke `pc-kanban:spawn-workers
        <chantier-id> <card-slug>` instead and stop — every bullet below this one is worker-only. The
        worker it opens runs this same skill from inside the repo, lands on the worker branch, and
        performs the actual take (its own `mv` + `date:` bump — the orchestrator never does either).
@@ -131,6 +131,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     - A card ending up without this block (older cards, `sert: null`, parent unavailable) parses
       exactly as before — this is appended body content, not a frontmatter field.
    - **Repo-scope.** `repos: []` or absent → kanban-only work, do not freeze (nothing to scope to).
+    A repo the card does not list is never written across the freeze: see `finishing-a-card.md` §
+    "Touching a repo the card does not list".
     Otherwise, resolve each `org/repo` slug to its local absolute path:
     ```bash
     bash "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh" <workspace-root> <slug...>
@@ -145,7 +147,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     ```
     Non-empty output (one plugin id per line) means something was newly enabled — its skills/LSP/MCP
     aren't available until `/reload-plugins` runs, and step 8's execution depends on them. Stop here:
-    no freeze yet, no Session name, no Grill gate. Emit only:
+    no freeze yet, no Grill gate. Emit only:
     ```
     🔌 Next step: reload plugins before this card's work can use them.
     /reload-plugins
@@ -168,25 +170,6 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     ```bash
     python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" --root <workspace-root> freeze <resolved-repo-paths...> <kanban-board-roots...>
     ```
-   - **Session name.** Either branch of this step took the card — resumed from `3-in-progress/` or
-    just moved there — so the session now carries one card and should be named for it. `/rename` is
-    parsed at the CLI level before the turn, exactly like `/goal` below, so this skill cannot run
-    it: emit it as a pasteable line at the tail of the response, **before** the `/goal` block
-    (nothing may follow that — its evaluator reads only the transcript) and before the grill
-    routing:
-
-    ```
-    📛 Next step: rename this session to match the card.
-    /rename <card-slug>
-    ```
-
-    where `<card-slug>` is the card's filename without `.md`. The user pastes it (no turn), then
-    the `/goal` line — or the grill routing — as the next message. `rename` is queued by the Bash
-    call the **Grill gate** or **Goal** bullet makes — never by a call of its own here: a
-    matcher-`*` `PreToolUse` gate sits in front of every tool call, so a standalone `require rename`
-    at this bullet would let the gate intercept the very next tool call (the following bullet's own
-    combined call) and pop `rename` early, before that call ever lands. Emit the block above only
-    after the **Grill gate** or **Goal** bullet's own Bash call has run — never before it.
    - **Grill gate — before the goal.** Set the goal only when the card is execution-ready: its
     `## Done when` is a concrete demonstrable state and its requirements are settled. **If the card
     still carries open design questions** — a `## Options to explore` / `## To decide` /
@@ -196,31 +179,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     active Stop-hook goal fights a multi-turn interview: the session cannot yield while the user
     thinks between rounds, so the model loops re-answering "waiting for your input" while the hook
     re-fires (observed repeatedly). Instead, end the response by routing to `pc-kanban:grill`, and
-    say the goal is set from the rewritten `## Done when` once the grill converges. The **Session
-    name** bullet still applies — right before emitting its `/rename` line, queue it (the one and
-    only Bash call this bullet makes, so nothing pops it early):
-
-    ```bash
-    python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py" require rename '/rename <card-slug>' --surfaced
-    ```
-
-    Then skip the rest of this bullet.
+    say the goal is set from the rewritten `## Done when` once the grill converges. Then skip the
+    rest of this bullet.
    - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `## Done when` line;
     `sert: <parent>` → walk up to the root card (`sert: null`) this chain ultimately serves, and use
      **its** `## Done when` line instead — the session may then work any card in that group, not
     just this one.
 
     **Orphan `sert`.** If no `sert` is resolvable (orphan card, a cycle, no root found), say so
-    explicitly instead of inventing a condition — queue only the **Session name** bullet's `rename`
-    key, the same standalone call the **Grill gate** bullet uses (the one and only Bash call this
-    branch makes):
-
-    ```bash
-    python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py" require rename '/rename <card-slug>' --surfaced
-    ```
-
-    Then close the response with the **Session name** bullet's `/rename` block only — no `/goal`
-    block, nothing past it — and skip the rest of this bullet.
+    explicitly instead of inventing a condition — no `/goal` block, nothing past it — and skip the
+    rest of this bullet.
 
     `/goal` is parsed at the CLI level, before the turn — it cannot be invoked from
     inside a running skill's own text, so do not attempt to run it. Instead, end this skill's
@@ -255,19 +223,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     *assumed*, not confirmed clean on healthy tools — see chantier 0025's story § Open questions).
     Anti-cheat: the named action must be precise, nameable, and necessary — never a vague "I'm
     stuck", and never an action the agent could have run itself instead of yielding.
-    Once `<condition>` is fully resolved (clauses included), queue both the `rename` key the
-    **Session name** bullet needs and this bullet's own `goal` key — one Bash call, the very last
-    tool call of the turn, so neither pops the other early (single-quote each message, escaping
-    any literal `'` inside it as `'\''`):
+    Once `<condition>` is fully resolved (clauses included), queue this bullet's own `goal` key —
+    the last tool call of the turn (single-quote the message, escaping any literal `'` inside it as
+    `'\''`):
 
     ```bash
-    python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py" require rename '/rename <card-slug>' --surfaced && python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py" require goal '/goal <condition>' --surfaced
+    python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py" require goal '/goal <condition>' --surfaced
     ```
 
-    Only after that call returns, close the response with the **Session name** bullet's `/rename`
-    block, then the `/goal` block above — that order, both as plain text, no tool call between or
-    after them. Add nothing past the `/goal` block: no "would you like me to…", no rephrasing —
-    just the two pasteable lines, ready to paste as the next message.
+    Only after that call returns, close the response with the `/goal` block above — as plain text,
+    no tool call between or after it. Add nothing past it: no "would you like me to…", no
+    rephrasing — just the one pasteable line, ready to paste as the next message.
 8. Execute the card's work — or, if step 7's grill gate routed to `pc-kanban:grill`, run that
   first, then set the goal (step 7's **Goal** bullet) from the converged `## Done when`, then
   execute. "Execute" means, per `finishing-a-card.md` § "Who writes the work": a worker session

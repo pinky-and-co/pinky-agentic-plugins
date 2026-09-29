@@ -2,6 +2,7 @@
 name: kanban
 description: Mechanics of the file-based kanban board used to track chantiers (epics) and cards (tasks) — column lifecycle, card frontmatter schema, filiation, cross-agent log. Use when reading, moving, or writing a `_KANBAN/CHANTIER*/**/*.md` card, or when a session needs to resolve which repos/model/goal a card implies.
 user-invocable: false
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/open_cards_brief.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/drop_card.sh:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py:*)
 ---
 
 # Kanban — file-based board, agent-maintained
