@@ -1,5 +1,5 @@
 {
-  "description": "Enforces the careful/freeze/deny/guard permission guards (toggled by the permission-change skill), freezes an orchestrator session (cwd outside any git repo) to the kanban boards on SessionStart, asks before writing a kanban card still being framed (0-ideas, 1-todo, 2-selected-for-dev), keeps the in-progress kanban card's handoff fresh on Stop and SessionEnd, and on SessionEnd hands a working session's missing cross-agent log entry to a headless writer — see guard.py, orchestrator_freeze.py, card-discipline/card_discipline.py, stop_handoff.py, agent_log_writer.py",
+  "description": "Enforces the careful/freeze/deny/guard permission guards (toggled by the permission-change skill), freezes an orchestrator session (cwd outside any git repo) to the kanban boards on SessionStart, asks before writing a kanban card still being framed (0-ideas, 1-todo, 2-selected-for-dev), keeps the in-progress kanban card's handoff fresh on Stop and SessionEnd, and on SessionEnd hands a working session's missing cross-agent log entry to a headless writer — see guard.py, orchestrator_freeze.py, card-discipline/card_discipline.py, stop_handoff.py, agent_log_writer.py. Runs the deterministic skill scripts of `init` and `permission-change` directly, with no model call, when typed with conforming arguments (UserPromptExpansion).",
   "hooks": {
     "SessionStart": [
       {
@@ -57,6 +57,28 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/agent_log_writer.py\"",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "^pc-kanban:init$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_kanban_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/skills/init/scripts/pc_kanban_init.py\" --interpreter python3 --grammar '{\"forms\":[{\"match\":[],\"emit\":[]},{\"match\":[\"--workspace\",{\"re\":\"[\\\\w@%+:,./][\\\\w@%+=:,./-]*\"}],\"emit\":[\"--workspace\",\"{1}\"]}]}'",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "^pc-kanban:permission-change$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_kanban_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py\" --interpreter python3 --grammar '{\"forms\":[{\"match\":[\"status\"],\"emit\":[\"status\"]},{\"match\":[\"careful\"],\"emit\":[\"careful\"]},{\"match\":[\"careful\",{\"re\":\"on|off\"}],\"emit\":[\"careful\",\"{1}\"]},{\"match\":[{\"re\":\"freeze|deny|guard\"},{\"re\":\"[\\\\w@%+:,./][\\\\w@%+=:,./-]*\",\"repeat\":true}],\"emit\":[\"{*}\"]}]}'",
+            "timeout": 60
           }
         ]
       }

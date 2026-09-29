@@ -224,6 +224,7 @@ pinky-agentic-plugins/
 │   │   │   ├── pr-overlap/
 │   │   │   │   └── pr_overlap_guard.py
 │   │   │   ├── hooks.json
+│   │   │   ├── pc_git_direct_command_runner.py
 │   │   │   └── pc_git_policy_lib.py
 │   │   ├── skills/
 │   │   │   ├── branch-workflow/
@@ -254,6 +255,7 @@ pinky-agentic-plugins/
 │   │   │   ├── agent_log_writer.py
 │   │   │   ├── hooks.json
 │   │   │   ├── orchestrator_freeze.py
+│   │   │   ├── pc_kanban_direct_command_runner.py
 │   │   │   ├── pc_kanban_secret_patterns.py
 │   │   │   └── stop_handoff.py
 │   │   ├── skills/
@@ -384,6 +386,7 @@ pinky-agentic-plugins/
 │   ├── test_card_discipline.py
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
+│   ├── test_direct_command_hooks.py
 │   ├── test_drop_card_sh.py
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
