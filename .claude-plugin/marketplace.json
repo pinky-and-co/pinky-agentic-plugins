@@ -54,7 +54,12 @@
     {
       "name": "pc-delegate",
       "source": "./plugins/pc-delegate",
-      "description": "Aller/retour workflow for delegating work to an agent operating outside Claude Code — export context, reintegrate its results safely."
+      "description": "Export/reintegrate workflow for delegating work to an agent operating outside Claude Code — export context, reintegrate its results safely."
+    },
+    {
+      "name": "pc-customize",
+      "source": "./plugins/pc-customize",
+      "description": "Appearance and response-style customization: output styles and color themes"
     }
   ]
 }
