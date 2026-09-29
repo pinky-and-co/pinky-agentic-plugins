@@ -37,12 +37,13 @@ this **single script** that reads it. The script is dual-mode:
   - `careful` on  → a destructive `Bash` command returns ``permissionDecision: "ask"`` (interactive
     confirm; the user clears it with one keystroke). Never a silent denial — careful is a speed bump.
   - `freeze`  set → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target sits **outside** the
-    frozen directories returns ``permissionDecision: "deny"`` (a lock, not a prompt). HONEST LIMIT:
-    the lock covers the write-class tools only — a Bash write (`sed -i`, `tee`, `>`) is not
-    intercepted, and careful's destructive catalogue does not cover those either. No shell-parsing
-    whack-a-mole here; a hard path guarantee belongs to ``permissions.deny``. The always-on guards
-    above are the place a hard guarantee IS worth the code: `permissions.deny` entries cannot carry
-    a message, and the point here is the guidance text, not the block itself.
+    frozen directories returns ``permissionDecision: "deny"`` (a lock, not a prompt). A `Bash`
+    command that both looks like a write (`>`, `tee`, `sed -i`, `mv`, `cp`, `rm`, `git commit`…)
+    and names an absolute/`~` path, a `cd` target or a `git -C` dir outside the frozen directories
+    returns ``ask`` (a speed bump, never a deny). HONEST LIMIT: this is a string heuristic — a
+    computed path (`$(…)`, `python -c`) or a write verb outside the list passes; a hard path
+    guarantee belongs to ``permissions.deny``. System paths (`/usr`, `/tmp`, `/dev`…), boards and
+    the session scratchpad never trigger it.
   - `deny`  set → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target sits **inside** any
     denied directory returns ``permissionDecision: "deny"``. The inverse of `freeze`: a blocklist,
     not a whitelist — everything outside the denied directories stays writable.
@@ -406,6 +407,38 @@ def frozen_violation(target: str, freeze_dirs: list[str], root: Path) -> str | N
     return freeze_dirs[0] if len(freeze_dirs) == 1 else ", ".join(freeze_dirs)
 
 
+_BASH_WRITE_MARKER = re.compile(
+    r">|\btee\b|\bsed\s+(?:-\w+\s+)*-\w*i|"
+    r"\b(?:mv|cp|rm|touch|mkdir|ln|install|rsync|truncate)\b|"
+    r"\bgit\b[^\n;|&]*?\b(?:commit|checkout|switch|restore|apply|add|reset|merge|rebase|push)\b"
+)
+_BASH_PATH = re.compile(r"(?<![\w:./-])(~?/[^\s'\";|&<>()`$]*)")
+_BASH_DIR_ARG = re.compile(r"(?:\bcd|\bgit\s+-C|--git-dir=?)\s*([^\s'\";|&<>()`$]+)")
+_BASH_SYSTEM_PREFIXES = (
+    "/usr", "/bin", "/sbin", "/opt", "/dev", "/proc", "/tmp",
+    "/private/tmp",
+)  # fmt: skip
+
+
+def bash_write_escapes(command: str, freeze_dirs: list[str], root: Path) -> list[str]:
+    """Return the paths a write-looking Bash `command` names outside every frozen directory.
+
+    Empty when there is no freeze, no write marker, or every named path is inside a frozen
+    directory or under a system prefix. Board and scratchpad carve-outs are the caller's job.
+    """
+    if not freeze_dirs or not _BASH_WRITE_MARKER.search(command):
+        return []
+    candidates = _BASH_PATH.findall(command) + _BASH_DIR_ARG.findall(command)
+    escapes: list[str] = []
+    for raw in candidates:
+        path = os.path.expanduser(raw)
+        if path.startswith(_BASH_SYSTEM_PREFIXES):
+            continue
+        if frozen_violation(path, freeze_dirs, root) and path not in escapes:
+            escapes.append(path)
+    return escapes
+
+
 def denied_violation(target: str, deny_dirs: list[str], root: Path) -> str | None:
     """Return the denied scope a target falls inside, or None when it matches none (or no deny).
 
@@ -448,6 +481,30 @@ def decide(event: dict, root: Path) -> dict | None:
                 "ask",
                 f"careful: '{label}' is a destructive command — confirm before it runs. "
                 f"Lift the guard with `/permission-change careful off`.",
+            )
+
+    if tool == "Bash" and state.get("freeze"):
+        escapes = bash_write_escapes(
+            tool_input.get("command", ""), state["freeze"], root
+        )
+        if escapes:
+            board_paths = board_dirs(event, root).dirs
+
+            def exempt(raw: str) -> bool:
+                tgt = Path(raw)
+                tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
+                return is_session_scratchpad(str(tgt)) or any(
+                    tgt == d or tgt.is_relative_to(d) for d in board_paths
+                )
+
+            escapes = [e for e in escapes if not exempt(e)]
+        if escapes:
+            return _decision(
+                "ask",
+                f"freeze: this command looks like a write outside the locked scope "
+                f"(`{', '.join(escapes)}`). If the card genuinely needs that repo, add its slug "
+                f"to the card's `repos:` and relay with `spawn-workers` instead of writing "
+                f"across (finishing-a-card § Touching a repo the card does not list).",
             )
 
     if tool in FREEZE_TOOLS:

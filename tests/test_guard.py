@@ -227,5 +227,71 @@ class TestScratchpadCarveOut(unittest.TestCase):
             self.assertIsNone(self._decide(target))
 
 
+class TestBashFreeze(unittest.TestCase):
+    """Under freeze, a write-looking Bash command naming a path outside the frozen scope asks."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        self.repo = self.base / "repo"
+        self.other = self.base / "other"
+        self.repo.mkdir()
+        self.other.mkdir()
+        self.scratchpad = self.base / "claude-999" / "sess" / "scratchpad"
+        self.scratchpad.mkdir(parents=True)
+        self.freeze = [str(self.repo)]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _decide(self, command, freeze=True):
+        g.save_state(
+            g.state_path(self.repo),
+            {"careful": False, "freeze": self.freeze if freeze else [], "deny": []},
+        )
+        event = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(self.repo),
+        }
+        with unittest.mock.patch.object(
+            g, "board_dirs", return_value=g.BoardDirs([], True)
+        ):
+            return g.decide(event, self.repo)
+
+    def test_write_outside_scope_asks(self):
+        for cmd in (
+            f"echo x > {self.other}/a.txt",
+            f"sed -i s/a/b/ {self.other}/a.txt",
+            f"cd {self.other} && git commit -m x",
+            f"git -C {self.other} add -A",
+        ):
+            with self.subTest(cmd=cmd):
+                decision = self._decide(cmd)
+                self.assertEqual(
+                    decision["hookSpecificOutput"]["permissionDecision"], "ask"
+                )
+                self.assertIn(
+                    "spawn-workers",
+                    decision["hookSpecificOutput"]["permissionDecisionReason"],
+                )
+
+    def test_write_inside_scope_is_silent(self):
+        self.assertIsNone(self._decide(f"echo x > {self.repo}/a.txt"))
+
+    def test_read_outside_scope_is_silent(self):
+        self.assertIsNone(self._decide(f"cat {self.other}/a.txt"))
+
+    def test_system_paths_and_urls_are_ignored(self):
+        self.assertIsNone(self._decide("cmd > /dev/null 2>&1 && ls /usr/bin"))
+        self.assertIsNone(self._decide("curl -o out.txt https://example.com/a/b"))
+
+    def test_scratchpad_is_exempt(self):
+        self.assertIsNone(self._decide(f"echo x > {self.scratchpad}/m.txt"))
+
+    def test_no_freeze_is_silent(self):
+        self.assertIsNone(self._decide(f"echo x > {self.other}/a.txt", freeze=False))
+
+
 if __name__ == "__main__":
     unittest.main()

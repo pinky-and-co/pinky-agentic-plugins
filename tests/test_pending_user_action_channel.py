@@ -38,6 +38,15 @@ KANBAN_CLI = (
 GATE = REPO / "plugins" / "pc-autodiscovery" / "hooks" / "pending_gate.py"
 CLEARER = REPO / "plugins" / "pc-autodiscovery" / "hooks" / "clear_pending_queue.py"
 SKILL = REPO / "plugins" / "pc-kanban" / "skills" / "chantier" / "SKILL.md"
+FINISHING = (
+    REPO
+    / "plugins"
+    / "pc-kanban"
+    / "skills"
+    / "kanban"
+    / "references"
+    / "finishing-a-card.md"
+)
 
 
 class PendingActionChannelCase(unittest.TestCase):
@@ -156,29 +165,38 @@ class ChantierSkillWiringCase(unittest.TestCase):
             allowed_tools_line,
         )
 
-    def test_grill_gate_path_queues_rename_alone_surfaced(self):
-        section = self._section("**Grill gate — before the goal.**", "- **Goal.**")
-        self.assertIn(
-            f"{_CLI} require rename '/rename <card-slug>' --surfaced", section
-        )
-        self.assertNotIn("require goal", section)
+    def test_take_path_never_queues_rename(self):
+        self.assertNotIn("require rename", self.text)
+        self.assertNotIn("**Session name.**", self.text)
 
-    def test_orphan_sert_path_queues_rename_alone_surfaced(self):
-        section = self._section(
-            "**Orphan `sert`.**", "`/goal` is parsed at the CLI level"
-        )
-        self.assertIn(
-            f"{_CLI} require rename '/rename <card-slug>' --surfaced", section
-        )
-        self.assertNotIn("require goal", section)
-
-    def test_goal_path_queues_both_keys_surfaced_in_one_call(self):
+    def test_goal_path_queues_goal_alone_surfaced(self):
         section = self._section("Once `<condition>` is fully resolved", "8. Execute")
+        self.assertIn(f"{_CLI} require goal '/goal <condition>' --surfaced", section)
+        self.assertNotIn("require rename", section)
+
+
+class FinishingCardRenameCase(unittest.TestCase):
+    """Pins the close-time rename in finishing-a-card.md."""
+
+    def setUp(self):
+        text = FINISHING.read_text()
+        start = text.index("### Naming the session, once the proposal is out")
+        self.section = text[start : text.index("### Relaying a multi-repo card")]
+
+    def test_queues_rename_surfaced(self):
         self.assertIn(
-            f"{_CLI} require rename '/rename <card-slug>' --surfaced && "
-            f"{_CLI} require goal '/goal <condition>' --surfaced",
-            section,
+            f"{_CLI} require rename '/rename <name>' --surfaced", self.section
         )
+
+    def test_covers_every_naming_case_for_any_session(self):
+        for needle in (
+            "Any session, worker or orchestrator",
+            "One card closed",
+            "same `sert` root",
+            "+N",
+            "cannot be reconstructed",
+        ):
+            self.assertIn(needle, self.section)
 
 
 if __name__ == "__main__":

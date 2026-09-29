@@ -214,6 +214,51 @@ the candidate card's `repos:`/`sert` against the current session's own:
 Purely consultative end to end: this step never `mv`s the card, never spawns a session, never
 forces a pause — the same human decision as the proposal itself.
 
+### Naming the session, once the proposal is out
+
+**Any session, worker or orchestrator.** A session working a `sert`-linked group takes several cards
+in turn, so the name is set here, each time a card closes, never at card-take (a rename at each take
+would overwrite the group's identity with the latest card). It comes from the cards **this session**
+has closed so far, read from its own recent turn history:
+
+- **One card closed** → `/rename <that card's slug>`.
+- **Several, all serving the same `sert` root** → `/rename <root's slug>`.
+- **Several, not all serving the same root** → `/rename <slug>_<slug>_<slug>_+N`: the first three
+  closed slugs in closing order, then `+N` for the N remaining ones (omit `_+N` when there are three
+  or fewer).
+- **The closed set cannot be reconstructed** (history compacted or session resumed) → treat only the
+  card just closed as the set.
+
+`/rename` is parsed at the CLI level before the turn, exactly like `/goal` (`chantier` SKILL.md
+step 7's **Goal** bullet) — this skill cannot run it: emit it as a pasteable line at the tail of
+the response, after the recommendation above. Queue it with the one and only Bash call this step
+makes, the last tool call of the turn (a standalone `require` here is safe — nothing follows it in
+this section):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py" require rename '/rename <name>' --surfaced
+```
+
+Only after that call returns, close the response with:
+
+```
+📛 Next step: rename this session.
+/rename <name>
+```
+
+Add nothing past it — just the pasteable line, ready to paste as the next message.
+
+### Touching a repo the card does not list
+
+A worker is frozen to its card's `repos:` plus the boards. When the work turns out to need another
+repo, never write across (`freeze off`, or a Bash write, silently drops the scope the card was
+taken under). Instead:
+
+1. Stop editing.
+2. Add the repo's slug to the card's `repos:`, and say why in the handoff block.
+3. Relay as for a multi-repo card (below): `/pc-kanban:spawn-workers <chantier-id> <card-slug>
+   <repo-slug>`.
+
 ### Relaying a multi-repo card
 
 A card with 2+ entries in `repos:` is worked by one worker session per repo, spawned by the
