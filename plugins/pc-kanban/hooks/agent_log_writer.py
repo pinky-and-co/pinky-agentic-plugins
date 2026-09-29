@@ -6,7 +6,7 @@ detached headless writer (`claude -p`, haiku, restricted to Read/Glob/Write insi
 fed a condensed excerpt of the transcript. It launches only when both hold, checked by a pure scan
 of the transcript (no model call otherwise):
 
-- the session did real work — a commit (Bash `git commit`, a commit skill, the git-workflow agent)
+- the session did real work — a commit (Bash `git commit` or a commit skill)
   or an edit/move under `_KANBAN/`;
 - the session wrote nothing under `_AGENT_LOG/`.
 
@@ -121,10 +121,6 @@ def scan_transcript(transcript: Path) -> Scan:
                 elif name == "Skill":
                     skill = str(inp.get("skill") or "")
                     did_work |= skill.endswith((":commit", ":commit-and-pr"))
-                elif name == "Agent":
-                    did_work |= str(inp.get("subagent_type") or "").endswith(
-                        "git-workflow"
-                    )
     return Scan(did_work, wrote_log, lines)
 
 

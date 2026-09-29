@@ -28,11 +28,6 @@ of which skill or agent triggered it — enforcement lives in the hook, not in e
 - **`commit-convention`** *(reference)* — the gitmoji + Conventional-Commits message format
   shared by `commit` and `commit-and-pr`.
 
-## Agent
-
-**`git-workflow`** — the dedicated-agent counterpart to `commit`/`commit-and-pr`/`clean-gone`,
-for a reliable first action on a cold invocation instead of routing through the main session.
-
 ## Requirements
 
 `git`, `gh` (GitHub) or `glab` (GitLab) on `PATH` for the PR/MR-opening skills.
