@@ -29,7 +29,7 @@ branch, branch strategy) are read from that repo's own `.claude/settings.pinky.j
 | Plugin | What it ships |
 |--------|----------------|
 | [`pc-core`](plugins/pc-core/) | Session hygiene hooks (per-repo language/branch policies, costly-read and secret-read guards, post-edit lint, keychain secrets), the `reviewer` agent, skills `apply-pattern`, `council`, `document-to-md`, `review-guidelines`, and the `offline`/`adversarial`/`panel` model MCP tools |
-| [`pc-git`](plugins/pc-git/) | Gitmoji commit workflow (`commit`, `commit-and-pr`, `commit-convention`), `branch-workflow`, `clean-gone` (also run at session start), the `git-workflow` agent, and hooks guarding permanent branches and overlapping PRs |
+| [`pc-git`](plugins/pc-git/) | Gitmoji commit workflow (`commit`, `commit-and-pr`, `commit-convention`), `branch-workflow`, `clean-gone` (also run at session start), and hooks guarding permanent branches and overlapping PRs |
 | [`pc-kanban`](plugins/pc-kanban/) | File-based kanban mechanics — chantiers and cards (`kanban`, `chantier`, `grill`, `init`, `spawn-workers`, `yt`), the `card-worker` agent, permission guards (`careful`/`freeze`/`deny`/`guard`), card-discipline and handoff hooks |
 | [`pc-autodiscovery`](plugins/pc-autodiscovery/) | Always-on activation of the project-scoped plugins matching where the session sits, and a gate on the next tool call while a user-only slash command is pending |
 | [`pc-craft`](plugins/pc-craft/) | Engineering conventions: `code-conventions`, `debug-brief`, `fastapi`, `improve` |
@@ -164,8 +164,6 @@ pinky-agentic-plugins/
 │   │           │   └── apply_reintegrate.py
 │   │           └── SKILL.md
 │   ├── pc-git/
-│   │   ├── agents/
-│   │   │   └── git-workflow.md
 │   │   ├── evals/
 │   │   │   ├── 01-gh-guarded-push-prfails-honest/
 │   │   │   │   ├── graders/

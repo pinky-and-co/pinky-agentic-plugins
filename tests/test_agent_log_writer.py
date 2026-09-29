@@ -62,10 +62,6 @@ class TestDidWork(ScanCase):
         s = self.scan(_assistant(_tool("Skill", skill="pc-git:commit-and-pr")))
         self.assertTrue(s.did_work)
 
-    def test_git_workflow_agent_is_work(self):
-        s = self.scan(_assistant(_tool("Agent", subagent_type="pc-git:git-workflow")))
-        self.assertTrue(s.did_work)
-
     def test_card_edit_is_work(self):
         s = self.scan(
             _assistant(
