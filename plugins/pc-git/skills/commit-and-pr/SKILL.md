@@ -1,11 +1,11 @@
 ---
 name: commit-and-pr
 description: Commit, push, and open a PR (GitHub) or MR (GitLab) — full flow, auto end-to-end. Bulk mode (--all) handles every dirty repo in one deterministic pass.
-argument-hint: "<repository-to-commit> or --all [--no-watch-ci]"
+argument-hint: "<repository-to-commit | /absolute/repo/path> or --all [--no-watch-ci]"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write, Bash(prek run:*), Bash(pre-commit run:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git rev-parse:*), Bash(test -e:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write, Bash(prek run:*), Bash(pre-commit run:*)
 ---
 
 # Commit + push + PR/MR
@@ -35,14 +35,22 @@ at all means no argument was passed** — that is the normal, expected shape for
 not missing information. Go straight to the "No argument" branch below; never ask for one instead.
 
 **First, strip a trailing `--no-watch-ci` from `args`** and remember whether it was there — Step 3
-acts on it. Match what *remains* against a repo name / `--all`: matching the raw string (e.g.
+acts on it. Match what *remains* against a repo name / an absolute repo path / `--all`: matching the raw string (e.g.
 `myrepo --no-watch-ci`) would never equal `--all` nor appear in `discover`'s output, so it would
 fall into the "not in the list" branch instead of resolving. CI watching is the default; this flag
 is an opt-*out*.
 
 **Then resolve the target:**
 
-- **An explicit argument** — a repo name or `--all` — always wins. Use it.
+- **An explicit argument** — a repo name, an absolute repo path or `--all` — always wins. Use it.
+- **An absolute repo path** (starts with `/`) — combined with `--all` or with any other repo name or
+  path, stop with a plain error before any tool call. Otherwise the path must be exactly a repo's
+  own directory (a `.git` entry, file or directory): run `test -e "<path>/.git"`. If it fails — a
+  subdirectory of a repo, or a directory that merely contains repos, is not a repo path — say so
+  plainly and stop, never guess another repo. Then **quote the path** and, in each of `discover`,
+  `plan` and `apply` below, write `--repo-path "<path>"` **instead of** `--root "${CLAUDE_PROJECT_DIR}"`
+  and instead of `--repo <target>` (the script then acts on that one repo alone, nested repos
+  excluded). The target is the path's basename.
 - **No argument** → resolve by session location:
 
   ```
@@ -94,7 +102,8 @@ Then plan the resolved target:
        - `⚠️  missing pre-commit hooks` $ightarrow$ check repo criticality. For POCs/Assets, ignore. For Production, alert user and suggest adding security hooks.
 ```
 
-Include `--repo <target>` for every scope except `--all` / `all of them`.
+Include `--repo <target>` for every scope except `--all` / `all of them` and except path mode (use
+`--repo-path "<path>"` alone, never with `--root`/`--repo`).
 
 - `NO-REPOS-FOUND` → **do not report success**: the root holds no git repo at all, so it is stale
   (a moved workspace is the usual cause). Say the root is wrong and stop.
@@ -129,7 +138,7 @@ ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_
 ```
 
 Pass the **same `--repo <target>`** you resolved in Step 1 — omit it only for `--all` / `all of
-them`. Add `--dry-run` first if the plan looked surprising — it prints what each repo would get,
+them`, and in path mode (`--repo-path "<path>"` alone, never with `--root`/`--repo`). Add `--dry-run` first if the plan looked surprising — it prints what each repo would get,
 touching nothing, and emits **no `=== RESULTS` block** (run the real apply for that).
 
 **CI watching is on by default** — pass `--no-watch-ci` **if and only if Step 1 found it trailing
