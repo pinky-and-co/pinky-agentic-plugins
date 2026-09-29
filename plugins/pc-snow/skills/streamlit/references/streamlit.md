@@ -120,6 +120,7 @@ df = conn.query("SELECT * FROM my_table")
 
 # Secrets — Snowflake Secrets Object mapped to env vars
 import os
+
 api_key = os.environ["MY_API_KEY"]  # set via st.secrets + EAI
 
 # Caller's rights connection (Container Runtime, introduced 1.53.0)
@@ -150,16 +151,24 @@ import streamlit as st
 
 conn = st.connection("snowflake")
 
+
 # This section reruns independently when its widgets change
 @st.fragment
 def filter_panel():
     schema = st.selectbox("Schema", ["RAW", "CLEAN", "MART"])
-    df = conn.query(f"SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?", params=[schema])
+    df = conn.query(
+        f"SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?",
+        params=[schema],
+    )
     st.dataframe(df)
+
 
 # This only reruns on full page rerun, not when filter_panel widgets change
 st.title("Table Explorer")
-st.metric("Total tables", conn.query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES").iloc[0, 0])
+st.metric(
+    "Total tables",
+    conn.query("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES").iloc[0, 0],
+)
 
 filter_panel()
 ```
@@ -195,6 +204,7 @@ filter_panel()
 def load_heavy_data():
     return conn.query("SELECT ...")
 
+
 @st.fragment
 def interactive_section():
     data = load_heavy_data()  # cached, not re-queried on fragment rerun
@@ -207,7 +217,9 @@ def interactive_section():
 ```python
 @st.fragment(run_every="10s")
 def live_metrics():
-    row = conn.query("SELECT COUNT(*) as cnt FROM EVENTS WHERE CREATED_AT > DATEADD('minute', -5, CURRENT_TIMESTAMP())").iloc[0]
+    row = conn.query(
+        "SELECT COUNT(*) as cnt FROM EVENTS WHERE CREATED_AT > DATEADD('minute', -5, CURRENT_TIMESTAMP())"
+    ).iloc[0]
     st.metric("Events (last 5 min)", row["cnt"])
 ```
 

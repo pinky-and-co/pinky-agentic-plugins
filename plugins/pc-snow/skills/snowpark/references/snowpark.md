@@ -92,6 +92,7 @@ from snowflake.snowpark import Session
 # Outside Snowflake (local dev / tests)
 session = Session.builder.configs(CONNECTION_PARAMETERS).create()
 
+
 # Inside Snowflake SP — injected by runtime
 def main(session: Session, args: dict = {}) -> dict: ...
 ```
@@ -294,8 +295,9 @@ see "DataFrame API" and "Canonical vs deprecated method names" above — not rep
 ```python
 from snowflake.snowpark.types import Timestamp, LTZ, NTZ, TZ
 
-def my_udf(ts: Timestamp[NTZ]) -> str: ...   # TIMESTAMP_NTZ
-def my_udf(ts: Timestamp[LTZ]) -> str: ...   # TIMESTAMP_LTZ
+
+def my_udf(ts: Timestamp[NTZ]) -> str: ...  # TIMESTAMP_NTZ
+def my_udf(ts: Timestamp[LTZ]) -> str: ...  # TIMESTAMP_LTZ
 ```
 
 ---
@@ -307,8 +309,11 @@ def my_udf(ts: Timestamp[LTZ]) -> str: ...   # TIMESTAMP_LTZ
 @session.sproc(return_type=StringType(), input_types=[StringType()])
 def my_sp(session: Session, arg: str) -> str: ...
 
+
 # Via registration object
-session.sproc.register(func=my_sp, return_type=StringType(), input_types=[...], name="MY_SP")
+session.sproc.register(
+    func=my_sp, return_type=StringType(), input_types=[...], name="MY_SP"
+)
 
 # From file
 session.sproc.register_from_file("path/to/sp.py", "main", name="MY_SP")
@@ -322,8 +327,10 @@ session.sproc.register_from_file("path/to/sp.py", "main", name="MY_SP")
 ```python
 @session.udf(return_type=StringType(), input_types=[StringType()])
 def clean_date(raw: str) -> str:
-    if len(raw) == 5 and raw[0] == "2": return raw[:4]  # 21022 → 2102 heuristic
+    if len(raw) == 5 and raw[0] == "2":
+        return raw[:4]  # 21022 → 2102 heuristic
     return raw
+
 
 # Apply on DataFrame
 df.with_column("CLEAN_DATE", clean_date(col("RAW_DATE")))
@@ -333,6 +340,7 @@ df.with_column("CLEAN_DATE", clean_date(col("RAW_DATE")))
 ```python
 from snowflake.snowpark.types import PandasSeries, PandasSeriesType
 import pandas as pd
+
 
 @session.udf(return_type=StringType(), input_types=[PandasSeriesType(StringType())])
 def clean_date_vectorized(series: PandasSeries) -> PandasSeries:
@@ -352,7 +360,7 @@ Returns multiple rows per input row. Register via `session.udtf.register()`.
 from snowflake.snowpark.files import SnowflakeFile
 
 # Read a file from stage (inside SP or UDF)
-with SnowflakeFile.open(file_url, 'rb') as f:
+with SnowflakeFile.open(file_url, "rb") as f:
     data = f.read()
 
 # Write result file
@@ -373,9 +381,9 @@ with SnowflakeFile.open_new_result() as f:
 job = session.call_nowait("MY_SP", args)
 
 # Check status
-job.is_done()     # bool
-job.is_failed()   # bool
-job.status        # str
+job.is_done()  # bool
+job.is_failed()  # bool
+job.status  # str
 
 # Get results (blocks until done)
 result = job.result()
@@ -421,15 +429,15 @@ Always catch Snowpark-specific exceptions instead of bare `Exception`. This surf
 
 ```python
 from snowflake.snowpark.exceptions import (
-    SnowparkSQLException,                  # SQL error (permissions, syntax, missing object)
-    SnowparkSessionException,              # Session expired / disconnected / invalid token
-    SnowparkDataframeException,            # DataFrame construction error (bad column ref)
-    SnowparkInvalidObjectNameException,    # Invalid object name in a DataFrame operation
-    SnowparkColumnException,               # Ambiguous or missing column
-    SnowparkJoinException,                 # Ambiguous join (column name conflicts)
-    SnowparkPlanException,                 # Plan too complex / invalid
-    SnowparkCreateDynamicTableException,   # Dynamic table creation error
-    SnowparkUploadFileException,           # PUT / stage upload failure
+    SnowparkSQLException,  # SQL error (permissions, syntax, missing object)
+    SnowparkSessionException,  # Session expired / disconnected / invalid token
+    SnowparkDataframeException,  # DataFrame construction error (bad column ref)
+    SnowparkInvalidObjectNameException,  # Invalid object name in a DataFrame operation
+    SnowparkColumnException,  # Ambiguous or missing column
+    SnowparkJoinException,  # Ambiguous join (column name conflicts)
+    SnowparkPlanException,  # Plan too complex / invalid
+    SnowparkCreateDynamicTableException,  # Dynamic table creation error
+    SnowparkUploadFileException,  # PUT / stage upload failure
 )
 ```
 
@@ -456,6 +464,7 @@ except SnowparkSQLException as e:
 
 ```python
 from snowflake.snowpark.exceptions import SnowparkSQLException
+
 
 def main(session, client_schema: str):
     try:

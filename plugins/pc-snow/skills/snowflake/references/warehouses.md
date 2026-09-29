@@ -343,6 +343,7 @@ def load_reference_data() -> pd.DataFrame:
         WHERE status = 'A'
     """).to_pandas()
 
+
 df_reference = load_reference_data()
 ```
 
@@ -352,7 +353,7 @@ Since 1.53.0: `st.cache_data` can be scoped per session (`experimental_allow_wid
 For data shared between users with a defined freshness:
 
 ```python
-@st.cache_data(ttl=3600)   # 1 hour
+@st.cache_data(ttl=3600)  # 1 hour
 def load_dashboard_kpis(tenant_id: str) -> pd.DataFrame:
     conn = st.connection("snowflake")
     return conn.query(f"SELECT * FROM {tenant_id}.kpis WHERE run_date = CURRENT_DATE")

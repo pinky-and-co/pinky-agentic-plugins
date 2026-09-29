@@ -412,8 +412,8 @@ ORDER BY 1 DESC, compute_credits DESC;
 
 ```python
 df_enriched = df_raw.join(df_ref, on="ID").cache_result()
-count = df_enriched.count()          # executes once (from temp table)
-df_enriched.write.save_as_table(...) # executes once (from temp table)
+count = df_enriched.count()  # executes once (from temp table)
+df_enriched.write.save_as_table(...)  # executes once (from temp table)
 ```
 
 **Dynamic Table lag** — set lag to the actual business freshness requirement. A `LAG = '1 hour'` DT refreshes 24× less than `LAG = '5 minutes'`. Don't default to the minimum.
