@@ -72,14 +72,21 @@ Developing a plugin from a local clone: see *Where an installed plugin runs from
 pinky-agentic-plugins/
 ├── plugins/
 │   ├── pc-autodiscovery/
-│   │   └── hooks/
-│   │       ├── clear_pending_queue.py
-│   │       ├── hooks.json
-│   │       ├── pending_gate.py
-│   │       ├── pending_user_action.py
-│   │       ├── plugin_scope_lib.py
-│   │       ├── settings_commit_nudge.py
-│   │       └── sync_plugin_scope.py
+│   │   ├── hooks/
+│   │   │   ├── agents-md/
+│   │   │   │   ├── agents_md_hook.py
+│   │   │   │   ├── agents_md_lib.py
+│   │   │   │   └── agents_md_repo.py
+│   │   │   ├── clear_pending_queue.py
+│   │   │   ├── hooks.json
+│   │   │   ├── pending_gate.py
+│   │   │   ├── pending_user_action.py
+│   │   │   ├── plugin_scope_lib.py
+│   │   │   ├── settings_commit_nudge.py
+│   │   │   └── sync_plugin_scope.py
+│   │   └── skills/
+│   │       └── agents-md/
+│   │           └── SKILL.md
 │   ├── pc-core/
 │   │   ├── agents/
 │   │   │   └── reviewer.md
@@ -378,6 +385,7 @@ pinky-agentic-plugins/
 │   ├── smoke_model_pool.py
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_agent_log_writer.py
+│   ├── test_agents_md_hook.py
 │   ├── test_anonymize.py
 │   ├── test_apply_reintegrate.py
 │   ├── test_branch_guard.py
