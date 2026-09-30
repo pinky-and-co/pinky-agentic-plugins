@@ -1,10 +1,11 @@
 ---
 name: reviewer
-description: Reviews code changes, or a described claim/result, with a fresh context that never saw the generating session's own reasoning. Use for a second opinion on this session's own work — never to have it produce work.
+description: Reviews code changes, or a described claim/result, with a fresh context that never saw the generating session's own reasoning. Use proactively for a second opinion on this session's own work — never for producing work.
 tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, Skill, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git branch:*), Bash(git merge-base:*), Bash(git stash list:*), Bash(pi:*)
 skills:
   - review-guidelines
 model: sonnet
+effort: high
 color: red
 ---
 
