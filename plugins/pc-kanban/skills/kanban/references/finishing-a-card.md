@@ -2,6 +2,20 @@
 
 Referenced from `SKILL.md`. Read this when taking a card in, or before declaring a card done.
 
+## Contents
+
+- Who writes the work
+- Reviewing before declaring a card done
+- The review belongs in the `/goal` condition, not in an after-the-fact hope
+- Making the review visible on the card
+- Proposing the next card, once the card is done
+- Flagging cards the closed card just made obsolete
+- Recommending session vs spawn, next to the proposal
+- Naming the session, once the proposal is out
+- Touching a repo the card does not list
+- Relaying a multi-repo card
+- Abandoning a multi-repo card
+
 A session's real capacity limit is the session itself — one card, or one `sert`-linked group of
 cards, per session. `/chantier` operationalizes this natively instead of relying on judgment:
 
