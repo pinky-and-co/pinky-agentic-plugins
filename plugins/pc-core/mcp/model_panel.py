@@ -45,11 +45,13 @@ DEFAULT_TIMEOUT = 180
 
 
 class Answer(NamedTuple):
-    """One model's reply in a panel run. `slot` is the 1-based index of the prompt it answered."""
+    """One model's reply in a panel run. `slot` is the 1-based index of the prompt it answered;
+    `model` is the pool entry's name, `label` how the reply names its author (`answer_label`)."""
 
     slot: int
     model: str
     text: str
+    label: str = ""
 
 
 class Skip(NamedTuple):
@@ -221,7 +223,11 @@ def run_panel(
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(entries)) as pool:
         for slot, res in enumerate(pool.map(worker, entries, prompts), start=1):
             if res.reason is None and res.answer is not None:
-                answers.append(Answer(slot, res.entry["name"], res.answer))
+                answers.append(
+                    Answer(
+                        slot, res.entry["name"], res.answer, ma.answer_label(res.entry)
+                    )
+                )
             else:
                 skipped.append(Skip(slot, res.entry["name"], res.reason or "unknown"))
     return PanelResponse(answers, skipped)
@@ -259,7 +265,8 @@ def format_panel(response: PanelResponse, requested: int) -> str:
         header += " · " + " · ".join(notes)
 
     blocks = "\n\n".join(
-        f"--- [slot {a.slot} · {a.model}] ---\n{a.text}" for a in response.answers
+        f"--- [slot {a.slot} · {a.label or a.model}] ---\n{a.text}"
+        for a in response.answers
     )
     return f"{header}\n\n{blocks}" if blocks else header
 

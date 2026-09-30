@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -78,10 +79,14 @@ def adversarial(
     tier: str | None = None,
     diff: str | None = None,
     tools: list[str] | None = None,
+    base: str | None = None,
+    scope: Literal["all", "staged", "unstaged"] = "all",
 ) -> str:
-    """Challenge THIS session's own output with a contrarian second opinion from a non-Claude model.
+    """Contrarian second opinion on a change from a non-Claude model — called by the `reviewer`
+    agent, which decides whether a review needs it; a session asking for a review spawns that agent
+    rather than calling this directly.
 
-    Pass your own plan/review/reasoning as `task` (plus source files if relevant) — a same-model
+    Pass the intent and what to attack as `task` (plus source files, or `base`) — a same-model
     self-check inherits its own blind spots, which is exactly what this tool exists to avoid. Tries
     each pool candidate in order, falling through to the next on failure; the returned text always
     opens with which model actually answered — never present a review as verdict without knowing
@@ -99,18 +104,39 @@ def adversarial(
 
     `tools` (pi tool names, e.g. `["read", "grep"]`) lets the model open files itself; omitted →
     no tools, the model sees only the prompt and the inlined `files`.
+
+    `base` (a branch or ref, e.g. `main`; `HEAD` for work not yet committed) makes the tool compute
+    the change under review itself: everything this work changed since it forked from `base` —
+    commits, staged and unstaged edits, untracked files that are not git-ignored — is appended to
+    the prompt, and so leaves the machine, and used to route the tier; the caller needs no diff
+    file. It diffs the repository of this session's project directory, and names it in its
+    messages. It takes precedence over `diff`. `scope` narrows it: `staged` (fork point → index),
+    `unstaged` (index → working tree, untracked files included), or `all` (the default).
     """
     files = files or []
     override = model_adversarial.resolve_model(model)
 
-    resolved_tier = tier if tier in model_adversarial._TIER_RANK else None
-    if resolved_tier is None and diff:
+    diff_text: str | None = None
+    repo = model_adversarial.project_dir()
+    if base:
         try:
-            resolved_tier = review_complexity.tier_for(
-                Path(diff).read_text(encoding="utf-8", errors="ignore")
-            )
+            repo = model_adversarial.repo_root()
+            diff_text = model_adversarial.diff_against(base, scope=scope)
+        except subprocess.CalledProcessError as e:
+            return f"[adversarial] ERROR — cannot diff against {base!r} in {repo}: {model_adversarial.failure_detail(e)}"
+        except (ValueError, OSError) as e:
+            return f"[adversarial] ERROR — cannot diff against {base!r} in {repo}: {e}"
+        if not diff_text.strip():
+            return f"[adversarial] nothing to review — no change against {base!r} in {repo}."
+    elif diff:
+        try:
+            diff_text = Path(diff).read_text(encoding="utf-8", errors="ignore")
         except OSError:
-            resolved_tier = None
+            diff_text = None
+
+    resolved_tier = tier if tier in model_adversarial._TIER_RANK else None
+    if resolved_tier is None and diff_text:
+        resolved_tier = review_complexity.tier_for(diff_text)
 
     if override:
         entries = [
@@ -130,12 +156,14 @@ def adversarial(
     resolved_stack = stack or model_adversarial.detect_stack(files)
     methodology = model_adversarial.load_methodology(resolved_stack)
     adversarial_task = (methodology + "\n\n" if methodology else "") + task
+    if base and diff_text:
+        adversarial_task += f"\n\n--- DIFF against {base} in {repo} ---\n{diff_text}"
     prompt = model_adversarial.build_prompt(adversarial_task, files)
 
     pool_result = model_adversarial.run_pool(entries, prompt, tools=tools)
     if pool_result.entry is None:
         return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
-    return f"[answered by {pool_result.entry['name']}]\n\n{pool_result.result}"
+    return f"[answered by {model_adversarial.answer_label(pool_result.entry)}]\n\n{pool_result.result}"
 
 
 @m.tool()

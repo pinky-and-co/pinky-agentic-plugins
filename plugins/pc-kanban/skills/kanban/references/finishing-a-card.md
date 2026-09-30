@@ -48,24 +48,18 @@ costs more than it returns, so the session makes it directly instead.
 The reviewer must not be the generator — a same-model self-check inherits its own blind spots, and
 agreement among several voices of the same model is not proof of correctness either, only a
 correlated blind spot repeated. Whenever a card's work needs real judgment reviewed, not just a
-mechanical check, prefer in this order:
+mechanical check, in this order:
 
-1. **`adversarial` MCP tool** (`pc-core`, native, no spawn) — the default. Routes the review to a
-   non-Claude pool model, not a cheaper same-vendor tier: the real change of perspective. Pass
-   `diff` (a path to the change under review) so the tool picks the model tier deterministically
-   from the diff's size and risk factors — a security-sensitive or large change goes opus-tier, a
-   small mechanical one to the cheapest capable entry. Pass `stack`, or let it infer one from the
-   imports, so a FastAPI / SiS / Snowflake checklist rides along (the pool model has no `Skill`
-   tool). Falls through pool candidates on failure; returns `[adversarial] BLOCKED — …` when no
-   pool key resolves at all — that is the signal to drop to (2).
-2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
-   reviewer.md`), preloads the `review-guidelines` skill, no external plugin dependency. The
-   fallback when (1) returns `BLOCKED`, and the right first choice when the review needs a reviewer
-   that navigates the repo itself rather than a single-shot pool call. Same vendor as the
-   generator, but a fresh context that never saw the generating session's own rationalizations —
-   `model: sonnet` in its own definition, a real floor.
-3. **Same-session self-review** — last resort only, and **say plainly that it is degraded** (same
-   model, same context) rather than presenting it as equivalent to (1) or (2).
+1. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
+   reviewer.md`), the single entry point: the caller never calls the `adversarial` MCP tool
+   itself. Hand it the branch the work forked from (`main`) and the card's intent; it reads the
+   change in a fresh context that never saw the generating session's rationalizations, then
+   decides by itself between `adversarial` (a non-Claude pool model, tier routed from the diff,
+   stack checklist included — the real change of perspective) and reviewing the diff itself
+   under the `review-guidelines` skill. It opens its report with `Method: adversarial (<model>)`
+   or `Method: reviewer`.
+2. **Same-session self-review** — last resort only, when the agent cannot run, and **say plainly
+   that it is degraded** (same model, same context) rather than presenting it as equivalent to (1).
 
 ### The review belongs in the `/goal` condition, not in an after-the-fact hope
 
@@ -74,8 +68,8 @@ on roughly half the judgment work, invisibly. So when a card's work needs judgme
 review goes **into the `/goal` condition itself**, set when the card is taken (`chantier` SKILL.md
 step 7): the harness-native Stop-hook then holds the card open until the transcript shows the
 review ran. Phrase it as a transcript-verifiable state, never a promise — e.g. append to the
-`## Done when`-derived condition `… and the final diff has been reviewed by `adversarial` or
-`Agent(reviewer)`, findings addressed, and the `- [x] reviewed (<method>)` box checked on the card`
+`## Done when`-derived condition `… and the final diff has been reviewed by `Agent(reviewer)`,
+findings addressed, and the `- [x] reviewed (<method>)` box checked on the card`
 — naming the checkbox so satisfying the goal and stamping the box are one action.
 
 The judgment/mechanical call is made at intake, before the diff exists — so **when it is unclear,
@@ -97,9 +91,10 @@ Not every card goes through the section above — a purely mechanical change has
 reviewer to catch, and stamping one on every card regardless would turn a real judgment call into a
 box-ticking ritual. When a card's work *did* need real judgment reviewed, make it visible on the
 card itself: immediately above the `## Done when` line (already present by this point — it was set at
-selection), add `- [ ] reviewed (method)`, `method` one of `adversarial`, `reviewer`,
-`self-degraded`, comma-separated if more than one was actually used (e.g. `adversarial, reviewer`) —
-or `n/a — mechanical` for a mechanical card that had nothing for a reviewer to catch.
+selection), add `- [ ] reviewed (method)`, `method` the reviewer's own `Method:` line
+(`adversarial`, or `reviewer` when it reviewed by itself) or `self-degraded`, comma-separated if
+more than one was actually used (e.g. `adversarial, reviewer`) — or `n/a — mechanical` for a
+mechanical card that had nothing for a reviewer to catch.
 Check it — `- [x] reviewed (…)` — once the review above is done, before declaring the card done.
 
 Added by the session doing the work, never by `/chantier`'s intake (step 7). This checkbox is

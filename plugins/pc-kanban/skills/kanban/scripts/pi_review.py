@@ -29,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[4] / "pc-core" / "mcp"))
 import model_adversarial as ma  # noqa: E402
 
-DEFAULT_TIMEOUT = 180
+DEFAULT_TIMEOUT = ma.RUN_TIMEOUT
 
 _DONE_WHEN_RE = re.compile(
     r"^##\s+Done when\b.*?\n(.*?)(?=\n##\s|\Z)", re.MULTILINE | re.DOTALL

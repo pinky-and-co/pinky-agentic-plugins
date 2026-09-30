@@ -205,8 +205,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     **Review clause.** If the card's work needs judgment reviewed — the same criterion as
     `finishing-a-card.md` § "Reviewing before declaring the card done", i.e. anything beyond a
     purely mechanical change — append to `<condition>`: `… and the final diff has been reviewed by
-    `adversarial` or `Agent(reviewer)`, findings addressed, and the `- [x] reviewed (<method>)` box
-    checked on the card`. Naming the checkbox in the clause makes satisfying the goal and stamping
+    `Agent(reviewer)`, findings addressed, and the `- [x] reviewed (<method>)` box checked on the
+    card` — `<method>` is the `Method:` line the reviewer opens its report with. Naming the
+    checkbox in the clause makes satisfying the goal and stamping
     the box one action, not two — so the retroactive audit does not later flag a genuinely-reviewed
     card. The decision is made pre-work, on `## Done when` and `requirements:` alone, so **when it is
     unclear, include the clause** — a spurious clause on a card that turns out mechanical costs one

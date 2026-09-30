@@ -103,7 +103,7 @@ def is_out_of_memory(text: str) -> bool:
 
 
 def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
-    """Run `pi -p --model 'mlx/<id>' -t read --no-session --thinking off "<prompt>"`, return stdout.
+    """Run `pi -p --model 'mlx/<id>' -t read --thinking off "<prompt>"`, return stdout.
 
     Raises `subprocess.CalledProcessError` / `subprocess.TimeoutExpired` / `OSError` on failure —
     callers classify those via `failure_hint()`, never letting `pi`'s own stdout/stderr (which may
@@ -116,7 +116,6 @@ def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
         f"{PROVIDER}/{model}",
         "-t",
         "read",
-        "--no-session",
         "--thinking",
         "off",
         prompt,
