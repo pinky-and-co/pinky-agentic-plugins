@@ -1,6 +1,6 @@
 ---
 name: dev-prerelease
-description: Cut a `.devN` pre-release of the PyPI library in the current repo — fail-fast preconditions, version bump, commit, push, then stop before the publishing tag for an explicit human go. Never publishes on its own.
+description: Cut a `.devN` pre-release of the PyPI library in the current repo — fail-fast preconditions, version bump, commit, push, then stop before the publishing tag for an explicit human go. Never publishes on its own. Use when the user asks for a dev pre-release of the library.
 argument-hint: "[<library-checkout-path>] — defaults to the current directory's git repo"
 allowed-tools: Bash(git branch:*), Bash(git status:*), Bash(git fetch:*), Bash(git rev-parse:*), Bash(git symbolic-ref:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(git push:*), Bash(git tag:*), Bash(gh run list:*), Bash(gh run watch:*), Bash(rg:*), Bash(cat:*), Bash(curl:*), Bash(python3:*), Read, Edit, AskUserQuestion, mcp__plugin_pc-core_pc-core-models__offline, mcp__plugin_pc-core_pc-core-models__panel
 ---

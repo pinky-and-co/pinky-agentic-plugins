@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Commit the current changes using the gitmoji convention. Bulk mode (--all) commits every dirty repo in one deterministic pass.
+description: Commit the current changes using the gitmoji convention. Bulk mode (--all) commits every dirty repo in one deterministic pass. Use when the user asks to commit changes, or to commit every dirty repo in one pass.
 argument-hint: "<repository-to-commit | /absolute/repo/path> or --all"
 model: haiku
 context: fork

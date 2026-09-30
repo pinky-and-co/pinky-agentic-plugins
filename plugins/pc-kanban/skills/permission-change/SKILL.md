@@ -1,6 +1,6 @@
 ---
 name: permission-change
-description: Toggle the PreToolUse permission guards — careful (confirm destructive Bash), freeze (lock edits to a scope), deny (block edits to a scope), or guard (careful + freeze together)
+description: Toggle the PreToolUse permission guards — careful (confirm destructive Bash), freeze (lock edits to a scope), deny (block edits to a scope), or guard (careful + freeze together). Use when the user asks to change or check a permission guard.
 argument-hint: "careful|freeze|guard|deny [scope-dir...] [on|off] | status"
 arguments: [mode]
 model: haiku

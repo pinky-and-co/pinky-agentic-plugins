@@ -1,6 +1,6 @@
 ---
 name: yt
-description: "Summarize a YouTube video (any source language — auto-detected) and produce a relevance verdict against the active chantier board — the verdict is the feature, not the summary. Deterministic fetch (yt-dlp → VTT → clean text), analysis reserved for the LLM (fetch/LLM boundary). MANDATORY TRIGGER: '/yt <url>'. STRONG TRIGGERS: 'summarize this YouTube video', 'is this video relevant to what we're doing', 'check if this video brings anything new'. Do NOT trigger for downloading/transcoding video, or for non-YouTube sources — this skill is summary + board-relevance only."
+description: "Summarize a YouTube video (any source language — auto-detected) and produce a relevance verdict against the active chantier board — the verdict is the feature, not the summary. Deterministic fetch (yt-dlp → VTT → clean text), analysis reserved for the LLM (fetch/LLM boundary). MANDATORY TRIGGER: '/yt'. STRONG TRIGGERS: 'summarize this YouTube video', 'is this video relevant to what we're doing', 'check if this video brings anything new'. Do NOT trigger for downloading/transcoding video, or for non-YouTube sources — this skill is summary + board-relevance only."
 argument-hint: "<url> [lang] [--card]"
 allowed-tools: Bash(yt-dlp:*), Bash(python3:*), Bash(ls:*), Read, Write, AskUserQuestion
 ---

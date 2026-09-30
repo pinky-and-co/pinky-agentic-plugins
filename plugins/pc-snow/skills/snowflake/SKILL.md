@@ -1,6 +1,6 @@
 ---
 name: snowflake
-description: Snowflake platform reference — Python Core API (snowflake.core) for IaC deployment, warehouse/compute-pool sizing and caching, PyPI packages in UDFs/procedures via the artifact repository, governance (classification, tags, masking, row access, lineage, GDPR), telemetry/event tables, cost model and tracking, and the Native App framework.
+description: Snowflake platform reference — Python Core API (snowflake.core) for IaC deployment, warehouse/compute-pool sizing and caching, PyPI packages in UDFs/procedures via the artifact repository, governance (classification, tags, masking, row access, lineage, GDPR), telemetry/event tables, cost model and tracking, and the Native App framework. Use when the work touches Snowflake deployment, sizing, governance, telemetry, cost or Native Apps.
 user-invocable: false
 metadata:
   source: Snowflake official docs (docs.snowflake.com) — distilled/rewritten content
