@@ -3,8 +3,11 @@
 
 Defines "done": a card selected by id is found across the chantier's columns, moved to
 `3-in-progress` with `date:` bumped and an `exported:` marker set (dry-run writes nothing), a
-secret-bearing path is never written into the zip (from the repo subtree or `_AGENT_LOG`), and a
-local absolute path inside an `_AGENT_LOG` entry is redacted rather than shipped verbatim.
+secret-bearing path is never written into the zip (from the repo subtree or `_AGENT_LOG`), a
+local absolute path inside an `_AGENT_LOG` entry is redacted rather than shipped verbatim, and an
+`_AGENT_LOG` entry ships only when it mentions an exported card's slug and is dated within the
+60-day window — zero matching entries means no `_AGENT_LOG` in the zip and an explicit line in
+the output, never silence.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import zipfile
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -194,26 +198,86 @@ class TestChantierTreeListing:
 
 
 class TestFilteredAgentLog:
-    def test_redacts_local_paths(self, tmp_path: Path) -> None:
-        log_dir = tmp_path / "_AGENT_LOG"
-        log_dir.mkdir()
-        (log_dir / "2026-01-01_note.md").write_text(
-            "see /Users/perrine/Workspaces/pinky/repo/file.py\n"
-        )
-        result = be.filtered_agent_log(log_dir)
-        assert "_AGENT_LOG/2026-01-01_note.md" in result
-        assert "/Users/perrine" not in result["_AGENT_LOG/2026-01-01_note.md"]
+    SLUGS = ("export-agent-log-non-filtre-par-pertinence", "second-exported-card")
+    REF = date(2026, 9, 30)
 
-    def test_excludes_a_md_file_that_itself_matches_the_denylist(
+    def test_oracle_only_slug_mentioning_entries_inside_the_window_ship(
         self, tmp_path: Path
     ) -> None:
         log_dir = tmp_path / "_AGENT_LOG"
         log_dir.mkdir()
-        (log_dir / "2026-01-01_note.md").write_text("hello\n")
-        (log_dir / "aws-credentials.md").write_text("not really markdown\n")
-        result = be.filtered_agent_log(log_dir)
-        assert "_AGENT_LOG/2026-01-01_note.md" in result
-        assert "_AGENT_LOG/aws-credentials.md" not in result
+        j59 = (self.REF - timedelta(days=59)).isoformat()
+        j61 = (self.REF - timedelta(days=61)).isoformat()
+        (log_dir / f"{j59}_backtick-mention.md").write_text(
+            "worked on `export-agent-log-non-filtre-par-pertinence` today\n"
+        )
+        (log_dir / "2026-09-01_path-mention.md").write_text(
+            "see /Users/perrine/Workspaces/pinky/_KANBAN/C25/3-in-progress/"
+            "second-exported-card.md\n"
+        )
+        (log_dir / f"{j61}_bold-mention.md").write_text(
+            "**export-agent-log-non-filtre-par-pertinence** kicked off\n"
+        )
+        (log_dir / "2026-09-29_chantier-token-only.md").write_text(
+            "advanced CHANTIER0025, no card named\n"
+        )
+        (log_dir / "no-date-prefix.md").write_text(
+            "mentions export-agent-log-non-filtre-par-pertinence but no dated filename\n"
+        )
+
+        assert be.filtered_agent_log(log_dir, self.SLUGS, today=self.REF) == {
+            f"_AGENT_LOG/{j59}_backtick-mention.md": (
+                "worked on `export-agent-log-non-filtre-par-pertinence` today\n"
+            ),
+            "_AGENT_LOG/2026-09-01_path-mention.md": "see <redacted-local-path>\n",
+        }
+
+    def test_j60_is_still_inside_the_window(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        log_dir.mkdir()
+        j60 = (self.REF - timedelta(days=60)).isoformat()
+        (log_dir / f"{j60}_mention.md").write_text("`my-card` done\n")
+        assert be.filtered_agent_log(log_dir, ("my-card",), today=self.REF) == {
+            f"_AGENT_LOG/{j60}_mention.md": "`my-card` done\n"
+        }
+
+    def test_future_dated_mention_is_outside_the_preceding_window(
+        self, tmp_path: Path
+    ) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        log_dir.mkdir()
+        tomorrow = (self.REF + timedelta(days=1)).isoformat()
+        (log_dir / f"{tomorrow}_mention.md").write_text("`my-card` done\n")
+        assert be.filtered_agent_log(log_dir, ("my-card",), today=self.REF) == {}
+
+    def test_non_yyyy_mm_dd_prefix_is_skipped_without_raising(
+        self, tmp_path: Path
+    ) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        log_dir.mkdir()
+        (log_dir / "2026-13-99_bad-month.md").write_text("`my-card` done\n")
+        (log_dir / "note.md").write_text("`my-card` done\n")
+        (log_dir / "20260929_basic-format.md").write_text("`my-card` done\n")
+        assert be.filtered_agent_log(log_dir, ("my-card",), today=self.REF) == {}
+
+    def test_recent_entry_without_any_exported_slug_is_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        log_dir.mkdir()
+        (log_dir / "2026-09-29_unrelated.md").write_text("work on another chantier\n")
+        assert be.filtered_agent_log(log_dir, ("my-card",), today=self.REF) == {}
+
+    def test_denylist_still_applies_to_a_mentioning_entry(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "_AGENT_LOG"
+        log_dir.mkdir()
+        (log_dir / "2026-09-29_fine.md").write_text("`my-card` fine\n")
+        (log_dir / "2026-09-29_aws-credentials.md").write_text(
+            "`my-card` but denylisted\n"
+        )
+        assert be.filtered_agent_log(log_dir, ("my-card",), today=self.REF) == {
+            "_AGENT_LOG/2026-09-29_fine.md": "`my-card` fine\n"
+        }
 
 
 class TestResolveRepoFiles:
@@ -405,6 +469,103 @@ class TestGuideHooksCarveOut:
         text = self.GUIDE_PATH.read_text(encoding="utf-8")
         assert "does not replace the reintegration step" in text
         assert "runs the project's own checks in full" in text
+
+
+class TestAgentLogZeroMatchLine:
+    """Zero `_AGENT_LOG` match: the zip ships without it and the script says so explicitly, in
+    dry-run as in a real run — never silence."""
+
+    def _log_dir(self, tmp_path: Path) -> Path:
+        log_dir = tmp_path / "_AGENT_LOG"
+        log_dir.mkdir()
+        (log_dir / f"{date.today().isoformat()}_unrelated.md").write_text(
+            "other work\n"
+        )
+        return log_dir
+
+    def test_dry_run_zero_match_prints_an_explicit_line(
+        self, tmp_path: Path, chantier: Path
+    ) -> None:
+        _write_card(chantier, "1-todo", "quiet-card")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "build_export.py"),
+                "--chantier",
+                str(chantier),
+                "--card",
+                "quiet-card",
+                "--agent-log-dir",
+                str(self._log_dir(tmp_path)),
+                "--out",
+                str(tmp_path / "export.zip"),
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "0 agent log file(s)" in result.stdout
+        assert "would ship no _AGENT_LOG entry" in result.stdout
+        assert not (tmp_path / "export.zip").exists()
+
+    def test_real_run_zero_match_ships_no_agent_log_and_says_so(
+        self, tmp_path: Path, chantier: Path
+    ) -> None:
+        _write_card(chantier, "1-todo", "quiet-card")
+        out = tmp_path / "export.zip"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "build_export.py"),
+                "--chantier",
+                str(chantier),
+                "--card",
+                "quiet-card",
+                "--agent-log-dir",
+                str(self._log_dir(tmp_path)),
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "shipped no _AGENT_LOG entry" in result.stdout
+        with zipfile.ZipFile(out) as zf:
+            assert not [n for n in zf.namelist() if n.startswith("_AGENT_LOG/")]
+
+    def test_real_run_with_a_mention_ships_that_entry(
+        self, tmp_path: Path, chantier: Path
+    ) -> None:
+        _write_card(chantier, "1-todo", "loud-card")
+        log_dir = tmp_path / "_AGENT_LOG"
+        log_dir.mkdir()
+        entry = f"{date.today().isoformat()}_mention.md"
+        (log_dir / entry).write_text("worked on `loud-card`\n")
+        out = tmp_path / "export.zip"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "build_export.py"),
+                "--chantier",
+                str(chantier),
+                "--card",
+                "loud-card",
+                "--agent-log-dir",
+                str(log_dir),
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "shipped no _AGENT_LOG entry" not in result.stdout
+        with zipfile.ZipFile(out) as zf:
+            assert [n for n in zf.namelist() if n.startswith("_AGENT_LOG/")] == [
+                f"_AGENT_LOG/{entry}"
+            ]
 
 
 class TestMainAtomicity:
