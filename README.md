@@ -336,6 +336,8 @@ pinky-agentic-plugins/
 │   │           │   └── reconcile.py
 │   │           └── SKILL.md
 │   ├── pc-snow/
+│   │   ├── agents/
+│   │   │   └── snowflake-guide.md
 │   │   ├── skills/
 │   │   │   ├── cortex/
 │   │   │   │   ├── references/
