@@ -1,0 +1,28 @@
+{
+  "description": "Alert before Read loads a dataset that looks like it holds personal data, and block a prompt whose @file mention would inline one (pc-privacy).",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script \"${CLAUDE_PLUGIN_ROOT}/hooks/pii_guard.py\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script \"${CLAUDE_PLUGIN_ROOT}/hooks/pii_guard.py\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

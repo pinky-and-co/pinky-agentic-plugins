@@ -1,6 +1,6 @@
 ---
 name: reintegrate
-description: "Reintegrate the results an external agent (Cortex/Snowsight, claude.ai web, any agent working outside Claude Code) produced — a zip or directory of the files it created or modified. Applies safely (new files OK, a locally-diverged file is refused not overwritten), classifies each Python file comments-only vs code-changed, runs the target repo's own verify loop, then hands off to `commit` — never an automatic commit/push/PR. Use when the user says 'réintègre ce zip', 'intègre le retour de <agent>', or hands you a directory of externally-produced files to bring back into a repo."
+description: "Reintegrate the results an external agent (Cortex/Snowsight, claude.ai web, any agent working outside Claude Code) produced — a zip or directory of the files it created or modified. Applies safely (new files OK, a locally-diverged file is refused not overwritten), classifies each Python file comments-only vs code-changed, runs the target repo's own verify loop, then hands off to `commit` — never an automatic commit/push/PR. Use when the user says 'réintègre ce zip', 'intègre le retour de …', or hands you a directory of externally-produced files to bring back into a repo."
 argument-hint: "<zip-or-directory> --repo <path> [--agent-log-dir <path>] [--card <id> ...]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/apply_reintegrate.py:*), Bash(git status:*), Bash(git diff:*), Bash(ruff check:*), Bash(ruff format:*), Bash(mypy:*), Bash(pytest:*), Bash(prek run:*), Bash(pre-commit run:*), Read, Skill
 ---

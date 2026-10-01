@@ -16,10 +16,18 @@ requires-python = ">=3.12"
 authors = [{ name = "Pinky & Co" }]
 
 [dependency-groups]
-# Just pytest: the pre-commit hooks (ruff/mypy/bandit/interrogate/darglint) are provisioned
-# hermetically by prek itself (language: python), not by this group — same split as
-# pinky-workspace's own dev group.
-dev = ["pytest"]
+# pytest + the pc-privacy Presidio stack (mcp, presidio, openpyxl, and the French spaCy model as
+# a direct-URL wheel) so the Presidio-gated tests run in CI instead of skipping; prek still
+# provisions its own hooks (ruff/mypy/bandit/interrogate/darglint) hermetically, untouched by
+# this group.
+dev = [
+    "pytest",
+    "mcp",
+    "presidio-analyzer",
+    "presidio-anonymizer",
+    "openpyxl",
+    "fr-core-news-md @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_md-3.8.0/fr_core_news_md-3.8.0-py3-none-any.whl",
+]
 
 # ── uv ───────────────────────────────────────────────────────────────────────
 [tool.uv]
@@ -29,6 +37,10 @@ required-version = ">=0.9.17"
 # republiée sur PyPI. Durée relative : uv la résout au lock, `grep exclude-newer-span
 # uv.lock` dit la fenêtre appliquée. Posée par `pinky repo distribute`, jamais éditée à la main.
 exclude-newer = "3 days"
+# presidio-anonymizer caps `cryptography<49`, whose releases carry known advisories (PKCS#7,
+# X.509 path building, DNS name constraints) that the dependency audit rejects. Nothing here uses
+# presidio's encrypt operator, so the cap is overridden rather than ignored.
+override-dependencies = ["cryptography>=50.0.0"]
 
 # No package to build (see the `[project]` comment) — bypass-selection tells hatchling not to
 # error looking for one, so `pip install -e . --group dev` still succeeds (it only needs to land

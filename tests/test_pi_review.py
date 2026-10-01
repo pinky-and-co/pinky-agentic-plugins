@@ -281,8 +281,7 @@ class TestReviewPoint(unittest.TestCase):
     @unittest.mock.patch("subprocess.run")
     def test_full_command_is_constructed_through_review_point(self, mock_run):
         # Oracle sur la ligne de commande réelle construite par review_point → run_pool,
-        # pas seulement sur le verdict — la card exige explicitement -p, -t read,
-        # --no-session et --model <provider>/<id>.
+        # pas seulement sur le verdict — la card exige explicitement -p, -t read et --model <provider>/<id>.
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="STATUS: OK\nJUSTIFICATION: fine.", stderr="", returncode=0
         )
@@ -296,7 +295,6 @@ class TestReviewPoint(unittest.TestCase):
                 "mlx/mlx-community/Qwen3.5-9B-MLX-4bit",
                 "-t",
                 "read",
-                "--no-session",
                 "--",
                 pi_review.build_prompt("/repo", "First thing", "detail"),
             ],
@@ -400,6 +398,12 @@ class TestMain(unittest.TestCase):
             rc = pi_review.main([str(self.project_dir / "absent.md"), "/repo"])
         self.assertEqual(rc, 1)
         self.assertIn("cannot read card", buf[0])
+
+
+class TestDefaultTimeout(unittest.TestCase):
+    def test_the_tool_loop_gets_the_pools_wall_clock_backstop(self):
+        # `review_point` passe des outils : une boucle d'exploration dure des minutes.
+        self.assertEqual(pi_review.DEFAULT_TIMEOUT, pi_review.ma.RUN_TIMEOUT)
 
 
 if __name__ == "__main__":

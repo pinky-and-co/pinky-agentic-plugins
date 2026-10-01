@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
+import subprocess
+import sys
 import unittest
 import unittest.mock
-import subprocess
 from pathlib import Path
-import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
 import model_adversarial as ma
@@ -66,7 +66,6 @@ class TestCliModelIdJoin(unittest.TestCase):
             "--model",
             model_arg,
             "--no-tools",
-            "--no-session",
             "--",
             "p",
         ]
@@ -90,7 +89,7 @@ class TestCliModelIdJoin(unittest.TestCase):
             env=unittest.mock.ANY,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=900,
             check=True,
         )
 
@@ -115,7 +114,7 @@ class TestCliModelIdJoin(unittest.TestCase):
             env=unittest.mock.ANY,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=900,
             check=True,
         )
 
@@ -138,7 +137,7 @@ class TestCliModelIdJoin(unittest.TestCase):
             env=unittest.mock.ANY,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=900,
             check=True,
         )
 
@@ -209,7 +208,6 @@ class TestModelAdversarialCLI(unittest.TestCase):
             "--model",
             "anthropic/claude-3-5-sonnet",
             "--no-tools",
-            "--no-session",
             "--",
             self.prompt,
         ]
@@ -219,7 +217,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             env=unittest.mock.ANY,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=900,
             check=True,
         )
 
@@ -230,7 +228,10 @@ class TestModelAdversarialCLI(unittest.TestCase):
     def test_cli_failover_on_rate_limit(self, mock_run):
         # Pool de deux modèles cli pour tester la bascule. Le premier appel échoue avec un 429
         # au format Mistral réel, le second réussit.
-        pool = [self.cli_entry, {**self.cli_entry, "name": "pi-model-2"}]
+        pool = [
+            self.cli_entry,
+            {**self.cli_entry, "name": "pi-model-2", "provider": "other-provider"},
+        ]
         mock_run.side_effect = [
             subprocess.CalledProcessError(
                 1, "pi", stderr="Mistral API error (429): too many requests"
@@ -261,7 +262,10 @@ class TestModelAdversarialCLI(unittest.TestCase):
 
     @unittest.mock.patch("subprocess.run")
     def test_cli_failover_on_insufficient_credit(self, mock_run):
-        pool = [self.cli_entry, {**self.cli_entry, "name": "pi-model-2"}]
+        pool = [
+            self.cli_entry,
+            {**self.cli_entry, "name": "pi-model-2", "provider": "other-provider"},
+        ]
         mock_run.side_effect = [
             subprocess.CalledProcessError(
                 1, "pi", stderr='402: {"message":"insufficient credit"}'
@@ -276,7 +280,10 @@ class TestModelAdversarialCLI(unittest.TestCase):
     def test_cli_failover_matches_stdout_too_not_only_stderr(self, mock_run):
         # Un fournisseur qui écrit son erreur sur stdout, pas stderr, doit quand même être
         # détecté — les deux flux combinés sont vérifiés, jamais stderr seul.
-        pool = [self.cli_entry, {**self.cli_entry, "name": "pi-model-2"}]
+        pool = [
+            self.cli_entry,
+            {**self.cli_entry, "name": "pi-model-2", "provider": "other-provider"},
+        ]
         mock_run.side_effect = [
             subprocess.CalledProcessError(
                 1, "pi", output="Mistral API error (429): too many requests", stderr=""

@@ -98,7 +98,6 @@ class TestCallMlx(unittest.TestCase):
                 "mlx/mlx-community/gemma-4-12b-it-4bit",
                 "-t",
                 "read",
-                "--no-session",
                 "--thinking",
                 "off",
                 "do the task",

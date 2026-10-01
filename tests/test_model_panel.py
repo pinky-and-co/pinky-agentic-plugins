@@ -160,9 +160,19 @@ class TestRunPanel(unittest.TestCase):
         self.assertEqual(
             resp.answers,
             [
-                mp.Answer(1, "glm-5-2", "glm says"),
-                mp.Answer(2, "mistral-medium-3.5", "mistral says"),
-                mp.Answer(3, "gemini-3.6-flash", "gemini says"),
+                mp.Answer(1, "glm-5-2", "glm says", "openrouter/glm-5-2 · 🟧 opus"),
+                mp.Answer(
+                    2,
+                    "mistral-medium-3.5",
+                    "mistral says",
+                    "mistral/mistral-medium-3.5 · 🟧 opus",
+                ),
+                mp.Answer(
+                    3,
+                    "gemini-3.6-flash",
+                    "gemini says",
+                    "gemini/gemini-3.6-flash · 🟪 sonnet",
+                ),
             ],
         )
         self.assertEqual(resp.skipped, [])
@@ -185,8 +195,13 @@ class TestRunPanel(unittest.TestCase):
         self.assertEqual(
             resp.answers,
             [
-                mp.Answer(1, "glm-5-2", "glm"),
-                mp.Answer(3, "gemini-3.6-flash", "gemini"),
+                mp.Answer(1, "glm-5-2", "glm", "openrouter/glm-5-2 · 🟧 opus"),
+                mp.Answer(
+                    3,
+                    "gemini-3.6-flash",
+                    "gemini",
+                    "gemini/gemini-3.6-flash · 🟪 sonnet",
+                ),
             ],
         )
         self.assertEqual(
@@ -339,6 +354,19 @@ class TestFormatPanel(unittest.TestCase):
         self.assertEqual(
             mp.format_panel(resp, requested=1),
             "[panel] 0/1 slots answered · skipped: slot 1 glm-5-2 (HTTP 401)",
+        )
+
+
+class TestFormatPanelLabel(unittest.TestCase):
+    def test_an_answer_with_a_label_is_tagged_with_it_instead_of_the_pool_name(self):
+        resp = mp.PanelResponse(
+            answers=[mp.Answer(1, "glm-5-2", "A", "openrouter/glm-5-2 · 🟧 opus")],
+            skipped=[],
+        )
+        self.assertEqual(
+            mp.format_panel(resp, requested=1),
+            "[panel] 1/1 slots answered\n\n"
+            "--- [slot 1 · openrouter/glm-5-2 · 🟧 opus] ---\nA",
         )
 
 

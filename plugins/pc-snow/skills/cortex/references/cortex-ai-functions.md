@@ -406,14 +406,12 @@ Validated pattern — a single-value helper handling both file and plain-text in
 ```python
 from snowflake.snowpark.functions import ai_extract, lit, to_file
 
+
 def extract(session, source: str, response_format: dict, from_file: bool = False):
     input_col = to_file(source) if from_file else lit(source)
-    row = (
-        session.range(1)
-        .select(ai_extract(input_col, response_format))
-        .collect()[0]
-    )
+    row = session.range(1).select(ai_extract(input_col, response_format)).collect()[0]
     return row[0]
+
 
 extract(session, "@doc_stage/kbis_001.pdf", response_format, from_file=True)
 extract(session, "some raw text to extract from", response_format, from_file=False)
@@ -465,7 +463,9 @@ first — the list keeps growing), fall back to `call_builtin`:
 ```python
 from snowflake.snowpark.functions import call_builtin, lit
 
-session.range(1).select(call_builtin("VECTOR_COSINE_SIMILARITY", lit(v1), lit(v2))).collect()
+session.range(1).select(
+    call_builtin("VECTOR_COSINE_SIMILARITY", lit(v1), lit(v2))
+).collect()
 ```
 
 Token counting: use `AI_COUNT_TOKENS` — GA since 2026-01-27, the canonical function (native Snowpark
@@ -504,9 +504,11 @@ input. Pattern validated in production (a SiS report-hub generating an AI descri
 
 ```python
 code_hash = hashlib.md5(code.encode()).hexdigest()
-cached = session.sql(f"SELECT RESULT FROM {CACHE} WHERE CODE_HASH = ?", params=[code_hash]).collect()
+cached = session.sql(
+    f"SELECT RESULT FROM {CACHE} WHERE CODE_HASH = ?", params=[code_hash]
+).collect()
 if cached and cached[0][0]:
-    return json.loads(str(cached[0][0]))            # hit → zero Cortex cost
+    return json.loads(str(cached[0][0]))  # hit → zero Cortex cost
 # miss → call ai_complete, then persist
 result_json = json.dumps(result, ensure_ascii=False)
 session.sql(

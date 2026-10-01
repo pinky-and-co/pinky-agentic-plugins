@@ -41,8 +41,12 @@ Each entry:
     local          true if this entry runs on this machine (e.g. MLX-SERVE) — absent/false means a
                    network call. Both selectors below tie-break on it so a local entry is tried
                    before an equally-ranked remote one, without special-casing a provider name.
-    timeout        optional seconds to wait for this entry, overriding the caller's default — for a
-                   slow provider that still answers well (NVIDIA NIM: 9–47s for a one-line reply)
+    timeout        optional wall-clock seconds for the whole `pi` run of this entry (tool loop
+                   included), overriding the caller's default — a backstop against a run that never
+                   ends; `pi` bounds each request itself
+    priority       optional integer, default 0, higher first: orders the providers inside each round
+                   of the selection's provider alternation — a generous provider opens every round
+                   without stacking its entries. Never outranks locality, cost or tier.
     thinking       optional pi thinking level (`off`, `low`, `medium`, …); absent → pi's own default.
                    `off` for a small local model, which a thinking pass drowns into an empty answer
 
@@ -58,12 +62,15 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import itertools
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
@@ -78,10 +85,14 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 DEFAULT_MODEL = "z-ai/glm-5.3"
+RUN_TIMEOUT = 900
 CHECK_PROMPT = "Reply with exactly: OK"
 CHECK_WORKERS = 4
 
 _TIER_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
+# Selection ranks: sonnet and opus are one capacity class — only a few entries carry the `opus`
+# label, and a queue built on it alone is held by whichever provider they share.
+_SELECTION_RANK = {"haiku": 0, "sonnet": 1, "opus": 1}
 
 # Prédicats de bascule du pool. Rate limit, out of memory et insufficient credit sont définitifs
 # (abandon sans retour) ; timeout, comme une réponse vide, est transitoire (un seul retour en fin
@@ -89,6 +100,7 @@ _TIER_RANK = {"haiku": 0, "sonnet": 1, "opus": 2}
 _RATE_LIMIT_RE = re.compile(r"\b429\b")
 _OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
+_ORGANIZATION_LIMIT_RE = re.compile(r"\borgani[sz]ation reached\b", re.IGNORECASE)
 _TIMEOUT_RE = re.compile(r"\btimed out\b")
 
 
@@ -145,20 +157,53 @@ def tier_rank(tier: str) -> int:
     return _TIER_RANK.get(tier, 0)
 
 
+def selection_rank(tier: str) -> int:
+    """Ordinal of a `capacity_tier` for candidate selection: sonnet and opus rank the same,
+    haiku below; unknown tiers sort lowest."""
+    return _SELECTION_RANK.get(tier, 0)
+
+
+def spread_providers(
+    entries: list[dict[str, Any]], key: Callable[[dict[str, Any]], Any]
+) -> list[dict[str, Any]]:
+    """`entries` sorted by `key`, each group of equal `key` then taken round-robin across
+    providers — never two entries of one provider back to back while another provider still has
+    one in the group.
+
+    A provider that is down or slow (NVIDIA NIM: 9–47s for a one-line reply) fails all its
+    entries alike; consecutive ones burn a full timeout each before any other provider is tried.
+    `key` decides which group comes first, so spreading never reorders across locality, cost or
+    aggregator priority. Within a group, entries are taken in descending `priority` (pool order
+    between equals): the provider holding the highest one opens each round, and a provider's own
+    entries come out highest `priority` first.
+    """
+    spread: list[dict[str, Any]] = []
+    for _, group in itertools.groupby(sorted(entries, key=key), key=key):
+        by_provider: dict[str, deque[dict[str, Any]]] = {}
+        for e in sorted(group, key=lambda e: -e.get("priority", 0)):
+            by_provider.setdefault(e["provider"], deque()).append(e)
+        queues = list(by_provider.values())
+        while queues:
+            spread.extend(q.popleft() for q in queues)
+            queues = [q for q in queues if q]
+    return spread
+
+
 def select_for_adversarial(
     pool: list[dict[str, Any]], floor_tier: str = "sonnet"
 ) -> list[dict[str, Any]]:
-    """Candidates for `adversarial`: never offline, at/above the capacity floor, direct before
-    aggregator (an aggregator is API-usage-only, never the plan held directly with the provider —
-    for a model reachable both ways, direct is at least as good, so it goes first).
+    """Candidates for `adversarial`: never offline, at/above the capacity floor (sonnet and opus
+    count the same), direct before aggregator (an aggregator is API-usage-only, never the plan held
+    directly with the provider — for a model reachable both ways, direct is at least as good, so
+    it goes first), providers alternating inside each of those groups (`spread_providers`).
     """
     candidates = [
         e
         for e in pool
         if e["kind"] != "offline"
-        and tier_rank(e["capacity_tier"]) >= tier_rank(floor_tier)
+        and selection_rank(e["capacity_tier"]) >= selection_rank(floor_tier)
     ]
-    return sorted(
+    return spread_providers(
         candidates,
         key=lambda e: (
             0 if e.get("local", False) else 1,
@@ -174,18 +219,23 @@ def select_for_delegation(
     paid, and among equally-priced entries the one just capable enough (frugal: don't spend an
     opus-tier free model on a haiku-tier task when a haiku-tier free one qualifies).
 
+    Sonnet and opus count as one tier (`selection_rank`); providers alternate inside each group of
+    equal cost, tier and locality (`spread_providers`).
+
     Offline is a real candidate here (free, `capacity_tier: haiku`) — a caller that resolves to a
     `kind: "offline"` entry must route to the separate `offline` MCP tool, never call it through
     `call_cli` (that would break its zero-egress guarantee).
     """
     candidates = [
-        e for e in pool if tier_rank(e["capacity_tier"]) >= tier_rank(task_tier)
+        e
+        for e in pool
+        if selection_rank(e["capacity_tier"]) >= selection_rank(task_tier)
     ]
-    return sorted(
+    return spread_providers(
         candidates,
         key=lambda e: (
             not e.get("free_tier", False),
-            tier_rank(e["capacity_tier"]),
+            selection_rank(e["capacity_tier"]),
             not e.get("local", False),
         ),
     )
@@ -218,6 +268,30 @@ def select_for_delegation_with_fallback(
 def resolve_model(cli_model: str | None = None) -> str | None:
     """CLI flag > PINKY_ADVERSARIAL_MODEL env > None (no override — use the pool)."""
     return cli_model or os.environ.get("PINKY_ADVERSARIAL_MODEL")
+
+
+_TIER_BADGES = {"haiku": "🟦", "sonnet": "🟪", "opus": "🟧"}
+
+
+def answer_label(entry: dict[str, Any]) -> str:
+    """How a reply names the entry that produced it: `provider/model · <badge> <tier>`.
+
+    The model id is cut to its last path segment (`z-ai/glm-5.3` → `glm-5.3`). The tier is the only
+    ordinal attribute, so it alone carries a colour — squares, never the circles that mark a
+    finding's severity in a review.
+
+    Args:
+        entry: the pool entry that answered.
+
+    Returns:
+        The label; a tier with no badge is shown as plain text.
+    """
+    who = f"{entry['provider']}/{entry['model'].split('/')[-1]}"
+    tier = entry.get("capacity_tier")
+    if not tier:
+        return who
+    badge = _TIER_BADGES.get(tier)
+    return f"{who} · {badge} {tier}" if badge else f"{who} · {tier}"
 
 
 def cli_model_id(entry: dict[str, Any]) -> str:
@@ -272,6 +346,23 @@ def is_insufficient_credit(text: str) -> bool:
         True if a `402` marker is present.
     """
     return bool(_INSUFFICIENT_CREDIT_RE.search(text))
+
+
+def is_provider_wide_limit(text: str) -> bool:
+    """Whether `text` shows a refusal that covers every model of the provider for this run: a 402
+    (no balance) or a 429 worded for the whole organization (`Your organization reached its limit
+    …`). A 429 that names one model — a per-model quota, a tokens-per-minute budget — says nothing
+    about the provider's other models.
+
+    Args:
+        text: the combined output of one `pi` invocation.
+
+    Returns:
+        True if the limit is the provider's, not one model's.
+    """
+    if is_insufficient_credit(text):
+        return True
+    return is_rate_limited(text) and bool(_ORGANIZATION_LIMIT_RE.search(text))
 
 
 def is_timeout(text: str) -> bool:
@@ -394,6 +485,128 @@ def build_prompt(task: str, files: list[str]) -> str:
     return "\n\n".join(parts)
 
 
+_MAX_UNTRACKED_BYTES = 200_000
+_MAX_FILE_DIFF_CHARS = 200_000
+_DIFF_HEADER_RE = re.compile(r"^diff --git a/.+? b/(?P<path>.+)$")
+
+
+DIFF_SCOPES = ("all", "staged", "unstaged")
+
+
+def project_dir() -> str:
+    """The directory this session works in: `CLAUDE_PROJECT_DIR`, else the current directory."""
+    return os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+
+
+def _git(repo: str, *args: str, check: bool = True) -> str:
+    """Stdout of `git -C <repo> <args>`, decoded as UTF-8 with undecodable bytes replaced."""
+    return subprocess.run(
+        ["git", "-C", repo, *args],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=check,
+    ).stdout
+
+
+def repo_root(cwd: str | None = None) -> str:
+    """The top-level directory of the repository containing `cwd` (default `project_dir()`).
+
+    Args:
+        cwd: a directory inside the repository; defaults to `project_dir()`.
+
+    Returns:
+        The repository's top-level directory.
+
+    Raises:
+        subprocess.CalledProcessError: `cwd` is not inside a git repository.
+        OSError: `git` is not installed.
+    """
+    return _git(cwd or project_dir(), "rev-parse", "--show-toplevel").strip()
+
+
+def _cap_file_diffs(diff: str) -> str:
+    """`diff` with each file's block cut at `_MAX_FILE_DIFF_CHARS`, a note naming the file in
+    place of the cut part — a lockfile or a generated file must not drown the review."""
+    blocks = re.split(r"(?m)^(?=diff --git )", diff)
+    capped: list[str] = []
+    for block in blocks:
+        if len(block) > _MAX_FILE_DIFF_CHARS:
+            head = _DIFF_HEADER_RE.match(block.splitlines()[0])
+            path = head["path"] if head else "?"
+            kept = block[:_MAX_FILE_DIFF_CHARS].rpartition("\n")[0]
+            block = (
+                f"{kept}\n# diff truncated: {path} "
+                f"({len(block)} chars > {_MAX_FILE_DIFF_CHARS})\n"
+            )
+        capped.append(block)
+    return "".join(capped)
+
+
+def diff_against(base: str, cwd: str | None = None, scope: str = "all") -> str:
+    """Unified diff of what this work changed since it forked from `base`.
+
+    Covers commits, staged and unstaged edits of tracked files, and untracked files that are not
+    git-ignored (a worker never commits, so the change under review is usually still in the
+    working tree). The whole repository is diffed, whatever subdirectory `cwd` points into. A
+    tracked file's diff past `_MAX_FILE_DIFF_CHARS` is cut there; an untracked file past
+    `_MAX_UNTRACKED_BYTES`, or one that is not a regular file (a symlink, a nested repository), is
+    replaced by a one-line note. The diff goes to a third-party model:
+    an untracked file that is not git-ignored leaves the machine with it.
+
+    `scope` narrows it: `all` (the default) is fork point → working tree; `staged` is fork point →
+    index; `unstaged` is index → working tree. Untracked files count as unstaged.
+
+    Args:
+        base: the branch or ref the work forked from (`main`); `HEAD` for work not yet committed.
+        cwd: a directory inside the repository to diff; defaults to `project_dir()`.
+        scope: one of `DIFF_SCOPES`.
+
+    Returns:
+        The diff text; empty when nothing changed.
+
+    Raises:
+        ValueError: `base` starts with `-` — git would read it as an option — or `scope` is
+            not one of `DIFF_SCOPES`.
+        subprocess.CalledProcessError: git failed (not a repository, unknown `base`).
+        OSError: `git` is not installed.
+    """
+    if base.startswith("-"):
+        raise ValueError(f"base {base!r} looks like an option, not a ref")
+    if scope not in DIFF_SCOPES:
+        raise ValueError(f"scope {scope!r} is not one of {', '.join(DIFF_SCOPES)}")
+    repo = repo_root(cwd)
+    fork = _git(repo, "merge-base", base, "HEAD").strip()
+    plain = ("diff", "--no-ext-diff", "--no-color")
+    tracked = {
+        "all": (fork,),
+        "staged": ("--cached", fork),
+        "unstaged": (),
+    }[scope]
+    parts = [_cap_file_diffs(_git(repo, *plain, *tracked))]
+    if scope == "staged":
+        return parts[0]
+    untracked = _git(repo, "ls-files", "-z", "--others", "--exclude-standard")
+    for path in filter(None, untracked.split("\0")):
+        info = (Path(repo) / path).lstat()
+        if not stat.S_ISREG(info.st_mode):
+            parts.append(f"# untracked entry skipped: {path} (not a regular file)\n")
+            continue
+        if info.st_size > _MAX_UNTRACKED_BYTES:
+            parts.append(
+                f"# untracked file skipped: {path} "
+                f"({info.st_size} bytes > {_MAX_UNTRACKED_BYTES})\n"
+            )
+            continue
+        # `--no-index` exits 1 when the two sides differ — a new file always does.
+        parts.append(
+            _git(repo, *plain, "--no-index", "--", os.devnull, path, check=False)
+        )
+    return "".join(parts)
+
+
 _HTTP_REFUSAL = (
     "kind 'http' is no longer supported — declare the provider in pi "
     "(~/.pi/agent/models.json) and set kind 'cli'"
@@ -460,7 +673,6 @@ def call_cli(
         "--model",
         cli_model_id(entry),
         *tool_args,
-        "--no-session",
         *(["--thinking", entry["thinking"]] if entry.get("thinking") else []),
         "--",
         prompt,
@@ -485,19 +697,25 @@ def failure_detail(exc: subprocess.CalledProcessError) -> str:
     return lines[-1] if lines else f"exit {exc.returncode}, no output"
 
 
-def build_pool_log_line(when: datetime, name: str, kind: str) -> str:
-    """One `run_pool` debug log line: an ISO-8601 UTC timestamp, the entry name, the failure kind.
+def build_pool_log_line(
+    when: datetime, name: str, kind: str, fields: dict[str, object] | None = None
+) -> str:
+    """One `run_pool` debug log line: an ISO-8601 UTC timestamp, the entry name, the event kind,
+    then ` key=value` for each of `fields`, in order.
 
     Args:
         when: the event's timestamp — passed in rather than read internally, so a caller can pin
             it and assert the line's exact text.
-        name: the pool entry's `name`, or `"(pool)"` for the final pool-exhaustion event.
-        kind: a short label for what failed (`"empty answer"`, `"timeout"`, `"exhausted"`, ...).
+        name: the pool entry's `name`, or `"(pool)"` for a pool-level event.
+        kind: a short label for what happened (`"answered"`, `"empty answer"`, `"timeout"`,
+            `"start"`, `"exhausted"`, ...).
+        fields: the call's context — model id, prompt size, timeout, attempt, tools, duration.
 
     Returns:
         The line, newline-terminated.
     """
-    return f"{when.isoformat()} {name} {kind}\n"
+    detail = "".join(f" {k}={v}" for k, v in (fields or {}).items())
+    return f"{when.isoformat()} {name} {kind}{detail}\n"
 
 
 def _pool_log_path() -> Path:
@@ -515,7 +733,7 @@ def _pool_log_path() -> Path:
     )
 
 
-def log_pool_event(name: str, kind: str) -> None:
+def log_pool_event(name: str, kind: str, **fields: object) -> None:
     """Best-effort append of one `build_pool_log_line` line to `run_pool`'s debug log.
 
     Swallows any failure to write it silently (missing `~/.claude/debug/` and unable to create it,
@@ -523,10 +741,11 @@ def log_pool_event(name: str, kind: str) -> None:
     break a `run_pool` call that otherwise succeeded.
 
     Args:
-        name: the pool entry's `name`, or `"(pool)"` for the final pool-exhaustion event.
-        kind: a short label for what failed.
+        name: the pool entry's `name`, or `"(pool)"` for a pool-level event.
+        kind: a short label for what happened.
+        **fields: the context appended to the line, in keyword order.
     """
-    line = build_pool_log_line(datetime.now(timezone.utc), name, kind)
+    line = build_pool_log_line(datetime.now(timezone.utc), name, kind, fields)
     try:
         path = _pool_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -536,10 +755,33 @@ def log_pool_event(name: str, kind: str) -> None:
         pass
 
 
+def call_context(
+    entry: dict[str, Any],
+    prompt: str,
+    timeout: int,
+    tools: list[str] | None,
+    attempt: int,
+) -> dict[str, object]:
+    """What a `run_pool` log line says about one call — enough to tell, afterwards, why an entry
+    answered in one run and not in the next: the exact model id, how big the prompt was, how long
+    it was given, which attempt this is, and whether the model had tools.
+    """
+    return {
+        "model": cli_model_id(entry),
+        "prompt_chars": len(prompt),
+        "timeout": f"{timeout}s",
+        "attempt": attempt,
+        "tools": ",".join(tools) if tools else "none",
+    }
+
+
+_LOGGED_ERROR_CHARS = 200
+
+
 def run_pool(
     entries: list[dict[str, Any]],
     prompt: str,
-    timeout: int = 180,
+    timeout: int = RUN_TIMEOUT,
     tools: list[str] | None = None,
 ) -> PoolResult:
     """Try each queued entry in order, first non-empty success wins.
@@ -550,21 +792,35 @@ def run_pool(
     Shared by the CLI (`main`), the MCP tool and `pi_review`, so a fallback fix lands once.
 
     `is_rate_limited` / `is_out_of_memory` / `is_insufficient_credit` mean the provider refuses
-    to serve for the rest of this run: the entry is dropped for good, never requeued. An empty
-    answer or a timeout (`is_timeout`, or a `subprocess.TimeoutExpired`) is transient: the entry
-    is appended to the end of the remaining queue once; a second such failure from the same entry
-    drops it for good — at most `2 * len(entries)` attempts, never an infinite loop. Trade-off: a
+    to serve for the rest of this run: the entry is dropped for good, never requeued. A 402 or an
+    organization-wide 429 (`is_provider_wide_limit`) is the provider's own, so its other queued
+    entries are skipped too; a 429 naming one model skips only that entry. An empty
+    answer or a timeout `pi` itself reports (`is_timeout`) is transient: the entry is appended to
+    the end of the remaining queue once; a second such failure from the same entry drops it for
+    good — at most `2 * len(entries)` attempts, never an infinite loop. `timeout` is the wall
+    clock of the whole `pi` run, tool loop included — `pi` bounds each request itself
+    (`retry.provider.timeoutMs`, `httpIdleTimeoutMs`) — so it is a backstop against a run that
+    never ends, and a `subprocess.TimeoutExpired` drops the entry without a requeue: a second
+    attempt would repeat the whole exploration. Trade-off: a
     pool where every entry times out now takes up to twice as long to exhaust, since each gets a
     second attempt before being dropped — deliberate, in exchange for surviving a transient blip.
     Any other non-zero exit is a terminal stop for the whole pool, not a fall-through.
 
-    Every failure signal, and the pool's own exhaustion, is logged through `log_pool_event`,
-    best-effort.
+    Every call, its outcome and the pool's own start and exhaustion are logged through
+    `log_pool_event` with the call's context (`call_context`) and its duration, best-effort.
     """
     last_error: str | None = None
     env = secret_env()
     queue: deque[int] = deque(range(len(entries)))
     requeued: set[int] = set()
+    attempts: dict[int, int] = {}
+    limited_providers: set[str] = set()
+    log_pool_event(
+        "(pool)",
+        "start",
+        entries=",".join(e["name"] for e in entries),
+        prompt_chars=len(prompt),
+    )
 
     def requeue_once(idx: int) -> None:
         """Append `idx` to the end of the queue on its first transient failure only."""
@@ -589,12 +845,26 @@ def run_pool(
             last_error = f"{entry['name']}: cli entries require a 'model' field"
             log_pool_event(entry["name"], "missing model field")
             continue
+        if entry.get("provider") in limited_providers:
+            log_pool_event(
+                entry["name"], "skipped (provider limited)", provider=entry["provider"]
+            )
+            continue
+        attempts[idx] = attempts.get(idx, 0) + 1
+        call_timeout = entry_timeout(entry, timeout)
+        context = call_context(entry, prompt, call_timeout, tools, attempts[idx])
+        started = time.monotonic()
         try:
-            answer = call_cli(entry, prompt, entry_timeout(entry, timeout), tools, env)
+            answer = call_cli(entry, prompt, call_timeout, tools, env)
         except subprocess.CalledProcessError as e:
             # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
             # stdout pendant que stderr porte autre chose.
             combined = f"{e.stdout or ''}\n{e.stderr or ''}"
+            seen = {
+                **context,
+                "elapsed": f"{time.monotonic() - started:.1f}s",
+                "error": failure_detail(e)[:_LOGGED_ERROR_CHARS],
+            }
             if (
                 is_rate_limited(combined)
                 or is_out_of_memory(combined)
@@ -604,33 +874,55 @@ def run_pool(
                 # deux marqueurs à la fois (ex. un 429 dont le corps mentionne aussi un timeout
                 # amont) reste jamais-requeue plutôt que transitoire.
                 last_error = f"{entry['name']}: {combined.strip()}"
+                if is_provider_wide_limit(failure_detail(e)):
+                    # Solde ou limite d'organisation : ses autres entrées échoueraient pareil.
+                    # Un 429 qui nomme un modèle, ou un out-of-memory, ne concerne que lui.
+                    limited_providers.add(entry["provider"])
                 log_pool_event(
-                    entry["name"], "rate limit / out of memory / insufficient credit"
+                    entry["name"],
+                    "rate limit / out of memory / insufficient credit",
+                    **seen,
                 )
                 continue
             if is_timeout(combined):
                 last_error = f"{entry['name']}: {combined.strip()}"
-                log_pool_event(entry["name"], "timeout")
+                log_pool_event(entry["name"], "timeout", **seen)
                 requeue_once(idx)
                 continue
-            log_pool_event(entry["name"], "critical failure")
+            log_pool_event(entry["name"], "critical failure", **seen)
             return PoolResult(
                 None, f"{entry['name']} critical failure: {combined.strip()}"
             )
         except subprocess.TimeoutExpired as e:
             last_error = f"{entry['name']}: {e}"
-            log_pool_event(entry["name"], "timeout")
-            requeue_once(idx)
+            log_pool_event(
+                entry["name"],
+                "run timeout",
+                **context,
+                elapsed=f"{time.monotonic() - started:.1f}s",
+            )
             continue
         except OSError as e:
             last_error = f"{entry['name']}: {e}"
-            log_pool_event(entry["name"], "os error")
+            log_pool_event(
+                entry["name"],
+                "os error",
+                **context,
+                elapsed=f"{time.monotonic() - started:.1f}s",
+                error=str(e)[:_LOGGED_ERROR_CHARS],
+            )
             continue
         else:
+            answered = {
+                **context,
+                "elapsed": f"{time.monotonic() - started:.1f}s",
+                "answer_chars": len(answer.strip()),
+            }
             if answer.strip():
+                log_pool_event(entry["name"], "answered", **answered)
                 return PoolResult(entry, answer)
             last_error = f"{entry['name']}: empty answer"
-            log_pool_event(entry["name"], "empty answer")
+            log_pool_event(entry["name"], "empty answer", **answered)
             requeue_once(idx)
     log_pool_event("(pool)", "exhausted")
     return PoolResult(None, last_error)

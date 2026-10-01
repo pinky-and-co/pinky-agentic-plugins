@@ -5,7 +5,8 @@ export marker, and assemble the archive an external agent receives.
 The repo code subtree is computed elsewhere (`export_subtree`, the `pc-delegate` MCP tool — the
 one place a third-party dependency, `grimp`, is allowed in this plugin) and passed in here as a
 plain list of repo-relative paths; this script's own job is deterministic: card selection and
-state, the secrets denylist, and zipping — no reasoning, no network, no repo-graph computation.
+state, the secrets denylist, the `_AGENT_LOG` relevance filter, and zipping — no reasoning, no
+network, no repo-graph computation.
 
 Sequencing is deliberate: every card's new content is computed first (pure — nothing written), the
 zip is built and fully written next, and only once that succeeds are the cards actually moved on
@@ -23,12 +24,15 @@ from __future__ import annotations
 import argparse
 import sys
 import zipfile
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
 import secrets_filter
 
 _COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress", "4-done")
+
+_AGENT_LOG_WINDOW_DAYS = 60
 
 
 class ExportError(Exception):
@@ -110,15 +114,48 @@ def chantier_tree_listing(chantier_dir: Path) -> str:
     return "\n".join(paths) + "\n"
 
 
-def filtered_agent_log(agent_log_dir: Path) -> dict[str, str]:
-    """Every `.md` file under *agent_log_dir*, denylist-excluded and local-path-redacted —
-    `{repo-relative-name: content}`."""
+def _entry_date(name: str) -> date | None:
+    """The date read off an `_AGENT_LOG` entry's `YYYY-MM-DD_` filename prefix — None when the
+    prefix is absent, not dash-shaped (`fromisoformat` also accepts the basic `YYYYMMDD` form,
+    which is not this journal's convention), or not a valid ISO date. An undatable entry is
+    simply out of the window, never an error: the journal's naming is a convention, not a
+    contract enforced here."""
+    if name[4:5] != "-" or name[7:8] != "-" or name[10:11] != "_":
+        return None
+    try:
+        return date.fromisoformat(name[:10])
+    except ValueError:
+        return None
+
+
+def filtered_agent_log(
+    agent_log_dir: Path,
+    card_slugs: Sequence[str],
+    *,
+    today: date | None = None,
+) -> dict[str, str]:
+    """`.md` entries under *agent_log_dir* relevant to the exported cards — an entry survives only
+    if its content mentions one of *card_slugs* as a substring (which covers the backtick, bold and
+    card-path forms) AND its `YYYY-MM-DD_` filename prefix dates it within the
+    `_AGENT_LOG_WINDOW_DAYS` days preceding *today* (default: the run's date). A chantier token
+    (`CHANTIER{NNNN}`, bare number) never qualifies on its own. Relevance is decided on the raw
+    text, before redaction — a slug cited inside a local path counts as a mention even though the
+    shipped content has that path redacted. Survivors are still denylist-excluded and
+    local-path-redacted — `{repo-relative-name: content}`."""
+    ref = today if today is not None else date.today()
     result: dict[str, str] = {}
     for p in sorted(agent_log_dir.glob("*.md")):
         rel = f"_AGENT_LOG/{p.name}"
         if secrets_filter.is_denied(rel):
             continue
-        result[rel] = secrets_filter.redact_local_paths(p.read_text(encoding="utf-8"))
+        raw = p.read_text(encoding="utf-8")
+        entry_day = _entry_date(p.name)
+        age = (ref - entry_day).days if entry_day is not None else None
+        if age is None or not 0 <= age <= _AGENT_LOG_WINDOW_DAYS:
+            continue
+        if not any(slug in raw for slug in card_slugs):
+            continue
+        result[rel] = secrets_filter.redact_local_paths(raw)
     return result
 
 
@@ -211,7 +248,8 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        today = date.today().isoformat()
+        run_date = date.today()
+        today = run_date.isoformat()
         card_paths = [find_card(args.chantier, cid) for cid in args.card_ids]
         cards = {
             f"{card_id}.md": _exported_content(card_path, today=today)
@@ -219,7 +257,11 @@ def main() -> int:
         }
 
         chantier_tree = chantier_tree_listing(args.chantier)
-        agent_log = filtered_agent_log(args.agent_log_dir) if args.agent_log_dir else {}
+        agent_log = (
+            filtered_agent_log(args.agent_log_dir, args.card_ids, today=run_date)
+            if args.agent_log_dir
+            else {}
+        )
         guide_content = args.guide.read_text(encoding="utf-8") if args.guide else None
         repo_paths, excluded = (
             _resolve_repo_files(args.repo, args.repo_files)
@@ -234,6 +276,11 @@ def main() -> int:
             )
             for rel in excluded:
                 print(f"🚫 would exclude (secrets denylist): {rel}")
+            if args.agent_log_dir and not agent_log:
+                print(
+                    "🚫 would ship no _AGENT_LOG entry (no entry mentions an exported "
+                    f"card's slug within the last {_AGENT_LOG_WINDOW_DAYS} days)"
+                )
             return 0
 
         try:
@@ -259,6 +306,11 @@ def main() -> int:
     print(f"wrote {args.out} — {len(cards)} card(s), {len(repo_paths)} repo file(s)")
     for rel in excluded:
         print(f"🚫 excluded (secrets denylist): {rel}")
+    if args.agent_log_dir and not agent_log:
+        print(
+            f"🚫 shipped no _AGENT_LOG entry (no entry mentions an exported card's slug "
+            f"within the last {_AGENT_LOG_WINDOW_DAYS} days)"
+        )
     print("\n--- suggested prompt for the external agent's chat ---")
     print(suggested_prompt(args.card_ids))
     return 0

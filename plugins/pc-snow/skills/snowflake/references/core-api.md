@@ -19,6 +19,7 @@ root = Root(session)
 
 # From a connector (local / CI)
 from snowflake.connector import connect
+
 root = Root(connect(**CONNECTION_PARAMETERS))
 ```
 
@@ -38,14 +39,17 @@ All Snowflake objects follow the same three-class pattern:
 
 ```python
 # Create
-task_ref = root.databases["mydb"].schemas["myschema"].tasks.create(
-    Task(name="mytask", definition="CALL MY_SP()"),
-    mode=CreateMode.or_replace
+task_ref = (
+    root.databases["mydb"]
+    .schemas["myschema"]
+    .tasks.create(
+        Task(name="mytask", definition="CALL MY_SP()"), mode=CreateMode.or_replace
+    )
 )
 
 # Fetch existing
 task_ref = root.databases["mydb"].schemas["myschema"].tasks["mytask"]
-task_obj = task_ref.fetch()   # returns Task model with current state
+task_obj = task_ref.fetch()  # returns Task model with current state
 
 # Alter
 task_ref.create_or_alter(Task(name="mytask", definition="CALL MY_SP_V2()"))
@@ -61,9 +65,9 @@ task_ref.drop(if_exists=True)
 ```python
 from snowflake.core import CreateMode
 
-CreateMode.error_if_exists   # default — raises ConflictError if exists (≈ CREATE)
-CreateMode.or_replace        # ≈ CREATE OR REPLACE
-CreateMode.if_not_exists     # ≈ CREATE IF NOT EXISTS
+CreateMode.error_if_exists  # default — raises ConflictError if exists (≈ CREATE)
+CreateMode.or_replace  # ≈ CREATE OR REPLACE
+CreateMode.if_not_exists  # ≈ CREATE IF NOT EXISTS
 ```
 
 pinky-provider convention: use `or_replace` for idempotent deploys, `if_not_exists` for bootstrap objects.
@@ -144,41 +148,40 @@ from snowflake.core.task import Cron
 
 task = Task(
     name="MY_TASK",
-    definition="CALL MY_SCHEMA.MY_SP(PARSE_JSON('{\"run_date\": \"2026-01-01\"}'))",
-
+    definition='CALL MY_SCHEMA.MY_SP(PARSE_JSON(\'{"run_date": "2026-01-01"}\'))',
     # Serverless (no warehouse)
     user_task_managed_initial_warehouse_size="XSMALL",  # initial size hint only
     serverless_task_min_statement_size="XSMALL",
     serverless_task_max_statement_size="MEDIUM",
-
     # Schedule — only on root task
     schedule=Cron("0 6 * * *", "Europe/Paris"),  # daily at 06:00 Paris
-
     # DAG
-    predecessors=["SCHEMA.PARENT_TASK"],          # list of fully qualified task names
+    predecessors=["SCHEMA.PARENT_TASK"],  # list of fully qualified task names
     condition="SYSTEM$STREAM_HAS_DATA('MY_STREAM')",
-
     # Resilience
     suspend_task_after_num_failures=3,
     task_auto_retry_attempts=1,
-    user_task_timeout_ms=3_600_000,               # 1 hour
-
+    user_task_timeout_ms=3_600_000,  # 1 hour
     comment="Managed by snowflake-provider",
 )
 
-task_ref = root.databases["db"].schemas["schema"].tasks.create(task, mode=CreateMode.or_replace)
+task_ref = (
+    root.databases["db"]
+    .schemas["schema"]
+    .tasks.create(task, mode=CreateMode.or_replace)
+)
 ```
 
 ### TaskResource actions
 
 ```python
-task_ref.execute()              # trigger immediately (ignores schedule)
+task_ref.execute()  # trigger immediately (ignores schedule)
 task_ref.execute(retry_last=True)  # retry the last failed run
-task_ref.resume()               # un-suspend
-task_ref.suspend()              # suspend
+task_ref.resume()  # un-suspend
+task_ref.suspend()  # suspend
 task_ref.create_or_alter(task)  # idempotent update — full object expected
 task_ref.drop(if_exists=True)
-task_ref.fetch()                # returns Task model with current server state
+task_ref.fetch()  # returns Task model with current server state
 ```
 
 **Important**: `create_or_alter()` expects the FULL task model. Any field not set will be set to NULL. Always pass all fields, not just changed ones.
@@ -192,8 +195,8 @@ from snowflake.core.dynamic_table import DynamicTable, DownstreamLag, TargetLag
 
 dt = DynamicTable(
     name="MY_DT",
-    target_lag=TargetLag(lag="1 minute"),         # or DownstreamLag() for downstream mode
-    warehouse="MY_WH",                             # always required — no serverless option for Dynamic Tables (Adaptive is the recommended type, see warehouses.md)
+    target_lag=TargetLag(lag="1 minute"),  # or DownstreamLag() for downstream mode
+    warehouse="MY_WH",  # always required — no serverless option for Dynamic Tables (Adaptive is the recommended type, see warehouses.md)
     query="SELECT * FROM MY_SOURCE_TABLE",
     comment="Managed by snowflake-provider",
 )
@@ -207,8 +210,8 @@ root.databases["db"].schemas["schema"].dynamic_tables.create(
 ```python
 dt_ref.suspend()
 dt_ref.resume()
-dt_ref.refresh()       # trigger immediate refresh
-dt_ref.fetch()         # returns DynamicTable model
+dt_ref.refresh()  # trigger immediate refresh
+dt_ref.fetch()  # returns DynamicTable model
 dt_ref.drop()
 ```
 
@@ -224,13 +227,19 @@ table = Table(
     columns=[
         TableColumn(name="ID", datatype="NUMBER(38,0)", nullable=False),
         TableColumn(name="NAME", datatype="VARCHAR(256)"),
-        TableColumn(name="CREATED_AT", datatype="TIMESTAMP_NTZ", default_value="CURRENT_TIMESTAMP()"),
+        TableColumn(
+            name="CREATED_AT",
+            datatype="TIMESTAMP_NTZ",
+            default_value="CURRENT_TIMESTAMP()",
+        ),
     ],
     primary_key=PrimaryKey(column_names=["ID"]),
     comment="Managed by snowflake-provider",
 )
 
-root.databases["db"].schemas["schema"].tables.create(table, mode=CreateMode.if_not_exists)
+root.databases["db"].schemas["schema"].tables.create(
+    table, mode=CreateMode.if_not_exists
+)
 ```
 
 ---
@@ -277,7 +286,9 @@ from snowflake.core import Clone, PointOfTime
 # Clone a table at a point in time
 root.databases["db"].schemas["schema"].tables.create(
     Table(name="MY_TABLE_BACKUP"),
-    clone=Clone(source="MY_TABLE", point_of_time=PointOfTimeOffset(reference="before", when="1"))
+    clone=Clone(
+        source="MY_TABLE", point_of_time=PointOfTimeOffset(reference="before", when="1")
+    ),
 )
 ```
 
@@ -289,8 +300,8 @@ Every resource method has an `_async` variant returning `PollingOperation`:
 
 ```python
 op = task_ref.execute_async()
-result = op.result()       # blocks until complete
-op.cancel()                # cancel if still running
+result = op.result()  # blocks until complete
+op.cancel()  # cancel if still running
 ```
 
 ---

@@ -134,8 +134,7 @@ session = Session.builder.configs({...}).create()
 root = Root(session)
 
 search_service = (
-    root
-    .databases["my_db"]
+    root.databases["my_db"]
     .schemas["my_schema"]
     .cortex_search_services["minute_culture_search"]
 )
@@ -144,7 +143,7 @@ search_service = (
 resp = search_service.search(
     query="comment fonctionne la photosynthèse",
     columns=["titre", "contenu", "source", "video_url"],
-    limit=3
+    limit=3,
 )
 
 # With attribute filter
@@ -152,23 +151,18 @@ resp = search_service.search(
     query="théorème de Pythagore triangle rectangle",
     columns=["titre", "contenu", "source", "video_url"],
     filter={"@eq": {"matiere": "maths"}},
-    limit=2
+    limit=2,
 )
 
 # With combined filter (AND)
 resp = search_service.search(
     query="révolution française causes",
     columns=["titre", "contenu", "video_url"],
-    filter={
-        "@and": [
-            {"@eq": {"matiere": "histoire"}},
-            {"@eq": {"niveau": "4e"}}
-        ]
-    },
-    limit=2
+    filter={"@and": [{"@eq": {"matiere": "histoire"}}, {"@eq": {"niveau": "4e"}}]},
+    limit=2,
 )
 
-results = resp.results   # list of dicts
+results = resp.results  # list of dicts
 ```
 
 ### Filter operators

@@ -303,6 +303,9 @@ pinky-agentic-plugins/
 │   │   │       └── SKILL.md
 │   │   └── README.md
 │   ├── pc-privacy/
+│   │   ├── hooks/
+│   │   │   ├── hooks.json
+│   │   │   └── pii_guard.py
 │   │   ├── mcp/
 │   │   │   ├── anonymize.py
 │   │   │   └── pc_privacy_server.py
@@ -333,6 +336,8 @@ pinky-agentic-plugins/
 │   │           │   └── reconcile.py
 │   │           └── SKILL.md
 │   ├── pc-snow/
+│   │   ├── agents/
+│   │   │   └── snowflake-guide.md
 │   │   ├── skills/
 │   │   │   ├── cortex/
 │   │   │   │   ├── references/
@@ -385,6 +390,7 @@ pinky-agentic-plugins/
 │   ├── test_agent_log_writer.py
 │   ├── test_agents_md_hook.py
 │   ├── test_anonymize.py
+│   ├── test_apply_anonymization.py
 │   ├── test_apply_reintegrate.py
 │   ├── test_branch_guard.py
 │   ├── test_build_export.py
@@ -392,6 +398,8 @@ pinky-agentic-plugins/
 │   ├── test_card_discipline.py
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
+│   ├── test_detect_findings.py
+│   ├── test_detect_format.py
 │   ├── test_direct_command_hooks.py
 │   ├── test_drop_card_sh.py
 │   ├── test_guard.py
@@ -413,6 +421,7 @@ pinky-agentic-plugins/
 │   ├── test_pending_gate.py
 │   ├── test_pending_user_action_channel.py
 │   ├── test_pi_review.py
+│   ├── test_pii_guard.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
 │   ├── test_pr_overlap_guard.py

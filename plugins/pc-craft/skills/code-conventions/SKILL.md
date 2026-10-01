@@ -1,6 +1,6 @@
 ---
 name: code-conventions
-description: Generic engineering conventions for a multi-repo/multi-lib suite — no-framework web app layout (HTML/CSS/JS), library API surface (public vs module-private), Python CLI help and output (--help, status, color, prompts), and third-party bug reproduction tracking. No infra content yet.
+description: Generic engineering conventions for a multi-repo/multi-lib suite — no-framework web app layout (HTML/CSS/JS), library API surface (public vs module-private), Python CLI help and output (--help, status, color, prompts), and third-party bug reproduction tracking. Use when writing or reviewing a no-framework web app, a library's API surface, a Python CLI, or a third-party bug reproduction. No infra content yet.
 user-invocable: false
 metadata:
   source: original + cli-developer skill (Jeffallan/claude-skills, MIT) — color/TTY layer of references/cli.md adapted
