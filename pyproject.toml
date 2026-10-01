@@ -37,6 +37,10 @@ required-version = ">=0.9.17"
 # republiée sur PyPI. Durée relative : uv la résout au lock, `grep exclude-newer-span
 # uv.lock` dit la fenêtre appliquée. Posée par `pinky repo distribute`, jamais éditée à la main.
 exclude-newer = "3 days"
+# presidio-anonymizer caps `cryptography<49`, whose releases carry known advisories (PKCS#7,
+# X.509 path building, DNS name constraints) that the dependency audit rejects. Nothing here uses
+# presidio's encrypt operator, so the cap is overridden rather than ignored.
+override-dependencies = ["cryptography>=50.0.0"]
 
 # No package to build (see the `[project]` comment) — bypass-selection tells hatchling not to
 # error looking for one, so `pip install -e . --group dev` still succeeds (it only needs to land

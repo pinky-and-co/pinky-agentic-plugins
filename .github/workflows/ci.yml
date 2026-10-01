@@ -64,9 +64,11 @@ jobs:
         # sur pinky-core, chantier 0024). L'export force pip-audit à lire le VRAI arbre résolu.
         # Bloquant : une CVE détectée fait échouer le job. Un scan qui ne bloque rien n'est qu'un
         # log de plus, ignoré comme tout log jusqu'à l'incident.
+        # --disable-pip --no-deps : l'export est entièrement épinglé, on audite le lock tel quel.
+        # pip re-résoudrait les bornes des paquets et rejetterait un `override-dependencies` d'uv.
         run: |
           uv export --frozen --all-extras --all-groups --format requirements-txt --no-hashes -o /tmp/pip-audit-requirements.txt
-          uvx pip-audit -r /tmp/pip-audit-requirements.txt
+          uvx pip-audit --disable-pip --no-deps -r /tmp/pip-audit-requirements.txt
 
       - name: Tests
         # Commande surchargeable : `pytest` ne convient qu'aux repos dont la suite est en Python.
