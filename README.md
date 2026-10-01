@@ -34,7 +34,7 @@ branch, branch strategy) are read from that repo's own `.claude/settings.pinky.j
 | [`pc-autodiscovery`](plugins/pc-autodiscovery/) | Always-on activation of the project-scoped plugins matching where the session sits, and a gate on the next tool call while a user-only slash command is pending |
 | [`pc-craft`](plugins/pc-craft/) | Engineering conventions: `code-conventions`, `debug-brief`, `fastapi`, `improve` |
 | [`pc-delegate`](plugins/pc-delegate/) | `export`/`reintegrate`: hand kanban cards and code to an agent working outside Claude Code, then bring its results back safely |
-| [`pc-privacy`](plugins/pc-privacy/) | Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools — no LLM |
+| [`pc-privacy`](plugins/pc-privacy/) | Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, plus an optional local decision-model gate on Read |
 | [`pc-pypi`](plugins/pc-pypi/) | `dev-prerelease`: cut a dev pre-release of a PyPI library, stopping before the publishing tag |
 | [`pc-snow`](plugins/pc-snow/) | Snowflake knowledge against training bias: `snowflake`, `snowpark`, `streamlit`, `cortex`, `snowpark-to-sql`, `sql-to-snowpark` |
 | [`pc-statusline`](plugins/pc-statusline/) | Multi-line status line — model, effort, context, cache hit, cost, rate limits — plus a per-subagent row |
@@ -146,6 +146,11 @@ pinky-agentic-plugins/
 │   │   │   └── skim-and-push.md
 │   │   ├── themes/
 │   │   │   └── lisible.json
+│   │   └── README.md
+│   ├── pc-decision/
+│   │   ├── mcp/
+│   │   │   ├── decision_client.py
+│   │   │   └── pc_decision_server.py
 │   │   └── README.md
 │   ├── pc-delegate/
 │   │   ├── mcp/
@@ -303,7 +308,13 @@ pinky-agentic-plugins/
 │   │   │       └── SKILL.md
 │   │   └── README.md
 │   ├── pc-privacy/
+│   │   ├── evals/
+│   │   │   ├── decision_compare.py
+│   │   │   ├── gliner_compare.py
+│   │   │   ├── tev_compare.py
+│   │   │   └── tev_systemone.py
 │   │   ├── hooks/
+│   │   │   ├── decision_gate.py
 │   │   │   ├── hooks.json
 │   │   │   └── pii_guard.py
 │   │   ├── mcp/
@@ -398,6 +409,7 @@ pinky-agentic-plugins/
 │   ├── test_card_discipline.py
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
+│   ├── test_decision_client.py
 │   ├── test_detect_findings.py
 │   ├── test_detect_format.py
 │   ├── test_direct_command_hooks.py
@@ -422,6 +434,7 @@ pinky-agentic-plugins/
 │   ├── test_pending_user_action_channel.py
 │   ├── test_pi_review.py
 │   ├── test_pii_guard.py
+│   ├── test_pii_guard_decision.py
 │   ├── test_policy_lib.py
 │   ├── test_post_edit_lint.py
 │   ├── test_pr_overlap_guard.py

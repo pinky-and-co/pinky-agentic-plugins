@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
+sys.path.insert(
+    0, str(Path(__file__).parent.parent / "plugins" / "pc-privacy" / "hooks")
+)
 
+import decision_gate
 import model_adversarial
 
 
@@ -24,3 +28,20 @@ def _isolate_pool_log(monkeypatch, tmp_path):
     session log."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_decision_gate(monkeypatch):
+    """The `pii_guard` decision gate is off unless a test sets its variables — a developer who
+    runs a local decision server would otherwise send every test digest to it."""
+    monkeypatch.delenv("ONE_DECISION_MODEL", raising=False)
+    monkeypatch.delenv("ONE_DECISION_URL", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _decision_gate_starts_on():
+    """The gate switches itself off for the process after a transport failure — every test starts
+    and ends with it on, so one test's dead server never silences the next."""
+    decision_gate.reset()
+    yield
+    decision_gate.reset()

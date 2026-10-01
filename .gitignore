@@ -13,4 +13,5 @@ __pycache__/
 **/.claude/settings.local.json
 
 # Plugin evaluation results (test output)
-plugins/*/evals/
+plugins/*/evals/*
+!plugins/*/evals/*.py

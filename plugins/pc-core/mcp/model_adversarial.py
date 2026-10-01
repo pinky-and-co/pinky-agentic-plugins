@@ -17,10 +17,10 @@ Every remote call goes through ``pi`` (``call_cli``): ``pi -p --model <provider>
 endpoints live in pi's registry (built-in, or a custom provider in ``~/.pi/agent/models.json``).
 Keys come from the ``keys`` array of ``settings.pinky.json`` — the same ``macos_keychain`` entries
 ``load_secrets`` declares — resolved on demand and handed to each pi call as environment variables
-(``secret_env``), never exported into ``$CLAUDE_ENV_FILE``: this server's process never receives
-that file, and a keychain key is never held in a session's own env either. A custom provider reads
-its key with ``"apiKey": "$<NAME>"``. Adding a provider pi does not know is a ``models.json`` edit
-plus a ``keys`` entry, never a code change here.
+(``secret_env``), never exported into a session-wide env: a keychain key is never held in this
+server's own environment or in a session's. A custom provider reads its key with
+``"apiKey": "$<NAME>"``. Adding a provider pi does not know is a ``models.json`` edit plus a
+``keys`` entry, never a code change here.
 
 Tools are chosen per call, never per entry: none by default (``--no-tools``), or an allowlist
 (``-t read,grep``) when the caller needs the model to look at files itself.

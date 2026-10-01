@@ -44,7 +44,12 @@
     {
       "name": "pc-privacy",
       "source": "./plugins/pc-privacy",
-      "description": "Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools — detect sensitive columns, then write coherently anonymized copies. No LLM, no profile-resolved values."
+      "description": "Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, plus an optional local decision-model gate on Read. Detect sensitive columns, then write coherently anonymized copies."
+    },
+    {
+      "name": "pc-decision",
+      "source": "./plugins/pc-decision",
+      "description": "Shared decision-model brick — an MCP client of a local mlx-serve that picks one lettered option and returns its probabilities. Loads no model, runs no daemon, no profile-resolved values."
     },
     {
       "name": "pc-pypi",

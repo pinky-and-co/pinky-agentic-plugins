@@ -1,7 +1,7 @@
 # pc-privacy
 
 Deterministic, coherent PII pseudonymization for Claude Code — an MCP server and a `Read` guard,
-no LLM anywhere in the plugin.
+with an optional local decision-model gate on `Read`.
 
 ## Overview
 
@@ -96,6 +96,42 @@ runs the same detection as `anonymize_detect`.
 - Alongside `read_cost.py` (also `ask` on `Read` for heavy formats) both hooks answer
   independently on the same event; neither overrides the other.
 
+## Optional: decision-model gate
+
+With a decision model served locally, the Read guard first asks it one question about a bounded
+digest of the file: personal data as the guard's rules define it, yes or no. A probability below 0.5 (a model "pass") ends the guard
+there: Presidio does not run and the file goes through; 0.5 or more still runs Presidio for the column listing and adds
+one line saying the model also judged the file personal. A file whose name contains `.anon.` never
+goes to the model.
+
+| Variable | Effect |
+|---|---|
+| `ONE_DECISION_MODEL` | The mlx-serve model id. Unset: the gate is off |
+| `ONE_DECISION_URL` | Server address, default `http://127.0.0.1:11234`. Only `127.0.0.1`, `localhost` and `::1` are accepted |
+
+- **Silent fallback.** Variable unset, server unreachable, any HTTP error, or a digest the server
+  refuses because it does not fit its context window: the gate is skipped with no message and
+  Presidio decides alone, exactly as without the gate. The server is probed with a short TCP
+  connection before the digest is built, and after a connection failure or a timeout the gate
+  stays off for the rest of that hook run, so a down server adds neither a second parse of a
+  large file nor a timeout per `@file`.
+- **You start the server.** The hook starts no process. Run `mlx-serve` yourself and keep the model
+  loaded: a cold start costs seconds on every `Read`.
+- **Values stay local.** The digest sent to the model holds the format, the column names and up to
+  three sampled values per column, each cut at 60 characters, never the file name. A text file
+  sends its first 10 lines, cut the same way. Newlines and other control characters in the content
+  become spaces. It goes to a loopback address only.
+- **Bind loopback.** `mlx-serve` listens on all interfaces by default: start it with
+  `--host 127.0.0.1` so the model is not reachable from the network.
+- **Bounded digest.** The digest lists every column, never a sample of columns, so a wide file can
+  exceed the server's window and fall back to Presidio.
+- **A pass stops the guard.** A text file longer than `PII_GUARD_MAX_TEXT_LINES` lines that the
+  model passes is not scanned further, and the notice about lines not analyzed is not emitted.
+
+`evals/decision_compare.py` (`uv run --script evals/decision_compare.py FILE[:block|:pass]...`)
+prints, per file, the Presidio-only decision, the gate's probability and the decision with the gate
+active, then the misses and false alarms of each. It needs the running server and prints no value.
+
 ## Optional: GLiNER name detection
 
 `fr_core_news_md` misses ALL-CAPS names (`JEAN DUPONT` comes back as `LOCATION`, not `PERSON`).
@@ -115,8 +151,8 @@ dependencies (the hook otherwise fails open with a stderr line).
 | `PC_PRIVACY_GLINER_THRESHOLD` | Override the confidence threshold |
 
 `evals/gliner_compare.py` (`uv run --script evals/gliner_compare.py FILE...`) prints, per file, the
-columns flagged only with or only without GLiNER and both timings — never a value. `evals/` is
-gitignored, so the script exists only on the machine that has it.
+columns flagged only with or only without GLiNER and both timings — never a value. Eval sources
+(`evals/*.py`) are tracked; results written next to them are gitignored.
 
 ## Setup
 
