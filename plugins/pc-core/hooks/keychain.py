@@ -2,7 +2,7 @@
 """keychain — read one secret from the macOS classic keychain (Trousseau d'accès).
 
 Used through `load_secrets.py`'s `resolve_env`, called on demand by `model_adversarial.secret_env`
-and handed straight to each `pi` call's own `env=` — never into `$CLAUDE_ENV_FILE`, so a keychain
+and handed straight to each `pi` call's own `env=` — never into a session-wide env, so a keychain
 secret is never present in a session's inherited Bash environment.
 
 Classic keychain only — `security` cannot see the Passwords app's data-protection keychain
