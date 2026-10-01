@@ -2,7 +2,7 @@ pinky-and-co plugins — Third-Party Notices
 
 Third-party content and dependencies carrying a license obligation, used by the plugins in
 this marketplace (pc-core, pc-git, pc-kanban, pc-snow, pc-craft, pc-privacy, pc-pypi,
-pc-statusline). Courtesy-only inspirations (concept/pattern reuse, no obligation) are in
+pc-statusline, pc-rtk). Courtesy-only inspirations (concept/pattern reuse, no obligation) are in
 CREDITS. Full running ledger + verification trail: ATTRIBUTIONS.md.
 
 ================================================================================
@@ -18,6 +18,12 @@ yt-dlp
   License: The Unlicense (public domain — no obligation, credited as courtesy)
   Used by: skill `pc-kanban:yt` — fetch auto-generated subtitles (VTT), no video download.
   https://github.com/yt-dlp/yt-dlp
+
+RTK (rtk-ai/rtk)
+  License: Apache-2.0
+  Used by: plugin `pc-rtk` — rewrite Bash commands to their filtered `rtk` form, show
+  `rtk gain` savings.
+  https://www.rtk-ai.app/
 
 ================================================================================
 ADAPTED DOCUMENTATION

@@ -65,6 +65,11 @@
       "name": "pc-customize",
       "source": "./plugins/pc-customize",
       "description": "Appearance and response-style customization: output styles and color themes"
+    },
+    {
+      "name": "pc-rtk",
+      "source": "./plugins/pc-rtk",
+      "description": "RTK output filtering — rewrites Bash commands to their filtered rtk form before they run, so only compact output enters the context. Needs the rtk binary."
     }
   ]
 }

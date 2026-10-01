@@ -1,0 +1,29 @@
+{
+  "description": "Rewrites a Bash command to its filtered `rtk` form before it runs, through RTK's own hook processor (`rtk hook claude`). Fails open: no `rtk` on PATH, an `rtk` that errors or lacks `hook claude`, or a command with no RTK equivalent leaves the command untouched and never blocks it. Runs the deterministic skill script directly, with no model call, when `/pc-rtk:gain` is typed bare or with plain read flags (UserPromptExpansion); any other arguments fall back to the skill.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v rtk >/dev/null 2>&1 || exit 0; rtk hook claude || exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "^pc-rtk:gain$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_rtk_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/skills/gain/scripts/gain.sh\" --interpreter bash --timeout 30 --grammar '{\"forms\":[{\"match\":[],\"emit\":[]},{\"match\":[{\"re\":\"(-p|--project|-g|--graph|-H|--history|-q|--quota|-d|--daily|-w|--weekly|-m|--monthly|-a|--all|-F|--failures|--recalls)\",\"allow_dash\":true,\"repeat\":true}],\"emit\":[\"{*}\"]}]}'",
+            "timeout": 40
+          }
+        ]
+      }
+    ]
+  }
+}
