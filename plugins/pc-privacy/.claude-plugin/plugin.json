@@ -1,7 +1,7 @@
 {
   "name": "pc-privacy",
   "version": "0.1.0",
-  "description": "Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools — no LLM, no profile-resolved values.",
+  "description": "Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, plus an optional local decision-model gate on Read.",
   "author": {
     "name": "Pinky & Co"
   }

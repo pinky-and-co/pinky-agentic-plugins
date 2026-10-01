@@ -6,9 +6,15 @@
 """PreToolUse / Read — alert before a native `Read` of a dataset that holds personal data.
 
 Reuses ``anonymize.detect_findings`` as-is (same Presidio + French NLP + custom FR recognizers as
-the `pc-privacy` MCP server) — no second detector. The decision is always ``ask``, never ``deny``:
-the person sees which columns look sensitive and chooses. Reading as-is, refusing, or refusing and
-running `anonymize_apply` afterwards are all their call; the hook only interrupts.
+the `pc-privacy` MCP server) — no second deterministic detector. The decision is always ``ask``,
+never ``deny``: the person sees which columns look sensitive and chooses. Reading as-is, refusing,
+or refusing and running `anonymize_apply` afterwards are all their call; the hook only interrupts.
+
+When ``ONE_DECISION_MODEL`` names a model served locally, ``decision_gate`` judges a bounded digest
+of the file first: a ``pass`` ends the scan without Presidio, a ``block`` adds one line to the
+Presidio report.
+Unset, unreachable, or refusing the digest, the gate is skipped with no message and Presidio
+decides alone.
 
 The same script also runs on ``UserPromptSubmit``: an ``@file`` typed in a prompt is inlined by
 Claude Code without going through ``Read``, so ``decide_prompt`` scans the mentioned paths and
@@ -76,6 +82,31 @@ def _ask(reason: str) -> dict:
     }
 
 
+# Appended to the listing when the decision model also judged the file personal.
+DECISION_MODEL_LINE = (
+    "A local decision model also judged this file to contain personal data."
+)
+
+
+def _gate_verdict(path: Path, fmt: str, anonymize) -> str | None:
+    """Ask the local decision gate: ``"block"``, ``"pass"``, or None when it is unavailable.
+
+    Args:
+        path: The file to judge.
+        fmt: Its format, as decided by ``anonymize.detect_format``.
+        anonymize: The ``anonymize`` module.
+
+    Returns:
+        The gate's verdict, or None on any failure, including the gate module not importing.
+    """
+    try:
+        import decision_gate
+
+        return decision_gate.verdict(path, fmt, anonymize)
+    except Exception:
+        return None
+
+
 def _scan(path: Path, anonymize) -> tuple[str, str] | None:
     """Classify and scan one file: ``("oversize" | "pii", message)``, or None when nothing to flag.
 
@@ -98,9 +129,14 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
             "limit of the PII scan, so it was NOT analyzed. It may contain personal data.",
         )
     kwargs: dict = {}
-    # An anonymized copy keeps its column names: only its values can still betray a leak.
-    if ".anon." in path.name:
+    # An anonymized copy keeps its column names: only its values can still betray a leak. Its
+    # pseudonyms sit too close to the decision model's threshold, so the gate is not asked.
+    anon_copy = ".anon." in path.name
+    if anon_copy:
         kwargs["values_only"] = True
+    judged = None if anon_copy else _gate_verdict(path, fmt, anonymize)
+    if judged == "pass":
+        return None
     cut: list[str] = []
     if fmt == "text":
         kwargs["text_max_lines"] = MAX_TEXT_LINES
@@ -110,6 +146,14 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
         f"Only the first {MAX_TEXT_LINES} lines of `{path.name}` were analyzed; the rest was "
         "NOT fully analyzed. It may contain personal data."
     )
+    if not findings and judged == "block":
+        return (
+            "pii",
+            f"A local decision model judged `{path.name}` to contain personal data, but no "
+            "deterministic detector found a specific column — reading it puts it into the "
+            "model's context (and whatever cloud sits behind it)."
+            + (f"\n{note}" if cut else ""),
+        )
     if not findings:
         return ("oversize", note) if cut else None
     listing = "\n".join(f"  - {f.column}: {f.reason}" for f in findings)
@@ -117,7 +161,8 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
         "pii",
         f"Personal data detected in `{path.name}` — reading it puts it into the model's context "
         f"(and whatever cloud sits behind it):\n{listing}"
-        + (f"\n{note}" if cut else ""),
+        + (f"\n{note}" if cut else "")
+        + (f"\n{DECISION_MODEL_LINE}" if judged == "block" else ""),
     )
 
 
