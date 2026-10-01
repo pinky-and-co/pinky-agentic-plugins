@@ -1,0 +1,9 @@
+{
+  "name": "pc-rtk",
+  "version": "0.1.0",
+  "description": "Rewrites Bash commands to their filtered RTK form before they run, so only compact output enters the context.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"]
+}

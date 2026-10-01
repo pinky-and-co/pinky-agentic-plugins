@@ -36,6 +36,7 @@
 |---|---|---|---|
 | markitdown (Microsoft) | convert-then-read for office/HTML formats | MIT (GitHub API confirmed) | optional dep — `read-documents` rule |
 | yt-dlp | fetch auto-generated subtitles (VTT), no video download | Unlicense (GitHub API confirmed) | optional dep — `yt` skill |
+| RTK (rtk-ai/rtk) | rewrites Bash commands to a token-filtered form before they run | Apache-2.0 (`brew info rtk`) | optional dep — plugin `pc-rtk` |
 | AgentShield (affaan-m/agentshield) | one-shot pre-distribution config audit | MIT (GitHub API confirmed) | backlog, NOT a runtime dep |
 | markdownify · beautifulsoup4 · lxml | HTML→lean-MD conversion in `scripts/mirror_to_md.py` (select `<article>`, render to MD) | MIT · MIT · BSD-3-Clause (PyPI metadata confirmed) | generation-time dep only, not shipped in any lib |
 | trafilatura | HTML→lean-MD candidate (⭐ in card) | n/a | **rejected** (ADR-0017): drops Sphinx signature/params on API pages |
@@ -62,6 +63,7 @@
   |---|---|---|
   | markitdown (MIT) | NOTICE — optional runtime dep | `pinky-agentic-plugins` NOTICE — `pc-core:document-to-md` |
   | yt-dlp (Unlicense) | NOTICE — courtesy (public domain) | `pinky-agentic-plugins` NOTICE — `pc-kanban:yt` |
+  | RTK (Apache-2.0) | NOTICE — optional runtime dep | `pinky-agentic-plugins` NOTICE — plugin `pc-rtk` |
   | Snowflake docs (adapted) | NOTICE — transformative adaptation | `pinky-agentic-plugins` NOTICE — `pc-snow` skills, `metadata.source` per file |
   | Streamlit docs (Apache-2.0, adapted) | NOTICE — attribution given | `pinky-agentic-plugins` NOTICE — `pc-snow:streamlit` |
   | markdownify · beautifulsoup4 · lxml | NOTICE — generation-time only, not shipped | `pinky-bootstrap` NOTICE — `tools/mirror_to_md.py` |

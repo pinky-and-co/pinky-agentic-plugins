@@ -36,6 +36,7 @@ branch, branch strategy) are read from that repo's own `.claude/settings.pinky.j
 | [`pc-delegate`](plugins/pc-delegate/) | `export`/`reintegrate`: hand kanban cards and code to an agent working outside Claude Code, then bring its results back safely |
 | [`pc-privacy`](plugins/pc-privacy/) | Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, plus an optional local decision-model gate on Read |
 | [`pc-pypi`](plugins/pc-pypi/) | `dev-prerelease`: cut a dev pre-release of a PyPI library, stopping before the publishing tag |
+| [`pc-rtk`](plugins/pc-rtk/) | RTK output filtering: a hook rewrites Bash commands to their filtered `rtk` form before they run, and the `gain` skill shows the token savings |
 | [`pc-snow`](plugins/pc-snow/) | Snowflake knowledge against training bias: `snowflake`, `snowpark`, `streamlit`, `cortex`, `snowpark-to-sql`, `sql-to-snowpark` |
 | [`pc-statusline`](plugins/pc-statusline/) | Multi-line status line — model, effort, context, cache hit, cost, rate limits — plus a per-subagent row |
 
@@ -346,6 +347,16 @@ pinky-agentic-plugins/
 │   │           ├── scripts/
 │   │           │   └── reconcile.py
 │   │           └── SKILL.md
+│   ├── pc-rtk/
+│   │   ├── hooks/
+│   │   │   ├── hooks.json
+│   │   │   └── pc_rtk_direct_command_runner.py
+│   │   ├── skills/
+│   │   │   └── gain/
+│   │   │       ├── scripts/
+│   │   │       │   └── gain.sh
+│   │   │       └── SKILL.md
+│   │   └── README.md
 │   ├── pc-snow/
 │   │   ├── agents/
 │   │   │   └── snowflake-guide.md
@@ -430,6 +441,7 @@ pinky-agentic-plugins/
 │   ├── test_pc_kanban_init.py
 │   ├── test_pc_kanban_migrate_agent_log.py
 │   ├── test_pc_kanban_spawn_workers.py
+│   ├── test_pc_rtk.py
 │   ├── test_pending_gate.py
 │   ├── test_pending_user_action_channel.py
 │   ├── test_pi_review.py
