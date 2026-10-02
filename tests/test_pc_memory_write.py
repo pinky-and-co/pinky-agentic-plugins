@@ -1,5 +1,6 @@
 """Tests for the pc-memory PreToolUse write guard — run with: uv run pytest tests/test_pc_memory_write.py"""
 
+import io
 import json
 import os
 import subprocess
@@ -385,10 +386,14 @@ def test_bash_cheap_bypass_forms_ask(home, repo, template):
     assert _decision(_bash(repo, command)) == "ask"
 
 
-def test_bash_curl_and_wget_without_output_flag_are_not_writes(home, repo):
+def test_bash_curl_and_wget_naming_memory_without_writing_it_have_no_decision(
+    home, repo
+):
     silo = mw.memory_dir_of(repo)
-    assert _bash(repo, f"curl https://example.com/{silo.name}") == {}
-    assert _bash(repo, f"wget -q -O /tmp/a {silo}") == {}
+    assert _bash(repo, f"curl -o /tmp/a file://{silo}/a.md") == {}
+    assert _bash(repo, f"curl https://example.com{silo}/a.md") == {}
+    assert _bash(repo, f"wget -q -O /tmp/a {silo}/a.md") == {}
+    assert _bash(repo, f"curl {silo}/a.md") == {}
 
 
 def test_bash_sed_without_in_place_is_not_a_write(home, repo):
@@ -566,3 +571,249 @@ def test_bash_target_directory_outside_memory_has_no_decision(home, repo):
     silo = mw.memory_dir_of(repo)
     assert _bash(repo, f"cp -t /tmp {silo}/a.md") == {}
     assert _bash(repo, f"wget -P /tmp {silo}") == {}
+
+
+# --- heredocs, here-strings, arithmetic ------------------------------------------------------
+
+
+@pytest.mark.parametrize("operator", ["<<< foo", "<<<foo", '<<<"foo"'])
+def test_bash_here_string_is_not_a_heredoc(home, repo, operator):
+    silo = mw.memory_dir_of(repo)
+    command = f"cat {operator}\nrm {silo}/a.md"
+    assert _decision(_bash(repo, command)) == "ask"
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        'git commit -m "explain <<EOF"',
+        "echo 'a <<EOF'",
+        "ls # <<EOF",
+        "x=$((1<<n))",
+        "(( x = 1 << n ))",
+        'echo "$((1<<n))"',
+    ],
+)
+def test_bash_heredoc_operator_outside_code_does_not_open_a_heredoc(home, repo, prefix):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f"{prefix}\nrm {silo}/a.md")) == "ask"
+
+
+@pytest.mark.parametrize(
+    ("opener", "delimiter", "decoy"),
+    [
+        ("<<\\EOF", "EOF", "EOFX"),
+        ("<<'END-OF'", "END-OF", "END"),
+        ("<<EOF-1", "EOF-1", "EOF"),
+        ('<<"EOF"', "EOF", "EO"),
+    ],
+)
+def test_bash_heredoc_delimiter_forms(home, repo, opener, delimiter, decoy):
+    silo = mw.memory_dir_of(repo)
+    body = f"cat {opener}\n{decoy}\nrm {silo}/a.md\n{delimiter}"
+    assert _bash(repo, body) == {}
+    assert _decision(_bash(repo, f"{body}\nrm {silo}/b.md")) == "ask"
+
+
+def test_bash_heredoc_with_crlf_line_endings(home, repo):
+    silo = mw.memory_dir_of(repo)
+    body = f"cat <<EOF\r\nrm {silo}/a.md\r\nEOF\r\n"
+    assert _bash(repo, body) == {}
+    assert _decision(_bash(repo, body + f"rm {silo}/b.md\r\n")) == "ask"
+
+
+def test_bash_heredoc_body_starts_after_a_continued_line(home, repo):
+    silo = mw.memory_dir_of(repo)
+    body = f"cat <<EOF \\\n> /tmp/x\nrm {silo}/a.md\nEOF"
+    assert _bash(repo, body) == {}
+    assert _decision(_bash(repo, f"{body}\ntouch {silo}/b.md")) == "ask"
+
+
+def test_bash_continued_line_can_redirect_into_memory(home, repo):
+    silo = mw.memory_dir_of(repo)
+    command = f"cat <<EOF \\\n> {silo}/a.md\nbody\nEOF"
+    assert _decision(_bash(repo, command)) == "ask"
+
+
+def test_bash_two_heredocs_on_one_line(home, repo):
+    silo = mw.memory_dir_of(repo)
+    body = f"cat <<A <<B\nrm {silo}/x\nA\ntouch {silo}/y\nB"
+    assert _bash(repo, body) == {}
+    assert _decision(_bash(repo, f"{body}\nrm {silo}/z")) == "ask"
+
+
+def test_bash_dash_heredoc_with_tab_indented_terminator(home, repo):
+    silo = mw.memory_dir_of(repo)
+    body = f"cat <<-EOF\n\trm {silo}/a.md\n\tEOF"
+    assert _bash(repo, body) == {}
+    assert _decision(_bash(repo, f"{body}\nrm {silo}/b.md")) == "ask"
+
+
+def test_bash_plain_heredoc_does_not_accept_an_indented_terminator(home, repo):
+    silo = mw.memory_dir_of(repo)
+    body = f"cat <<EOF\nx\n\tEOF\nrm {silo}/a.md\nEOF"
+    assert _bash(repo, body) == {}
+
+
+def test_bash_commit_message_heredoc_with_double_quotes_in_the_body(home, repo):
+    silo = mw.memory_dir_of(repo)
+    command = f'git commit -m "$(cat <<\'EOF\'\nsay "hi"\nrm {silo}/a.md\nEOF\n)"'
+    assert _bash(repo, command) == {}
+
+
+def test_bash_command_substitution_inside_quotes_is_read(home, repo):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f'echo "$(rm {silo}/a.md)"')) == "ask"
+    assert _decision(_bash(repo, f'echo "$(echo "a")" > {silo}/a.md')) == "ask"
+
+
+def test_bash_backtick_substitution_is_read(home, repo):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f"echo `rm {silo}/a.md`")) == "ask"
+
+
+# --- one unresolvable word or directory does not switch the analysis off ---------------------
+
+
+def test_bash_word_with_a_nul_byte_does_not_hide_the_next_command(home, repo):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f"touch a\x00b; rm {silo}/a")) == "ask"
+
+
+def test_bash_symlink_loop_does_not_hide_the_next_command(home, repo):
+    silo = mw.memory_dir_of(repo)
+    (repo / "loop").symlink_to(repo / "loop2")
+    (repo / "loop2").symlink_to(repo / "loop")
+    assert _decision(_bash(repo, f"touch loop/x; rm {silo}/a")) == "ask"
+
+
+def test_invalid_declared_directory_leaves_the_default_silo_protected(home, repo):
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryDirectory": "bad\x00dir"}), encoding="utf-8"
+    )
+    default = home / ".claude" / "projects" / encode(repo) / "memory"
+    assert _decision(_bash(repo, f"touch {default}/a.md")) == "ask"
+    out = mw.build_output(_payload("Write", repo, file_path=str(default / "a.md")))
+    assert _decision(out) == "ask"
+
+
+def test_invalid_declared_directory_does_not_hide_other_levels(home, repo):
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryDirectory": "bad\x00dir"}), encoding="utf-8"
+    )
+    parent_memory = home / "parent-mem"
+    (repo.parent / ".claude").mkdir()
+    (repo.parent / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryDirectory": str(parent_memory)}), encoding="utf-8"
+    )
+    assert _decision(_bash(repo, f"touch {parent_memory}/a.md")) == "ask"
+
+
+# --- value flags, `-` and the command-position check ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "touch --reference {d}/a.md /tmp/b",
+        "truncate --reference {d}/a.md /tmp/b",
+        "truncate -r {d}/a.md /tmp/b",
+        "sed -i -f {d}/s.sed /tmp/x",
+        "sed -i --file {d}/s.sed /tmp/x",
+        "sed -i -e s/a/b/ -f {d}/s.sed /tmp/x",
+    ],
+)
+def test_bash_value_flag_arguments_are_not_targets(home, repo, template):
+    silo = mw.memory_dir_of(repo)
+    assert _bash(repo, template.format(d=silo)) == {}
+
+
+def test_bash_truncate_size_flag_still_targets_the_file(home, repo):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f"truncate -s 0 {silo}/a.md")) == "ask"
+    assert _decision(_bash(repo, f"truncate --size=0 {silo}/a.md")) == "ask"
+
+
+def test_bash_stdout_dash_is_not_a_path(home, repo):
+    silo = mw.memory_dir_of(repo)
+    silo.mkdir(parents=True)
+    command = "wget -qO- https://example.com/a"
+    assert mw.build_output(_payload("Bash", silo, command=command)) == {}
+
+
+def test_bash_sed_script_is_not_a_path(home, repo):
+    silo = mw.memory_dir_of(repo)
+    silo.mkdir(parents=True)
+    out = mw.build_output(_payload("Bash", silo, command="sed -i s/a/b/ /tmp/x"))
+    assert out == {}
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "echo rm {d}/a.md",
+        "echo touch {d}/a.md",
+        "cat {d}/touch",
+        "cat {d}/rm",
+        "ls tee {d}",
+        "printf '%s' cp {d}/a.md",
+    ],
+)
+def test_bash_verb_outside_command_position_is_not_a_write(home, repo, template):
+    silo = mw.memory_dir_of(repo)
+    assert _bash(repo, template.format(d=silo)) == {}
+
+
+# --- levels, symlinks, redirections --------------------------------------------------------
+
+
+def test_declared_directory_of_a_parent_level_asks(home, repo):
+    target = home / "parent-mem"
+    (repo.parent / ".claude").mkdir()
+    (repo.parent / ".claude" / "settings.local.json").write_text(
+        json.dumps({"autoMemoryDirectory": str(target)}), encoding="utf-8"
+    )
+    out = mw.build_output(_payload("Write", repo, file_path=str(target / "a.md")))
+    assert _decision(out) == "ask"
+
+
+def test_real_directory_declared_and_written_through_a_symlink_asks(home, repo):
+    real = home / "real-mem"
+    real.mkdir()
+    link = home / "link-mem"
+    link.symlink_to(real)
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryDirectory": str(real)}), encoding="utf-8"
+    )
+    out = mw.build_output(_payload("Write", repo, file_path=str(link / "a.md")))
+    assert _decision(out) == "ask"
+    assert _decision(_bash(repo, f"touch {link}/a.md")) == "ask"
+
+
+def test_bash_copy_with_a_noop_redirection_still_asks(home, repo):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f"cp /tmp/a {silo}/a 2>/dev/null")) == "ask"
+
+
+# --- failing open ----------------------------------------------------------------------------
+
+
+def test_internal_error_fails_open(home, repo, monkeypatch, capsys):
+    def boom(_payload: dict) -> dict:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(mw, "build_output", boom)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Bash"})))
+    assert mw.main() == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "boom" in captured.err
+
+
+def test_bash_backslash_newline_continues_the_command(home, repo):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f"rm \\\n  {silo}/a.md")) == "ask"
+    assert _decision(_bash(repo, f"rm \\\n{silo}/a.md")) == "ask"

@@ -69,16 +69,16 @@ newlines, and each is checked in command position:
 - `dd of=`, `curl -o` / `--output`, `wget -O` / `--output-document`, `wget -P` /
   `--directory-prefix` with a memory path.
 
-The command is read by a small word splitter: heredoc bodies, text in quotes and `#` comments are
-never looked into, so a commit message that quotes a memory path or a redirection asks nothing.
+The command is read by a small word splitter: heredoc bodies (a `<<<` here-string is not one),
+text in quotes, `#` comments and arithmetic (`$((1<<n))`) are never looked into, so a commit message that quotes a memory path or a redirection asks nothing. A `$(...)` inside double quotes is read as commands.
 `\rm`, `'rm'`, `sudo -u me rm` and `env -i rm` are seen as `rm`. Paths are matched after expanding
 `~`, `$HOME`, `${HOME}`, `..` and symlinks; a relative path resolves from the working directory. A file
 named `install.md` asks nothing.
 
 The `Bash` net is shallow, and a false alarm costs more than a miss. Not covered:
 
-- a script, an interpreter one-liner, `xargs`, a path built at run time, a path cut by a `cd`, a
-  glob, `${CLAUDE_CONFIG_DIR:-...}`, a command substitution inside quotes;
+- a script, an interpreter one-liner, `bash -c`, `sh -c`, `eval`, `find`, `xargs`, a path built at run time, a path cut by a `cd`, a
+  glob, `${CLAUDE_CONFIG_DIR:-...}`, a path word that cannot be resolved (it is skipped, the rest of the command is still read);
 - `mv <memory>/a.md /tmp/` removes a note without asking: only the destination is checked;
 - `unlink`, `shred`, `rmdir`, `find -delete`, `git restore`, `git checkout --` and `git mv`;
 - a case-insensitive file system (macOS): a path spelled with another case is not matched;

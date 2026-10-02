@@ -9,7 +9,8 @@ the procedure as the reason: the user decides each note, nothing is blocked.
 Intercepted:
 - `Write`, `Edit`, `MultiEdit` whose `file_path` lies inside a memory directory;
 - `Bash` commands, split into simple commands at `;`, `&&`, `||`, `|`, `&`, `(` and newlines
-  (heredoc bodies, comments and quoted text are never looked into), that write a memory directory:
+  (heredoc bodies, comments, arithmetic and quoted text are never looked into), that write a
+  memory directory:
   a redirection (`>`, `>>`, `>|`, `&>`) whose target is in memory; `tee`, `rm`, `touch`,
   `truncate`, `sed -i`/`--in-place`, `perl -i` with a memory path argument; `cp`, `mv`, `ln`,
   `install`, `rsync` with a memory path as the destination (the last argument, or the `-t` /
@@ -40,9 +41,14 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from pc_memory_lib import config_dir, level_roots, memory_dir_of  # noqa: E402
+from pc_memory_lib import (  # noqa: E402
+    is_default_silo,
+    level_roots,
+    memory_dir_of,
+)
 
 FILE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
 REASON = (
@@ -50,7 +56,6 @@ REASON = (
     "(a diff of that SKILL), not a note. A general rule: promote it to a CLAUDE.md or a rule at "
     "the right level. A local trap: a note is acceptable. Allow only if a note is the right place."
 )
-_HEREDOC = re.compile(r"<<(?!<)-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 _ENV_ASSIGNMENT = re.compile(r"^\w+=")
 _SED_IN_PLACE = re.compile(r"^(?:-[nEsrzu]*i|--in-place)")
 _PERL_IN_PLACE = re.compile(r"^-[pnlaw0-9]*i")
@@ -59,13 +64,14 @@ _WRAPPERS = {
     "sudo": frozenset({"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U"}),
     "env": frozenset({"-u", "-C", "-S"}),
 }
-_ANY_OPERAND = frozenset({"rm", "touch", "truncate", "tee"})
-_DESTINATION = frozenset({"cp", "mv", "ln", "install", "rsync"})
+_TARGET_ALL = frozenset({"rm", "touch", "truncate", "tee"})
+_TARGET_LAST = frozenset({"cp", "mv", "ln", "install", "rsync"})
 _TARGET_DIR_VERBS = frozenset({"cp", "mv", "ln", "install"})
 _VALUE_FLAGS = {
-    "touch": frozenset({"-r", "-d", "-t"}),
-    "truncate": frozenset({"-r", "-s"}),
+    "touch": frozenset({"-r", "-d", "-t", "--reference", "--date"}),
+    "truncate": frozenset({"-r", "-s", "--reference", "--size"}),
 }
+_SCRIPT_FLAGS = frozenset({"-e", "-f", "--expression", "--file"})
 _FLAG_VALUES = {
     "curl": (frozenset("o"), frozenset({"--output"})),
     "wget": (
@@ -75,6 +81,7 @@ _FLAG_VALUES = {
 }
 _TARGET_DIR_FLAGS = (frozenset("t"), frozenset({"--target-directory"}))
 _DUP_FD = re.compile(r"&(?:\d+|-)")
+_UNRESOLVABLE = (OSError, ValueError, RuntimeError)
 
 
 @dataclass
@@ -85,40 +92,28 @@ class Command:
     targets: list[str] = field(default_factory=list)
 
 
-def _strip_heredocs(command: str) -> str:
-    """`command` without the bodies (and terminator lines) of its heredocs."""
-    kept: list[str] = []
-    pending: list[tuple[str, bool]] = []
-    for line in command.split("\n"):
-        if pending:
-            delimiter, dash = pending[0]
-            if (line.lstrip("\t") if dash else line) == delimiter:
-                pending.pop(0)
-            continue
-        kept.append(line)
-        pending = [
-            (m.group(2), m.group(0).startswith("<<-")) for m in _HEREDOC.finditer(line)
-        ]
-    return "\n".join(kept)
-
-
 class _Splitter:
-    """Single pass over a command line: simple commands, quotes removed, redirections apart."""
+    """Words of one nesting level: simple commands, quotes removed, redirections apart."""
 
-    def __init__(self) -> None:
-        self.commands: list[Command] = [Command()]
+    def __init__(self, out: list[Command], heredocs: list[tuple[str, bool]]) -> None:
+        self.out = out
+        self.heredocs = heredocs
+        self.command = Command()
         self.current: list[str] = []
         self.in_word = False
-        self.pending: str | None = None
+        self.pending: Literal["target", "source", "heredoc"] | None = None
+        self.dash = False
 
     def flush(self) -> None:
-        """End the word being read, filing it as a word, a redirection target or a source."""
+        """End the word being read: a word, a redirection target, a source or a heredoc delimiter."""
         if self.in_word:
             text = "".join(self.current)
             if self.pending == "target":
-                self.commands[-1].targets.append(text)
+                self.command.targets.append(text)
+            elif self.pending == "heredoc":
+                self.heredocs.append((text, self.dash))
             elif self.pending is None:
-                self.commands[-1].words.append(text)
+                self.command.words.append(text)
             self.pending = None
         self.current = []
         self.in_word = False
@@ -127,114 +122,190 @@ class _Splitter:
         """End the simple command being read."""
         self.flush()
         self.pending = None
-        if self.commands[-1].words or self.commands[-1].targets:
-            self.commands.append(Command())
+        if self.command.words or self.command.targets:
+            self.out.append(self.command)
+            self.command = Command()
 
     def add(self, char: str) -> None:
         """Append a literal character to the current word."""
         self.current.append(char)
         self.in_word = True
 
-    def redirect(self, text: str, pos: int) -> int:
-        """Read a `>` or `<` operator at `pos`; return the position after it."""
+
+class _Parser:
+    """Single pass over a command line, nested `$(...)` inside double quotes included."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.pos = 0
+        self.commands: list[Command] = []
+        self.heredocs: list[tuple[str, bool]] = []
+
+    def run(self, nested: bool = False) -> None:
+        """Read from `pos` to the end of the text, or to the `)` closing a nested `$(`."""
+        text, size = self.text, len(self.text)
+        sp = _Splitter(self.commands, self.heredocs)
+        depth = 0
+        while self.pos < size:
+            pos = self.pos
+            char = text[pos]
+            nxt = text[pos + 1] if pos + 1 < size else ""
+            if char == "\\":
+                if nxt and nxt != "\n":
+                    sp.add(nxt)
+                self.pos += 2
+            elif char == "'":
+                end = text.find("'", pos + 1)
+                end = size if end < 0 else end
+                sp.in_word = True
+                sp.current.extend(text[pos + 1 : end])
+                self.pos = end + 1
+            elif char == '"':
+                self.pos += 1
+                sp.in_word = True
+                self._double_quoted(sp)
+            elif char in " \t\r":
+                sp.flush()
+                self.pos += 1
+            elif char == "#" and not sp.in_word:
+                end = text.find("\n", pos)
+                self.pos = size if end < 0 else end
+            elif char == "\n":
+                sp.boundary()
+                self.pos += 1
+                self._skip_heredoc_bodies()
+            elif char == "(" and nxt == "(" and self._arithmetic_opens(sp):
+                end = self._arithmetic_end(pos)
+                if sp.current[-1:] == ["$"]:
+                    sp.current.extend(text[pos:end])
+                self.pos = end
+            elif char == ")" and nested and depth == 0:
+                sp.boundary()
+                self.pos += 1
+                return
+            elif char in ";`()":
+                depth += (char == "(") - (char == ")" and depth > 0)
+                sp.boundary()
+                self.pos += 1
+            elif char == "|" or (char == "&" and nxt != ">"):
+                sp.boundary()
+                self.pos += 2 if nxt == char else 1
+            elif char in "<>&":
+                self._redirect(sp)
+            else:
+                sp.add(char)
+                self.pos += 1
+        sp.boundary()
+
+    @staticmethod
+    def _arithmetic_opens(sp: _Splitter) -> bool:
+        """True when `((` at this point starts an arithmetic expansion or command."""
+        if sp.current[-1:] == ["$"]:
+            return True
+        return not sp.in_word and not sp.command.words
+
+    def _arithmetic_end(self, pos: int) -> int:
+        """Position after the parentheses opened at `pos`, so a `<<` inside is not a heredoc."""
+        depth = 0
+        for index in range(pos, len(self.text)):
+            depth += (self.text[index] == "(") - (self.text[index] == ")")
+            if depth == 0:
+                return index + 1
+        return len(self.text)
+
+    def _double_quoted(self, sp: _Splitter) -> None:
+        """Read a double-quoted string after its opening quote; `$(...)` inside is parsed too."""
+        text, size = self.text, len(self.text)
+        while self.pos < size and text[self.pos] != '"':
+            char = text[self.pos]
+            if char == "\\" and self.pos + 1 < size and text[self.pos + 1] in '"\\$`':
+                self.pos += 1
+                sp.current.append(text[self.pos])
+                self.pos += 1
+            elif text.startswith("$((", self.pos):
+                end = self._arithmetic_end(self.pos + 1)
+                sp.current.extend(text[self.pos : end])
+                self.pos = end
+            elif text.startswith("$(", self.pos):
+                start = self.pos
+                self.pos += 2
+                self.run(nested=True)
+                sp.current.extend(text[start : self.pos])
+            else:
+                sp.current.append(char)
+                self.pos += 1
+        self.pos += 1
+
+    def _redirect(self, sp: _Splitter) -> None:
+        """Read a `<`, `<<`, `<<<`, `>`, `>>`, `>|`, `&>` or `>&` operator at `pos`."""
+        text, size = self.text, len(self.text)
+        pos = self.pos + 1 if text[self.pos] == "&" else self.pos
         if text[pos] == "<":
-            self.flush()
-            end = pos + 1
-            while end < len(text) and text[end] == "<":
+            sp.flush()
+            end = pos
+            while end < size and text[end] == "<":
                 end += 1
-            self.pending = "source"
-            return end
-        if self.in_word and "".join(self.current).isdigit():
-            self.current = []
-            self.in_word = False
+            sp.pending = "source"
+            if end - pos == 2:
+                sp.pending = "heredoc"
+                sp.dash = text.startswith("-", end)
+                end += sp.dash
+            self.pos = end
+            return
+        if sp.in_word and "".join(sp.current).isdigit():
+            sp.current = []
+            sp.in_word = False
         else:
-            self.flush()
+            sp.flush()
         end = pos + 1
         if text.startswith(">", end) or text.startswith("|", end):
             end += 1
         dup = _DUP_FD.match(text, end)
         if dup:
-            return dup.end()
+            self.pos = dup.end()
+            return
         if text.startswith("&", end):
             end += 1
-        self.pending = "target"
-        return end
+        sp.pending = "target"
+        self.pos = end
+
+    def _skip_heredoc_bodies(self) -> None:
+        """After a newline, skip the bodies of the heredocs opened on the line just ended."""
+        text, size = self.text, len(self.text)
+        while self.heredocs:
+            delimiter, dash = self.heredocs.pop(0)
+            while self.pos < size:
+                eol = text.find("\n", self.pos)
+                eol = size if eol < 0 else eol
+                line = text[self.pos : eol].rstrip("\r")
+                self.pos = min(eol + 1, size)
+                if (line.lstrip("\t") if dash else line) == delimiter:
+                    break
 
 
 def _split_commands(command: str) -> list[Command]:
-    """Simple commands of a shell line, honouring quotes, backslashes and comments."""
-    text = _strip_heredocs(command)
-    sp = _Splitter()
-    pos, size = 0, len(text)
-    while pos < size:
-        char = text[pos]
-        nxt = text[pos + 1] if pos + 1 < size else ""
-        if char == "\\":
-            if nxt and nxt != "\n":
-                sp.add(nxt)
-            pos += 2
-        elif char == "'":
-            end = text.find("'", pos + 1)
-            end = size if end < 0 else end
-            sp.in_word = True
-            sp.current.extend(text[pos + 1 : end])
-            pos = end + 1
-        elif char == '"':
-            sp.in_word = True
-            pos += 1
-            while pos < size and text[pos] != '"':
-                if text[pos] == "\\" and pos + 1 < size and text[pos + 1] in '"\\$`':
-                    pos += 1
-                sp.current.append(text[pos])
-                pos += 1
-            pos += 1
-        elif char in " \t":
-            sp.flush()
-            pos += 1
-        elif char == "#" and not sp.in_word:
-            end = text.find("\n", pos)
-            pos = size if end < 0 else end
-        elif char in ";\n`()":
-            sp.boundary()
-            pos += 1
-        elif char == "|" or (char == "&" and nxt != ">"):
-            sp.boundary()
-            pos += 2 if nxt == char else 1
-        elif char in "<>" or char == "&":
-            pos = sp.redirect(text, pos + 1 if char == "&" else pos)
-        else:
-            sp.add(char)
-            pos += 1
-    sp.boundary()
-    return [c for c in sp.commands if c.words or c.targets]
+    """Simple commands of a shell line, honouring quotes, backslashes, comments and heredocs."""
+    parser = _Parser(command)
+    parser.run()
+    return [c for c in parser.commands if c.words or c.targets]
 
 
 def memory_dirs(cwd: Path) -> list[Path]:
     """Memory directories of the working directory's level and of each ancestor level."""
     dirs: list[Path] = []
     for root in level_roots(cwd):
-        candidate = memory_dir_of(root)
-        for variant in (candidate, candidate.resolve()):
-            if variant not in dirs:
-                dirs.append(variant)
+        try:
+            candidate = memory_dir_of(root)
+            variants = [candidate, candidate.resolve()]
+        except _UNRESOLVABLE:
+            continue
+        dirs.extend(v for v in variants if v not in dirs)
     return dirs
 
 
 def _inside(path: Path, directory: Path) -> bool:
     """True when `path` is `directory` or lies under it."""
     return path == directory or directory in path.parents
-
-
-def _is_silo(path: Path) -> bool:
-    """True when `path` is inside `<config dir>/projects/<project>/memory`."""
-    for base in {config_dir(), config_dir().resolve()}:
-        try:
-            parts = path.relative_to(base).parts
-        except ValueError:
-            continue
-        if len(parts) >= 3 and parts[0] == "projects" and parts[2] == "memory":
-            return True
-    return False
 
 
 def _normalized(word: str, cwd: Path) -> Path:
@@ -251,19 +322,21 @@ def _normalized(word: str, cwd: Path) -> Path:
 
 
 def _hits_memory(word: str, cwd: Path, dirs: list[Path]) -> bool:
-    """True when the shell word names a path inside a memory directory."""
-    if not word:
+    """True when the shell word names a path inside a memory directory.
+
+    A word that cannot be resolved (NUL byte, symlink loop) names no memory path.
+    """
+    if not word or word == "-":
         return False
-    path = _normalized(word, cwd)
+    try:
+        path = _normalized(word, cwd)
+        variants = (path, path.resolve())
+    except _UNRESOLVABLE:
+        return False
     return any(
-        _is_silo(variant) or any(_inside(variant, d) for d in dirs)
-        for variant in (path, path.resolve())
+        is_default_silo(variant) or any(_inside(variant, d) for d in dirs)
+        for variant in variants
     )
-
-
-def file_write_hits_memory(file_path: str, cwd: Path, dirs: list[Path]) -> bool:
-    """True when `file_path` (relative paths resolve from `cwd`) is inside a memory directory."""
-    return _hits_memory(file_path, cwd, dirs)
 
 
 def _operands(args: list[str], value_flags: frozenset[str] = frozenset()) -> list[str]:
@@ -331,9 +404,9 @@ def _command_writes_memory(cmd: Command, cwd: Path, dirs: list[Path]) -> bool:
     def hit(candidates: list[str]) -> bool:
         return any(_hits_memory(c, cwd, dirs) for c in candidates)
 
-    if verb in _ANY_OPERAND:
+    if verb in _TARGET_ALL:
         return hit(_operands(args, _VALUE_FLAGS.get(verb, frozenset())))
-    if verb in _DESTINATION:
+    if verb in _TARGET_LAST:
         directories = (
             _flag_values(args, *_TARGET_DIR_FLAGS) if verb in _TARGET_DIR_VERBS else []
         )
@@ -342,9 +415,11 @@ def _command_writes_memory(cmd: Command, cwd: Path, dirs: list[Path]) -> bool:
         operands = _operands(args)
         return bool(operands) and hit(operands[-1:])
     if verb == "sed" and any(_SED_IN_PLACE.match(a) for a in args):
-        return hit(_operands(args))
+        operands = _operands(args, _SCRIPT_FLAGS)
+        has_script_flag = any(a in _SCRIPT_FLAGS for a in args)
+        return hit(operands if has_script_flag else operands[1:])
     if verb == "perl" and any(_PERL_IN_PLACE.match(a) for a in args):
-        return hit(_operands(args))
+        return hit(_operands(args, _SCRIPT_FLAGS))
     if verb == "dd":
         return hit([a[3:] for a in args if a.startswith("of=")])
     if verb in _FLAG_VALUES:
@@ -369,9 +444,7 @@ def writes_memory(payload: dict[str, object]) -> bool:
     dirs = memory_dirs(cwd)
     if tool in FILE_TOOLS:
         file_path = tool_input.get("file_path")
-        return isinstance(file_path, str) and file_write_hits_memory(
-            file_path, cwd, dirs
-        )
+        return isinstance(file_path, str) and _hits_memory(file_path, cwd, dirs)
     if tool == "Bash":
         command = tool_input.get("command")
         return isinstance(command, str) and bash_write_hits_memory(command, cwd, dirs)

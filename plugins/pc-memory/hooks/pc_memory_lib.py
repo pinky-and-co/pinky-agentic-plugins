@@ -30,6 +30,7 @@ __all__ = [
     "encode",
     "find_memory_dir",
     "home_dir",
+    "is_default_silo",
     "level_root",
     "level_roots",
     "memory_dir_of",
@@ -112,6 +113,18 @@ def memory_dir_of(level: Path) -> Path:
     if declared is not None:
         return declared
     return config_dir() / "projects" / encode(level) / "memory"
+
+
+def is_default_silo(path: Path) -> bool:
+    """True when `path` is inside `<config dir>/projects/<project>/memory`, whatever the project."""
+    for base in {config_dir(), config_dir().resolve()}:
+        try:
+            parts = path.relative_to(base).parts
+        except ValueError:
+            continue
+        if len(parts) >= 3 and parts[0] == "projects" and parts[2] == "memory":
+            return True
+    return False
 
 
 def find_memory_dir(level: Path) -> Path | None:
