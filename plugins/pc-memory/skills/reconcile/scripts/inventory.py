@@ -523,7 +523,7 @@ def _level_report(
         and not (directory / t).is_file()
         and unquote(t) not in linked - {t}
     )
-    report = {
+    report: dict[str, object] = {
         "level": short(level.root),
         "dir": short(directory),
         "role": "current" if level.root == current else "parent",
