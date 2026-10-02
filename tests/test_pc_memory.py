@@ -313,7 +313,7 @@ def test_compact_reinjects_model_only(home, tree):
     assert "p" in out["hookSpecificOutput"]["additionalContext"]
 
 
-@pytest.mark.parametrize("source", ["startup", "clear", "fork"])
+@pytest.mark.parametrize("source", ["startup", "clear"])
 def test_other_sources_show_the_user_message(home, tree, source):
     ws, _, sub = tree
     _memory(_silo(home, ws), "- p\n")
@@ -468,7 +468,6 @@ def test_hook_is_wired_on_every_session_source():
         "startup",
         "clear",
         "compact",
-        "fork",
     }
     command = entry["hooks"][0]["command"]
     assert "${CLAUDE_PLUGIN_ROOT}/hooks/memory-context/memory_context.py" in command

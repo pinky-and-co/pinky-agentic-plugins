@@ -25,8 +25,8 @@ directory is shown once.
 
 A note's age comes from the `modified` field of its frontmatter, falling back to the file mtime.
 
-On a resumed session no SessionStart hook runs again: the resumed session keeps the parent indexes
-from its own history, so `resume` is not a source this hook handles.
+On a resumed or forked session no SessionStart hook runs again: the session keeps the parent
+indexes from its own history, so neither `resume` nor `fork` is a source this hook handles.
 
 Never blocks the session: any error prints an empty object and exits 0, and an unreadable level
 is skipped without hiding the others.

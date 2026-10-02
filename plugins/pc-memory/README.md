@@ -52,9 +52,9 @@ setting.
 
 A note's age is its frontmatter `modified` field, falling back to the file modification time.
 
-On `resume`, no `SessionStart` hook runs again and the resumed session keeps the context of its
-history, parent indexes included, so the hook is wired to `startup`, `clear`, `compact` and `fork`
-only.
+On `resume`, as on a derivation (`fork`), no `SessionStart` hook runs again and the session keeps
+the context of its history, parent indexes included, so the hook is wired to `startup`, `clear` and
+`compact` only.
 
 The hook never blocks the session: any error prints `{}` and exits 0.
 
