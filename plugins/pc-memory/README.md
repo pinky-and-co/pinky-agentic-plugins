@@ -18,11 +18,16 @@ and emits:
   gets its summary and stale notes. No index line is shown; a level with no stale note is its summary line alone. When at least one stale note is listed, a
   closing reminder says where to promote it (a skipped procedure step: fix the skill or hook; a
   rule or pitfall beyond the directory: the source that generates the instructions, never a
-  generated copy; a local trap stays in memory) or to delete it. Not shown again after
+  generated copy; a local trap stays in memory) or to delete it. The last line is always a tip
+  (a light-bulb emoji, then: use `/memory` to enable or disable auto memory and to browse the memory
+  entries of the current level), with or without stale notes. Not shown again after
   `/compact`.
 - **To the model** (`additionalContext`): the index of the **parent** levels only, capped per
-  level and fenced as data, not instructions. The current level's index is already loaded by
-  Claude Code.
+  level and fenced as data, not instructions. One sentence after the data notice tells the model to
+  choose the level of a note by subject (a note belongs at the lowest level where it stays true for
+  every session; each level's memory directory is given below), so its first path already aims at the
+  right level. The sentence is absent when there is no parent context. The current level's index is
+  already loaded by Claude Code.
 
 Levels are the git root (or the working directory outside a repo) and each ancestor up to the home
 directory, excluded; a `.git` kept in the home directory itself is never taken as a root. From
