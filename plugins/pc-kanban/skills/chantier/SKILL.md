@@ -65,6 +65,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 ```bash
     bash "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh" <card-path>
 ```
+    A reviewed card with no ADR candidate may skip `4-done/` entirely — the script archives
+    straight from `3-in-progress/` (it refuses an unchecked `reviewed` box, the one net
+    `--list-unreviewed-done` cannot see past).
 6. **Resolve `model:`, then pick the next move.**
   - Missing `model:` on a selected/in-progress card → propose one and say why, never guess silently.
   - Card's `model:` is a stronger model than the session's current one → call the `advisor` tool
@@ -205,15 +208,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     **Review clause.** If the card's work needs judgment reviewed — the same criterion as
     `finishing-a-card.md` § "Reviewing before declaring the card done", i.e. anything beyond a
     purely mechanical change — append to `<condition>`: `… and the final diff has been reviewed by
-    `Agent(reviewer)`, findings addressed, and the `- [x] reviewed (<method>)` box checked on the
-    card` — `<method>` is the `Method:` line the reviewer opens its report with. Naming the
-    checkbox in the clause makes satisfying the goal and stamping
-    the box one action, not two — so the retroactive audit does not later flag a genuinely-reviewed
-    card. The decision is made pre-work, on `## Done when` and `requirements:` alone, so **when it is
-    unclear, include the clause** — a spurious clause on a card that turns out mechanical costs one
-    `- [x] reviewed (n/a — mechanical)` stamp at close; a missing clause on judgment work is the
-    expensive failure this card exists to stop. A card that is *obviously* mechanical (doc typo, a
-    rename, a one-line config) gets no clause and is closed with `- [x] reviewed (n/a — mechanical)`.
+    `Agent(reviewer)`, findings addressed, the report's `Method:` line relayed verbatim to the
+    user, its label completed to the full `provider/model · 🟦🟪🟧 tier` form from the report's
+    `[answered by …]` line when the first line carries the model name alone —
+    an `adversarial` call that returned nothing stated as such — verdict on the reviewer alone —
+    and the `- [x] reviewed (<method>)` box checked on the card` — `<method>` is the `Method:`
+    line the reviewer opens its report with. Naming the checkbox in the clause makes
+    satisfying the goal and stamping the box one action, not two — so the retroactive audit does
+    not later flag a genuinely-reviewed card. The decision is made pre-work, on `## Done when` and
+    `requirements:` alone, so **when it is unclear, include the clause** — a spurious clause on a
+    card that turns out mechanical costs one `- [x] reviewed (n/a — mechanical)` stamp at close; a
+    missing clause on judgment work is the expensive failure this card exists to stop. A card that
+    is *obviously* mechanical (doc typo, a rename, a one-line config) gets no clause and is closed
+    with `- [x] reviewed (n/a — mechanical)`.
     **Escape clause.** Append an OR branch to `<condition>`: `… OR the agent's last message names a
     precise, user-only action (a literal command to paste, a named permission to grant,
     `/reload-plugins`, an input asked for by name) that is the only remaining path — no

@@ -278,7 +278,8 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── drop_card.sh
 │   │   │   │   │   ├── pc_kanban_pending_user_action.py
 │   │   │   │   │   ├── pc_kanban_plugin_scope_lib.py
-│   │   │   │   │   └── resolve_repos.sh
+│   │   │   │   │   ├── resolve_repos.sh
+│   │   │   │   │   └── retire_requirements.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── grill/
 │   │   │   │   └── SKILL.md
@@ -432,6 +433,7 @@ pinky-agentic-plugins/
 │   ├── test_anonymize.py
 │   ├── test_apply_anonymization.py
 │   ├── test_apply_reintegrate.py
+│   ├── test_archive_card_sh.py
 │   ├── test_branch_guard.py
 │   ├── test_build_export.py
 │   ├── test_bulk_commit_sh.py
@@ -480,6 +482,7 @@ pinky-agentic-plugins/
 │   ├── test_reconcile.py
 │   ├── test_reconcile_oracle.py
 │   ├── test_repo_path_flag.py
+│   ├── test_retire_requirements.py
 │   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
 │   ├── test_settings_commit_nudge.py

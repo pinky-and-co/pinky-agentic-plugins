@@ -24,10 +24,12 @@ the four invariants, the table's columns.
 
 - **No session-narrated prose.** No `## Decisions (grill YYYY-MM-DD)` block, no `## State` dump.
   When a grill closes, its outcome folds into `## Requirements` and `## Open questions`.
-- **A delivered requirement leaves the table once the code holds it** — a test whose docstring
-  states it, or a line of the plugin's `SKILL.md` describing the behaviour. The code is the
-  durable form: the board is not versioned, and a chantier is deleted once finished. A row whose
-  durable form cannot be pointed at stays in the table.
+- **A delivered requirement leaves the table when its card leaves the board** — mechanically:
+  `archive_card.sh`/`drop_card.sh` call `retire_requirements.py`, which removes the rows the
+  card's frontmatter `requirements` lists — unless another open card still carries the id — and
+  copies them verbatim into the archived card (the board is not versioned; that copy is the only
+  way back). `drop_card.sh --keep-requirements` keeps the story when the need survives the card.
+  The durable form of a delivered requirement is the code, never this table.
 - **A retired requirement is deleted**, never struck through; its id stays burnt.
 
 A story past ~200 lines has accreted prose — prune it back to the template, don't grow the file.

@@ -40,6 +40,7 @@ code.
   invoke that one too.
 
 **3. Report.** First line `Method: adversarial (<the label inside the [answered by …] line>)` or
-`Method: reviewer` — the caller stamps it on the card. Then the findings and the verdict, in the
-methodology's format. An `adversarial` verdict goes back verbatim; add your own findings under it,
+`Method: reviewer` — the caller stamps it on the card. The label is the full
+`provider/model · 🟦🟪🟧 tier` form, copied whole from the `[answered by …]` line — never the
+model name alone. Then the findings and the verdict, in the methodology's format. An `adversarial` verdict goes back verbatim; add your own findings under it,
 never a softened rewrite of the model's.
