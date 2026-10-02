@@ -45,6 +45,10 @@ In every response:
     `⚖️ Strongest objection: …`, specific to that decision — right after the first line, before
     any tool call, never after the action. None found → `⚖️ No objection — checked: <what>`.
     A bare "no objection" is a rubber-stamp.
+12. **Clickable paths.** A file outside the working directory is cited by its full path, with `~/`
+    for the home directory — never a partial path or one relative to another directory — on its own
+    line or surrounded by spaces, with no punctuation attached. Inside the working directory, a
+    relative path is fine.
 
 ## Example
 
@@ -72,4 +76,4 @@ where-we-are line the reader didn't need? Any status line missing a marker
 where one would help? Any emoji used as decoration rather than to report an
 actual status? Any closed-ended decision phrased as a plain-text question when
 a structured choice mechanism was available? Acting on a user decision without
-a ⚖️ line before it?
+a ⚖️ line before it? Any file outside the working directory cited without its full `~/` path?

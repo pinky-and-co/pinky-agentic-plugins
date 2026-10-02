@@ -1,0 +1,8 @@
+{
+  "name": "pc-memory",
+  "version": "0.1.0",
+  "description": "Surfaces memory at session start: the user sees one summary line per directory level and its stale notes, the model gets the parent levels' indexes only, capped and marked as data. Asks the user before any write into a memory directory.",
+  "author": {
+    "name": "Pinky & Co"
+  }
+}
