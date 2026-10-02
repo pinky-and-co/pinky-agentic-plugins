@@ -2,8 +2,9 @@
 """Shared resolution of memory directories and directory levels for the pc-memory hooks.
 
 Never declared in `hooks.json`: a pure dependency imported by `memory-context/memory_context.py`
-(SessionStart) and `memory-write/memory_write_guard.py` (PreToolUse), so both resolve a level's
-memory directory the same way.
+(SessionStart), `memory-write/memory_write_guard.py` (PreToolUse) and `memory-count/memory_count.py`
+(PostToolUse), so all resolve a level's memory directory the same way, and name the consultation
+ledger files the same way.
 
 A level is the git root (the main repo's root from inside a worktree) found below the home
 directory, else the working directory, then each ancestor up to the home directory, excluded.
@@ -25,6 +26,9 @@ from pathlib import Path
 
 __all__ = [
     "INDEX_NAME",
+    "LEDGER_NAME",
+    "LOCK_NAME",
+    "MARKER_NAME",
     "Level",
     "clean_text",
     "config_dir",
@@ -42,6 +46,9 @@ __all__ = [
 ]
 
 INDEX_NAME = "MEMORY.md"
+LEDGER_NAME = ".pc-memory-ledger.json"
+LOCK_NAME = ".pc-memory-ledger.lock"
+MARKER_NAME = ".pc-memory-reconciling"
 _GITDIR = re.compile(r"^gitdir:\s*(.+?)\s*$")
 _STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
@@ -72,17 +79,20 @@ def encode(path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
-def _settings_sources(level: Path) -> list[tuple[Path, Path]]:
+def _settings_sources(
+    level: Path, trust_shared_project_settings: bool = True
+) -> list[tuple[Path, Path]]:
     """Settings files by priority, each with the base a relative path resolves from.
 
-    Level `.claude/settings.local.json`, level `.claude/settings.json`, then the user
-    `settings.json` in the config directory.
+    Level `.claude/settings.local.json`, level `.claude/settings.json` (left out when
+    `trust_shared_project_settings` is false), then the user `settings.json` in the config
+    directory.
     """
-    return [
-        (level / ".claude" / "settings.local.json", level),
-        (level / ".claude" / "settings.json", level),
-        (config_dir() / "settings.json", config_dir()),
-    ]
+    sources = [(level / ".claude" / "settings.local.json", level)]
+    if trust_shared_project_settings:
+        sources.append((level / ".claude" / "settings.json", level))
+    sources.append((config_dir() / "settings.json", config_dir()))
+    return sources
 
 
 def _read_value(settings_file: Path, key: str) -> object:
@@ -94,7 +104,9 @@ def _read_value(settings_file: Path, key: str) -> object:
     return data.get(key) if isinstance(data, dict) else None
 
 
-def configured_memory_dir(level: Path) -> Path | None:
+def configured_memory_dir(
+    level: Path, trust_shared_project_settings: bool = True
+) -> Path | None:
     """Memory directory redirected through `autoMemoryDirectory`, None when no settings set it.
 
     Level settings win over user settings. A relative path resolves from the level for level
@@ -102,11 +114,13 @@ def configured_memory_dir(level: Path) -> Path | None:
 
     Args:
         level: The level's root directory.
+        trust_shared_project_settings: False ignores the level's `.claude/settings.json`, the file a
+            cloned repo ships, so a caller that writes into the directory is not redirected by it.
 
     Returns:
         The redirected directory, or None.
     """
-    for settings_file, base in _settings_sources(level):
+    for settings_file, base in _settings_sources(level, trust_shared_project_settings):
         value = _read_value(settings_file, "autoMemoryDirectory")
         if not isinstance(value, str) or not value.strip():
             continue
@@ -134,12 +148,13 @@ def spinner_tips_enabled(level: Path) -> bool:
     return True
 
 
-def memory_dir_of(level: Path) -> Path:
+def memory_dir_of(level: Path, trust_shared_project_settings: bool = True) -> Path:
     """Memory directory of a level, whether or not it exists yet.
 
     A declared `autoMemoryDirectory` is the only candidate; the default silo is used otherwise.
+    `trust_shared_project_settings` is passed to `configured_memory_dir`.
     """
-    declared = configured_memory_dir(level)
+    declared = configured_memory_dir(level, trust_shared_project_settings)
     if declared is not None:
         return declared
     return config_dir() / "projects" / encode(level) / "memory"

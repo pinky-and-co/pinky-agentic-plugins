@@ -1,5 +1,5 @@
 {
-  "description": "At SessionStart, shows the user one summary line per directory level (current and parents) with the notes at least 30 days old listed oldest first, and gives the model the parent levels' indexes only (capped, marked as data). Read-only on memory; never blocks the session — see memory-context/memory_context.py. At PreToolUse, asks the user before a Write, Edit, MultiEdit or Bash command writes into a memory directory, and gives Claude the reminder of where a note belongs; nothing is blocked — see memory-write/memory_write_guard.py.",
+  "description": "At SessionStart, shows the user one summary line per directory level (current and parents) with the notes at least 30 days old listed oldest first, and gives the model the parent levels' indexes only (capped, marked as data). Read-only on memory; never blocks the session — see memory-context/memory_context.py. At PreToolUse, asks the user before a Write, Edit, MultiEdit or Bash command writes into a memory directory, and gives Claude the reminder of where a note belongs; nothing is blocked — see memory-write/memory_write_guard.py. At PostToolUse, after a Read of a note in a memory directory, counts in a ledger file inside that directory how many sessions consulted it (once per session, never touching the note); nothing is blocked — see memory-count/memory_count.py.",
   "hooks": {
     "SessionStart": [
       {
@@ -21,6 +21,18 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/memory-write/memory_write_guard.py\"",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/memory-count/memory_count.py\"",
+            "timeout": 5
           }
         ]
       }

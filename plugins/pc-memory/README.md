@@ -1,6 +1,6 @@
 # pc-memory
 
-Memory index recall for Claude Code, as a plugin.
+Memory index recall and consultation counting for Claude Code, as a plugin.
 
 ## Overview
 
@@ -120,6 +120,50 @@ The `Bash` net is shallow, and a false alarm costs more than a miss. Not covered
 - a case-insensitive file system (macOS): a path spelled with another case is not matched;
 - `NotebookEdit` is not intercepted.
 
+### Consultation counter
+
+A `PostToolUse` hook (`Read`) counts, per note, in how many sessions it was consulted, so a later
+review can tell the notes in use from the ones nobody opens. It acts only on a successful `Read`
+of a `*.md` file located directly in a memory directory (the default silo of any project, or the
+directory a level declares through `autoMemoryDirectory` in its `.claude/settings.local.json` or
+in the user settings), `MEMORY.md` excluded. Any other `Read`
+exits at once with no output; only a `.md` path costs a settings lookup.
+
+The count lives in `.pc-memory-ledger.json` inside the memory directory, a dot file that is not a
+note and never appears in the startup summary:
+
+```json
+{"notes": {"feedback_x.md": {"sessions": 3, "last_session": "<session id>", "last_read": "2026-10-02"}},
+ "last_review": null}
+```
+
+- A counter goes up by one only when the session differs from the note's `last_session`: ten reads
+  in one long session count once. `last_read` is the local date.
+- The note and `MEMORY.md` are never written, so a read does not change the file it reads.
+- Unknown keys and an existing `last_review` survive a rewrite. A ledger that cannot be decoded
+  or parsed is rebuilt from the entries still usable, with a message on stderr, and the original
+  is kept as `.pc-memory-ledger.json.corrupt` (an earlier `.corrupt` is overwritten). A ledger
+  that cannot be read for another reason (a directory, no permission) is left as it is and
+  nothing is counted.
+- The counter writes into the directory, so it does not follow an `autoMemoryDirectory` declared
+  in the level's shared `.claude/settings.json`, the file a cloned repo ships: a repo cannot
+  redirect the write. A team that declares its memory directory there gets no count unless it
+  also sets it in `settings.local.json` or the user settings. The default silos always count. The
+  SessionStart and PreToolUse hooks still honour the shared file.
+- Two sessions counting together lose nothing: the read-modify-write holds an exclusive `flock` on
+  `.pc-memory-ledger.lock`, and the ledger is replaced atomically (temp file, then `os.replace`),
+  so a reader never sees a truncated ledger. The lock is polled without blocking and given up
+  after about 1 s: that count is then skipped (message on stderr), the tool call is not delayed
+  further. Without `fcntl` (Windows) nothing is counted.
+- A file named `.pc-memory-reconciling` in the memory directory suspends the count for that
+  directory. It is checked under the lock: whoever creates the marker and then takes the lock is
+  not overtaken by a count already in flight.
+- The hook never blocks: any error goes to stderr, exit 0, nothing on stdout.
+
+The counter is a biased proxy: a note is read only if its index line made the model open it. Read
+it with the note's age, not on its own. The de-duplication compares with the last session only:
+sessions A, B, A reading the same note count 3.
+
 ## Enable
 
 ```bash
@@ -139,6 +183,14 @@ Environment variables, all optional:
 
 ## Limits
 
+- The ledger is created with mode 0600; the lock file takes the default mode. A declared memory
+  directory inside a repo or a synced folder receives a visible `.pc-memory-ledger.json` and
+  `.pc-memory-ledger.lock`, and `flock` can be a no-op on some network or synced file systems, in
+  which case two sessions counting together can lose an increment.
+- A path spelled with another case on a case-insensitive file system (macOS) is not matched, as
+  with the write guard.
+- The counter sees what goes through the `Read` tool. A recall that bypasses it (a note loaded by the
+  harness itself, a `cat` in `Bash`) is not counted.
 - The folder name of the default silo (every non-alphanumeric character becomes `-`) is an observed
   rule, not a documented one. A level whose memory exists but is not found: compare
   `ls ~/.claude/projects/` with the encoded path first.
