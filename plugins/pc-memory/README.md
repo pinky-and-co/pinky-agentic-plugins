@@ -44,6 +44,46 @@ only.
 
 The hook never blocks the session: any error prints `{}` and exits 0.
 
+### Write guard
+
+A `PreToolUse` hook (`Write|Edit|MultiEdit|Bash`) asks the user before anything is written into a
+memory directory. A note written to memory reads as a suggestion, a step of a SKILL is a point of
+passage: told it skipped a step, Claude tends to write a `feedback_*` note instead of fixing the
+SKILL. The hook returns `permissionDecision: ask`, with the procedure as the reason: a skipped
+step is a diff of the SKILL concerned, a general rule is promoted to a `CLAUDE.md`, a local trap
+is an acceptable note. The user decides each note; nothing is blocked. It also runs inside
+subagents.
+
+A memory directory is resolved as above (declared `autoMemoryDirectory`, else the default silo) for
+the working directory's level and each ancestor level, whether or not it exists yet, plus any
+default silo of any project under the config directory. `Write`, `Edit`, `MultiEdit` are matched on `file_path` (a relative path resolves from the working
+directory). A `Bash` command is split into simple commands at `;`, `&&`, `||`, `|`, `&`, `(` and
+newlines, and each is checked in command position:
+
+- a redirection (`>`, `>>`, `>|`, `&>`) whose target is in memory; `/dev/null` and descriptor
+  redirections (`2>&1`, `&>/dev/null`) never count, and a `<` source is not a target;
+- `tee`, `rm`, `touch`, `truncate`, `sed -i` / `--in-place`, `perl -i` with a memory path argument
+  (`touch -r REF` and `truncate -r REF` take REF as a source);
+- `cp`, `mv`, `ln`, `install`, `rsync` with a memory path as the last argument, the destination, or
+  as the `-t` / `--target-directory` value;
+- `dd of=`, `curl -o` / `--output`, `wget -O` / `--output-document`, `wget -P` /
+  `--directory-prefix` with a memory path.
+
+The command is read by a small word splitter: heredoc bodies, text in quotes and `#` comments are
+never looked into, so a commit message that quotes a memory path or a redirection asks nothing.
+`\rm`, `'rm'`, `sudo -u me rm` and `env -i rm` are seen as `rm`. Paths are matched after expanding
+`~`, `$HOME`, `${HOME}`, `..` and symlinks; a relative path resolves from the working directory. A file
+named `install.md` asks nothing.
+
+The `Bash` net is shallow, and a false alarm costs more than a miss. Not covered:
+
+- a script, an interpreter one-liner, `xargs`, a path built at run time, a path cut by a `cd`, a
+  glob, `${CLAUDE_CONFIG_DIR:-...}`, a command substitution inside quotes;
+- `mv <memory>/a.md /tmp/` removes a note without asking: only the destination is checked;
+- `unlink`, `shred`, `rmdir`, `find -delete`, `git restore`, `git checkout --` and `git mv`;
+- a case-insensitive file system (macOS): a path spelled with another case is not matched;
+- `NotebookEdit` is not intercepted.
+
 ## Enable
 
 ```bash
@@ -59,6 +99,7 @@ Environment variables, all optional:
 | `PC_MEMORY_CONTEXT` | on | `0` disables the hook |
 | `PC_MEMORY_STALE_DAYS` | `30` | a note at least this many days old is reported as stale |
 | `PC_MEMORY_MODEL_LINES` | `30` | index lines injected per parent level into the model |
+| `PC_ALLOW_MEMORY_WRITE` | unset | `1` lets memory writes through without asking; set it when launching the session |
 
 ## Limits
 

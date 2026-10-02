@@ -48,7 +48,19 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-INDEX_NAME = "MEMORY.md"
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from pc_memory_lib import (  # noqa: E402
+    INDEX_NAME,
+    Level,
+    encode,
+    find_memory_dir,
+    home_dir,
+    level_root,
+    level_roots,
+)
+
+__all__ = ["Level", "encode", "find_memory_dir", "level_root", "level_roots"]
+
 MAX_LINE_CHARS = 200
 INDEX_BYTES = 65536
 SECONDS_PER_DAY = 86400
@@ -61,16 +73,7 @@ PROMOTION_REMINDER = (
 )
 DEFAULT_MODEL_LINES = 30
 _MODIFIED = re.compile(r"^modified:\s*(.+?)\s*$")
-_GITDIR = re.compile(r"^gitdir:\s*(.+?)\s*$")
 _STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
-
-
-@dataclass(frozen=True)
-class Level:
-    """A directory level that owns a memory index."""
-
-    root: Path
-    memory_dir: Path
 
 
 @dataclass(frozen=True)
@@ -99,19 +102,6 @@ def _env_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-def _home() -> Path:
-    """Resolved home directory, the upper bound of the level walk."""
-    return Path.home().resolve()
-
-
-def _config_dir() -> Path:
-    """Claude Code's config directory: `CLAUDE_CONFIG_DIR` when set, else `~/.claude`."""
-    raw = os.environ.get("CLAUDE_CONFIG_DIR")
-    if raw:
-        return Path(os.path.expanduser(raw))
-    return Path.home() / ".claude"
-
-
 def _clean(text: str) -> str:
     """`text` with tabs as spaces, and every control, format and line-separator character removed.
 
@@ -125,114 +115,6 @@ def _clean(text: str) -> str:
         if unicodedata.category(ch) not in _STRIPPED_CATEGORIES
         and not "\u2060" <= ch <= "\u206f"
     )
-
-
-def encode(path: Path) -> str:
-    """Name of the Claude Code project folder for `path`: every non-alphanumeric becomes `-`."""
-    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
-
-
-def _read_setting(settings_file: Path) -> str | None:
-    """`autoMemoryDirectory` declared in one settings file, None when absent or unreadable."""
-    try:
-        data = json.loads(settings_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    value = data.get("autoMemoryDirectory") if isinstance(data, dict) else None
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-def configured_memory_dir(level: Path) -> Path | None:
-    """Memory directory redirected through `autoMemoryDirectory`, None when no settings set it.
-
-    Level settings win over user settings. A relative path resolves from the level for level
-    settings and from the config directory for the user settings.
-
-    Args:
-        level: The level's root directory.
-
-    Returns:
-        The redirected directory, or None.
-    """
-    sources = [
-        (level / ".claude" / "settings.local.json", level),
-        (level / ".claude" / "settings.json", level),
-        (_config_dir() / "settings.json", _config_dir()),
-    ]
-    for settings_file, base in sources:
-        value = _read_setting(settings_file)
-        if value is None:
-            continue
-        candidate = Path(os.path.expanduser(value))
-        return candidate if candidate.is_absolute() else base / candidate
-    return None
-
-
-def find_memory_dir(level: Path) -> Path | None:
-    """Memory directory of a level when it has an index.
-
-    A declared `autoMemoryDirectory` is the only candidate; the default silo is used otherwise.
-    """
-    candidate = configured_memory_dir(level)
-    if candidate is None:
-        candidate = _config_dir() / "projects" / encode(level) / "memory"
-    return candidate if (candidate / INDEX_NAME).is_file() else None
-
-
-def _main_repo_root(git_file: Path, fallback: Path) -> Path:
-    """Root of the main repo a worktree's `.git` file points to, `fallback` for anything else.
-
-    A submodule's `.git` file points to `<repo>/.git/modules/<name>`, not to a worktree entry, so
-    it keeps `fallback`.
-    """
-    try:
-        text = git_file.read_text(encoding="utf-8").strip()
-    except OSError:
-        return fallback
-    match = _GITDIR.match(text)
-    if match is None:
-        return fallback
-    gitdir = (git_file.parent / match.group(1)).resolve()
-    common = gitdir.parent.parent
-    if gitdir.parent.name != "worktrees" or common.name != ".git":
-        return fallback
-    return common.parent
-
-
-def level_root(cwd: Path) -> Path:
-    """Git root below the home directory (memory is attached to it), else `cwd` itself.
-
-    From inside a worktree the root is the main repo's, whose path names the memory silo. The walk
-    stops before the home directory, so a `.git` kept in `$HOME` never captures every session.
-    """
-    if _home() not in cwd.parents:
-        return cwd
-    for candidate in (cwd, *cwd.parents):
-        if candidate == _home():
-            break
-        marker = candidate / ".git"
-        if marker.is_dir():
-            return candidate
-        if marker.is_file():
-            return _main_repo_root(marker, candidate)
-    return cwd
-
-
-def level_roots(cwd: Path) -> list[Path]:
-    """Current level, then each ancestor up to the home directory (excluded)."""
-    home = _home()
-    start = level_root(cwd)
-    roots = [start]
-    current = start
-    while True:
-        parent = current.parent
-        if parent == current or parent == home or home not in parent.parents:
-            break
-        roots.append(parent)
-        current = parent
-    return roots
 
 
 def collect_levels(cwd: Path) -> list[Level]:
@@ -257,7 +139,7 @@ def collect_levels(cwd: Path) -> list[Level]:
 def short(path: Path) -> str:
     """`path` with the home directory abbreviated to `~`."""
     text = str(path)
-    for home in (str(_home()), str(Path.home())):
+    for home in (str(home_dir()), str(Path.home())):
         if text == home or text.startswith(home + os.sep):
             return "~" + text[len(home) :]
     return text
