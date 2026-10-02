@@ -8,6 +8,8 @@
     "pyright@claude-code-lsps": true,
     "pc-autodiscovery@pinky-agentic-plugins": true,
     "pc-git@pinky-agentic-plugins": true,
-    "pc-delegate@pinky-agentic-plugins": true
+    "pc-delegate@pinky-agentic-plugins": true,
+    "pc-rtk@pinky-agentic-plugins": true,
+    "pc-memory@pinky-agentic-plugins": true
   }
 }
