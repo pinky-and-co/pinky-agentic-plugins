@@ -7,7 +7,7 @@ hook reads, never writes, each level's `MEMORY.md` and emits two things:
 - `systemMessage` (the user): one summary line per level, current included (path, notes, notes
   at least the stale threshold old), then that level's stale notes with their age, oldest first,
   each by its full path (`~/` for the home directory), so they get promoted to the right level
-  or deleted. No index line is shown. A `/memory` tip closes it. Skipped after a compaction,
+  or deleted. No index line is shown. A `/memory` tip closes it unless the `spinnerTipsEnabled` setting is false. Skipped after a compaction,
   since the user already saw it.
 - `additionalContext` (the model): the index of the parent levels only, capped, and marked as
   data, after one sentence telling the model to pick the level of a note by subject. The current level's index is already loaded natively by Claude Code.
@@ -58,6 +58,7 @@ from pc_memory_lib import (  # noqa: E402
     level_root,
     level_roots,
     short,
+    spinner_tips_enabled,
 )
 
 __all__ = [
@@ -218,7 +219,11 @@ def read_index(memory_dir: Path, max_lines: int) -> list[str]:
 
 
 def build_user_message(
-    levels: list[Level], current: Path, stale_days: int, now: float
+    levels: list[Level],
+    current: Path,
+    stale_days: int,
+    now: float,
+    show_tip: bool = True,
 ) -> str:
     """Message shown to the user: one summary line per level, then its stale notes by age.
 
@@ -229,7 +234,7 @@ def build_user_message(
     `clean_text` at the one point where the message is joined, so no path or name can carry a control
     sequence to the terminal.
     The promotion reminder follows only when at least one stale note is listed. The `/memory` tip
-    is the last line, always.
+    is the last line, unless `show_tip` is false.
     """
     out = [
         f"Memory by directory level, notes at least {stale_days} d old listed oldest first:"
@@ -255,7 +260,8 @@ def build_user_message(
         return ""
     if listed:
         out.append(PROMOTION_REMINDER)
-    out.append(MEMORY_TIP)
+    if show_tip:
+        out.append(MEMORY_TIP)
     return "\n".join(clean_text(line) for line in out)
 
 
@@ -302,6 +308,7 @@ def build_output(payload: dict[str, object], now: float) -> dict[str, object]:
             current,
             _env_int("PC_MEMORY_STALE_DAYS", DEFAULT_STALE_DAYS),
             now,
+            spinner_tips_enabled(current),
         )
     if message:
         output["systemMessage"] = message

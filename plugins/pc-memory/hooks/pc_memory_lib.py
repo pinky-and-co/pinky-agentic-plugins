@@ -38,6 +38,7 @@ __all__ = [
     "level_roots",
     "memory_dir_of",
     "short",
+    "spinner_tips_enabled",
 ]
 
 INDEX_NAME = "MEMORY.md"
@@ -71,16 +72,26 @@ def encode(path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
-def _read_setting(settings_file: Path) -> str | None:
-    """`autoMemoryDirectory` declared in one settings file, None when absent or unreadable."""
+def _settings_sources(level: Path) -> list[tuple[Path, Path]]:
+    """Settings files by priority, each with the base a relative path resolves from.
+
+    Level `.claude/settings.local.json`, level `.claude/settings.json`, then the user
+    `settings.json` in the config directory.
+    """
+    return [
+        (level / ".claude" / "settings.local.json", level),
+        (level / ".claude" / "settings.json", level),
+        (config_dir() / "settings.json", config_dir()),
+    ]
+
+
+def _read_value(settings_file: Path, key: str) -> object:
+    """Value of `key` in one settings file, None when absent or unreadable."""
     try:
         data = json.loads(settings_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    value = data.get("autoMemoryDirectory") if isinstance(data, dict) else None
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
+    return data.get(key) if isinstance(data, dict) else None
 
 
 def configured_memory_dir(level: Path) -> Path | None:
@@ -95,18 +106,32 @@ def configured_memory_dir(level: Path) -> Path | None:
     Returns:
         The redirected directory, or None.
     """
-    sources = [
-        (level / ".claude" / "settings.local.json", level),
-        (level / ".claude" / "settings.json", level),
-        (config_dir() / "settings.json", config_dir()),
-    ]
-    for settings_file, base in sources:
-        value = _read_setting(settings_file)
-        if value is None:
+    for settings_file, base in _settings_sources(level):
+        value = _read_value(settings_file, "autoMemoryDirectory")
+        if not isinstance(value, str) or not value.strip():
             continue
-        candidate = Path(os.path.expanduser(value))
+        candidate = Path(os.path.expanduser(value.strip()))
         return candidate if candidate.is_absolute() else base / candidate
     return None
+
+
+def spinner_tips_enabled(level: Path) -> bool:
+    """Value of the `spinnerTipsEnabled` setting, True when no settings file sets a boolean.
+
+    Same priority as `autoMemoryDirectory`: the first file holding a boolean wins. A value that
+    is not a boolean is ignored, as is an unreadable file.
+
+    Args:
+        level: The level's root directory.
+
+    Returns:
+        False only when the winning setting is the boolean false.
+    """
+    for settings_file, _ in _settings_sources(level):
+        value = _read_value(settings_file, "spinnerTipsEnabled")
+        if isinstance(value, bool):
+            return value
+    return True
 
 
 def memory_dir_of(level: Path) -> Path:

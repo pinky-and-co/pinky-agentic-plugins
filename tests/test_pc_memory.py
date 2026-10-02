@@ -947,3 +947,140 @@ def test_level_choice_sentence_is_absent_without_a_parent_context(home, tree):
     _memory(_silo(home, repo), "- p\n")
     assert "hookSpecificOutput" not in _run(sub)
     assert mc.build_model_context([], 30) == ""
+
+
+def _settings(directory: Path, name: str, data: object) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text(
+        data if isinstance(data, str) else json.dumps(data), encoding="utf-8"
+    )
+
+
+def _tip_shown(home, tree) -> bool:
+    ws, _, sub = tree
+    _memory(_silo(home, ws), "- p\n", {"old.md": 60})
+    return _run(sub)["systemMessage"].splitlines()[-1] == TIP
+
+
+def test_tip_is_shown_when_no_settings_file_sets_it(home, tree):
+    assert _tip_shown(home, tree)
+
+
+def test_tip_is_shown_when_the_setting_is_true_locally(home, tree):
+    _, repo, _ = tree
+    _settings(repo / ".claude", "settings.local.json", {"spinnerTipsEnabled": True})
+    assert _tip_shown(home, tree)
+
+
+def test_local_false_wins_over_true_in_the_shared_settings(home, tree):
+    _, repo, _ = tree
+    _settings(repo / ".claude", "settings.local.json", {"spinnerTipsEnabled": False})
+    _settings(repo / ".claude", "settings.json", {"spinnerTipsEnabled": True})
+    assert not _tip_shown(home, tree)
+
+
+def test_shared_settings_false_wins_over_user_true(home, tree):
+    _, repo, _ = tree
+    _settings(repo / ".claude", "settings.json", {"spinnerTipsEnabled": False})
+    _settings(home / ".claude", "settings.json", {"spinnerTipsEnabled": True})
+    assert not _tip_shown(home, tree)
+
+
+def test_local_true_wins_over_user_false(home, tree):
+    _, repo, _ = tree
+    _settings(repo / ".claude", "settings.local.json", {"spinnerTipsEnabled": True})
+    _settings(home / ".claude", "settings.json", {"spinnerTipsEnabled": False})
+    assert _tip_shown(home, tree)
+
+
+def test_user_false_alone_removes_the_tip(home, tree):
+    _settings(home / ".claude", "settings.json", {"spinnerTipsEnabled": False})
+    assert not _tip_shown(home, tree)
+
+
+def test_string_false_is_not_a_boolean_and_keeps_the_tip(home, tree):
+    _, repo, _ = tree
+    _settings(repo / ".claude", "settings.json", {"spinnerTipsEnabled": "false"})
+    assert _tip_shown(home, tree)
+
+
+def test_invalid_json_keeps_the_tip(home, tree):
+    _, repo, _ = tree
+    _settings(repo / ".claude", "settings.local.json", "{not json")
+    assert _tip_shown(home, tree)
+
+
+def test_settings_of_a_parent_level_are_not_read(home, tree):
+    ws, _, _ = tree
+    _settings(ws / ".claude", "settings.json", {"spinnerTipsEnabled": False})
+    assert _tip_shown(home, tree)
+
+
+def test_moved_config_directory_settings_are_read(home, tree, monkeypatch):
+    ws, _, sub = tree
+    config = home / "cfg"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    _memory(config / "projects" / mc.encode(ws) / "memory", "- p\n", {"old.md": 60})
+    _settings(home / ".claude", "settings.json", {"spinnerTipsEnabled": True})
+    _settings(config, "settings.json", {"spinnerTipsEnabled": False})
+    assert "Tip:" not in _run(sub)["systemMessage"]
+
+
+def test_default_config_directory_settings_are_ignored_when_it_is_moved(
+    home, tree, monkeypatch
+):
+    ws, _, sub = tree
+    config = home / "cfg"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    _memory(config / "projects" / mc.encode(ws) / "memory", "- p\n", {"old.md": 60})
+    _settings(home / ".claude", "settings.json", {"spinnerTipsEnabled": False})
+    assert _run(sub)["systemMessage"].splitlines()[-1] == TIP
+
+
+def test_build_user_message_without_tip_is_the_same_message_minus_the_last_line(home):
+    ws, repo, now = _fixed_tree(home)
+    levels = mc.collect_levels(repo)
+    assert mc.build_user_message(levels, repo, 30, now, show_tip=False) == (
+        "Memory by directory level, notes at least 30 d old listed oldest first:\n"
+        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old\n"
+        f"> {mc.short(ws)} (parent) - 2 notes - 2 at least 30 d old\n"
+        f"  ~/.claude/projects/{mc.encode(ws)}/memory/old.md (100 d)\n"
+        f"  ~/.claude/projects/{mc.encode(ws)}/memory/mid.md (40 d)\n"
+        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
+        "this directory -> the source that generates your instructions (never a generated "
+        "copy); local trap -> stays here. Delete what is outdated."
+    )
+
+
+def test_build_user_message_without_tip_and_without_stale_note(home):
+    ws, repo, now = _fixed_tree(home)
+    for note in _silo(home, ws).glob("*.md"):
+        if note.name != "MEMORY.md":
+            os.utime(note, (now - DAY, now - DAY))
+    levels = mc.collect_levels(repo)
+    assert mc.build_user_message(levels, repo, 30, now, show_tip=False) == (
+        "Memory by directory level, notes at least 30 d old listed oldest first:\n"
+        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old\n"
+        f"> {mc.short(ws)} (parent) - 2 notes - 0 at least 30 d old"
+    )
+
+
+def test_build_output_drops_only_the_tip_when_the_setting_is_false(home):
+    ws, repo, now = _fixed_tree(home)
+    _settings(repo / ".claude", "settings.json", {"spinnerTipsEnabled": False})
+    levels = mc.collect_levels(repo)
+    out = mc.build_output({"cwd": str(repo), "source": "startup"}, now)
+    assert out["systemMessage"] == mc.build_user_message(
+        levels, repo, 30, now, show_tip=False
+    )
+    assert mc.build_output({"cwd": str(repo), "source": "compact"}, now) == {
+        "hookSpecificOutput": out["hookSpecificOutput"]
+    }
+
+
+def test_compaction_shows_nothing_to_the_user_whatever_the_setting(home, tree):
+    ws, repo, sub = tree
+    _memory(_silo(home, ws), "- p\n", {"old.md": 60})
+    for value in (True, False):
+        _settings(repo / ".claude", "settings.json", {"spinnerTipsEnabled": value})
+        assert "systemMessage" not in _run(sub, source="compact")

@@ -20,7 +20,8 @@ and emits:
   rule or pitfall beyond the directory: the source that generates the instructions, never a
   generated copy; a local trap stays in memory) or to delete it. The last line is always a tip
   (a light-bulb emoji, then: use `/memory` to enable or disable auto memory and to browse the memory
-  entries of the current level), with or without stale notes. Not shown again after
+  entries of the current level), with or without stale notes, unless the `spinnerTipsEnabled`
+  setting (the "Show tips" option of `/config`) is the boolean `false`. Not shown again after
   `/compact`.
 - **To the model** (`additionalContext`): the index of the **parent** levels only, capped per
   level and fenced as data, not instructions. One sentence after the data notice tells the model to
@@ -41,6 +42,13 @@ A level's memory directory is the one `autoMemoryDirectory` points to — level
 only candidate: with no `MEMORY.md` in it the level shows nothing, with no fallback to the silo. A
 relative path resolves from the level (level settings) or from the config directory (user
 settings). The config directory is `CLAUDE_CONFIG_DIR` when set, else `~/.claude`.
+
+`spinnerTipsEnabled` is read with the same priority as `autoMemoryDirectory`: the current level's
+`.claude/settings.local.json`, then its `.claude/settings.json`, then the user `settings.json` in
+the config directory; the first file holding a boolean wins. A missing key, a value that is not a
+boolean (such as the string `"false"`) or an unreadable file keeps the tip. Not seen by the hook:
+managed (enterprise) settings and the command-line `--settings` option, which can also impose the
+setting.
 
 A note's age is its frontmatter `modified` field, falling back to the file modification time.
 
