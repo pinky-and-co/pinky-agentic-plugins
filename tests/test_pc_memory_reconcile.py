@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -620,7 +621,7 @@ def test_a_reviewed_dir_that_is_not_a_memory_dir_is_refused(home, two, tmp_path)
 
 def test_a_move_onto_an_existing_note_is_refused(home, two):
     _note(two["par"], "c.md", "already there\n")
-    with pytest.raises(ap.PlanError, match="already exists"):
+    with pytest.raises(ap.PlanError, match="differ"):
         ap.parse_plan(
             {"actions": [_act(two["cur"], "c.md", "move", to_dir=two["par"])]},
             two["repo"],
@@ -680,7 +681,7 @@ def test_dry_run_changes_nothing_not_even_the_marker(home, two, monkeypatch):
         [
             _act(cur, "a.md", "delete"),
             _act(cur, "c.md", "move", to_dir=par),
-            _act(cur, "ghost.md", "delete"),
+            _act(cur, "ghost.md", "delete", hard=True),
         ],
         reviewed=[cur],
         dry_run=True,
@@ -691,16 +692,32 @@ def test_dry_run_changes_nothing_not_even_the_marker(home, two, monkeypatch):
         "dry_run": True,
         "ok": True,
         "results": [
-            {"dir": short_cur, "note": "a.md", "action": "delete", "status": "planned"},
-            {"dir": short_cur, "note": "c.md", "action": "move", "status": "planned"},
+            {
+                "dir": short_cur,
+                "note": "a.md",
+                "action": "delete",
+                "to_dir": None,
+                "hard": False,
+                "status": "planned",
+            },
+            {
+                "dir": short_cur,
+                "note": "c.md",
+                "action": "move",
+                "to_dir": _short(par, home),
+                "hard": False,
+                "status": "planned",
+            },
             {
                 "dir": short_cur,
                 "note": "ghost.md",
                 "action": "delete",
+                "to_dir": None,
+                "hard": True,
                 "status": "already_gone",
             },
         ],
-        "last_review": {short_cur: "2026-10-02"},
+        "reviewed_dirs": [short_cur],
     }
 
 
@@ -830,6 +847,7 @@ sys.path.insert(0, str(PLUGIN / "hooks" / "memory-count"))
 import errno  # noqa: E402
 import signal  # noqa: E402
 import time  # noqa: E402
+from urllib.parse import quote  # noqa: E402
 
 import memory_count as cnt  # noqa: E402
 from pc_memory_lib import MARKER_MAX_AGE, marker_active  # noqa: E402
@@ -1286,7 +1304,10 @@ def test_the_skill_grants_no_read_or_write_and_passes_the_plan_on_stdin():
     ).split(":", 1)[1]
     names = {part.strip().split("(")[0] for part in tools.split(", ")}
     assert names == {"Bash", "AskUserQuestion"}
+    assert "apply.py" not in tools
     assert "--plan -" in text
+    assert "--dry-run" in text
+    assert "permanent deletion" in text
 
 
 # --- review round: surviving mutations ----------------------------------------------
@@ -1435,9 +1456,27 @@ def test_the_exclusive_copy_never_replaces_an_existing_destination(tmp_path):
     source.write_text("mine\n", encoding="utf-8")
     dest.write_text("theirs\n", encoding="utf-8")
     with pytest.raises(FileExistsError):
-        ap._move_exclusive(source, dest)
+        ap._copy_exclusive(source, dest)
     assert dest.read_text(encoding="utf-8") == "theirs\n"
     assert source.read_text(encoding="utf-8") == "mine\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["d.md", "s.md"]
+
+
+def test_the_copy_in_place_fallback_never_replaces_a_destination_either(
+    tmp_path, monkeypatch
+):
+    source, dest = tmp_path / "s.md", tmp_path / "d.md"
+    source.write_text("mine\n", encoding="utf-8")
+    dest.write_text("theirs\n", encoding="utf-8")
+
+    def refuse(*args, **kwargs):
+        raise OSError(errno.EPERM, "no hard link here")
+
+    monkeypatch.setattr(os, "link", refuse)
+    with pytest.raises(FileExistsError):
+        ap._copy_exclusive(source, dest)
+    monkeypatch.undo()
+    assert dest.read_text(encoding="utf-8") == "theirs\n"
 
 
 def test_a_copy_that_fails_midway_leaves_no_half_file(tmp_path, monkeypatch):
@@ -1449,6 +1488,421 @@ def test_a_copy_that_fails_midway_leaves_no_half_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ap.shutil, "copyfileobj", broken)
     with pytest.raises(OSError, match="disk full"):
-        ap._move_exclusive(source, dest)
+        ap._copy_exclusive(source, dest)
     monkeypatch.undo()
     assert source.exists() and not dest.exists()
+
+
+# --- review round 3: crash-safe move ------------------------------------------------
+
+DRIVER = r"""
+import json, os, sys
+from datetime import date
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import apply as ap
+crash_at = int(os.environ["CRASH_AT"])
+calls = [0]
+def wrap(name):
+    real = getattr(os, name)
+    def guarded(*a, **k):
+        calls[0] += 1
+        if calls[0] == crash_at:
+            os._exit(75)
+        return real(*a, **k)
+    setattr(os, name, guarded)
+for name in ("open", "replace", "link", "unlink", "symlink", "rename", "utime", "mkdir", "chmod"):
+    wrap(name)
+if os.environ.get("CRASH_MID_COPY"):
+    def half(src, dst, *a):
+        dst.write(src.read(1))
+        dst.flush()
+        os._exit(76)
+    ap.shutil.copyfileobj = half
+plan = ap.parse_plan(json.load(open(sys.argv[2])), Path(sys.argv[3]))
+ap.apply_plan(plan, date(2026, 10, 2))
+print(calls[0])
+"""
+CRASH_MAX = 90
+TEMP_NAME = re.compile(
+    r"^\.pc-memory-(move|index|ledger)\.[a-z0-9_]{8}$", re.IGNORECASE
+)
+
+
+def _crash_run(home, two, plan, crash_at, **env):
+    plan_file = home / "crash-plan.json"
+    plan_file.write_text(json.dumps(plan), encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, "-c", DRIVER, str(SCRIPTS), str(plan_file), str(two["repo"])],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HOME": str(home), "CRASH_AT": str(crash_at), **env},
+        check=False,
+    )
+
+
+def _crash_plan(two):
+    return {
+        "actions": [
+            _act(two["cur"], "a.md", "delete"),
+            _act(two["cur"], "c.md", "move", to_dir=two["par"]),
+        ],
+        "reviewed_dirs": [str(two["cur"])],
+    }
+
+
+def _age_markers(two):
+    for directory in (two["cur"], two["par"]):
+        if (directory / MARKER_NAME).exists():
+            _age(directory / MARKER_NAME, 11 * 60)
+
+
+def _assert_converged(two, orig):
+    cur, par = two["cur"], two["par"]
+    assert not (cur / "c.md").exists()
+    assert (par / "c.md").read_bytes() == orig
+    assert (par / "MEMORY.md").read_text(encoding="utf-8").count("(c.md)") == 1
+    assert "c.md" not in (cur / "MEMORY.md").read_text(encoding="utf-8")
+    assert "a.md" not in (cur / "MEMORY.md").read_text(encoding="utf-8")
+    assert not (cur / "a.md").exists()
+    trashed = list((cur / ".reconcile-trash" / "2026-10-02").iterdir())
+    assert [t.name for t in trashed] == ["a.md"]
+    notes = _json(cur / LEDGER_NAME)["notes"]
+    assert "a.md" not in notes and "c.md" not in notes
+    assert _json(cur / LEDGER_NAME)["last_review"] == "2026-10-02"
+    for directory in (cur, par):
+        assert not [p for p in directory.iterdir() if TEMP_NAME.match(p.name)]
+        assert not (directory / MARKER_NAME).exists()
+
+
+def test_the_crash_driver_reaches_the_end_of_a_clean_run(home, two):
+    run = _crash_run(home, two, _crash_plan(two), 0)
+    assert run.returncode == 0, run.stderr
+    assert int(run.stdout.strip()) <= CRASH_MAX
+
+
+@pytest.mark.parametrize("crash_at", range(1, CRASH_MAX + 1))
+def test_a_run_killed_before_any_os_call_converges_when_the_plan_is_replayed(
+    home, two, crash_at
+):
+    orig = (two["cur"] / "c.md").read_bytes()
+    run = _crash_run(home, two, _crash_plan(two), crash_at)
+    assert run.returncode in (0, 75), run.stderr
+    cur, par = two["cur"], two["par"]
+    assert (cur / "c.md").exists() or (par / "c.md").exists()
+    if (par / "c.md").exists():
+        assert (par / "c.md").read_bytes() == orig
+    _age_markers(two)
+    summary = _apply(two, _crash_plan(two)["actions"], reviewed=[cur])
+    assert summary["ok"] is True
+    _assert_converged(two, orig)
+
+
+def test_a_run_killed_during_the_copy_converges_when_the_plan_is_replayed(home, two):
+    cur, par = two["cur"], two["par"]
+    (cur / "c.md").write_text("x" * 5000, encoding="utf-8")
+    orig = (cur / "c.md").read_bytes()
+    run = _crash_run(home, two, _crash_plan(two), 0, CRASH_MID_COPY="1")
+    assert run.returncode == 76, run.stderr
+    assert not (par / "c.md").exists()
+    assert [p.name for p in par.iterdir() if TEMP_NAME.match(p.name)]
+    _age_markers(two)
+    assert _apply(two, _crash_plan(two)["actions"], reviewed=[cur])["ok"] is True
+    _assert_converged(two, orig)
+
+
+def test_a_destination_is_never_visible_half_written(home, two, monkeypatch):
+    cur, par = two["cur"], two["par"]
+    seen = []
+
+    def half(src, dst, *args):
+        dst.write(src.read(1))
+        seen.append(sorted(p.name for p in par.iterdir() if p.name == "c.md"))
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ap.shutil, "copyfileobj", half)
+    summary = _apply(two, [_act(cur, "c.md", "move", to_dir=par)])
+    monkeypatch.undo()
+    assert summary["ok"] is False
+    assert seen == [[]]
+    assert (cur / "c.md").exists() and not (par / "c.md").exists()
+    assert not [p for p in par.iterdir() if TEMP_NAME.match(p.name)]
+
+
+@pytest.mark.parametrize("code", [errno.EXDEV, errno.EPERM, errno.ENOTSUP])
+def test_a_file_system_without_hard_links_falls_back_to_a_copy(
+    home, two, monkeypatch, code
+):
+    cur, par = two["cur"], two["par"]
+
+    def refuse(src, dst, *args, **kwargs):
+        raise OSError(code, "no hard link here")
+
+    monkeypatch.setattr(os, "link", refuse)
+    summary = _apply(two, [_act(cur, "c.md", "move", to_dir=par)])
+    monkeypatch.undo()
+    assert summary["ok"] is True
+    assert not (cur / "c.md").exists()
+    assert (par / "c.md").read_text(encoding="utf-8") == (
+        "---\ndescription: desc c\n---\nbody c\n"
+    )
+    assert not [p for p in par.iterdir() if TEMP_NAME.match(p.name)]
+
+
+def test_identical_source_and_destination_are_a_move_in_progress(home, two):
+    cur, par = two["cur"], two["par"]
+    (par / "c.md").write_bytes((cur / "c.md").read_bytes())
+    summary = _apply(two, [_act(cur, "c.md", "move", to_dir=par)])
+    assert summary["ok"] is True
+    assert summary["results"][0]["status"] == "done"
+    assert not (cur / "c.md").exists()
+    assert (par / "c.md").read_text(encoding="utf-8") == (
+        "---\ndescription: desc c\n---\nbody c\n"
+    )
+    assert (par / "MEMORY.md").read_text(encoding="utf-8").count("(c.md)") == 1
+    assert "c.md" not in (cur / "MEMORY.md").read_text(encoding="utf-8")
+    assert "c.md" not in _json(cur / LEDGER_NAME)["notes"]
+
+
+def test_different_source_and_destination_are_refused_naming_both_paths(home, two):
+    cur, par = two["cur"], two["par"]
+    _note(par, "c.md", "another body\n")
+    with pytest.raises(ap.PlanError) as refused:
+        ap.parse_plan({"actions": [_act(cur, "c.md", "move", to_dir=par)]}, two["repo"])
+    assert _short(cur / "c.md", home) in str(refused.value)
+    assert _short(par / "c.md", home) in str(refused.value)
+
+
+def test_a_destination_that_differs_when_applying_is_refused_and_nothing_is_lost(
+    home, two
+):
+    cur, par = two["cur"], two["par"]
+    plan = ap.parse_plan(
+        {"actions": [_act(cur, "c.md", "move", to_dir=par)]}, two["repo"]
+    )
+    (par / "c.md").write_text("theirs\n", encoding="utf-8")
+    summary = ap.apply_plan(plan, TODAY)
+    assert summary["ok"] is False
+    assert (par / "c.md").read_text(encoding="utf-8") == "theirs\n"
+    assert (cur / "c.md").exists()
+    assert "c.md" in (cur / "MEMORY.md").read_text(encoding="utf-8")
+
+
+def test_hidden_temporaries_of_a_dead_run_are_cleaned_and_real_files_kept(home, two):
+    cur, par = two["cur"], two["par"]
+    junk = [
+        ".pc-memory-move.abcd1234",
+        ".pc-memory-index.zzzz0000",
+        ".pc-memory-ledger.12345678",
+    ]
+    keep = [LOCK_NAME, LEDGER_NAME + ".corrupt", ".pc-memory-ledger.abc", "notes.txt"]
+    for directory in (cur, par):
+        for name in junk + keep:
+            (directory / name).write_text("x", encoding="utf-8")
+    _apply(two, [_act(cur, "a.md", "keep")], reviewed=[par])
+    for directory in (cur, par):
+        assert not [n for n in junk if (directory / n).exists()]
+        assert all((directory / n).exists() for n in keep)
+
+
+# --- review round 3: the approval covers what runs ----------------------------------
+
+
+def test_the_skill_asks_for_the_plan_shown_with_a_separate_permanent_deletion_option():
+    text = (PLUGIN / "skills" / "reconcile" / "SKILL.md").read_text(encoding="utf-8")
+    assert "exactly the plan shown" in text
+    assert "never the default" in text
+
+
+# --- review round 3: raw fields -----------------------------------------------------
+
+
+def test_every_raw_inventory_field_is_cleaned_and_capped(home, tree):
+    cur = tree["current"]
+    bad = "ev\U000e0041il\x1b[0m‮"
+    (cur / f"{bad}.md").write_text("Same body across levels.\n", encoding="utf-8")
+    (cur / "MEMORY.md").write_text(
+        "- [g](ghost\U000e0041‮.md)\n- [t](build_trap.md)\n", encoding="utf-8"
+    )
+    ledger = _json(cur / LEDGER_NAME)
+    ledger["notes"]["build_trap.md"]["last_read"] = "\x1b[31m2026-10-01‮"
+    ledger["notes"]["tone.md"] = {"sessions": 1, "last_read": "x" * 3000}
+    ledger["last_review"] = "‮2026-08-01" + "z" * 3000
+    (cur / LEDGER_NAME).write_text(json.dumps(ledger), encoding="utf-8")
+    level = inv.build_inventory(tree["repo"], NOW)["levels"][0]
+    by_file = {n["file"]: n for n in level["notes"]}
+    assert "evil[0m.md" in by_file
+    assert level["orphans"]["file_without_index"] == [
+        "dup.md",
+        "evil[0m.md",
+        "loose.md",
+        "tone.md",
+    ]
+    assert level["orphans"]["index_without_file"] == ["ghost.md"]
+    assert by_file["build_trap.md"]["last_read"] is None
+    assert by_file["tone.md"]["last_read"] is None
+    assert level["last_review"] is None
+    exact = inv.build_inventory(tree["repo"], NOW)["duplicates"]["exact"]
+    assert [m["file"] for g in exact for m in g] == [
+        "dup_shared.md",
+        "dup.md",
+        "evil[0m.md",
+    ]
+
+
+def test_a_description_cannot_make_a_second_link_in_a_generated_index_line(tmp_path):
+    note = tmp_path / "n.md"
+    note.write_text(
+        "---\ndescription: see [z](z.md) \x1b[31m‮\U000e0041 "
+        + "d" * 3000
+        + "\n---\nb\n",
+        encoding="utf-8",
+    )
+    line = ap._default_line(note, "n.md")
+    from pc_memory_lib import link_targets
+
+    assert link_targets(line) == ["n.md"]
+    assert len(line) <= 260
+    assert "\x1b" not in line and "‮" not in line and "\U000e0041" not in line
+
+
+def test_a_note_name_with_brackets_makes_one_link(tmp_path):
+    from pc_memory_lib import link_targets
+
+    note = tmp_path / "a](evil.md).md"
+    note.write_text("b\n", encoding="utf-8")
+    targets = link_targets(ap._default_line(note, note.name))
+    assert note.name in targets
+    assert set(targets) <= {note.name, quote(note.name)}
+
+
+# --- review round 3: the index is a real file ---------------------------------------
+
+
+def test_an_index_that_is_a_symlink_is_refused_when_the_plan_is_read(
+    home, two, tmp_path
+):
+    real = tmp_path / "real-index.md"
+    real.write_text("- [P](p.md)\n", encoding="utf-8")
+    (two["par"] / "MEMORY.md").unlink()
+    (two["par"] / "MEMORY.md").symlink_to(real)
+    with pytest.raises(ap.PlanError, match="symlink"):
+        ap.parse_plan({"actions": [_act(two["par"], "p.md", "delete")]}, two["repo"])
+    assert real.read_text(encoding="utf-8") == "- [P](p.md)\n"
+
+
+def test_an_index_replaced_by_a_symlink_after_validation_is_not_overwritten(
+    home, two, tmp_path
+):
+    real = tmp_path / "real-index.md"
+    real.write_text("- [A](a.md)\n", encoding="utf-8")
+    plan = ap.parse_plan({"actions": [_act(two["cur"], "a.md", "delete")]}, two["repo"])
+    (two["cur"] / "MEMORY.md").unlink()
+    (two["cur"] / "MEMORY.md").symlink_to(real)
+    summary = ap.apply_plan(plan, TODAY)
+    assert summary["ok"] is False
+    assert (two["cur"] / "MEMORY.md").is_symlink()
+    assert real.read_text(encoding="utf-8") == "- [A](a.md)\n"
+
+
+# --- review round 3: the plan text --------------------------------------------------
+
+
+def _cli(home, two, text, *extra):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS / "apply.py"),
+            "--plan",
+            "-",
+            "--cwd",
+            str(two["repo"]),
+            *extra,
+        ],
+        input=text,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HOME": str(home)},
+        check=False,
+    )
+
+
+def test_a_plan_with_a_duplicated_key_is_refused(home, two):
+    cur = two["cur"]
+    text = (
+        '{"actions": [{"dir": "%s", "note": "a.md", "action": "keep", "action": "delete"}]}'
+        % cur
+    )
+    before = _snapshot(home / ".claude")
+    run = _cli(home, two, text)
+    assert run.returncode == 2
+    assert "duplicate" in json.loads(run.stdout)["refused"]
+    assert _snapshot(home / ".claude") == before
+    assert (cur / "a.md").exists()
+
+
+def test_a_plan_nested_too_deep_is_refused_and_nothing_is_modified(home, two):
+    before = _snapshot(home / ".claude")
+    run = _cli(home, two, "[" * 200000)
+    assert run.returncode == 2
+    assert json.loads(run.stdout)["ok"] is False
+    assert _snapshot(home / ".claude") == before
+
+
+def test_thousands_of_actions_do_not_slow_the_run_down(home, two, monkeypatch):
+    cur = two["cur"]
+    calls = []
+    real = ap.Plan.removable_by_dir
+
+    def counted(self):
+        calls.append(1)
+        return real(self)
+
+    monkeypatch.setattr(ap.Plan, "removable_by_dir", counted)
+    start = time.monotonic()
+    summary = _apply(
+        two,
+        [_act(cur, "a.md", "keep")] * 1
+        + [_act(cur, f"k{n}.md", "keep") for n in range(8000)],
+    )
+    assert summary["ok"] is True
+    assert len(calls) == 1
+    assert time.monotonic() - start < 5
+
+
+def test_the_refusal_for_a_fresh_marker_says_what_to_do_after_a_kill(home, two):
+    (two["cur"] / MARKER_NAME).write_text("", encoding="utf-8")
+    with pytest.raises(ap.PlanError, match="killed.*10 minutes.*remove"):
+        ap.parse_plan({"actions": [_act(two["cur"], "a.md", "keep")]}, two["repo"])
+
+
+# --- review round 3: the counter ----------------------------------------------------
+
+
+def test_a_count_started_before_a_deletion_does_not_recreate_the_pruned_entry(
+    home, two
+):
+    import fcntl
+    import threading
+
+    cur = two["cur"]
+    ledger_before = _json(cur / LEDGER_NAME)
+    assert "a.md" in ledger_before["notes"]
+    result = []
+    with open(cur / LOCK_NAME, "a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        thread = threading.Thread(
+            target=lambda: result.append(
+                cnt.record_read(_read_payload(two, "s9"), TODAY)
+            )
+        )
+        thread.start()
+        time.sleep(0.2)
+        (cur / "a.md").unlink()
+        ledger = _json(cur / LEDGER_NAME)
+        del ledger["notes"]["a.md"]
+        (cur / LEDGER_NAME).write_text(json.dumps(ledger), encoding="utf-8")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    thread.join(timeout=5)
+    assert result == [False]
+    assert "a.md" not in _json(cur / LEDGER_NAME)["notes"]

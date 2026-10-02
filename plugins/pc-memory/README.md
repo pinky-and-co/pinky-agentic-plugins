@@ -179,8 +179,10 @@ the model:
    (`lines`, `bytes`, `over_budget` past 200 lines or 25 KB, the part Claude Code reads), and per
    note the description, type, age in days (frontmatter `modified`, else the file mtime),
    `sessions`, `last_read`, whether the index links it and the first index line that does (null
-   when none). Descriptions and index lines have control characters removed, spaces normalised and
-   are capped at 200 characters. Also the orphans (an index line whose file is gone, a note without
+   when none). Every text field read from a note, an index or the ledger (descriptions, types, index
+   lines, file names, orphan and duplicate names) has control characters removed and is capped at
+   200 characters, descriptions and index lines also have their spaces normalised; `last_read` and
+   `last_review` are kept only when they are `YYYY-MM-DD` dates, else null. Also the orphans (an index line whose file is gone, a note without
    index line) and the exact duplicates across all levels shown: the same body after the
    frontmatter, whitespace normalised, empty bodies not compared. Dot files, the ledger, its lock,
    `.corrupt` and temp files, the trash folder, non-`.md` entries and `MEMORY.md` are not notes. A
@@ -202,24 +204,35 @@ the model:
    - a note name is not a plain `*.md` file name (no separator, no leading dot, not `MEMORY.md`
      whatever its case), is a link to the index, or is neither a regular file nor a symlink;
    - two actions have the same source, or two moves the same destination;
-   - a move has no destination, goes onto itself or onto an existing note;
-   - a marker younger than 10 minutes is in an involved directory (another reconcile runs; its
-     age is in the message).
+   - a move has no destination, goes onto itself, or finds a different file at the destination
+     (the message names both paths); identical bytes at both ends are a move that was
+     interrupted, and it is finished;
+   - an involved `MEMORY.md` is a symlink (it would be replaced by a regular file);
+   - the JSON has a duplicated key, or is nested too deep;
+   - a marker younger than 10 minutes is in an involved directory (another reconcile runs, or one
+     was killed and its marker has not aged yet; the age and what to do are in the message).
 
    `delete` moves the note to `<dir>/.reconcile-trash/<YYYY-MM-DD>/` (a name taken that day gets a
    numeric suffix; the note is removed for good only with `"hard": true`), removes the index lines
    that link to it and prunes its ledger entry. `move` adds the index line to the destination
-   index (the source line, or a link built from the note's description), then copies the file to
-   `to_dir` with an exclusive creation, so nothing is ever overwritten and a move between volumes
-   works, removes the source, removes the line from the source index and prunes the source ledger
-   entry. A symlink note moves as a link. `keep` does nothing. A plan that was interrupted is
-   applied again as it is: the note already at the destination is found, and the indexes are
-   repaired. An index line that links several notes is removed only when the plan takes out all of
+   index (the source line, or a link built from the note's description, with its brackets and
+   parentheses removed and its target percent-encoded, so it makes one link), then copies the file to
+   a hidden temporary file of `to_dir` and hard-links it to its final name: the link is atomic and
+   never replaces a file, so the destination is never partial and a move between volumes works (a
+   file system without hard links gets an exclusive copy instead). It then removes the temporary
+   file and the source, removes the line from the source index and prunes the source ledger entry. A symlink note moves as a link. `keep` does
+   nothing. A run killed without cleaning up
+   (SIGKILL, power loss) leaves its marker: a new plan is refused for 10 minutes, then the same
+   plan converges, without a duplicate or a partial file (tested by killing the run before each
+   system call of a move and of a delete, and during the copy). Hidden `.pc-memory-move.*`,
+   `.pc-memory-index.*` and `.pc-memory-ledger.*` temporaries a dead run left are removed under
+   the lock. An index line that links several notes is removed only when the plan takes out all of
    them; otherwise it stays and the result carries `shared_index_line`. Then `last_review` (local
    date) is set in the ledger of each reviewed directory. A note already gone is reported
    `already_gone`. The summary is JSON on stdout; exit 1 when an action failed, with `results`
    (the failed action carries the `steps` it completed) and `left`, the actions not attempted.
-   `--dry-run` prints the summary and changes nothing, not even the marker.
+   `--dry-run` prints every field of every action (`dir`, `note`, `action`, `to_dir`, `hard`) and
+   `reviewed_dirs`, the plan as it will run, and changes nothing, not even the marker.
 
 For the duration of `apply.py`, each involved directory holds a `.pc-memory-reconciling` marker,
 created exclusively before anything else and removed in a `finally`, also when an action fails and
@@ -229,6 +242,11 @@ it, since `apply.py` names no memory path in its command. A marker older than 10
 by a run that died (SIGKILL, power loss): the counter ignores it and the next application removes
 it. The ledger is updated under the same `flock` the counter uses. The trash folder is the only
 copy of a deleted note: nothing empties it.
+
+The approval covers what runs: the skill shows the `--dry-run` output as it is in the approval
+question, with permanent deletion as a separate option that is never the default, then runs exactly
+that plan. `apply.py` is not in the skill's `allowed-tools`, so every run, the dry run included, goes
+through the usual permission prompt, which shows the command and its plan.
 
 The skill reads a note with `cat`, not the `Read` tool, so a review does not count as a
 consultation, and a read refused by a confidentiality guard is never retried through another
@@ -254,6 +272,9 @@ Environment variables, all optional:
 | `PC_ALLOW_MEMORY_WRITE` | unset | `1` lets memory writes through without asking; set it when launching the session |
 
 ## Limits
+
+- A note's session count is not carried over when `reconcile` moves the note to another level: the
+  destination starts at zero.
 
 - The ledger is created with mode 0600; the lock file takes the default mode. A declared memory
   directory inside a repo or a synced folder receives a visible `.pc-memory-ledger.json` and

@@ -19,8 +19,10 @@ it. Per level:
 `duplicates.exact` lists the groups of notes, across every level shown, whose body after the
 frontmatter is the same once whitespace is normalised. A note with an empty body is not compared.
 
-`index_line` is the first index line linking the note, null when none does. Text read from a note
-or an index has its control characters removed and is capped, so it is safe to show to a model.
+`index_line` is the first index line linking the note, null when none does. Every text read from a note, an index or the
+ledger (descriptions, types, index lines, file names, orphan and duplicate names) has its control
+characters removed and is capped, so it is safe to show to a model; `last_read` and `last_review`
+are kept only when they are `YYYY-MM-DD` dates, else null.
 Dot files (ledger, lock, `.corrupt`, temp files, the trash folder) and `MEMORY.md` are not notes.
 """
 
@@ -29,8 +31,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -52,6 +56,7 @@ INDEX_MAX_LINES = 200
 INDEX_MAX_BYTES = 25 * 1024
 TEXT_CHARS = 200
 FRONTMATTER_LIMIT = 100
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -72,6 +77,22 @@ def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
 def _text(value: str) -> str:
     """`value` without control characters, on one line, capped."""
     return " ".join(clean_text(value).split())[:TEXT_CHARS]
+
+
+def _clean(value: str) -> str:
+    """`value` without control characters, capped: a name or a path fragment, spaces kept."""
+    return clean_text(value)[:TEXT_CHARS]
+
+
+def _date(value: object) -> str | None:
+    """`value` when it is a `YYYY-MM-DD` date string, else None."""
+    if isinstance(value, str) and _ISO_DATE.fullmatch(value):
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            return None
+        return value
+    return None
 
 
 def _read_ledger(directory: Path) -> dict[str, object]:
@@ -130,23 +151,23 @@ def _level_report(
         entry = stored.get(path.name)
         counted = entry if isinstance(entry, dict) else {}
         sessions = counted.get("sessions")
-        last_read = counted.get("last_read")
+        shown = _clean(path.name)
         names.add(path.name)
-        bodies.append((path.name, " ".join(body.split())))
+        bodies.append((shown, " ".join(body.split())))
         notes.append(
             {
-                "file": path.name,
+                "file": shown,
                 "description": _text(fields.get("description", "")),
                 "type": _text(fields.get("type", "")),
                 "age_days": note_age_days(path, now),
                 "sessions": sessions if isinstance(sessions, int) else 0,
-                "last_read": last_read if isinstance(last_read, str) else None,
+                "last_read": _date(counted.get("last_read")),
                 "in_index": path.name in linked,
                 "index_line": line_of.get(path.name),
             }
         )
     missing = sorted(
-        _text(t)
+        _clean(t)
         for t in linked
         if t.endswith(".md")
         and t.casefold() != INDEX_NAME.casefold()
@@ -157,12 +178,12 @@ def _level_report(
         "level": short(level.root),
         "dir": short(directory),
         "role": "current" if level.root == current else "parent",
-        "last_review": ledger["last_review"],
+        "last_review": _date(ledger["last_review"]),
         "index": index,
         "notes": notes,
         "orphans": {
             "index_without_file": missing,
-            "file_without_index": sorted(n for n in names if n not in linked),
+            "file_without_index": sorted(_clean(n) for n in names if n not in linked),
         },
     }
     return report, bodies

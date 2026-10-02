@@ -31,7 +31,8 @@ then `os.replace`). The lock is polled without blocking and given up after `LOCK
 seconds: the count is then skipped, never the tool call. A file named
 `.pc-memory-reconciling` in the memory directory, a regular file less than `MARKER_MAX_AGE` seconds
 old, suspends the count for that directory; it is checked under the lock, so a writer that creates
-the marker and then takes the lock cannot be overtaken by a count that started earlier.
+the marker and then takes the lock cannot be overtaken by a count that started earlier. The note is
+checked again under the lock: a note deleted while the count waited gets no entry back.
 
 Never blocks and never fails the tool call: any error goes to stderr, nothing to stdout, exit 0.
 """
@@ -148,7 +149,7 @@ def record_read(payload: dict[str, object], today: date | None = None) -> bool:
         return False
     ledger_file = memory_dir / LEDGER_NAME
     with exclusive_lock(memory_dir):
-        if marker_active(memory_dir):
+        if marker_active(memory_dir) or not (memory_dir / note).is_file():
             return False
         ledger = count_session(
             load_ledger(ledger_file), note, session_id, today or date.today()

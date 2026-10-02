@@ -20,10 +20,13 @@ touched, and refused (exit 2, nothing changed) when:
   case), or names the index through a link or a case-insensitive file system, or is neither a
   regular file nor a symlink;
 - two actions have the same source `(dir, note)`, or two moves the same destination;
-- a `move` has no `to_dir`, goes onto itself or onto an existing file;
+- a `move` has no `to_dir`, goes onto itself, or finds a different file already at the
+  destination (the message names both paths); a source and a destination with identical bytes are a
+  move that was interrupted, and it is finished;
+- an involved directory has a `MEMORY.md` that is a symlink;
 - a `.pc-memory-reconciling` marker younger than `MARKER_MAX_AGE` seconds is in an involved
-  directory: another reconcile runs. An older one was left by a run that died: it is removed when
-  the plan is applied.
+  directory: another reconcile runs, or one was killed and its marker has not aged yet. An older
+  one was left by a run that died: it is removed when the plan is applied.
 
 Then, for every involved directory, the marker is created first (exclusively; it suspends the
 consultation counter), the ledger lock is taken, and each action is applied in order, the marker
@@ -32,11 +35,16 @@ being refreshed before each one:
 - `delete`: the note moves to `<dir>/.reconcile-trash/<YYYY-MM-DD>/` (removed for good only when
   `hard` is true), its index lines leave `<dir>/MEMORY.md`, its ledger entry is pruned;
 - `move`: the index line is added to the destination index (a link to the note when the source had
-  none), the file is copied to `to_dir` with an exclusive creation, so nothing is ever overwritten,
-  and removed from the source, the line leaves the source index and the source ledger entry is
-  pruned. A plan interrupted anywhere is applied again as it is: the note already at the
-  destination is found and the indexes are repaired;
+  none), the file is copied to a hidden temporary file of `to_dir`, which is hard-linked to its
+  final name (atomic, never replaces a file, so the destination is never partial; a file system
+  without hard links gets an exclusive copy instead), then the temporary file and the source are
+  removed, the line leaves the source index and the source ledger entry is pruned;
 - `keep`: nothing.
+
+A run killed without a chance to clean up leaves its marker for 10 minutes, then the same plan can
+be applied again: the note found at both ends with identical bytes, or only at the destination, is
+finished and the indexes are repaired. Hidden temporaries (`.pc-memory-move.*`, `-index.*`,
+`-ledger.*`) a dead run left are removed under the lock.
 
 An index line that links several notes is removed only when all of them are deleted or moved by the
 plan; otherwise it stays and the result carries `shared_index_line`. Finally `last_review` (local
@@ -46,13 +54,17 @@ action fails and when the process gets SIGTERM or SIGHUP. A note already gone is
 
 Prints a JSON summary on stdout. Exit 0 when done, 1 when an action failed (`results` holds what was
 done, the failed action with the steps it completed, `left` the actions not attempted), 2 when the
-plan was refused. `--dry-run` prints the summary and changes nothing, not even the marker.
+plan was refused. `--dry-run` prints every field of every action (`dir`, `note`, `action`,
+`to_dir`, `hard`) and `reviewed_dirs`, the plan as it will run, and changes nothing, not even the
+marker.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
+import filecmp
 import json
 import os
 import re
@@ -86,6 +98,9 @@ TRASH_NAME = ".reconcile-trash"
 LOCK_TIMEOUT = 10.0
 ACTIONS = frozenset({"delete", "move", "keep"})
 LINE_CHARS = 200
+_NO_HARD_LINK = frozenset({errno.EXDEV, errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP})
+_TEMPORARY = re.compile(r"\.pc-memory-(?:move|index|ledger)\.[A-Za-z0-9_]{8}")
+_BRACKETS = re.compile(r"[\[\]()<>]")
 _UNRESOLVABLE = (OSError, ValueError, RuntimeError)
 _DESCRIPTION = re.compile(r"^description:\s*(.+?)\s*$", re.MULTILINE)
 
@@ -121,14 +136,13 @@ class Plan:
                 found.add(item.to_dir)
         return sorted(found)
 
-    def removable(self, directory: Path) -> frozenset[str]:
-        """Link targets, as an index may spell them, of the notes the plan takes out of `directory`."""
-        names = {
-            i.note
-            for i in self.actions
-            if i.directory == directory and i.action != "keep"
-        }
-        return frozenset(names | {quote(n) for n in names})
+    def removable_by_dir(self) -> dict[Path, frozenset[str]]:
+        """Per directory, the link targets, as an index may spell them, of the notes taken out."""
+        names: dict[Path, set[str]] = {}
+        for item in self.actions:
+            if item.action != "keep":
+                names.setdefault(item.directory, set()).add(item.note)
+        return {d: frozenset(n | {quote(x) for x in n}) for d, n in names.items()}
 
 
 def _line(text: str) -> str:
@@ -198,6 +212,28 @@ def _check_note(directory: Path, note: str) -> None:
             raise PlanError(f"{short(path)} is the index, not a note")
 
 
+def _same_content(first: Path, second: Path) -> bool:
+    """True when both are regular files with the same bytes, or symlinks with the same target."""
+    try:
+        if first.is_symlink() or second.is_symlink():
+            return (
+                first.is_symlink()
+                and second.is_symlink()
+                and os.readlink(first) == os.readlink(second)
+            )
+        return filecmp.cmp(first, second, shallow=False)
+    except OSError:
+        return False
+
+
+def _differ_message(source: Path, dest: Path) -> str:
+    """Refusal for a destination that holds a different file than the source."""
+    return (
+        f"{short(source)} and {short(dest)} both exist and differ: "
+        "the destination is not a copy of the source"
+    )
+
+
 def parse_plan(raw: object, cwd: Path) -> Plan:
     """Validate a decoded plan against the memory directories of `cwd`.
 
@@ -243,8 +279,13 @@ def parse_plan(raw: object, cwd: Path) -> Plan:
                     f"{what}: {note} is already the destination of another move"
                 )
             destinations.add(destination)
-            if os.path.lexists(directory / note) and os.path.lexists(to_dir / note):
-                raise PlanError(f"{what}: {note} already exists in the destination")
+            source_path, dest_path = directory / note, to_dir / note
+            if (
+                os.path.lexists(source_path)
+                and os.path.lexists(dest_path)
+                and not _same_content(source_path, dest_path)
+            ):
+                raise PlanError(f"{what}: {_differ_message(source_path, dest_path)}")
         actions.append(Action(directory, note, item["action"], to_dir, hard))
     reviewed_raw = raw.get("reviewed_dirs", [])
     if not isinstance(reviewed_raw, list):
@@ -252,6 +293,8 @@ def parse_plan(raw: object, cwd: Path) -> Plan:
     reviewed = [_memory_dir(r, allowed, "reviewed_dirs") for r in reviewed_raw]
     plan = Plan(actions, reviewed)
     for directory in plan.directories():
+        if (directory / INDEX_NAME).is_symlink():
+            raise PlanError(f"{short(directory / INDEX_NAME)} is a symlink: refused")
         _check_marker(directory)
     return plan
 
@@ -275,13 +318,18 @@ def _check_marker(directory: Path) -> None:
     if marker_active(directory):
         age = int(time.time() - info.st_mtime)
         raise PlanError(
-            f"{short(directory)}: another reconcile runs (marker {age} s old); "
-            "a marker older than 10 minutes is ignored"
+            f"{short(directory)}: another reconcile runs (marker {age} s old). If none does "
+            "because one was killed, wait until the marker is 10 minutes old, or remove it"
         )
 
 
 def _replace_text(path: Path, text: str) -> None:
-    """Replace `path` with `text` through a temp file in the same directory."""
+    """Replace `path` with `text` through a temp file in the same directory.
+
+    A symlink is never replaced by a regular file.
+    """
+    if path.is_symlink():
+        raise OSError(f"{short(path)} is a symlink: not replaced")
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".pc-memory-index.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
@@ -364,15 +412,24 @@ def _append_index_lines(directory: Path, note: str, lines: list[str]) -> bool:
     return True
 
 
+def _neutral(text: str) -> str:
+    """`text` on one line, without control characters or the characters that make a link."""
+    return " ".join(_BRACKETS.sub(" ", clean_text(text)).split())
+
+
 def _default_line(path: Path, note: str) -> str:
-    """Index line for a note: a link, and its description when it has one."""
+    """Index line for a note: one link, and its description when it has one.
+
+    The description is cleaned, capped and stripped of brackets and parentheses, so it cannot make
+    a second link; the target is percent-encoded for the same reason.
+    """
     head = path.read_text(encoding="utf-8", errors="replace")[:4096]
     found = _DESCRIPTION.search(head)
-    line = f"- [{Path(note).stem}]({note})"
+    line = f"- [{_neutral(Path(note).stem)}]({quote(note)})"
     if found is None:
         return line
-    description = " ".join(found.group(1).strip("\"'").split())
-    return f"{line} - {description}"
+    description = _neutral(found.group(1).strip("\"'"))[:LINE_CHARS]
+    return f"{line} - {description}" if description else line
 
 
 def _prune_ledger(directory: Path, note: str) -> bool:
@@ -400,34 +457,60 @@ def _trash(directory: Path, note: str, today: date) -> Path:
     return target
 
 
-def _move_exclusive(source: Path, dest: Path) -> None:
-    """Move `source` to `dest` without ever replacing a file, across volumes too.
+def _copy_in_place(source: Path, dest: Path) -> None:
+    """Copy `source` to `dest` created exclusively; a failed copy leaves no `dest`."""
+    copied = False
+    with open(source, "rb") as src, open(dest, "xb") as dst:
+        try:
+            shutil.copyfileobj(src, dst)
+            copied = True
+        finally:
+            if not copied:
+                dst.close()
+                dest.unlink()
 
-    The destination is created exclusively (a copy, or a symlink with the same target), then the
-    source is removed. A copy that fails midway leaves no half file.
+
+def _copy_exclusive(source: Path, dest: Path) -> None:
+    """Create `dest` as a copy of `source`, never replacing a file and never partial.
+
+    The copy is written to a hidden temporary file of the destination directory, then hard-linked
+    to `dest`: the link is atomic and fails when `dest` exists. A file system with no hard links
+    gets an exclusive copy in place instead. A symlink is recreated with the same target.
 
     Args:
-        source: The file or symlink to move.
+        source: The file or symlink to copy.
         dest: Where it goes; it must not exist.
 
     Raises:
         FileExistsError: When `dest` exists.
+        OSError: When the copy or the link fails for another reason.
     """
     if source.is_symlink():
         os.symlink(os.readlink(source), dest)
-    else:
-        copied = False
-        with open(source, "rb") as src, open(dest, "xb") as dst:
-            try:
-                shutil.copyfileobj(src, dst)
-                copied = True
-            finally:
-                if not copied:
-                    dst.close()
-                    dest.unlink()
+        return
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".pc-memory-move.")
+    try:
+        with os.fdopen(fd, "wb") as dst, open(source, "rb") as src:
+            shutil.copyfileobj(src, dst)
         with contextlib.suppress(OSError):
-            shutil.copystat(source, dest)
-    source.unlink()
+            shutil.copystat(source, tmp)
+        try:
+            os.link(tmp, dest)
+        except OSError as exc:
+            if exc.errno not in _NO_HARD_LINK:
+                raise
+            _copy_in_place(source, dest)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+
+
+def _clean_temporaries(directory: Path) -> None:
+    """Remove the hidden temporaries a run killed without cleaning up left in `directory`."""
+    for path in directory.iterdir():
+        if _TEMPORARY.fullmatch(path.name) and not path.is_symlink() and path.is_file():
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 def _destination_lines(item: Action, present: bool) -> list[str]:
@@ -475,14 +558,17 @@ def _apply_action(
         assert item.to_dir is not None
         dest = item.to_dir / item.note
         result["to_dir"] = short(item.to_dir)
-        if present and os.path.lexists(dest):
-            raise FileExistsError(f"{short(dest)} already exists")
-        if present or os.path.lexists(dest):
+        at_destination = os.path.lexists(dest)
+        if present and at_destination and not _same_content(source, dest):
+            raise FileExistsError(_differ_message(source, dest))
+        if present or at_destination:
             lines = _destination_lines(item, present)
             _append_index_lines(item.to_dir, item.note, lines)
             steps.append("destination_index")
         if present:
-            _move_exclusive(source, dest)
+            if not at_destination:
+                _copy_exclusive(source, dest)
+            source.unlink()
             steps.append("file")
     removed, shared = _remove_index_lines(item.directory, item.note, removable)
     steps.append("source_index")
@@ -494,13 +580,15 @@ def _apply_action(
 
 
 def _plan_result(item: Action) -> dict[str, object]:
-    """What `--dry-run` reports for one action."""
+    """What `--dry-run` reports for one action: every field the plan carries, and its status."""
     present = os.path.lexists(item.directory / item.note)
     status = "kept" if item.action == "keep" else "planned"
     return {
         "dir": short(item.directory),
         "note": item.note,
         "action": item.action,
+        "to_dir": None if item.to_dir is None else short(item.to_dir),
+        "hard": item.hard,
         "status": status if present or item.action == "keep" else "already_gone",
     }
 
@@ -539,7 +627,7 @@ def apply_plan(plan: Plan, today: date, dry_run: bool = False) -> dict[str, obje
     summary: dict[str, object] = {"dry_run": dry_run, "ok": True}
     if dry_run:
         summary["results"] = [_plan_result(item) for item in plan.actions]
-        summary["last_review"] = {short(d): today.isoformat() for d in plan.reviewed}
+        summary["reviewed_dirs"] = [short(d) for d in plan.reviewed]
         return summary
     results: list[dict[str, object]] = []
     created: list[Path] = []
@@ -554,6 +642,9 @@ def apply_plan(plan: Plan, today: date, dry_run: bool = False) -> dict[str, obje
                         f"ledger lock of {short(directory)} still held",
                     )
                 )
+            for directory in plan.directories():
+                _clean_temporaries(directory)
+            removable = plan.removable_by_dir()
             for item in plan.actions:
                 _refresh(created)
                 result: dict[str, object] = {
@@ -565,7 +656,11 @@ def apply_plan(plan: Plan, today: date, dry_run: bool = False) -> dict[str, obje
                 results.append(result)
                 try:
                     _apply_action(
-                        item, today, plan.removable(item.directory), result, steps
+                        item,
+                        today,
+                        removable.get(item.directory, frozenset()),
+                        result,
+                        steps,
                     )
                 except Exception:
                     result["status"] = "failed"
@@ -594,6 +689,16 @@ def apply_plan(plan: Plan, today: date, dry_run: bool = False) -> dict[str, obje
     return summary
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """JSON object whose keys are all different: a plan that says a field twice is ambiguous."""
+    out: dict[str, object] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate key {key!r} in the plan")
+        out[key] = value
+    return out
+
+
 def _exit_on_signal(signum: int, _frame: object) -> None:
     """Leave through `SystemExit`, so the `finally` of `apply_plan` removes the markers."""
     sys.exit(128 + signum)
@@ -615,8 +720,8 @@ def main() -> int:
             if args.plan == "-"
             else Path(args.plan).read_text(encoding="utf-8")
         )
-        plan = parse_plan(json.loads(text), cwd)
-    except (OSError, ValueError, PlanError) as exc:
+        plan = parse_plan(json.loads(text, object_pairs_hook=_no_duplicate_keys), cwd)
+    except (OSError, ValueError, PlanError, RecursionError) as exc:
         print(json.dumps({"ok": False, "refused": str(exc)}, ensure_ascii=False))
         return 2
     for name in ("SIGTERM", "SIGHUP"):

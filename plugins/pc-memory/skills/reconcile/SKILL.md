@@ -2,7 +2,7 @@
 name: reconcile
 description: Review the memory notes of the current directory level and of its parent levels with the user, note by note (promote, keep, move to another level, delete), then apply the approved plan. Use when the user asks to review, clean up or reconcile memory, or when the startup message says a review is due.
 disable-model-invocation: true
-allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/inventory.py:*), Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/apply.py:*), Bash(cat:*), AskUserQuestion
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/inventory.py:*), Bash(cat:*), AskUserQuestion
 ---
 
 # Reconcile
@@ -37,17 +37,22 @@ session. Talk to the user in the user's own language; keep file names, paths and
    call. Put the recommended option first with its reason in the option description. Options are
    few and concrete: keep, delete, promote (say where), move to another level. Ask every note,
    never in a long prose question. An answer that is empty or unusable is not a yes: ask again.
-4. When every note has an answer, show a COMPLETE recap, one line per note with its decision, and
-   get explicit approval with AskUserQuestion. Change nothing before that approval. If the user
-   wants a change, update the recap and ask again.
-5. Pass the approved plan on standard input, with a heredoc in the Bash command, no file:
-   `python3 ${CLAUDE_SKILL_DIR}/scripts/apply.py --plan - <<'EOF'` then the JSON, then `EOF`. Plan
-   shape: `{"actions": [{"dir": "<memory dir>", "note": "x.md", "action": "delete" | "move" |
-   "keep", "to_dir": "<memory dir>", "hard": false}], "reviewed_dirs": ["<memory dir>"]}`. Use the
-   `dir` values the inventory printed. A delete goes to the trash folder unless the user asked for
-   a hard delete. List in `reviewed_dirs` each level the user went through. Report a refusal or a
-   failure as it is, with the `left` actions; applying the same plan again is safe. `--dry-run`
-   shows what a plan would do.
+4. When every note has an answer, build the plan and get it approved before any change. Plan shape:
+   `{"actions": [{"dir": "<memory dir>", "note": "x.md", "action": "delete" | "move" | "keep",
+   "to_dir": "<memory dir>", "hard": false}], "reviewed_dirs": ["<memory dir>"]}`. Use the `dir`
+   values the inventory printed. A delete goes to the trash folder (`"hard": false`). List in
+   `reviewed_dirs` each level the user went through. Run
+   `python3 ${CLAUDE_SKILL_DIR}/scripts/apply.py --dry-run --plan - <<'EOF'` then the JSON, then
+   `EOF`: it changes nothing and prints every field of every action and `reviewed_dirs`. Show that
+   output as it is in the approval question (AskUserQuestion), not a summary of your own. Options:
+   apply this plan (recommended); apply it with permanent deletion instead of the trash for the
+   notes to delete, a separate and explicit option that is never the default; change something;
+   cancel. If the user changes something, rebuild the plan, run the dry run again and ask again.
+5. Run exactly the plan shown: the same JSON with `--dry-run` removed (`"hard": true` only when the
+   user chose permanent deletion). This command is not pre-approved: the permission prompt shows
+   the command and its plan, which is the last check. Report a refusal or a failure as it is, with
+   the `left` actions. After a failure, applying the plan again is allowed once the cause is fixed;
+   after a run that was killed, a new plan is refused until its marker is 10 minutes old.
 6. This skill edits nothing outside memory directories. A promotion is made by the session or by
    the user, outside this flow: a note to promote stays untouched in the plan. Only after the user
    says the promotion is done, propose deleting the note, and apply it the same way after approval.
