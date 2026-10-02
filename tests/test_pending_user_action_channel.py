@@ -174,6 +174,15 @@ class ChantierSkillWiringCase(unittest.TestCase):
         self.assertIn(f"{_CLI} require goal '/goal <condition>' --surfaced", section)
         self.assertNotIn("require rename", section)
 
+    def test_review_clause_requires_the_method_line_relay(self):
+        section = self._section("**Review clause.**", "**Escape clause.**")
+        self.assertIn("the final diff has been reviewed by", section)
+        self.assertIn("`Method:` line relayed verbatim", section)
+        self.assertIn(
+            "an `adversarial` call that returned nothing stated as such", section
+        )
+        self.assertIn("full `provider/model · 🟦🟪🟧 tier` form", section)
+
 
 class FinishingCardRenameCase(unittest.TestCase):
     """Pins the close-time rename in finishing-a-card.md."""

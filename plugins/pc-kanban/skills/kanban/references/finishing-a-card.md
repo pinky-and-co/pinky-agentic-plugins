@@ -75,6 +75,14 @@ mechanical check, in this order:
 2. **Same-session self-review** — last resort only, when the agent cannot run, and **say plainly
    that it is degraded** (same model, same context) rather than presenting it as equivalent to (1).
 
+Whatever this session then tells the user about the review opens with the report's `Method:` line,
+relayed verbatim before any findings — the label in its full `provider/model · 🟦🟪🟧 tier` form,
+completed from the report's `[answered by …]` line when the first line carries the model name
+alone. It is the only trace of *how* the verdict was reached, and a summary that drops it presents
+a pool-model challenge and a solo same-model read as the same review. When the review involved an `adversarial` call that returned nothing (unfinished response,
+cut off mid-answer, pool exhausted), say so explicitly: the verdict then rests on the reviewer
+alone.
+
 ### The review belongs in the `/goal` condition, not in an after-the-fact hope
 
 The section above is a *should* that nothing enforced — an audit of closed cards found it skipped
@@ -83,7 +91,9 @@ review goes **into the `/goal` condition itself**, set when the card is taken (`
 step 7): the harness-native Stop-hook then holds the card open until the transcript shows the
 review ran. Phrase it as a transcript-verifiable state, never a promise — e.g. append to the
 `## Done when`-derived condition `… and the final diff has been reviewed by `Agent(reviewer)`,
-findings addressed, and the `- [x] reviewed (<method>)` box checked on the card`
+findings addressed, the report's `Method:` line relayed verbatim to the user (an `adversarial`
+call that returned nothing stated as such — verdict on the reviewer alone), and the `- [x]
+reviewed (<method>)` box checked on the card`
 — naming the checkbox so satisfying the goal and stamping the box are one action.
 
 The judgment/mechanical call is made at intake, before the diff exists — so **when it is unclear,

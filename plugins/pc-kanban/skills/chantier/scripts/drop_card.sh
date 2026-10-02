@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
-# Drop a card confirmed obsolete by the human: drop_card.sh <card-path> <reason...>
+# Drop a card confirmed obsolete by the human: drop_card.sh [--keep-requirements] <card-path> <reason...>
 # e.g. drop_card.sh _KANBAN/CHANTIER0025-.../1-todo/foo.md "superseded by bar, same need"
+# Also retires from the chantier's story the requirements listed in the card's frontmatter
+# (retire_requirements.py) — unless another open card still carries them. --keep-requirements leaves
+# the story untouched: use it when the need survives the card ("same need", a replacement to come).
 set -euo pipefail
+
+keep_requirements=0
+if [[ "${1:-}" == "--keep-requirements" ]]; then
+  keep_requirements=1
+  shift
+fi
 
 # Sous set -u, accéder à $1 sans argument échoue en "unbound variable" avant même les messages
 # d'usage ci-dessous — le compte d'arguments doit être validé en premier.
-[[ $# -ge 2 ]] || { echo "a card path and a reason are required — drop_card.sh <card-path> <reason...>" >&2; exit 1; }
+[[ $# -ge 2 ]] || { echo "a card path and a reason are required — drop_card.sh [--keep-requirements] <card-path> <reason...>" >&2; exit 1; }
 
 card="$1"
 shift
 reason="$*"
 
 [[ -f "$card" ]] || { echo "no such card: $card" >&2; exit 1; }
-[[ -n "$reason" ]] || { echo "a reason is required — drop_card.sh <card-path> <reason...>" >&2; exit 1; }
+[[ -n "$reason" ]] || { echo "a reason is required — drop_card.sh [--keep-requirements] <card-path> <reason...>" >&2; exit 1; }
 
 card_dir=$(dirname "$card")
 column=$(basename "$card_dir")
@@ -60,3 +69,14 @@ fi
 mv -- "$card" "$dest"
 printf '\n## Dropped (%s)\n\n%s\n' "$today" "$reason" >> "$dest"
 echo "dropped -> $dest"
+
+if [[ $keep_requirements -eq 1 ]]; then
+  echo "requirements kept in the story (--keep-requirements)"
+else
+  # Même raisonnement que le mv : après lui, un échec laisse la story intacte, jamais l'inverse.
+  here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  if ! python3 "$here/retire_requirements.py" "$dest" "$chantier_dir"; then
+    echo "card dropped, but the story was not updated — re-run: python3 $here/retire_requirements.py $dest $chantier_dir" >&2
+    exit 1
+  fi
+fi
