@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """PreToolUse hook: ask the user before anything is written into a memory directory.
 
-A note written to memory reads as a suggestion; a step of a SKILL is a point of passage. When
+A note written to memory reads as a suggestion; a step of a skill is a point of passage. When
 Claude is told it skipped a step it tends to write a `feedback_*` note instead of fixing the
-SKILL. This hook intercepts the write and returns `permissionDecision: ask`, with a reminder of
-the procedure as the reason: the user decides each note, nothing is blocked.
+skill. This hook intercepts the write and returns `permissionDecision: ask`: the user decides each
+note, nothing is blocked. The confirmation dialog does not display the decision's reason, so the
+reminder of where a note belongs goes to Claude as `additionalContext` of the same output.
 
 Intercepted:
 - `Write`, `Edit`, `MultiEdit` whose `file_path` lies inside a memory directory;
@@ -57,10 +58,15 @@ from pc_memory_lib import (  # noqa: E402
 )
 
 FILE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
-REASON = (
-    "Write into memory. A step of a procedure that was skipped: fix the SKILL concerned "
-    "(a diff of that SKILL), not a note. A general rule: promote it to a CLAUDE.md or a rule at "
-    "the right level. A local trap: a note is acceptable. Allow only if a note is the right place."
+REASON = "Write into a memory file."
+REMINDER = (
+    "Before writing a memory note, check where it belongs. "
+    "(1) A skipped step of a procedure: fix the skill or hook that owns the step, not a note. "
+    "(2) A rule or pitfall that should apply beyond this directory: add it to the source that "
+    "produces your instructions; if a file is generated or distributed (a generated CLAUDE.md, "
+    "a distributed rules folder), edit its source, never the generated copy, which gets "
+    "overwritten. "
+    "(3) A trap that only concerns this directory: a note is fine."
 )
 _ENV_ASSIGNMENT = re.compile(r"^\w+=")
 _SED_IN_PLACE = re.compile(r"^(?:-[nEsrzu]*i|--in-place)")
@@ -477,6 +483,7 @@ def build_output(payload: dict[str, object]) -> dict[str, object]:
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
             "permissionDecisionReason": REASON,
+            "additionalContext": REMINDER,
         }
     }
 

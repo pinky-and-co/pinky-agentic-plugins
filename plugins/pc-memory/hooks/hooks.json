@@ -1,5 +1,5 @@
 {
-  "description": "At SessionStart, shows the user one summary line per directory level (current and parents) with the notes at least 30 days old listed oldest first, and gives the model the parent levels' indexes only (capped, marked as data). Read-only on memory; never blocks the session — see memory-context/memory_context.py. At PreToolUse, asks the user before a Write, Edit, MultiEdit or Bash command writes into a memory directory, with the procedure reminder as the reason; nothing is blocked — see memory-write/memory_write_guard.py.",
+  "description": "At SessionStart, shows the user one summary line per directory level (current and parents) with the notes at least 30 days old listed oldest first, and gives the model the parent levels' indexes only (capped, marked as data). Read-only on memory; never blocks the session — see memory-context/memory_context.py. At PreToolUse, asks the user before a Write, Edit, MultiEdit or Bash command writes into a memory directory, and gives Claude the reminder of where a note belongs; nothing is blocked — see memory-write/memory_write_guard.py.",
   "hooks": {
     "SessionStart": [
       {

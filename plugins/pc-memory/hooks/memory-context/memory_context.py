@@ -68,7 +68,8 @@ FRONTMATTER_BYTES = 4096
 DEFAULT_STALE_DAYS = 30
 MAX_STALE_LISTED = 10
 PROMOTION_REMINDER = (
-    "Promotion: procedure -> skill; general rule -> CLAUDE.md or a rule at the right level; "
+    "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond this "
+    "directory -> the source that generates your instructions (never a generated copy); "
     "local trap -> stays here. Delete what is outdated."
 )
 DEFAULT_MODEL_LINES = 30

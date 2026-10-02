@@ -654,8 +654,9 @@ def test_promotion_reminder_is_present_with_a_stale_note(home, tree):
     _memory(_silo(home, ws), "- p\n", {"old.md": 60})
     last = _run(sub)["systemMessage"].splitlines()[-1]
     assert last == (
-        "Promotion: procedure -> skill; general rule -> CLAUDE.md or a rule at the right level; "
-        "local trap -> stays here. Delete what is outdated."
+        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
+        "this directory -> the source that generates your instructions (never a generated "
+        "copy); local trap -> stays here. Delete what is outdated."
     )
 
 
@@ -814,8 +815,9 @@ def test_build_user_message_whole_output(home):
         f"> {mc.short(ws)} (parent) - 2 notes - 2 at least 30 d old\n"
         f"  ~/.claude/projects/{mc.encode(ws)}/memory/old.md (100 d)\n"
         f"  ~/.claude/projects/{mc.encode(ws)}/memory/mid.md (40 d)\n"
-        "Promotion: procedure -> skill; general rule -> CLAUDE.md or a rule at the right level; "
-        "local trap -> stays here. Delete what is outdated."
+        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
+        "this directory -> the source that generates your instructions (never a generated "
+        "copy); local trap -> stays here. Delete what is outdated."
     )
 
 
@@ -851,8 +853,9 @@ def test_build_user_message_caps_stale_notes_per_level_oldest_first(home):
             for i in range(12, 2, -1)
         ],
         "  ... (+3 more)",
-        "Promotion: procedure -> skill; general rule -> CLAUDE.md or a rule at the right level; "
-        "local trap -> stays here. Delete what is outdated.",
+        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
+        "this directory -> the source that generates your instructions (never a generated "
+        "copy); local trap -> stays here. Delete what is outdated.",
     ]
     assert mc.build_user_message(levels, ws, 30, now) == "\n".join(expected)
 

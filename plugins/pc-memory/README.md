@@ -16,8 +16,9 @@ and emits:
   absolute), as plain text, so a terminal that opens file paths on click can open it. The list is built from
   the notes themselves, not from the index, so a level whose `MEMORY.md` cannot be read still
   gets its summary and stale notes. No index line is shown; a level with no stale note is its summary line alone. When at least one stale note is listed, a
-  closing reminder says where to promote it (procedure to a skill, general rule to `CLAUDE.md` or a
-  rule at the right level, local trap stays in memory) or to delete it. Not shown again after
+  closing reminder says where to promote it (a skipped procedure step: fix the skill or hook; a
+  rule or pitfall beyond the directory: the source that generates the instructions, never a
+  generated copy; a local trap stays in memory) or to delete it. Not shown again after
   `/compact`.
 - **To the model** (`additionalContext`): the index of the **parent** levels only, capped per
   level and fenced as data, not instructions. The current level's index is already loaded by
@@ -47,12 +48,18 @@ The hook never blocks the session: any error prints `{}` and exits 0.
 ### Write guard
 
 A `PreToolUse` hook (`Write|Edit|MultiEdit|Bash`) asks the user before anything is written into a
-memory directory. A note written to memory reads as a suggestion, a step of a SKILL is a point of
+memory directory. A note written to memory reads as a suggestion, a step of a skill is a point of
 passage: told it skipped a step, Claude tends to write a `feedback_*` note instead of fixing the
-SKILL. The hook returns `permissionDecision: ask`, with the procedure as the reason: a skipped
-step is a diff of the SKILL concerned, a general rule is promoted to a `CLAUDE.md`, a local trap
-is an acceptable note. The user decides each note; nothing is blocked. It also runs inside
-subagents.
+skill. The hook returns `permissionDecision: ask`; the user decides each note and nothing is
+blocked. It also runs inside subagents.
+
+The confirmation dialog does not display the decision's `permissionDecisionReason` (measured in a
+real session), so the reason is one short sentence and the reminder travels elsewhere: the same
+output carries it to Claude as `additionalContext`. The reminder says where a note belongs: a
+skipped step of a procedure is a fix to the skill or hook that owns the step; a rule or pitfall
+that should apply beyond the directory goes to the source that produces the instructions (never the
+generated or distributed copy, which gets overwritten); a trap that only concerns the directory is a
+note.
 
 The `MEMORY.md` index at the root of a memory directory is exempt: it holds the pointer line of a
 note already confirmed, so one note costs one confirmation, not two. A note written straight into

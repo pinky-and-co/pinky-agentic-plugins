@@ -216,34 +216,47 @@ def test_malformed_input_has_no_decision(home, repo):
 # --- the reason ---------------------------------------------------------------------
 
 
-def test_reason_covers_the_three_cases_in_plain_text(home, repo):
-    out = mw.build_output(
-        _payload("Write", repo, file_path=str(mw.memory_dir_of(repo) / "a.md"))
-    )
-    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
-    assert "SKILL" in reason  # skipped step -> diff of the SKILL
-    assert "CLAUDE.md" in reason  # general rule -> promotion
-    assert "local trap" in reason  # local trap -> a note is acceptable
-    assert reason.isascii()
-    assert not any(unicodedata.category(ch) in {"Cc", "Cf"} for ch in reason)
+REMINDER = (
+    "Before writing a memory note, check where it belongs. "
+    "(1) A skipped step of a procedure: fix the skill or hook that owns the step, not a note. "
+    "(2) A rule or pitfall that should apply beyond this directory: add it to the source that "
+    "produces your instructions; if a file is generated or distributed (a generated CLAUDE.md, "
+    "a distributed rules folder), edit its source, never the generated copy, which gets "
+    "overwritten. (3) A trap that only concerns this directory: a note is fine."
+)
 
 
-def test_output_is_exactly_the_ask_decision(home, repo):
-    out = mw.build_output(
+def _note_output(repo: Path) -> dict:
+    return mw.build_output(
         _payload("Write", repo, file_path=str(mw.memory_dir_of(repo) / "a.md"))
     )
-    assert out == {
+
+
+def test_output_is_exactly_the_ask_decision_with_the_reminder(home, repo):
+    assert _note_output(repo) == {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
-            "permissionDecisionReason": (
-                "Write into memory. A step of a procedure that was skipped: fix the SKILL "
-                "concerned (a diff of that SKILL), not a note. A general rule: promote it to a "
-                "CLAUDE.md or a rule at the right level. A local trap: a note is acceptable. "
-                "Allow only if a note is the right place."
-            ),
+            "permissionDecisionReason": "Write into a memory file.",
+            "additionalContext": REMINDER,
         }
     }
+
+
+def test_reminder_covers_the_three_cases(home, repo):
+    reminder = _note_output(repo)["hookSpecificOutput"]["additionalContext"]
+    assert "fix the skill or hook that owns the step" in reminder
+    assert "source that produces your instructions" in reminder
+    assert "never the generated copy" in reminder
+    assert "a note is fine" in reminder
+
+
+def test_reminder_and_reason_are_plain_ascii_without_control_characters(home, repo):
+    output = _note_output(repo)["hookSpecificOutput"]
+    for field in ("permissionDecisionReason", "additionalContext"):
+        text = output[field]
+        assert text.isascii()
+        assert not any(unicodedata.category(ch) in {"Cc", "Cf"} for ch in text)
 
 
 # --- opt-out ------------------------------------------------------------------------
