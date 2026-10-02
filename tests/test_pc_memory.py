@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -16,8 +17,14 @@ HOOK = PLUGIN / "hooks" / "memory-context" / "memory_context.py"
 sys.path.insert(0, str(HOOK.parent))
 
 import memory_context as mc  # noqa: E402
+from pc_memory_lib import LEDGER_NAME  # noqa: E402
 
 DAY = 86400
+FOLDER = "\U0001f4c2"
+PIN = "\U0001f4cd"
+BRANCH = "\u251c\u2500\u2500 "
+LAST = "\u2514\u2500\u2500 "
+TIP = "\U0001f4a1 Audit your memory: /memory"
 
 
 @pytest.fixture(autouse=True)
@@ -278,11 +285,15 @@ def test_user_sees_every_level_and_model_gets_parents_only(home, tree):
     _memory(_silo(home, ws), "- PARENT-ENTRY\n", {"b.md": 100})
     out = _run(sub)
     message = out["systemMessage"]
+    assert "\U0001f4c2 ws \u00b7 1 note \u00b7 1 old \u00b7 last review: -\n" in message
     assert (
-        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old" in message
+        "\u2514\u2500\u2500 \U0001f4c2 repo \u00b7 1 note \u00b7 last review: - \U0001f4cd"
+        in message
     )
-    assert f"> {mc.short(ws)} (parent) - 1 note - 1 at least 30 d old" in message
-    assert f"  ~/.claude/projects/{mc.encode(ws)}/memory/b.md (100 d)" in message
+    assert (
+        f"\u251c\u2500\u2500 ~/.claude/projects/{mc.encode(ws)}/memory/b.md (100 d)"
+        in message
+    )
     assert "CURRENT-ENTRY" not in message
     assert "PARENT-ENTRY" not in message
     context = out["hookSpecificOutput"]["additionalContext"]
@@ -340,8 +351,11 @@ def test_session_in_plain_dir_above_repos_has_that_dir_as_current(home, tree):
     _memory(_silo(home, ws), "- WS\n")
     _memory(_silo(home, repo), "- REPO\n")
     out = _run(ws)
-    assert f"> {mc.short(ws)} (current level)" in out["systemMessage"]
-    assert "(parent)" not in out["systemMessage"]
+    assert (
+        out["systemMessage"].splitlines()[1]
+        == f"{FOLDER} ws \u00b7 0 notes \u00b7 last review: - {PIN}"
+    )
+    assert "repo" not in out["systemMessage"]
     assert "hookSpecificOutput" not in out  # no level above ws has memory
 
 
@@ -388,8 +402,8 @@ def test_stale_threshold_is_configurable(home, tree, monkeypatch):
     assert "a.md" not in _run(sub)["systemMessage"]
     monkeypatch.setenv("PC_MEMORY_STALE_DAYS", "5")
     message = _run(sub)["systemMessage"]
-    assert "1 at least 5 d old" in message
-    assert f"  ~/.claude/projects/{mc.encode(ws)}/memory/a.md (10 d)" in message
+    assert f"{FOLDER} ws \u00b7 1 note \u00b7 1 old \u00b7" in message
+    assert f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/a.md (10 d)" in message
 
 
 def test_memory_stays_read_only(home, tree):
@@ -588,8 +602,8 @@ def test_unreadable_index_is_left_out_of_the_model_context_only(home, tree):
     finally:
         (bad / "MEMORY.md").chmod(0o644)
     message = out["systemMessage"]
-    assert f"> {mc.short(ws)} (parent) - 1 note - 1 at least 30 d old" in message
-    assert f"  ~/.claude/projects/{mc.encode(ws)}/memory/old.md (60 d)" in message
+    assert f"{FOLDER} ws \u00b7 1 note \u00b7 1 old \u00b7 last review: -" in message
+    assert f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/old.md (60 d)" in message
     assert "hookSpecificOutput" not in out
 
 
@@ -603,8 +617,11 @@ def test_unreadable_directory_skips_that_level_only(home, tree):
         out = _run(sub)
     finally:
         bad.chmod(0o755)
-    assert f"> {mc.short(repo)} (current level)" in out["systemMessage"]
-    assert "(parent)" not in out["systemMessage"]
+    assert (
+        out["systemMessage"].splitlines()[1]
+        == f"{FOLDER} repo \u00b7 0 notes \u00b7 last review: - {PIN}"
+    )
+    assert len(out["systemMessage"].splitlines()) == 4
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads anything")
@@ -650,23 +667,18 @@ def test_model_context_escapes_ampersand_and_angle_bracket(home, tree):
     assert "  - a &amp;lt; b &amp; &lt;x>" in context
 
 
-def test_promotion_reminder_is_present_with_a_stale_note(home, tree):
+def test_the_message_carries_no_promotion_reminder_and_no_lead_in(home, tree):
     ws, _, sub = tree
     _memory(_silo(home, ws), "- p\n", {"old.md": 60})
-    last = _run(sub)["systemMessage"].splitlines()[-2]
-    assert last == (
-        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
-        "this directory -> the source that generates your instructions (never a generated "
-        "copy); local trap -> stays here. Delete what is outdated."
-    )
-
-
-def test_promotion_reminder_is_absent_without_a_stale_note(home, tree):
-    ws, _, sub = tree
-    _memory(_silo(home, ws), "- p\n", {"fresh.md": 2})
     message = _run(sub)["systemMessage"]
-    assert "Promotion" not in message
-    assert "skill" not in message
+    for gone in (
+        "Promotion",
+        "skill",
+        "Memory by directory level",
+        "levels",
+        "Review due",
+    ):
+        assert gone not in message
 
 
 def test_stale_note_path_is_listed_for_a_redirected_memory_dir(home, tree):
@@ -677,7 +689,7 @@ def test_stale_note_path_is_listed_for_a_redirected_memory_dir(home, tree):
         json.dumps({"autoMemoryDirectory": "~/redirected/mem"})
     )
     message = mc.build_user_message(mc.collect_levels(repo), repo, 30, time.time())
-    assert message.splitlines()[2] == "  ~/redirected/mem/r.md (50 d)"
+    assert message.splitlines()[2] == f"{LAST}~/redirected/mem/r.md (50 d)"
 
 
 def test_stale_note_outside_home_keeps_its_absolute_path(home, tmp_path, monkeypatch):
@@ -687,8 +699,8 @@ def test_stale_note_outside_home_keeps_its_absolute_path(home, tmp_path, monkeyp
     outside = _memory(home / "elsewhere" / "mem", "idx\n", {"x.md": 50})
     level = mc.Level(root=home / "elsewhere", memory_dir=outside)
     message = mc.build_user_message([level], level.root, 30, time.time())
-    assert message.splitlines()[2] == f"  {outside}/x.md (50 d)"
-    assert not message.splitlines()[2].startswith("  ~")
+    assert message.splitlines()[2] == f"{LAST}{outside}/x.md (50 d)"
+    assert "~" not in message.splitlines()[2]
 
 
 def test_user_message_is_plain_text_without_control_characters(home, tree):
@@ -746,7 +758,7 @@ def test_hostile_character_in_a_level_root_is_removed(home, char):
     message = mc.build_user_message(
         [mc.Level(root=root, memory_dir=memory)], root, 30, time.time()
     )
-    assert "> ~/wsdir (current level) - 1 note" in message
+    assert f"{FOLDER} wsdir \u00b7 1 note" in message
     assert _only_plain(message)
 
 
@@ -784,10 +796,10 @@ def test_summary_pluralises_notes(home):
     ws.mkdir()
     _memory(_silo(home, ws), "idx\n", {"a.md": 1})
     one = mc.build_user_message(mc.collect_levels(ws), ws, 30, time.time())
-    assert "(current level) - 1 note - 0 at least 30 d old" in one
+    assert f"{FOLDER} ws \u00b7 1 note \u00b7 last review: -" in one
     _memory(_silo(home, ws), "idx\n", {"a.md": 1, "b.md": 1})
     two = mc.build_user_message(mc.collect_levels(ws), ws, 30, time.time())
-    assert "(current level) - 2 notes - 0 at least 30 d old" in two
+    assert f"{FOLDER} ws \u00b7 2 notes \u00b7 last review: -" in two
 
 
 # --- whole-output oracles ---------------------------------------------------------------------
@@ -811,31 +823,28 @@ def test_build_user_message_whole_output(home):
     ws, repo, now = _fixed_tree(home)
     levels = mc.collect_levels(repo)
     assert mc.build_user_message(levels, repo, 30, now) == (
-        "Memory by directory level, notes at least 30 d old listed oldest first:\n"
-        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old\n"
-        f"> {mc.short(ws)} (parent) - 2 notes - 2 at least 30 d old\n"
-        f"  ~/.claude/projects/{mc.encode(ws)}/memory/old.md (100 d)\n"
-        f"  ~/.claude/projects/{mc.encode(ws)}/memory/mid.md (40 d)\n"
-        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
-        "this directory -> the source that generates your instructions (never a generated "
-        "copy); local trap -> stays here. Delete what is outdated.\n"
-        "\U0001f4a1 Tip: use /memory to enable or disable auto memory and to browse the memory "
-        "entries of the current level."
+        "\U0001f4da Memory\n"
+        f"{FOLDER} ws \u00b7 2 notes \u00b7 2 old \u00b7 last review: -\n"
+        f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/old.md (100 d)\n"
+        f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/mid.md (40 d)\n"
+        f"{LAST}{FOLDER} repo \u00b7 1 note \u00b7 last review: - {PIN}\n"
+        "\n"
+        f"{TIP}"
     )
 
 
-def test_build_user_message_without_stale_note_is_summary_lines_only(home):
+def test_build_user_message_without_stale_note_is_the_level_lines_only(home):
     ws, repo, now = _fixed_tree(home)
     for note in _silo(home, ws).glob("*.md"):
         if note.name != "MEMORY.md":
             os.utime(note, (now - DAY, now - DAY))
     levels = mc.collect_levels(repo)
     assert mc.build_user_message(levels, repo, 30, now) == (
-        "Memory by directory level, notes at least 30 d old listed oldest first:\n"
-        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old\n"
-        f"> {mc.short(ws)} (parent) - 2 notes - 0 at least 30 d old\n"
-        "\U0001f4a1 Tip: use /memory to enable or disable auto memory and to browse the memory "
-        "entries of the current level."
+        "\U0001f4da Memory\n"
+        f"{FOLDER} ws \u00b7 2 notes \u00b7 last review: -\n"
+        f"{LAST}{FOLDER} repo \u00b7 1 note \u00b7 last review: - {PIN}\n"
+        "\n"
+        f"{TIP}"
     )
 
 
@@ -851,20 +860,142 @@ def test_build_user_message_caps_stale_notes_per_level_oldest_first(home):
         os.utime(memory / f"n{i:02d}.md", (stamp, stamp))
     levels = mc.collect_levels(ws)
     expected = [
-        "Memory by directory level, notes at least 30 d old listed oldest first:",
-        f"> {mc.short(ws)} (current level) - 13 notes - 13 at least 30 d old",
+        "\U0001f4da Memory",
+        f"{FOLDER} ws \u00b7 13 notes \u00b7 13 old \u00b7 last review: - {PIN}",
         *[
-            f"  ~/.claude/projects/{mc.encode(ws)}/memory/n{i:02d}.md ({40 + i} d)"
+            f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/n{i:02d}.md ({40 + i} d)"
             for i in range(12, 2, -1)
         ],
-        "  ... (+3 more)",
-        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
-        "this directory -> the source that generates your instructions (never a generated "
-        "copy); local trap -> stays here. Delete what is outdated.",
-        "\U0001f4a1 Tip: use /memory to enable or disable auto memory and to browse the memory "
-        "entries of the current level.",
+        f"{LAST}... (+3 more)",
+        "",
+        TIP,
     ]
     assert mc.build_user_message(levels, ws, 30, now) == "\n".join(expected)
+
+
+def _fixed_level(home: Path, root: str, silo: str, ages: dict[str, int], now: float):
+    """A level `~/<root>` whose memory directory `~/.claude/projects/<silo>/memory` holds notes."""
+    memory = _memory(home / ".claude" / "projects" / silo / "memory", "idx\n")
+    for name, age in ages.items():
+        note = memory / name
+        note.write_text("body\n")
+        os.utime(note, (now - age * DAY, now - age * DAY))
+    return mc.Level(root=home / root, memory_dir=memory)
+
+
+def test_build_user_message_three_levels_whole_output(home):
+    now = datetime(2026, 10, 2, 12, 0).timestamp()
+    young = lambda prefix, count: {f"{prefix}{i}.md": 1 for i in range(count)}  # noqa: E731
+    root = _fixed_level(
+        home,
+        "pinky",
+        "-Users-x-pinky",
+        {**young("a", 12), "reference-automode-settings-location.md": 35},
+        now,
+    )
+    middle = _fixed_level(
+        home, "pinky/bootstrap", "-Users-x-bootstrap", {"b.md": 1}, now
+    )
+    current = _fixed_level(
+        home,
+        "pinky/bootstrap/pinky-agentic-plugins",
+        "-Users-x-agentic-plugins",
+        {**young("c", 21), "feedback-probe-via-tool-call-path.md": 34},
+        now,
+    )
+    (current.memory_dir / LEDGER_NAME).write_text(
+        json.dumps({"notes": {}, "last_review": "2026-09-01"}), encoding="utf-8"
+    )
+    message = mc.build_user_message(
+        [current, middle, root], current.root, 30, now, True, 30, "opus"
+    )
+    assert message == (
+        "\U0001f4da Memory\n"
+        "\U0001f4c2 pinky \u00b7 13 notes \u00b7 1 old \u00b7 last review: -\n"
+        "\u251c\u2500\u2500 ~/.claude/projects/-Users-x-pinky/memory/reference-automode-settings-location.md (35 d)\n"
+        "\u2514\u2500\u2500 \U0001f4c2 bootstrap \u00b7 1 note \u00b7 last review: -\n"
+        "      \u2514\u2500\u2500 \U0001f4c2 pinky-agentic-plugins \u00b7 22 notes \u00b7 1 old \u00b7 last review: 2026-09-01 \U0001f4cd\n"
+        "            \u2514\u2500\u2500 ~/.claude/projects/-Users-x-agentic-plugins/memory/feedback-probe-via-tool-call-path.md (34 d)\n"
+        "\n"
+        "\U0001f4a1 Audit your memory: /memory\n"
+        "\n"
+        "\U0001f514 Clean it up: /pc-memory:reconcile (\u26a0\ufe0f You are on opus, best on sonnet \u00b7 low effort)"
+    )
+
+
+def test_a_level_with_twelve_old_notes_and_a_child_is_capped_with_branches_all_through(
+    home,
+):
+    now = 1_800_000_000.0
+    parent = _fixed_level(
+        home, "p", "-p", {f"n{i:02d}.md": 40 + i for i in range(12)}, now
+    )
+    child = _fixed_level(home, "p/c", "-c", {"x.md": 1}, now)
+    lines = mc.build_user_message(
+        [child, parent], child.root, 30, now, False
+    ).splitlines()
+    assert lines[1] == f"{FOLDER} p \u00b7 12 notes \u00b7 12 old \u00b7 last review: -"
+    assert lines[2:12] == [
+        f"{BRANCH}~/.claude/projects/-p/memory/n{i:02d}.md ({40 + i} d)"
+        for i in range(11, 1, -1)
+    ]
+    assert lines[12] == f"{BRANCH}... (+2 more)"
+    assert lines[13] == f"{LAST}{FOLDER} c \u00b7 1 note \u00b7 last review: - {PIN}"
+    assert len(lines) == 14
+
+
+def test_two_levels_each_the_only_child_nest_their_notes_one_step_deeper(home):
+    now = 1_800_000_000.0
+    parent = _fixed_level(home, "p", "-p", {"a.md": 50, "b.md": 40}, now)
+    child = _fixed_level(home, "p/c", "-c", {"z.md": 45}, now)
+    assert mc.build_user_message([child, parent], child.root, 30, now, False) == (
+        "\U0001f4da Memory\n"
+        f"{FOLDER} p \u00b7 2 notes \u00b7 2 old \u00b7 last review: -\n"
+        f"{BRANCH}~/.claude/projects/-p/memory/a.md (50 d)\n"
+        f"{BRANCH}~/.claude/projects/-p/memory/b.md (40 d)\n"
+        f"{LAST}{FOLDER} c \u00b7 1 note \u00b7 1 old \u00b7 last review: - {PIN}\n"
+        f"      {LAST}~/.claude/projects/-c/memory/z.md (45 d)"
+    )
+
+
+def test_a_lone_level_closes_its_branch_on_its_last_note(home):
+    now = 1_800_000_000.0
+    only = _fixed_level(home, "p", "-p", {"a.md": 50, "b.md": 40}, now)
+    lines = mc.build_user_message([only], only.root, 30, now, False).splitlines()
+    assert lines[2:] == [
+        f"{BRANCH}~/.claude/projects/-p/memory/a.md (50 d)",
+        f"{LAST}~/.claude/projects/-p/memory/b.md (40 d)",
+    ]
+
+
+def test_the_current_level_is_shown_even_without_an_index(home, tree):
+    ws, _, sub = tree
+    _memory(_silo(home, ws), "- p\n", {"old.md": 60})
+    out = _run(sub)
+    assert out["systemMessage"] == (
+        "\U0001f4da Memory\n"
+        f"{FOLDER} ws \u00b7 1 note \u00b7 1 old \u00b7 last review: -\n"
+        f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/old.md (60 d)\n"
+        f"{LAST}{FOLDER} repo \u00b7 0 notes \u00b7 last review: - {PIN}\n"
+        "\n"
+        f"{TIP}"
+    )
+    assert (
+        out["hookSpecificOutput"]["additionalContext"].count("<parent-memory-index")
+        == 1
+    )
+
+
+def test_every_line_of_the_message_is_free_of_control_characters(home, tree):
+    ws, repo, sub = tree
+    _memory(_silo(home, ws), "idx\n", {"a.md": 90, "b\x1b]8;;evil\x07.md": 60})
+    _memory(_silo(home, repo), "idx\n", {"c\u202e.md": 70})
+    out = mc.build_output(
+        {"cwd": str(sub), "source": "startup", "model": "x\x1b[31m\u202e"}, time.time()
+    )
+    assert out["systemMessage"].count("\n") > 5
+    for line in out["systemMessage"].splitlines():
+        assert _only_plain(line)
 
 
 def test_build_model_context_whole_output(home):
@@ -899,10 +1030,6 @@ def test_build_output_whole_output(home):
     }
 
 
-TIP = (
-    "\U0001f4a1 Tip: use /memory to enable or disable auto memory and to browse the memory "
-    "entries of the current level."
-)
 LEVEL_CHOICE = (
     "When you save a memory note, choose the level by subject: a note belongs at the lowest "
     "level where it stays true for every session; the memory directory of each level is given "
@@ -910,14 +1037,18 @@ LEVEL_CHOICE = (
 )
 
 
-def test_tip_is_the_last_line_with_and_without_a_stale_note(home, tree):
+def test_tip_is_the_last_part_with_and_without_a_stale_note(home, tree):
     ws, repo, sub = tree
     _memory(_silo(home, ws), "- p\n", {"new.md": 1})
     assert _run(sub)["systemMessage"].splitlines()[-1] == TIP
     _memory(_silo(home, ws), "- p\n", {"old.md": 60})
     lines = _run(sub)["systemMessage"].splitlines()
     assert lines[-1] == TIP
-    assert lines[-2].startswith("Promotion:")
+    assert lines[-2] == ""
+    assert (
+        lines[-3] == f"{LAST}{FOLDER} repo \u00b7 0 notes \u00b7 last review: - {PIN}"
+    )
+    assert lines[-4].startswith(BRANCH + "~/.claude/projects/")
 
 
 def test_tip_is_not_shown_after_compaction(home, tree):
@@ -930,6 +1061,11 @@ def test_tip_emoji_survives_the_cleaning_and_is_the_only_non_ascii_character():
     assert mc.clean_text(TIP) == TIP
     assert [ch for ch in TIP if not ch.isascii()] == ["\U0001f4a1"]
     assert unicodedata.category("\U0001f4a1") not in {"Cc", "Cf", "Zl", "Zp"}
+
+
+def test_every_glyph_of_the_tree_survives_the_cleaning():
+    glyphs = f"\U0001f4da {FOLDER} {PIN} {BRANCH}{LAST} \u00b7 \u26a0\ufe0f \U0001f514"
+    assert mc.clean_text(glyphs) == glyphs
 
 
 def test_level_choice_sentence_follows_the_data_notice_and_precedes_the_indexes(
@@ -1024,7 +1160,7 @@ def test_moved_config_directory_settings_are_read(home, tree, monkeypatch):
     _memory(config / "projects" / mc.encode(ws) / "memory", "- p\n", {"old.md": 60})
     _settings(home / ".claude", "settings.json", {"spinnerTipsEnabled": True})
     _settings(config, "settings.json", {"spinnerTipsEnabled": False})
-    assert "Tip:" not in _run(sub)["systemMessage"]
+    assert TIP not in _run(sub)["systemMessage"]
 
 
 def test_default_config_directory_settings_are_ignored_when_it_is_moved(
@@ -1038,18 +1174,15 @@ def test_default_config_directory_settings_are_ignored_when_it_is_moved(
     assert _run(sub)["systemMessage"].splitlines()[-1] == TIP
 
 
-def test_build_user_message_without_tip_is_the_same_message_minus_the_last_line(home):
+def test_build_user_message_without_tip_is_the_tree_alone(home):
     ws, repo, now = _fixed_tree(home)
     levels = mc.collect_levels(repo)
     assert mc.build_user_message(levels, repo, 30, now, show_tip=False) == (
-        "Memory by directory level, notes at least 30 d old listed oldest first:\n"
-        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old\n"
-        f"> {mc.short(ws)} (parent) - 2 notes - 2 at least 30 d old\n"
-        f"  ~/.claude/projects/{mc.encode(ws)}/memory/old.md (100 d)\n"
-        f"  ~/.claude/projects/{mc.encode(ws)}/memory/mid.md (40 d)\n"
-        "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond "
-        "this directory -> the source that generates your instructions (never a generated "
-        "copy); local trap -> stays here. Delete what is outdated."
+        "\U0001f4da Memory\n"
+        f"{FOLDER} ws \u00b7 2 notes \u00b7 2 old \u00b7 last review: -\n"
+        f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/old.md (100 d)\n"
+        f"{BRANCH}~/.claude/projects/{mc.encode(ws)}/memory/mid.md (40 d)\n"
+        f"{LAST}{FOLDER} repo \u00b7 1 note \u00b7 last review: - {PIN}"
     )
 
 
@@ -1060,9 +1193,9 @@ def test_build_user_message_without_tip_and_without_stale_note(home):
             os.utime(note, (now - DAY, now - DAY))
     levels = mc.collect_levels(repo)
     assert mc.build_user_message(levels, repo, 30, now, show_tip=False) == (
-        "Memory by directory level, notes at least 30 d old listed oldest first:\n"
-        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old\n"
-        f"> {mc.short(ws)} (parent) - 2 notes - 0 at least 30 d old"
+        "\U0001f4da Memory\n"
+        f"{FOLDER} ws \u00b7 2 notes \u00b7 last review: -\n"
+        f"{LAST}{FOLDER} repo \u00b7 1 note \u00b7 last review: - {PIN}"
     )
 
 

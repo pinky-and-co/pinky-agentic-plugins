@@ -336,10 +336,10 @@ def test_the_startup_message_is_unchanged_by_the_ledger(home, repo, silo):
     cnt.record_read(_read(silo / "a.md", repo, "s1"), DAY1)
     assert mc.build_user_message(levels, repo, 30, now) == before
     assert before == (
-        "Memory by directory level, notes at least 30 d old listed oldest first:\n"
-        f"> {mc.short(repo)} (current level) - 1 note - 0 at least 30 d old\n"
-        "\U0001f4a1 Tip: use /memory to enable or disable auto memory and to browse the memory "
-        "entries of the current level."
+        "\U0001f4da Memory\n"
+        "\U0001f4c2 repo \u00b7 1 note \u00b7 last review: - \U0001f4cd\n"
+        "\n"
+        "\U0001f4a1 Audit your memory: /memory"
     )
 
 

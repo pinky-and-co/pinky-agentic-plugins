@@ -8,22 +8,35 @@ A session opened in a sub-repo does not see the memory notes kept at the directo
 it. A `SessionStart` hook reads each level's `MEMORY.md` (read-only — it never writes to memory)
 and emits:
 
-- **To the user** (`systemMessage`): one summary line per level, current included — path, number
-  of notes, number at least the stale threshold old (30 d by default) — then, under it, the stale
-  notes with their age,
-  oldest first, at most 10 per level followed by a `+N more` marker. Each note is listed by its
-  full path with the home directory written `~/` (a path outside the home directory stays
-  absolute), as plain text, so a terminal that opens file paths on click can open it. The list is built from
-  the notes themselves, not from the index, so a level whose `MEMORY.md` cannot be read still
-  gets its summary and stale notes. No index line is shown; a level with no stale note is its summary line alone. When at least one stale note is listed, a
-  closing reminder says where to promote it (a skipped procedure step: fix the skill or hook; a
-  rule or pitfall beyond the directory: the source that generates the instructions, never a
-  generated copy; a local trap stays in memory) or to delete it. When at least one level is due
-  for review (see [Review reminder](#review-reminder)), one `Review due` line follows. The last
-  line is always a tip (a light-bulb emoji, then: use `/memory` to enable or disable auto memory
-  and to browse the memory entries of the current level), with or without stale notes, unless the
-  `spinnerTipsEnabled` setting (the "Show tips" option of `/config`) is the boolean `false`. Not
-  shown again after `/compact`.
+- **To the user** (`systemMessage`): a tree of the levels, the widest first down to the current
+  one, each nested under the previous. A level is a line with its directory name, its number of
+  notes, `<K> old` when K notes are at least the stale threshold old (30 d by default) and the date
+  of its last `reconcile` review (`-` when none). The current level ends with a pin. Under a
+  level, its old notes are listed oldest first with their age, at most 10 followed by a `+N more`
+  marker, each by its full path with the home directory written `~/` (a path outside the home
+  directory stays absolute), as plain text, so a terminal that opens file paths on click can open
+  it. The branch of a level closes on its last item only when no deeper level follows:
+
+  ```text
+  📚 Memory
+  📂 pinky · 13 notes · 1 old · last review: -
+  ├── ~/.claude/projects/-Users-x-pinky/memory/reference-automode-settings-location.md (35 d)
+  └── 📂 bootstrap · 1 note · last review: -
+        └── 📂 pinky-agentic-plugins · 22 notes · 1 old · last review: 2026-09-01 📍
+              └── ~/.claude/projects/-Users-x-agentic-plugins/memory/feedback-probe-via-tool-call-path.md (34 d)
+
+  💡 Audit your memory: /memory
+
+  🔔 Clean it up: /pc-memory:reconcile (⚠️ You are on opus, best on sonnet · low effort)
+  ```
+
+  The list is built from the notes themselves, not from the index, so a level whose `MEMORY.md`
+  cannot be read still gets its line and old notes. No index line is shown. The parts are
+  separated by an empty line. The current level is always in the tree, with `0 notes` when it has
+  no index; a parent level without an index is not. The tip is hidden when the `spinnerTipsEnabled` setting (the "Show
+  tips" option of `/config`) is the boolean `false`. The bell line appears only when at least one
+  level is due for review (see [Review reminder](#review-reminder)); the tip setting does not hide
+  it. Not shown again after `/compact`.
 - **To the model** (`additionalContext`): the index of the **parent** levels only, capped per
   level and fenced as data, not instructions. One sentence after the data notice tells the model to
   choose the level of a note by subject (a note belongs at the lowest level where it stays true for
@@ -70,13 +83,16 @@ A level is due when:
   holds at least one note that is 30 days old or more. A never-reviewed level with only recent notes
   is not due, so a new directory is not flagged.
 
-The threshold is `PC_MEMORY_REVIEW_DAYS` (30 by default), the same for both cases. One line is added
-after the promotion reminder and before the tip, naming the number of levels, the first three
-(`+K more` beyond), the command, the model to pick with `/model` (`sonnet`, press `s` to keep it for
-the session only), the effort (`/effort medium`) and `/clear` for when it is done. The model and the
-effort are named because a skill's model override lasts a single turn and a review spans several.
-The line is absent when no level is due, and, like the rest of the message, after `/compact`. Reading
-the ledger never renames or rewrites it, even a corrupt one.
+The threshold is `PC_MEMORY_REVIEW_DAYS` (30 by default), the same for both cases. One line closes
+the message, after the tip, whatever the number of levels due: `🔔 Clean it up:
+/pc-memory:reconcile (best on sonnet · low effort)`. When the `SessionStart` payload carries a
+`model` string that does not contain `sonnet` (any case), the parenthesis starts with a warning
+naming it, cleaned and cut at 40 characters: `(⚠️ You are on opus, best on sonnet · low effort)`. A
+missing or non-string `model` gives no warning (Claude Code omits the field on some starts, for
+example after `/clear`). The effort is not in the payload, so the line always advises the low one.
+The model and the effort are advised because a skill's model override lasts a single turn and a
+review spans several. The line is absent when no level is due, and, like the rest of the message,
+after `/compact`. Reading the ledger never renames or rewrites it, even a corrupt one.
 
 ### Write guard
 
@@ -198,8 +214,8 @@ the model:
    it): the level and its memory directory, `last_review` from the ledger, the index size
    (`lines`, `bytes`, `over_budget` past 200 lines or 25 KB, the part Claude Code reads), and per
    note the description, type, age in days (frontmatter `modified`, else the file mtime),
-   `sessions`, `last_read`, whether the index links it and the first index line that does (null
-   when none). Every text field read from a note, an index or the ledger (descriptions, types, index
+   `sessions`, `last_read`, whether the index links it, the first index line that does (null
+   when none) and `coverage`. Every text field read from a note, an index or the ledger (descriptions, types, index
    lines, file names, orphan and duplicate names) has control characters removed and is capped at
    200 characters, descriptions and index lines also have their spaces normalised; `last_read` and
    `last_review` are kept only when they are `YYYY-MM-DD` dates, else null. Also the orphans (an index line whose file is gone, a note without
@@ -207,6 +223,30 @@ the model:
    frontmatter, whitespace normalised, empty bodies not compared. Dot files, the ledger, its lock,
    `.corrupt` and temp files, the trash folder, non-`.md` entries and `MEMORY.md` are not notes. A
    level that cannot be read is skipped with a message on stderr.
+
+   `coverage` is a hint that a note's fact is already stated where the instructions live, so the
+   note can be deleted: up to 3 `{"file", "line", "text", "terms"}` (the line clipped to 160
+   characters, cleaned, and the words that matched), best first. It is a clue: shared words are
+   not a shared fact, so the skill reads the cited line before recommending a deletion. The sources are those of the root directory of every level shown:
+   `CLAUDE.md`, `AGENTS.md`, `.claude/rules/*.md`, the string values of
+   `.claude/settings.pinky.json`, every `skills/<name>/SKILL.md` below the root and the
+   `description` fields of every `hooks/hooks.json`. Terms are the words of 6
+   characters or more of the note's name and description and its backticked identifiers, minus
+   common words and the repo's own vocabulary (plugin, hooks, skill, scripts, working, tree,
+   files, repo, code, claude, session, memory, note, rule). A term found in more than 10% of the
+   lines or of the files read (floor of 3) is common and weighs a tenth of a rare one. A source
+   covers a note when a window of 3 lines holds at least 4 distinct rare terms, or one rare
+   backticked identifier of 8 characters or more. The rule favours precision: a fact restated in
+   other words with fewer rare terms is not reported. The work is bounded: 60 source files per
+   level, none over 200 KB, nothing deeper than 6 directories. A file is read once through its real
+   path, so a `CLAUDE.md` that links to `AGENTS.md` is not cited twice (the first name met is
+   cited, `AGENTS.md` before `CLAUDE.md`); a link is followed only when its target stays inside the
+   level's root, a link that leaves it or is broken is ignored, and no linked directory is
+   entered. A line
+   shaped like a secret (a long token after `:` or `=`, a known key prefix, a private-key header,
+   credentials in a URL, a JWT) is never read. The detector is a local subset of the one in the
+   `pc-core` plugin, which this plugin cannot import without requiring it to be installed.
+   Nothing is written.
 2. `apply.py --plan FILE|- [--dry-run] [--cwd PATH]` applies the plan the user approved (`-` reads
    it from standard input, which is how the skill passes it):
 
@@ -267,6 +307,13 @@ The approval covers what runs: the skill shows the `--dry-run` output as it is i
 question, with permanent deletion as a separate option that is never the default, then runs exactly
 that plan. `apply.py` is not in the skill's `allowed-tools`, so every run, the dry run included, goes
 through the usual permission prompt, which shows the command and its plan.
+
+The skill reads the `coverage` hints before judging a note and recommends deleting one that a
+source already covers, citing the path and line. It asks the user in batches of at most 4
+questions, opened by one intro line (`Batch 2/4 — 3 notes`): two or more covered notes go through
+one grouped question first (delete all, one by one, keep all), and each other question gives the
+note's title, its full path on its own line, a short summary, the covering source when there is
+one, and a 1–2 word topic as its `header`.
 
 The skill reads a note with `cat`, not the `Read` tool, so a review does not count as a
 consultation, and a read refused by a confidentiality guard is never retried through another

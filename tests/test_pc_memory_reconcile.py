@@ -196,6 +196,7 @@ def test_inventory_of_a_three_level_tree(home, tree):
                         "last_read": "2026-10-01",
                         "in_index": True,
                         "index_line": "- [Build trap](build_trap.md) - local trap",
+                        "coverage": [],
                     },
                     {
                         "file": "dup.md",
@@ -206,6 +207,7 @@ def test_inventory_of_a_three_level_tree(home, tree):
                         "last_read": None,
                         "in_index": True,
                         "index_line": "- [Dup](dup.md) - same as the parent one",
+                        "coverage": [],
                     },
                     {
                         "file": "loose.md",
@@ -216,6 +218,7 @@ def test_inventory_of_a_three_level_tree(home, tree):
                         "last_read": None,
                         "in_index": False,
                         "index_line": None,
+                        "coverage": [],
                     },
                     {
                         "file": "tone.md",
@@ -226,6 +229,7 @@ def test_inventory_of_a_three_level_tree(home, tree):
                         "last_read": None,
                         "in_index": True,
                         "index_line": "- [Tone](tone.md) - how to talk",
+                        "coverage": [],
                     },
                 ],
                 "orphans": {
@@ -253,6 +257,7 @@ def test_inventory_of_a_three_level_tree(home, tree):
                         "last_read": None,
                         "in_index": True,
                         "index_line": "- [Shared dup](dup_shared.md) - shared",
+                        "coverage": [],
                     }
                 ],
                 "orphans": {"index_without_file": [], "file_without_index": []},
@@ -273,6 +278,7 @@ def test_inventory_of_a_three_level_tree(home, tree):
                         "last_read": None,
                         "in_index": True,
                         "index_line": "- [Only](only.md) - the only note",
+                        "coverage": [],
                     }
                 ],
                 "orphans": {"index_without_file": [], "file_without_index": []},
@@ -1906,3 +1912,540 @@ def test_a_count_started_before_a_deletion_does_not_recreate_the_pruned_entry(
     thread.join(timeout=5)
     assert result == [False]
     assert "a.md" not in _json(cur / LEDGER_NAME)["notes"]
+
+
+# --- coverage hints -----------------------------------------------------------------
+
+
+@pytest.fixture
+def one(home):
+    """One level `home/repo` with an empty memory directory, returns (repo, memory dir)."""
+    repo = home / "repo"
+    (repo / ".git").mkdir(parents=True)
+    memory = _silo(home, repo)
+    (memory / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
+    return repo, memory
+
+
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+FACT = "Automode configuration settings location overrides"
+
+
+def _coverage(repo: Path, file: str = "automode_settings_location.md") -> list[dict]:
+    notes = inv.build_inventory(repo, NOW)["levels"][0]["notes"]
+    return next(n for n in notes if n["file"] == file)["coverage"]
+
+
+def _automode_note(memory: Path, description: str | None = None) -> None:
+    _note(
+        memory,
+        "automode_settings_location.md",
+        "body\n",
+        description=description
+        or "Automode configuration lives in the user settings, overrides never apply",
+    )
+
+
+def test_a_note_stated_in_a_rule_file_gets_that_file_and_line(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(
+        repo / ".claude" / "rules" / "modes.md",
+        "# Modes\n\nunrelated line\nAutomode configuration and settings location, no overrides.\n",
+    )
+    assert _coverage(repo) == [
+        {
+            "file": _short(repo / ".claude" / "rules" / "modes.md", home),
+            "line": 4,
+            "text": "Automode configuration and settings location, no overrides.",
+            "terms": ["automode", "configuration", "location", "overrides", "settings"],
+        }
+    ]
+
+
+def test_a_note_with_no_match_has_an_empty_list(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "CLAUDE.md", "Nothing about modes here.\nTotally unrelated text.\n")
+    assert _coverage(repo) == []
+
+
+def test_a_single_weak_term_is_not_coverage(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "CLAUDE.md", "The automode is mentioned once.\n")
+    assert _coverage(repo) == []
+
+
+def test_terms_count_only_within_three_lines(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    far = "automode configuration\n" + "filler\n" * 2 + "settings location overrides\n"
+    _write(repo / "CLAUDE.md", far)
+    assert _coverage(repo) == []
+    near = "automode configuration\n" + "filler\n" + "settings location overrides\n"
+    _write(repo / "CLAUDE.md", near)
+    assert [m["line"] for m in _coverage(repo)] == [1]
+
+
+def test_three_rare_terms_are_not_enough(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "CLAUDE.md", "automode configuration settings\n")
+    assert _coverage(repo) == []
+
+
+def test_one_backticked_identifier_of_eight_characters_is_enough(home, one):
+    repo, memory = one
+    _automode_note(memory, "Set `autoMemoryDirectory` per level")
+    _write(repo / "AGENTS.md", "Use autoMemoryDirectory to redirect.\n")
+    assert [(m["file"], m["line"], m["terms"]) for m in _coverage(repo)] == [
+        (_short(repo / "AGENTS.md", home), 1, ["automemorydirectory"])
+    ]
+    _automode_note(memory, "Set `short` per level")
+    assert _coverage(repo) == []
+
+
+def test_a_backticked_identifier_found_everywhere_is_common_and_not_enough(home, one):
+    repo, memory = one
+    _automode_note(memory, "Set `autoMemoryDirectory` per level")
+    _write(repo / "AGENTS.md", "autoMemoryDirectory\n" * 5)
+    assert _coverage(repo) == []
+
+
+def test_common_words_of_the_domain_weigh_nothing(home, one):
+    repo, memory = one
+    words = (
+        "plugin plugins skills scripts working tree files repo claude session memory"
+    )
+    _note(memory, "tidy.md", "b", description=f"All about {words}")
+    _write(repo / "CLAUDE.md", f"{words}\n")
+    assert _coverage(repo, "tidy.md") == []
+
+
+def test_terms_found_in_many_lines_weigh_almost_nothing(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "CLAUDE.md", (FACT + "\n") * 5)
+    assert _coverage(repo) == []
+
+
+def test_stopwords_are_not_terms(home, one):
+    repo, memory = one
+    _note(
+        memory,
+        "tidy.md",
+        "b",
+        description="Should always be checked before every session",
+    )
+    _write(repo / "CLAUDE.md", "Should always be checked before every session.\n")
+    assert _coverage(repo, "tidy.md") == []
+
+
+def test_every_kind_of_source_is_read(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    text = FACT + "\n"
+    agents = _write(repo / "AGENTS.md", text)
+    skill = _write(repo / "plugins" / "p" / "skills" / "s" / "SKILL.md", text)
+    _write(repo / "plugins" / "p" / "other" / "SKILL.md", text)
+    hooks = _write(
+        repo / "plugins" / "p" / "hooks" / "hooks.json",
+        '{\n  "description": "' + FACT + '",\n  "command": "' + FACT.lower() + '"\n}\n',
+    )
+    settings = _write(
+        repo / ".claude" / "settings.pinky.json",
+        '{\n  "automode": "' + FACT + ' of the user",\n  "other": 1\n}\n',
+    )
+    for n in range(46):  # keeps each term in few enough files to stay rare
+        _write(repo / "skills" / f"f{n:02d}" / "SKILL.md", "Nothing to see here\n")
+    filler = {
+        _short(repo / "skills" / f"f{n:02d}" / "SKILL.md", home) for n in range(46)
+    }
+    assert {_short(src.path, home) for src in inv.collect_sources([repo])} == filler | {
+        _short(path, home) for path in (agents, skill, hooks, settings)
+    }
+    got = {(m["file"], m["line"]) for m in _coverage(repo)}
+    assert len(got) == 3
+    assert got <= {
+        (_short(agents, home), 1),
+        (_short(skill, home), 1),
+        (_short(hooks, home), 2),
+        (_short(settings, home), 2),
+    }
+
+
+def test_json_sources_contribute_their_values_only(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(
+        repo / ".claude" / "settings.pinky.json",
+        '{\n  "automode": 1,\n  "settingsLocation": 2\n}\n',
+    )
+    _write(
+        repo / "hooks" / "hooks.json",
+        '{\n  "automode": 1,\n  "command": "' + FACT + '"\n}\n',
+    )
+    assert _coverage(repo) == []
+
+
+def test_string_items_of_an_array_in_the_settings_are_read(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(
+        repo / ".claude" / "settings.pinky.json",
+        '{\n  "gotchas": [\n    "' + FACT + ' is the user file",\n'
+        '    "unrelated"\n  ],\n  "count": 3\n}\n',
+    )
+    assert [(m["file"], m["line"]) for m in _coverage(repo)] == [
+        (_short(repo / ".claude" / "settings.pinky.json", home), 3)
+    ]
+
+
+def test_at_most_three_matches_best_first(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "AGENTS.md", "Automode configuration settings location\n")
+    _write(repo / "CLAUDE.md", FACT + "\n")
+    for name in ("a", "b"):
+        _write(
+            repo / ".claude" / "rules" / f"{name}.md",
+            "Automode configuration settings location\n",
+        )
+    for n in range(46):  # keeps each term in few enough files to stay rare
+        _write(repo / "skills" / f"s{n:02d}" / "SKILL.md", "Nothing to see here\n")
+    got = _coverage(repo)
+    assert len(got) == 3
+    assert got[0]["file"] == _short(repo / "CLAUDE.md", home)
+    assert [m["file"] for m in got[1:]] == [
+        _short(repo / "AGENTS.md", home),
+        _short(repo / ".claude" / "rules" / "a.md", home),
+    ]
+
+
+def test_an_oversized_file_and_a_symlink_are_ignored(home, one, tmp_path):
+    repo, memory = one
+    _automode_note(memory)
+    big = FACT + "\n" + "x" * 200 * 1024
+    _write(repo / "CLAUDE.md", big)
+    outside = _write(tmp_path / "outside" / "AGENTS.md", FACT + "\n")
+    (repo / "AGENTS.md").symlink_to(outside)
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "rules").symlink_to(outside.parent)
+    (repo / "skills").symlink_to(outside.parent)
+    assert _coverage(repo) == []
+    assert inv.collect_sources([repo]) == []
+    _write(repo / "CLAUDE.md", FACT + "\n" + "x" * 150 * 1024)
+    assert [m["line"] for m in _coverage(repo)] == [1]
+
+
+def _agents_only(home: Path, repo: Path) -> dict:
+    return {
+        "file": _short(repo / "AGENTS.md", home),
+        "line": 1,
+        "text": FACT,
+        "terms": ["automode", "configuration", "location", "overrides", "settings"],
+    }
+
+
+def test_claude_md_linked_to_agents_md_is_cited_once_as_agents_md(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "AGENTS.md", FACT + "\n")
+    (repo / "CLAUDE.md").symlink_to("AGENTS.md")
+    assert _coverage(repo) == [_agents_only(home, repo)]
+
+
+def test_agents_md_linked_to_claude_md_is_cited_once_as_agents_md(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "CLAUDE.md", FACT + "\n")
+    (repo / "AGENTS.md").symlink_to("CLAUDE.md")
+    assert _coverage(repo) == [_agents_only(home, repo)]
+
+
+def test_both_names_linked_to_a_third_file_of_the_level_are_cited_once(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "docs" / "shared.md", FACT + "\n")
+    (repo / "AGENTS.md").symlink_to("docs/shared.md")
+    (repo / "CLAUDE.md").symlink_to("docs/shared.md")
+    assert _coverage(repo) == [_agents_only(home, repo)]
+
+
+def test_a_link_to_a_file_outside_the_level_or_a_broken_link_is_ignored(
+    home, one, tmp_path
+):
+    repo, memory = one
+    _automode_note(memory)
+    outside = _write(tmp_path / "elsewhere" / "AGENTS.md", FACT + "\n")
+    (repo / "AGENTS.md").symlink_to(outside)
+    (repo / "CLAUDE.md").symlink_to("missing.md")
+    assert _coverage(repo) == []
+    assert inv.collect_sources([repo]) == []
+
+
+def test_a_rule_linked_to_a_file_of_the_level_is_read_once(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    shared = _write(repo / "notes" / "shared.md", FACT + "\n")
+    rules = repo / ".claude" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "x.md").symlink_to(shared)
+    (rules / "y.md").symlink_to(shared)
+    assert [m["file"] for m in _coverage(repo)] == [_short(rules / "x.md", home)]
+
+
+def test_a_skill_linked_outside_the_level_is_ignored_and_one_inside_is_read(
+    home, one, tmp_path
+):
+    repo, memory = one
+    _automode_note(memory)
+    outside = _write(tmp_path / "elsewhere" / "SKILL.md", FACT + "\n")
+    inside = _write(repo / "docs" / "skill.md", FACT + "\n")
+    (repo / "skills" / "a").mkdir(parents=True)
+    (repo / "skills" / "a" / "SKILL.md").symlink_to(outside)
+    (repo / "skills" / "b").mkdir()
+    (repo / "skills" / "b" / "SKILL.md").symlink_to(inside)
+    assert [m["file"] for m in _coverage(repo)] == [
+        _short(repo / "skills" / "b" / "SKILL.md", home)
+    ]
+
+
+def test_at_most_sixty_source_files_are_read_per_level(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    for n in range(70):
+        _write(repo / "skills" / f"s{n:02d}" / "SKILL.md", "Automode settings\n")
+    assert len(inv.collect_sources([repo])) == 60
+
+
+def test_a_walk_stops_below_six_directories(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    deep = repo / "a" / "b" / "c" / "d" / "e" / "f" / "g" / "skills" / "s" / "SKILL.md"
+    _write(deep, "Automode settings\n")
+    assert inv.collect_sources([repo]) == []
+
+
+def _long_token() -> str:
+    """A 28-character token of letters and digits, built at run time."""
+    return "".join(f"{chr(97 + i)}{i % 10}" for i in range(14))
+
+
+SECRET_SHAPES = {
+    "known-prefix": lambda: "tok" + "en" + ": " + "gh" + "p_" + "abcdefghij" * 4,
+    "keyword-equals": lambda: "api" + "_key" + " = " + "abcdef0123" * 3,
+    "key-colon-long-token": lambda: "key" + ": " + _long_token(),
+    "long-blob": lambda: "".join(
+        chr(65 + i % 26) + chr(97 + i % 26) + str(i % 10) for i in range(14)
+    ),
+    "pem-header": lambda: "-----BEGIN " + "RSA PRIVATE" + " KEY-----",
+    "url-credentials": lambda: "https://" + "user" + ":" + "pw" + "@" + "host.example",
+    "jwt": lambda: "ey" + "J" + "abcdefgh" + "." + "abcdefgh" + "." + "sig",
+}
+
+
+@pytest.mark.parametrize("shape", SECRET_SHAPES)
+def test_lines_shaped_like_a_secret_are_never_a_hint(home, one, shape):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "CLAUDE.md", f"{FACT.lower()} {SECRET_SHAPES[shape]()}\n")
+    assert _coverage(repo) == []
+    _write(repo / "CLAUDE.md", f"{FACT.lower()}: see the user file\n")
+    assert [m["line"] for m in _coverage(repo)] == [1]
+
+
+def test_hint_text_is_cleaned_clipped_and_stable(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    long = FACT + " \x1b[31mred‮ " + "y" * 400
+    _write(repo / "CLAUDE.md", long + "\n")
+    first = _coverage(repo)
+    assert first == _coverage(repo)
+    assert len(first[0]["text"]) == 160
+    assert first[0]["text"].startswith(FACT + " [31mred ")
+    assert "\x1b" not in first[0]["text"]
+
+
+def test_coverage_never_writes(home, one):
+    repo, memory = one
+    _automode_note(memory)
+    _write(repo / "CLAUDE.md", FACT + "\n")
+    before = _snapshot(home)
+    assert _coverage(repo)
+    assert _snapshot(home) == before
+
+
+def test_a_note_is_checked_against_the_sources_of_every_level_shown(home):
+    ws = home / "ws"
+    inner = ws / "repo2"
+    (inner / ".git").mkdir(parents=True)
+    for level in (ws, inner):
+        (_silo(home, level) / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
+    _write(ws / "CLAUDE.md", FACT + "\n")
+    _note(
+        (home / ".claude" / "projects" / encode(inner) / "memory"),
+        "automode_settings_location.md",
+        "b",
+        description="Automode configuration lives in settings, overrides never apply",
+    )
+    notes = inv.build_inventory(inner, NOW)["levels"][0]["notes"]
+    assert [m["file"] for m in notes[0]["coverage"]] == [_short(ws / "CLAUDE.md", home)]
+
+
+FALSE_POSITIVES = [
+    pytest.param(
+        "claude-code-lsp-recommendation.md",
+        "Claude Code's built-in LSP recommendation keeps proposing pyright-lsp@claude-plugins-official "
+        "(no working LSP config) even with the pyright@claude-code-lsps fork active \u2014 reinstalled "
+        "once on 2026-09-20",
+        "AGENTS.md",
+        "This repo is registered as a `directory` marketplace. `${CLAUDE_PLUGIN_ROOT}` then resolves to the\n"
+        "working tree (`plugins/<name>/`), not to the copy under\n"
+        "`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` \u2014 measured on Claude Code 2.1.283\n",
+        id="lsp",
+    ),
+    pytest.param(
+        "claude-plugin-eval-cli-gotchas.md",
+        "Operational gotchas of `claude plugin eval` discovered while authoring pc-git's commit-and-pr "
+        "suite \u2014 tool grants, judge model default, sandbox network/git limits",
+        "AGENTS.md",
+        "  quality gates (mypy, bandit, interrogate, darglint) run against every authored `.py` under a\n"
+        "  plugin \u2014 `hooks/` (concern folders nested inside it included) and `skills/<name>/` alike.\n"
+        "- A profile-resolved value (chat language, default branch) is never hardcoded into a public\n",
+        id="eval-gotchas",
+    ),
+    pytest.param(
+        "feedback_commit-and-pr-broad-add-sweeps-untracked.md",
+        "After running pc-git commit-and-pr (or bulk_commit.sh), check the PR diff for unrelated "
+        "pre-existing untracked files it may have swept in",
+        "plugins/pc-core/skills/review-guidelines/SKILL.md",
+        "\n- Code formatting, import order, line length \u2014 handled by pre-commit (the repo's own formatter)\n"
+        "- Linting violations already caught by the repo's own linter\n",
+        id="commit-and-pr",
+    ),
+    pytest.param(
+        "feedback_finishing-card-check-selected-for-dev-first.md",
+        "When finishing a kanban card and looking for what's next, check 2-selected-for-dev before "
+        "proposing from 1-todo",
+        "plugins/pc-kanban/skills/kanban/SKILL.md",
+        "- **`priority`** \u2014 1 (low) to 5 (urgent). The agent proposes a value at the same moment it writes a\n"
+        "  card (`kanban-proactivity.md` \u00a7 Capture \u2192 card) with its reason; the human validates or changes\n"
+        "  it before the card is written \u2014 never agent-set unconfirmed. Drives the ordering of the next-card\n"
+        "  proposal in `0-ideas`/`1-todo` (`finishing-a-card.md` \u00a7 Proposing the next card) and of the\n"
+        '  "highest `priority:`" pick in `2-selected-for-dev` above \u2014 `date:`/file position only tie-break\n'
+        "  at equal `priority`. Omitted = `3`, no backfill of existing cards, no error.\n",
+        id="finishing-card",
+    ),
+    pytest.param(
+        "feedback_format-only-touched-files.md",
+        "Run ruff format on the files you edited, never on `plugins` or the whole repo",
+        "AGENTS.md",
+        "\n- **Plugin** \u2014 a folder under `plugins/<name>/` with its own `.claude-plugin/plugin.json`,\n"
+        "  published through the root `.claude-plugin/marketplace.json`.\n",
+        id="format-only",
+    ),
+]
+
+
+@pytest.mark.parametrize(("note", "description", "source", "text"), FALSE_POSITIVES)
+def test_lines_that_share_only_the_vocabulary_of_the_repo_are_not_coverage(
+    home, one, note, description, source, text
+):
+    repo, memory = one
+    _note(memory, note, "body\n", description=description)
+    _write(repo / source, text)
+    assert _coverage(repo, note) == []
+
+
+def test_a_rule_stating_the_same_fact_in_other_words_is_coverage_with_its_terms(
+    home, one
+):
+    repo, memory = one
+    _note(
+        memory,
+        "format_touched_paths.md",
+        "body\n",
+        description="Run the formatter on the files you edited, never on the whole repository",
+    )
+    rule = _write(
+        repo / ".claude" / "rules" / "formatting.md",
+        "# Formatting\n"
+        "Run the formatter per path: format only what you edited, touched paths only, "
+        "never the repository as a whole.\n",
+    )
+    assert _coverage(repo, "format_touched_paths.md") == [
+        {
+            "file": _short(rule, home),
+            "line": 2,
+            "text": "Run the formatter per path: format only what you edited, touched paths only, "
+            "never the repository as a whole.",
+            "terms": ["edited", "format", "formatter", "repository", "touched"],
+        }
+    ]
+
+
+# --- the skill asks the model to use the hints --------------------------------------
+
+
+def _skill_text() -> str:
+    """The skill with its line wraps and list indentation collapsed to single spaces."""
+    text = (PLUGIN / "skills" / "reconcile" / "SKILL.md").read_text(encoding="utf-8")
+    return " ".join(text.split())
+
+
+def test_the_skill_reads_the_coverage_hints_and_recommends_deleting_a_covered_note():
+    text = _skill_text()
+    assert "`coverage`" in text
+    assert "recommend delete" in text.lower()
+    assert "path and line" in text
+    assert "a clue, not a finding" in text
+    assert "`terms`" in text
+    assert "only after reading the cited line" in text
+    assert "states the same fact as the note" in text
+    assert "never recommend keeping a note that a source already covers" in text
+    assert "never recommend keep because of a vague hint" in text
+
+
+def test_the_skill_groups_the_covered_notes_in_one_first_question():
+    text = _skill_text()
+    assert "two or more notes are covered" in text
+    assert "ONE grouped question" in text
+    assert "delete all N covered notes (recommended)" in text
+    assert "go through them one by one" in text
+    assert "keep them all" in text
+    assert "<short title> — <summary> — covered by <source path:line>" in text
+
+
+def test_the_skill_asks_each_note_with_its_title_path_and_summary():
+    text = _skill_text()
+    assert "the note title, never a bare file name" in text
+    assert "full clickable `~/…` path on its own line" in text
+    assert "1–2 line summary" in text
+    assert "the covering source" in text
+
+
+def test_the_skill_gives_every_question_a_topic_header_not_a_file_stem_or_number():
+    text = _skill_text()
+    assert "`header`" in text
+    assert "1–2 word topic" in text
+    assert "not the file name stem, not a number" in text
+
+
+def test_the_skill_opens_each_batch_with_one_intro_line_that_is_never_cut():
+    text = _skill_text()
+    assert "Batch 2/4 — 3 notes" in text
+    assert "never cut" in text
+
+
+def test_the_skill_asks_only_where_the_choice_is_real_and_has_one_worked_example():
+    text = _skill_text()
+    assert "only where the choice is real" in text
+    assert "Obvious cases" in text
+    assert text.count("Worked example") == 1

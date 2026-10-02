@@ -23,20 +23,63 @@ session. Talk to the user in the user's own language; keep file names, paths and
 ## Steps
 
 1. Run `python3 ${CLAUDE_SKILL_DIR}/scripts/inventory.py` and read the JSON: one entry per level
-   (current, then parents), each note with its description, age, session count, last read and index
-   line, the orphans, the index budget and the exact duplicates.
-2. Judge each note with the principle above. Counts and ages are hints, there is no fixed
-   threshold, and a count is a biased proxy: a poorly indexed note is under-counted. Also look for
-   near-duplicates in the index lines, across levels too. Read a note only when its description and
-   index line are not enough, with `cat` through Bash, not the Read tool: a Read is counted as a
-   consultation and would skew the very counters being reviewed. A read that is refused (a
-   confidentiality guard) is never retried through another channel and never worked around with a
-   pragma or an exception: judge from the description and the index line, and tell the user the
-   note holds data shaped like a secret, a signal to delete it.
-3. Put the decisions to the user with AskUserQuestion, one question per note, at most 4 notes per
-   call. Put the recommended option first with its reason in the option description. Options are
-   few and concrete: keep, delete, promote (say where), move to another level. Ask every note,
-   never in a long prose question. An answer that is empty or unusable is not a yes: ask again.
+   (current, then parents), each note with its description, age, session count, last read, index
+   line and `coverage`, the orphans, the index budget and the exact duplicates. `coverage` lists up
+   to 3 places (`file`, `line`, `text`, `terms`) where several rare terms of the note appear close
+   together in a CLAUDE.md, an AGENTS.md, a rule, a skill, a hook description or the pinky settings
+   of a level, `terms` being the words that matched. It is a clue, not a finding: it only says the
+   same words appear there, and an empty list means nothing was found.
+2. Judge each note with the principle above. Before proposing anything for a note, read its
+   `coverage` hints. Read each `terms` list together with the cited line: shared words are not a
+   shared fact. Recommend DELETE for coverage only after reading the cited line (with `cat` through
+   Bash, a few lines around it) and seeing that it states the same fact as the note, then cite the
+   source (path and line); never recommend keeping a note that a source already covers, and never
+   recommend keep because of a vague hint. An empty `coverage` does not prove a note is not
+   covered: the hints miss a fact that a source states in other words. So for every note you would
+   otherwise recommend keeping, search the sources yourself first: run `grep -rn` through Bash on
+   two or three distinctive words of the note over the CLAUDE.md and AGENTS.md of each level, its
+   `.claude/rules/`, its skills and its hook descriptions, read the lines found, and recommend
+   DELETE with the cited path and line when one of them states the same fact. Counts and ages are hints too, there is no fixed threshold, and a count is a biased proxy:
+   a poorly indexed note is under-counted. Also look for near-duplicates in the index lines,
+   across levels too. Read a note only when its description and index line are not enough, with
+   `cat` through Bash, not the Read tool: a Read is counted as a consultation and would skew the
+   very counters being reviewed. A read that is refused (a confidentiality guard) is never retried
+   through another channel and never worked around with a pragma or an exception: judge from the
+   description and the index line, and tell the user the note holds data shaped like a secret, a
+   signal to delete it.
+3. Put the decisions to the user with AskUserQuestion, at most 4 questions per call, and only where
+   the choice is real. Obvious cases (covered by a source, outdated, an exact duplicate) go through
+   one grouped question, not one question each.
+   - When two or more notes are covered, ask ONE grouped question first. Options: delete all N
+     covered notes (recommended) / go through them one by one / keep them all. The question text
+     lists each note as `<short title> — <summary> — covered by <source path:line>`. Choosing "one
+     by one" turns each covered note into a per-note question below.
+   - Every per-note question gives, in its text: the note title, never a bare file name; its full
+     clickable `~/…` path on its own line; a 1–2 line summary of what the note says, from its
+     description, or read the note when the description is vague; and, when covered, the covering
+     source (path:line).
+   - The `header` of each question is a 1–2 word topic of the note: not the file name stem, not a
+     number.
+   - Before each batch, say one short intro line in plain text, such as `Batch 2/4 — 3 notes`: it
+     is never cut, not even for a batch of one note.
+   - Put the recommended option first with its reason in the option description. Options are few
+     and concrete: keep, delete, promote (say where), move to another level. Never a long prose
+     question. An answer that is empty or unusable is not a yes: ask again.
+
+   Worked example, one note of a batch, covered by a source:
+
+   ```
+   Batch 1/2 — 2 notes
+   question: "Automode location
+   ~/.claude/projects/-Users-x-pinky/memory/reference-automode-settings-location.md
+   Says where the automode setting lives, in the user settings rather than the project ones.
+   Covered by ~/Workspaces/pinky/CLAUDE.md:42"
+   header: "Automode"
+   options: "Delete (recommended)" — the rule at CLAUDE.md:42 already states it
+            "Keep" — the rule does not say why
+            "Move to another level"
+   ```
+
 4. When every note has an answer, build the plan and get it approved before any change. Plan shape:
    `{"actions": [{"dir": "<memory dir>", "note": "x.md", "action": "delete" | "move" | "keep",
    "to_dir": "<memory dir>", "hard": false}], "reviewed_dirs": ["<memory dir>"]}`. Use the `dir`
