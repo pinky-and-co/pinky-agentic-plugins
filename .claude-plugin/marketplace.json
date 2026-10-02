@@ -70,6 +70,11 @@
       "name": "pc-rtk",
       "source": "./plugins/pc-rtk",
       "description": "RTK output filtering — rewrites Bash commands to their filtered rtk form before they run, so only compact output enters the context. Needs the rtk binary."
+    },
+    {
+      "name": "pc-memory",
+      "source": "./plugins/pc-memory",
+      "description": "Memory recall at session start — the user sees one summary line per directory level and its stale notes (at least N days old); the model gets the parent levels' indexes only, capped and marked as data. Read-only on memory."
     }
   ]
 }
