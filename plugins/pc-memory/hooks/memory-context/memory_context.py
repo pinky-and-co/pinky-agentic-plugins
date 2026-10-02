@@ -43,7 +43,6 @@ import os
 import re
 import sys
 import time
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -52,14 +51,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pc_memory_lib import (  # noqa: E402
     INDEX_NAME,
     Level,
+    clean_text,
     encode,
     find_memory_dir,
-    home_dir,
     level_root,
     level_roots,
+    short,
 )
 
-__all__ = ["Level", "encode", "find_memory_dir", "level_root", "level_roots"]
+__all__ = [
+    "Level",
+    "encode",
+    "find_memory_dir",
+    "level_root",
+    "level_roots",
+    "short",
+]
 
 MAX_LINE_CHARS = 200
 INDEX_BYTES = 65536
@@ -74,7 +81,6 @@ PROMOTION_REMINDER = (
 )
 DEFAULT_MODEL_LINES = 30
 _MODIFIED = re.compile(r"^modified:\s*(.+?)\s*$")
-_STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
 @dataclass(frozen=True)
@@ -103,21 +109,6 @@ def _env_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-def _clean(text: str) -> str:
-    """`text` with tabs as spaces, and every control, format and line-separator character removed.
-
-    Covers the Unicode categories Cc (C0, DEL, C1, ESC included), Cf (zero-width, bidi overrides),
-    Zl and Zp (U+2028/2029), plus the whole U+2060-U+206F block, which holds unassigned code
-    points.
-    """
-    return "".join(
-        ch
-        for ch in text.replace("\t", " ")
-        if unicodedata.category(ch) not in _STRIPPED_CATEGORIES
-        and not "\u2060" <= ch <= "\u206f"
-    )
-
-
 def collect_levels(cwd: Path) -> list[Level]:
     """Levels that have a memory index, nearest first, each memory directory once."""
     levels: list[Level] = []
@@ -135,15 +126,6 @@ def collect_levels(cwd: Path) -> list[Level]:
         seen.add(key)
         levels.append(Level(root=root, memory_dir=memory_dir))
     return levels
-
-
-def short(path: Path) -> str:
-    """`path` with the home directory abbreviated to `~`."""
-    text = str(path)
-    for home in (str(home_dir()), str(Path.home())):
-        if text == home or text.startswith(home + os.sep):
-            return "~" + text[len(home) :]
-    return text
 
 
 def _frontmatter_modified(note: Path) -> float | None:
@@ -217,7 +199,7 @@ def read_index(memory_dir: Path, max_lines: int) -> list[str]:
     """
     with (memory_dir / INDEX_NAME).open("rb") as handle:
         text = handle.read(INDEX_BYTES).decode("utf-8", errors="replace")
-    cleaned = (_clean(ln).rstrip()[:MAX_LINE_CHARS] for ln in text.splitlines())
+    cleaned = (clean_text(ln).rstrip()[:MAX_LINE_CHARS] for ln in text.splitlines())
     lines = [ln for ln in cleaned if ln.strip()]
     if len(lines) > max_lines:
         keep = max(max_lines - 1, 0)
@@ -234,7 +216,7 @@ def build_user_message(
     `MAX_STALE_LISTED` stale notes are listed per level, oldest first, then a `+N more` marker.
     A note is listed by its full path with the home directory as `~/`, plain text the terminal
     can open on click; a path outside the home directory stays absolute. Every line goes through
-    `_clean` at the one point where the message is joined, so no path or name can carry a control
+    `clean_text` at the one point where the message is joined, so no path or name can carry a control
     sequence to the terminal.
     The promotion reminder closes the message only when at least one stale note is listed.
     """
@@ -262,7 +244,7 @@ def build_user_message(
         return ""
     if listed:
         out.append(PROMOTION_REMINDER)
-    return "\n".join(_clean(line) for line in out)
+    return "\n".join(clean_text(line) for line in out)
 
 
 def build_model_context(parents: list[Level], model_lines: int) -> str:

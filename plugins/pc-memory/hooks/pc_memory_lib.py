@@ -19,12 +19,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = [
     "INDEX_NAME",
     "Level",
+    "clean_text",
     "config_dir",
     "configured_memory_dir",
     "encode",
@@ -35,10 +37,12 @@ __all__ = [
     "level_root",
     "level_roots",
     "memory_dir_of",
+    "short",
 ]
 
 INDEX_NAME = "MEMORY.md"
 _GITDIR = re.compile(r"^gitdir:\s*(.+?)\s*$")
+_STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
 @dataclass(frozen=True)
@@ -197,3 +201,27 @@ def level_roots(cwd: Path) -> list[Path]:
         roots.append(parent)
         current = parent
     return roots
+
+
+def clean_text(text: str) -> str:
+    """`text` with tabs as spaces, and every control, format and line-separator character removed.
+
+    Covers the Unicode categories Cc (C0, DEL, C1, ESC included), Cf (zero-width, bidi overrides),
+    Zl and Zp (U+2028/2029), plus the whole U+2060-U+206F block, which holds unassigned code
+    points.
+    """
+    return "".join(
+        ch
+        for ch in text.replace("\t", " ")
+        if unicodedata.category(ch) not in _STRIPPED_CATEGORIES
+        and not "\u2060" <= ch <= "\u206f"
+    )
+
+
+def short(path: Path) -> str:
+    """`path` with the home directory abbreviated to `~`."""
+    text = str(path)
+    for home in (str(home_dir()), str(Path.home())):
+        if text == home or text.startswith(home + os.sep):
+            return "~" + text[len(home) :]
+    return text

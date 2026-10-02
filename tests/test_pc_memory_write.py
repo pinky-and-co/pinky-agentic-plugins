@@ -15,7 +15,7 @@ HOOK = PLUGIN / "hooks" / "memory-write" / "memory_write_guard.py"
 sys.path.insert(0, str(HOOK.parent))
 
 import memory_write_guard as mw  # noqa: E402
-from pc_memory_lib import encode  # noqa: E402
+from pc_memory_lib import encode, short  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -226,13 +226,121 @@ REMINDER = (
 )
 
 
+CHOICE = (
+    "Choose the level by subject: a note belongs at the lowest level where it stays "
+    "true for every session. Levels available:"
+)
+PARENT_HINT = "If the subject concerns a parent level, write the note in that level's directory instead."
+
+
+def _index(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "MEMORY.md").write_text("- [a](a.md)\n", encoding="utf-8")
+
+
 def _note_output(repo: Path) -> dict:
     return mw.build_output(
         _payload("Write", repo, file_path=str(mw.memory_dir_of(repo) / "a.md"))
     )
 
 
+def _reminder(output: dict) -> str:
+    return output["hookSpecificOutput"]["additionalContext"]
+
+
 def test_output_is_exactly_the_ask_decision_with_the_reminder(home, repo):
+    ws = repo.parent
+    _index(mw.memory_dir_of(repo))
+    _index(mw.memory_dir_of(ws))
+    assert _note_output(repo) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": "Write into a memory file.",
+            "additionalContext": (
+                f"{REMINDER} (4) Memory levels. This note is headed to {short(repo)}. "
+                f"{CHOICE} - {short(repo)} (current): {short(mw.memory_dir_of(repo))} "
+                f"- {short(ws)} (parent): {short(mw.memory_dir_of(ws))} {PARENT_HINT}"
+            ),
+        }
+    }
+
+
+def test_level_list_without_a_parent_has_no_parent_line_and_no_parent_hint(home, repo):
+    assert _reminder(_note_output(repo)) == (
+        f"{REMINDER} (4) Memory levels. This note is headed to {short(repo)}. "
+        f"{CHOICE} - {short(repo)} (current): {short(mw.memory_dir_of(repo))}"
+    )
+
+
+def test_note_in_the_parent_directory_is_headed_to_the_parent(home, repo):
+    ws = repo.parent
+    _index(mw.memory_dir_of(ws))
+    out = mw.build_output(
+        _payload("Write", repo, file_path=str(mw.memory_dir_of(ws) / "a.md"))
+    )
+    assert _reminder(out) == (
+        f"{REMINDER} (4) Memory levels. This note is headed to {short(ws)}. "
+        f"{CHOICE} - {short(repo)} (current): {short(mw.memory_dir_of(repo))} "
+        f"- {short(ws)} (parent): {short(mw.memory_dir_of(ws))} {PARENT_HINT}"
+    )
+
+
+def test_bash_write_in_the_parent_directory_is_headed_to_the_parent(home, repo):
+    ws = repo.parent
+    _index(mw.memory_dir_of(ws))
+    out = _bash(repo, f"echo x > {mw.memory_dir_of(ws)}/a.md")
+    assert f"This note is headed to {short(ws)}." in _reminder(out)
+
+
+def test_current_level_without_an_index_is_still_listed(home, repo):
+    ws = repo.parent
+    _index(mw.memory_dir_of(ws))
+    assert not mw.memory_dir_of(repo).exists()
+    assert (
+        f"- {short(repo)} (current): {short(mw.memory_dir_of(repo))} "
+        f"- {short(ws)} (parent): {short(mw.memory_dir_of(ws))} "
+    ) in _reminder(_note_output(repo))
+
+
+def test_parent_level_without_an_index_is_not_listed(home, repo):
+    reminder = _reminder(_note_output(repo))
+    assert "(parent)" not in reminder
+    assert PARENT_HINT not in reminder
+
+
+def test_memory_directory_shared_by_several_levels_is_listed_once(home, repo):
+    shared = home / "shared-mem"
+    _index(shared)
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryDirectory": str(shared)}), encoding="utf-8"
+    )
+    out = mw.build_output(_payload("Write", repo, file_path=str(shared / "a.md")))
+    assert _reminder(out) == (
+        f"{REMINDER} (4) Memory levels. This note is headed to {short(repo)}. "
+        f"{CHOICE} - {short(repo)} (current): {short(shared)}"
+    )
+
+
+def test_note_in_a_directory_of_no_level_has_no_headed_to_sentence(home, repo):
+    other = home / ".claude" / "projects" / "-some-other-project" / "memory" / "a.md"
+    out = mw.build_output(_payload("Write", repo, file_path=str(other)))
+    assert _decision(out) == "ask"
+    assert _reminder(out) == (
+        f"{REMINDER} (4) Memory levels. {CHOICE} "
+        f"- {short(repo)} (current): {short(mw.memory_dir_of(repo))}"
+    )
+
+
+def test_resolution_error_falls_back_to_the_reminder_without_point_four(
+    home, repo, monkeypatch
+):
+    _index(mw.memory_dir_of(repo.parent))
+
+    def boom(_level: Path) -> Path:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(mw, "find_memory_dir", boom)
     assert _note_output(repo) == {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -243,8 +351,9 @@ def test_output_is_exactly_the_ask_decision_with_the_reminder(home, repo):
     }
 
 
-def test_reminder_covers_the_three_cases(home, repo):
-    reminder = _note_output(repo)["hookSpecificOutput"]["additionalContext"]
+def test_reminder_keeps_the_three_cases_before_the_levels(home, repo):
+    reminder = _reminder(_note_output(repo))
+    assert reminder.startswith(REMINDER + " (4) Memory levels.")
     assert "fix the skill or hook that owns the step" in reminder
     assert "source that produces your instructions" in reminder
     assert "never the generated copy" in reminder
@@ -252,7 +361,13 @@ def test_reminder_covers_the_three_cases(home, repo):
 
 
 def test_reminder_and_reason_are_plain_ascii_without_control_characters(home, repo):
-    output = _note_output(repo)["hookSpecificOutput"]
+    messy = home / "ws" / "re\npo\x07x"
+    (messy / ".git").mkdir(parents=True)
+    out = mw.build_output(
+        _payload("Write", messy, file_path=str(mw.memory_dir_of(messy) / "a.md"))
+    )
+    output = out["hookSpecificOutput"]
+    assert "repox" in output["additionalContext"]
     for field in ("permissionDecisionReason", "additionalContext"):
         text = output[field]
         assert text.isascii()

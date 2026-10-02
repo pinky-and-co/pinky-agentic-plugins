@@ -6,6 +6,7 @@ Claude is told it skipped a step it tends to write a `feedback_*` note instead o
 skill. This hook intercepts the write and returns `permissionDecision: ask`: the user decides each
 note, nothing is blocked. The confirmation dialog does not display the decision's reason, so the
 reminder of where a note belongs goes to Claude as `additionalContext` of the same output.
+It also lists the memory levels (see `_levels_reminder`) so Claude picks the level to write at.
 
 Intercepted:
 - `Write`, `Edit`, `MultiEdit` whose `file_path` lies inside a memory directory;
@@ -51,10 +52,13 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pc_memory_lib import (  # noqa: E402
     INDEX_NAME,
+    clean_text,
+    find_memory_dir,
     is_default_silo,
     is_default_silo_root,
     level_roots,
     memory_dir_of,
+    short,
 )
 
 FILE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
@@ -455,15 +459,27 @@ def bash_write_hits_memory(command: str, cwd: Path, dirs: list[Path]) -> bool:
     return any(_command_writes_memory(c, cwd, dirs) for c in _split_commands(command))
 
 
-def writes_memory(payload: dict[str, object]) -> bool:
-    """True when the tool call of one PreToolUse payload writes into a memory directory."""
-    tool = payload.get("tool_name")
-    raw_input = payload.get("tool_input")
-    tool_input = raw_input if isinstance(raw_input, dict) else {}
+def _cwd(payload: dict[str, object]) -> Path:
+    """Working directory of the payload, the process one when absent."""
     raw_cwd = payload.get("cwd")
-    cwd = Path(
+    return Path(
         raw_cwd if isinstance(raw_cwd, str) and raw_cwd else os.getcwd()
     ).resolve()
+
+
+def _tool_input(payload: dict[str, object]) -> dict[str, object]:
+    """The `tool_input` of the payload, empty when it is not an object."""
+    raw_input = payload.get("tool_input")
+    return raw_input if isinstance(raw_input, dict) else {}
+
+
+def writes_memory(payload: dict[str, object]) -> bool:
+    """True when the tool call of one PreToolUse payload writes into a memory directory."""
+    tool, tool_input, cwd = (
+        payload.get("tool_name"),
+        _tool_input(payload),
+        _cwd(payload),
+    )
     dirs = memory_dirs(cwd)
     if tool in FILE_TOOLS:
         file_path = tool_input.get("file_path")
@@ -472,6 +488,76 @@ def writes_memory(payload: dict[str, object]) -> bool:
         command = tool_input.get("command")
         return isinstance(command, str) and bash_write_hits_memory(command, cwd, dirs)
     return False
+
+
+def _written_path(
+    payload: dict[str, object], cwd: Path, dirs: list[Path]
+) -> Path | None:
+    """Memory path the tool call writes: the file, or the first memory path a command names."""
+    tool_input = _tool_input(payload)
+    if payload.get("tool_name") in FILE_TOOLS:
+        file_path = tool_input.get("file_path")
+        return _normalized(file_path, cwd) if isinstance(file_path, str) else None
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        return None
+    for cmd in _split_commands(command):
+        for word in (*cmd.targets, *cmd.words):
+            if _hits_memory(word, cwd, dirs):
+                return _normalized(word, cwd)
+    return None
+
+
+def _levels_reminder(payload: dict[str, object]) -> str:
+    """Point 4 of the reminder: the memory levels, and the one the write is headed to.
+
+    The current level is always listed, then each ancestor level that has an index, each memory
+    directory once. Paths are written with `~/` for the home directory.
+    """
+    cwd = _cwd(payload)
+    roots = level_roots(cwd)
+    listed: list[tuple[Path, Path]] = []
+    for root in roots:
+        directory = memory_dir_of(root) if root == roots[0] else find_memory_dir(root)
+        if directory is not None and all(directory != d for _, d in listed):
+            listed.append((root, directory))
+    written = _written_path(payload, cwd, memory_dirs(cwd))
+    target = None
+    if written is not None:
+        for root in roots:
+            directory = memory_dir_of(root)
+            if any(
+                _inside(v, d)
+                for v in (written, written.resolve())
+                for d in (directory, directory.resolve())
+            ):
+                target = root
+                break
+    parts = ["(4) Memory levels."]
+    if target is not None:
+        parts.append(f"This note is headed to {short(target)}.")
+    parts.append(
+        "Choose the level by subject: a note belongs at the lowest level where it stays "
+        "true for every session. Levels available:"
+    )
+    for root, directory in listed:
+        role = "current" if root == roots[0] else "parent"
+        parts.append(f"- {short(root)} ({role}): {short(directory)}")
+    if any(root != roots[0] for root, _ in listed):
+        parts.append(
+            "If the subject concerns a parent level, write the note in that level's "
+            "directory instead."
+        )
+    return clean_text(" ".join(parts))
+
+
+def _reminder(payload: dict[str, object]) -> str:
+    """The reminder for Claude; without point 4 when the levels cannot be built."""
+    try:
+        return f"{REMINDER} {_levels_reminder(payload)}"
+    except Exception as exc:  # the `ask` must survive any resolution error
+        sys.stderr.write(f"memory_write_guard: {exc}\n")
+        return REMINDER
 
 
 def build_output(payload: dict[str, object]) -> dict[str, object]:
@@ -483,7 +569,7 @@ def build_output(payload: dict[str, object]) -> dict[str, object]:
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
             "permissionDecisionReason": REASON,
-            "additionalContext": REMINDER,
+            "additionalContext": _reminder(payload),
         }
     }
 

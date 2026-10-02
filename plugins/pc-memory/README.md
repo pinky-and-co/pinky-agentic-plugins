@@ -61,6 +61,17 @@ that should apply beyond the directory goes to the source that produces the inst
 generated or distributed copy, which gets overwritten); a trap that only concerns the directory is a
 note.
 
+A fourth point tells Claude at which level to write the note, since Claude chooses and the user sees
+the full path in the confirmation and accepts or refuses. It lists the memory levels: the current
+level (always, even without an index), then each ancestor level up to the home directory, excluded,
+that has a `MEMORY.md`, each memory directory once, with paths written `~/...` (absolute outside the
+home directory). It says which level the note is headed to (the level whose memory directory holds
+the written path; the sentence is left out when no level does), to choose by subject, a note
+belonging at the lowest level where it stays true for every session, and, when a parent is listed,
+to write in that level's directory when the subject concerns it. The text is plain ASCII with no
+control character. If the list cannot be built, the output keeps the `ask` and the first three
+points.
+
 The `MEMORY.md` index at the root of a memory directory is exempt: it holds the pointer line of a
 note already confirmed, so one note costs one confirmation, not two. A note written straight into
 the index is therefore not intercepted; a `MEMORY.md` in a sub-folder of a memory directory still
