@@ -18,11 +18,12 @@ and emits:
   gets its summary and stale notes. No index line is shown; a level with no stale note is its summary line alone. When at least one stale note is listed, a
   closing reminder says where to promote it (a skipped procedure step: fix the skill or hook; a
   rule or pitfall beyond the directory: the source that generates the instructions, never a
-  generated copy; a local trap stays in memory) or to delete it. The last line is always a tip
-  (a light-bulb emoji, then: use `/memory` to enable or disable auto memory and to browse the memory
-  entries of the current level), with or without stale notes, unless the `spinnerTipsEnabled`
-  setting (the "Show tips" option of `/config`) is the boolean `false`. Not shown again after
-  `/compact`.
+  generated copy; a local trap stays in memory) or to delete it. When at least one level is due
+  for review (see [Review reminder](#review-reminder)), one `Review due` line follows. The last
+  line is always a tip (a light-bulb emoji, then: use `/memory` to enable or disable auto memory
+  and to browse the memory entries of the current level), with or without stale notes, unless the
+  `spinnerTipsEnabled` setting (the "Show tips" option of `/config`) is the boolean `false`. Not
+  shown again after `/compact`.
 - **To the model** (`additionalContext`): the index of the **parent** levels only, capped per
   level and fenced as data, not instructions. One sentence after the data notice tells the model to
   choose the level of a note by subject (a note belongs at the lowest level where it stays true for
@@ -57,6 +58,25 @@ the context of its history, parent indexes included, so the hook is wired to `st
 `compact` only.
 
 The hook never blocks the session: any error prints `{}` and exits 0.
+
+### Review reminder
+
+The startup message reminds the user to run `/pc-memory:reconcile` when a level is due for review.
+A level is due when:
+
+- its ledger `last_review` (set by `reconcile` for the levels it reviewed) is a `YYYY-MM-DD` date at
+  least 30 days before today; or
+- it was never reviewed (no `last_review`, or a missing, unreadable, corrupt or non-date ledger) and
+  holds at least one note that is 30 days old or more. A never-reviewed level with only recent notes
+  is not due, so a new directory is not flagged.
+
+The threshold is `PC_MEMORY_REVIEW_DAYS` (30 by default), the same for both cases. One line is added
+after the promotion reminder and before the tip, naming the number of levels, the first three
+(`+K more` beyond), the command, the model to pick with `/model` (`sonnet`, press `s` to keep it for
+the session only), the effort (`/effort medium`) and `/clear` for when it is done. The model and the
+effort are named because a skill's model override lasts a single turn and a review spans several.
+The line is absent when no level is due, and, like the rest of the message, after `/compact`. Reading
+the ledger never renames or rewrites it, even a corrupt one.
 
 ### Write guard
 
@@ -268,6 +288,7 @@ Environment variables, all optional:
 |---|---|---|
 | `PC_MEMORY_CONTEXT` | on | `0` disables the hook |
 | `PC_MEMORY_STALE_DAYS` | `30` | a note at least this many days old is reported as stale |
+| `PC_MEMORY_REVIEW_DAYS` | `30` | a level whose last `reconcile` review is at least this many days old, or never reviewed with a note this old, triggers the review reminder |
 | `PC_MEMORY_MODEL_LINES` | `30` | index lines injected per parent level into the model |
 | `PC_ALLOW_MEMORY_WRITE` | unset | `1` lets memory writes through without asking; set it when launching the session |
 

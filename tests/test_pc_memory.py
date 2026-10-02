@@ -30,6 +30,8 @@ def _clean_env(monkeypatch):
         "PC_MEMORY_MODEL_LINES",
     ):
         monkeypatch.delenv(name, raising=False)
+    # no review reminder in these tests: the threshold is out of reach
+    monkeypatch.setenv("PC_MEMORY_REVIEW_DAYS", "100000")
 
 
 @pytest.fixture

@@ -7,7 +7,11 @@ hook reads, never writes, each level's `MEMORY.md` and emits two things:
 - `systemMessage` (the user): one summary line per level, current included (path, notes, notes
   at least the stale threshold old), then that level's stale notes with their age, oldest first,
   each by its full path (`~/` for the home directory), so they get promoted to the right level
-  or deleted. No index line is shown. A `/memory` tip closes it unless the `spinnerTipsEnabled` setting is false. Skipped after a compaction,
+  or deleted. No index line is shown. When a level is due for a `reconcile` review (its ledger
+  `last_review` is at least the review threshold old, or never set with a note at least that old),
+  one line names the command, the model and the effort to pick, and `/clear` for the end. A
+  `/memory` tip closes it unless the `spinnerTipsEnabled` setting is false. Skipped after a
+  compaction,
   since the user already saw it.
 - `additionalContext` (the model): the index of the parent levels only, capped, and marked as
   data, after one sentence telling the model to pick the level of a note by subject. The current level's index is already loaded natively by Claude Code.
@@ -34,6 +38,7 @@ is skipped without hiding the others.
 Environment variables, all optional:
   PC_MEMORY_CONTEXT=0        disable the hook
   PC_MEMORY_STALE_DAYS=30    age from which a note is reported as stale
+  PC_MEMORY_REVIEW_DAYS=30   days since the last `reconcile` review from which a reminder is shown
   PC_MEMORY_MODEL_LINES=30   index lines injected per parent level into the model
 """
 
@@ -44,6 +49,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -57,6 +63,7 @@ from pc_memory_lib import (  # noqa: E402
     level_root,
     level_roots,
     note_age_days,
+    read_last_review,
     short,
     spinner_tips_enabled,
 )
@@ -75,6 +82,8 @@ __all__ = [
 MAX_LINE_CHARS = 200
 INDEX_BYTES = 65536
 DEFAULT_STALE_DAYS = 30
+DEFAULT_REVIEW_DAYS = 30
+MAX_REVIEW_LISTED = 3
 MAX_STALE_LISTED = 10
 PROMOTION_REMINDER = (
     "Promotion: skipped procedure step -> fix the skill or hook; rule or pitfall beyond this "
@@ -89,6 +98,11 @@ LEVEL_CHOICE_HINT = (
     "When you save a memory note, choose the level by subject: a note belongs at the lowest "
     "level where it stays true for every session; the memory directory of each level is given "
     "below."
+)
+REVIEW_ADVICE = (
+    "Run /pc-memory:reconcile. First pick the model with /model (press s on sonnet to keep it for "
+    "this session only) and the effort with /effort medium, because a skill's model override "
+    "lasts a single turn; when it is done, run /clear."
 )
 DEFAULT_MODEL_LINES = 30
 
@@ -139,6 +153,34 @@ def note_stats(memory_dir: Path, stale_days: int, now: float) -> NoteStats:
     return stats
 
 
+def review_due(memory_dir: Path, review_days: int, now: float) -> bool:
+    """True when a level's memory directory is due for a `reconcile` review.
+
+    Due when its ledger `last_review` is at least `review_days` days before today. Without a valid
+    one, due only when a note is at least `review_days` days old, so a new directory is not
+    flagged. Never writes.
+    """
+    last = read_last_review(memory_dir)
+    if last is not None:
+        return (date.fromtimestamp(now) - last).days >= review_days
+    try:
+        return bool(note_stats(memory_dir, review_days, now).stale)
+    except OSError:
+        return False
+
+
+def build_review_line(due: list[Path], review_days: int) -> str:
+    """The reminder to run `reconcile`: how many levels are due, the first `MAX_REVIEW_LISTED`."""
+    shown = ", ".join(short(root) for root in due[:MAX_REVIEW_LISTED])
+    if len(due) > MAX_REVIEW_LISTED:
+        shown += f", +{len(due) - MAX_REVIEW_LISTED} more"
+    noun = "level" if len(due) == 1 else "levels"
+    return (
+        f"Review due: {len(due)} memory {noun} not reviewed for {review_days}+ days ({shown}). "
+        f"{REVIEW_ADVICE}"
+    )
+
+
 def read_index(memory_dir: Path, max_lines: int) -> list[str]:
     """Non-empty lines of the index, control characters removed, at most `max_lines` of them.
 
@@ -171,6 +213,7 @@ def build_user_message(
     stale_days: int,
     now: float,
     show_tip: bool = True,
+    review_days: int | None = None,
 ) -> str:
     """Message shown to the user: one summary line per level, then its stale notes by age.
 
@@ -180,13 +223,15 @@ def build_user_message(
     can open on click; a path outside the home directory stays absolute. Every line goes through
     `clean_text` at the one point where the message is joined, so no path or name can carry a control
     sequence to the terminal.
-    The promotion reminder follows only when at least one stale note is listed. The `/memory` tip
-    is the last line, unless `show_tip` is false.
+    The promotion reminder follows only when at least one stale note is listed. When `review_days`
+    is set and a level is due for review (`review_due`), one review line follows, then the
+    `/memory` tip, the last line unless `show_tip` is false.
     """
     out = [
         f"Memory by directory level, notes at least {stale_days} d old listed oldest first:"
     ]
     listed = 0
+    due: list[Path] = []
     for level in levels:
         role = "current level" if level.root == current else "parent"
         try:
@@ -203,10 +248,14 @@ def build_user_message(
             listed += 1
         if len(stats.stale) > MAX_STALE_LISTED:
             out.append(f"  ... (+{len(stats.stale) - MAX_STALE_LISTED} more)")
+        if review_days is not None and review_due(level.memory_dir, review_days, now):
+            due.append(level.root)
     if len(out) == 1:
         return ""
     if listed:
         out.append(PROMOTION_REMINDER)
+    if due and review_days is not None:
+        out.append(build_review_line(due, review_days))
     if show_tip:
         out.append(MEMORY_TIP)
     return "\n".join(clean_text(line) for line in out)
@@ -256,6 +305,7 @@ def build_output(payload: dict[str, object], now: float) -> dict[str, object]:
             _env_int("PC_MEMORY_STALE_DAYS", DEFAULT_STALE_DAYS),
             now,
             spinner_tips_enabled(current),
+            _env_int("PC_MEMORY_REVIEW_DAYS", DEFAULT_REVIEW_DAYS),
         )
     if message:
         output["systemMessage"] = message

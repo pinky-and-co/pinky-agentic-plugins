@@ -27,7 +27,7 @@ import time
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 try:
@@ -64,6 +64,7 @@ __all__ = [
     "marker_active",
     "memory_dir_of",
     "note_age_days",
+    "read_last_review",
     "short",
     "spinner_tips_enabled",
     "write_ledger_atomically",
@@ -82,6 +83,7 @@ _LOCK_POLL = 0.01
 _UNRESOLVABLE = (OSError, ValueError, RuntimeError)
 _GITDIR = re.compile(r"^gitdir:\s*(.+?)\s*$")
 _MODIFIED = re.compile(r"^modified:\s*(.+?)\s*$")
+_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _LINK_TARGET = re.compile(r"\]\(\s*<?([^)\s>]+)")
 _STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
@@ -455,6 +457,32 @@ def load_ledger(ledger_file: Path, source: str = "memory_count") -> dict[str, ob
         sys.stderr.write(f"{source}: corrupt ledger {ledger_file.name}: {exc}\n")
         os.replace(ledger_file, ledger_file.with_name(ledger_file.name + ".corrupt"))
         return clean_ledger(None)
+
+
+def read_last_review(memory_dir: Path) -> date | None:
+    """`last_review` of a memory directory's ledger, read-only: it never renames or writes.
+
+    Args:
+        memory_dir: The memory directory holding the ledger.
+
+    Returns:
+        The date when the ledger holds a valid `YYYY-MM-DD` string, None for a missing, unreadable
+        or corrupt ledger and for any other value.
+    """
+    ledger_file = memory_dir / LEDGER_NAME
+    try:
+        if not ledger_file.is_file():  # a FIFO would block the read
+            return None
+        data = json.loads(ledger_file.read_bytes().decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return None
+    value = data.get("last_review") if isinstance(data, dict) else None
+    if not isinstance(value, str) or _ISO_DATE.fullmatch(value) is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def write_ledger_atomically(ledger_file: Path, ledger: dict[str, object]) -> None:

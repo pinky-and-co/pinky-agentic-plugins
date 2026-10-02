@@ -1,7 +1,7 @@
 {
   "name": "pc-memory",
   "version": "0.1.0",
-  "description": "Surfaces memory at session start: the user sees one summary line per directory level and its stale notes, the model gets the parent levels' indexes only, capped and marked as data. Asks the user before any write into a memory directory, counts per note the sessions that read it, and its `reconcile` skill reviews the notes with the user and applies the approved plan.",
+  "description": "Surfaces memory at session start: the user sees one summary line per directory level and its stale notes, then a reminder to run `reconcile` when a review is due, the model gets the parent levels' indexes only, capped and marked as data. Asks the user before any write into a memory directory, counts per note the sessions that read it, and its `reconcile` skill reviews the notes with the user and applies the approved plan.",
   "author": {
     "name": "Pinky & Co"
   }
