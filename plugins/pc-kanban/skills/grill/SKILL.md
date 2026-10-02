@@ -83,7 +83,8 @@ which claims were measured and which were assumed, and the questions nobody aske
 So run the same frontier, and route each question to one of three outcomes:
 
 1. **Answered by the document** → record the decision *and where in the document it came from*.
-2. **Left open by the document** → it becomes a line under `## Open questions`, not a question.
+2. **Left open by the document** → a line under `## Open questions` only if implementation alone
+   can settle it; otherwise treat it as case 3 and ask the user in the next round.
 3. **Never asked** → this one, and only this one, goes to the user in the next round.
 
 Treat a stated cause the same way: a brief that asserts *why* something is the case states a
@@ -100,6 +101,13 @@ the two nobody asks unaided, and "what happens when this is retired" has no othe
 A family that produced nothing is simply absent from the table. Never invent a requirement to fill a
 row.
 
+**Then ask one last, free question.** State the contexts and subjects the story covers (harnesses,
+environments, repos, consumers) and ask which one is missing. A bare "anything to add?" gets "no",
+and a context written nowhere is one only the user can name. Route it like any open question: a
+markdown block in markdown mode; in `AskUserQuestion` mode, a final question with "Nothing is
+missing" and "Something is missing", the detail coming through the free-text answer. If the answer
+opens a branch, run its rounds, then ask once more.
+
 ## What the interview writes
 
 The story file, on the fixed template (skill `kanban` § The story file →
@@ -110,8 +118,10 @@ The story file, on the fixed template (skill `kanban` § The story file →
 - **`## Requirements`** — the table, in the form the skill `kanban` § Requirements defines: id
   `{FAM}-{NNNN}-{NN}`, priority, statement, verification criterion. That norm is authoritative; do
   not restate or bend it here.
-- **`## Open questions`** — what is knowingly undecided. Declaring the silence is the point; an empty
-  section on a real design is a claim nobody believes.
+- **`## Open questions`** — empty by default: the grill exists to close every question. An entry is
+  allowed only when the answer can come solely from implementing, and it names what the
+  implementation will reveal. A question the user can answer now is asked in a round, never
+  written down.
 - **`## Implementation priority`** — what has to exist first for the rest to be testable.
 
 **The source card**, when the input was an existing `0-ideas` card (not free text, not an imported
