@@ -64,7 +64,9 @@ def test_default_silo_file_write_asks(home, repo, tool):
 def test_silo_that_does_not_exist_yet_asks(home, repo):
     silo = mw.memory_dir_of(repo)
     assert not silo.exists()
-    out = mw.build_output(_payload("Write", repo, file_path=str(silo / "MEMORY.md")))
+    out = mw.build_output(
+        _payload("Write", repo, file_path=str(silo / "feedback_x.md"))
+    )
     assert _decision(out) == "ask"
 
 
@@ -817,3 +819,103 @@ def test_bash_backslash_newline_continues_the_command(home, repo):
     silo = mw.memory_dir_of(repo)
     assert _decision(_bash(repo, f"rm \\\n  {silo}/a.md")) == "ask"
     assert _decision(_bash(repo, f"rm \\\n{silo}/a.md")) == "ask"
+
+
+# --- the index is exempt
+
+
+@pytest.mark.parametrize("tool", ["Write", "Edit", "MultiEdit"])
+def test_index_file_write_has_no_decision(home, repo, tool):
+    silo = mw.memory_dir_of(repo)
+    out = mw.build_output(_payload(tool, repo, file_path=str(silo / "MEMORY.md")))
+    assert out == {}
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "echo x >> {d}/MEMORY.md",
+        "sed -i 's/a/b/' {d}/MEMORY.md",
+        "cp /tmp/x {d}/MEMORY.md",
+        "mv {d}/note.md {d}/MEMORY.md",
+        "tee -a {d}/MEMORY.md",
+        "cat <<EOF > {d}/MEMORY.md\nx\nEOF",
+    ],
+)
+def test_bash_write_to_the_index_has_no_decision(home, repo, template):
+    silo = mw.memory_dir_of(repo)
+    assert _bash(repo, template.format(d=silo)) == {}
+
+
+def test_note_next_to_the_index_still_asks(home, repo):
+    silo = mw.memory_dir_of(repo)
+    assert _decision(_bash(repo, f"mv {silo}/MEMORY.md {silo}/note.md")) == "ask"
+    assert _decision(_bash(repo, f"cp {silo}/MEMORY.md {silo}/note.md")) == "ask"
+
+
+@pytest.mark.parametrize(
+    "name", ["sub/MEMORY.md", "memory.md", "MEMORY.md.bak", "x/y/MEMORY.md"]
+)
+def test_other_files_named_like_the_index_still_ask(home, repo, name):
+    silo = mw.memory_dir_of(repo)
+    out = mw.build_output(_payload("Write", repo, file_path=str(silo / name)))
+    assert _decision(out) == "ask"
+    assert _decision(_bash(repo, f"echo x > {silo}/{name}")) == "ask"
+
+
+def test_index_name_outside_any_memory_directory_has_no_decision(home, repo):
+    out = mw.build_output(_payload("Write", repo, file_path=str(repo / "MEMORY.md")))
+    assert out == {}
+
+
+def test_index_of_a_declared_directory_is_exempt_and_its_notes_ask(home, repo):
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryDirectory": "notes/mem"}), encoding="utf-8"
+    )
+    declared = repo / "notes" / "mem"
+    index = mw.build_output(
+        _payload("Edit", repo, file_path=str(declared / "MEMORY.md"))
+    )
+    note = mw.build_output(_payload("Write", repo, file_path=str(declared / "a.md")))
+    assert index == {}
+    assert _decision(note) == "ask"
+    nested = declared / "sub" / "MEMORY.md"
+    assert (
+        _decision(mw.build_output(_payload("Write", repo, file_path=str(nested))))
+        == "ask"
+    )
+
+
+def test_index_of_a_parent_level_is_exempt(home, repo):
+    parent_memory = home / "parent-mem"
+    (repo.parent / ".claude").mkdir()
+    (repo.parent / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryDirectory": str(parent_memory)}), encoding="utf-8"
+    )
+    index = _payload("Write", repo, file_path=str(parent_memory / "MEMORY.md"))
+    assert mw.build_output(index) == {}
+    other = _payload("Write", repo, file_path=str(parent_memory / "a.md"))
+    assert _decision(mw.build_output(other)) == "ask"
+
+
+def test_index_of_another_projects_default_silo_is_exempt(home, repo):
+    other = home / ".claude" / "projects" / "-some-other-project" / "memory"
+    assert (
+        mw.build_output(_payload("Write", repo, file_path=str(other / "MEMORY.md")))
+        == {}
+    )
+    nested = other / "sub" / "MEMORY.md"
+    assert (
+        _decision(mw.build_output(_payload("Write", repo, file_path=str(nested))))
+        == "ask"
+    )
+
+
+def test_index_reached_through_a_symlink_is_exempt(home, repo):
+    silo = mw.memory_dir_of(repo)
+    silo.mkdir(parents=True)
+    link = home / "link-mem"
+    link.symlink_to(silo)
+    out = mw.build_output(_payload("Write", repo, file_path=str(link / "MEMORY.md")))
+    assert out == {}

@@ -54,6 +54,11 @@ step is a diff of the SKILL concerned, a general rule is promoted to a `CLAUDE.m
 is an acceptable note. The user decides each note; nothing is blocked. It also runs inside
 subagents.
 
+The `MEMORY.md` index at the root of a memory directory is exempt: it holds the pointer line of a
+note already confirmed, so one note costs one confirmation, not two. A note written straight into
+the index is therefore not intercepted; a `MEMORY.md` in a sub-folder of a memory directory still
+asks.
+
 A memory directory is resolved as above (declared `autoMemoryDirectory`, else the default silo) for
 the working directory's level and each ancestor level, whether or not it exists yet, plus any
 default silo of any project under the config directory. `Write`, `Edit`, `MultiEdit` are matched on `file_path` (a relative path resolves from the working

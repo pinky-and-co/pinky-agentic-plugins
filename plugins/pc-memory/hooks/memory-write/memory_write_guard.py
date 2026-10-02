@@ -18,6 +18,10 @@ Intercepted:
   counts only in command position, so a file named `install.md` or a commit message that quotes
   a memory path asks nothing.
 
+The `MEMORY.md` index at the root of a memory directory is exempt: it is the pointer line of a
+note already confirmed, so one note costs one confirmation. A note written straight into the
+index is therefore not intercepted; `MEMORY.md` in a sub-folder of a memory directory is.
+
 A memory directory is the one resolved for the working directory's level or any ancestor level
 (`autoMemoryDirectory` when declared, else the default silo, see `pc_memory_lib.py`), whether or
 not it exists yet, or any default silo of any project under the config directory.
@@ -45,7 +49,9 @@ from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pc_memory_lib import (  # noqa: E402
+    INDEX_NAME,
     is_default_silo,
+    is_default_silo_root,
     level_roots,
     memory_dir_of,
 )
@@ -321,6 +327,16 @@ def _normalized(word: str, cwd: Path) -> Path:
     return Path(os.path.normpath(path if path.is_absolute() else cwd / path))
 
 
+def _is_index(path: Path, dirs: list[Path]) -> bool:
+    """True when `path` is the `MEMORY.md` index at the root of a memory directory.
+
+    The index is the pointer line of a note already confirmed, so it is not asked about again.
+    """
+    return path.name == INDEX_NAME and (
+        path.parent in dirs or is_default_silo_root(path.parent)
+    )
+
+
 def _hits_memory(word: str, cwd: Path, dirs: list[Path]) -> bool:
     """True when the shell word names a path inside a memory directory.
 
@@ -334,7 +350,8 @@ def _hits_memory(word: str, cwd: Path, dirs: list[Path]) -> bool:
     except _UNRESOLVABLE:
         return False
     return any(
-        is_default_silo(variant) or any(_inside(variant, d) for d in dirs)
+        (is_default_silo(variant) or any(_inside(variant, d) for d in dirs))
+        and not _is_index(variant, dirs)
         for variant in variants
     )
 
