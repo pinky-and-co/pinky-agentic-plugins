@@ -1,6 +1,6 @@
 # pc-memory
 
-Memory index recall and consultation counting for Claude Code, as a plugin.
+Memory index recall, consultation counting and a guided review of the notes for Claude Code, as a plugin.
 
 ## Overview
 
@@ -156,13 +156,85 @@ note and never appears in the startup summary:
   after about 1 s: that count is then skipped (message on stderr), the tool call is not delayed
   further. Without `fcntl` (Windows) nothing is counted.
 - A file named `.pc-memory-reconciling` in the memory directory suspends the count for that
-  directory. It is checked under the lock: whoever creates the marker and then takes the lock is
-  not overtaken by a count already in flight.
+  directory, as long as it is a regular file less than 10 minutes old (a marker left by a run that
+  died stops mattering). It is checked under the lock: whoever creates the marker and then takes
+  the lock is not overtaken by a count already in flight.
 - The hook never blocks: any error goes to stderr, exit 0, nothing on stdout.
 
 The counter is a biased proxy: a note is read only if its index line made the model open it. Read
 it with the note's age, not on its own. The de-duplication compares with the last session only:
 sessions A, B, A reading the same note count 3.
+
+### Reconcile skill
+
+`/pc-memory:reconcile` (user-invoked, never started by the model) reviews the notes of the current
+level and of its parent levels, in the main session because it dialogues with the user. It runs two
+deterministic scripts, with no model, kept in `skills/reconcile/scripts/`, and leaves the judgment to
+the model:
+
+1. `inventory.py [--cwd PATH]` prints JSON and writes nothing. Per level that has an index (the
+   levels of the SessionStart hook, except that a directory declared only in the shared
+   `.claude/settings.json`, which a cloned repo controls, is not listed: `apply.py` would refuse
+   it): the level and its memory directory, `last_review` from the ledger, the index size
+   (`lines`, `bytes`, `over_budget` past 200 lines or 25 KB, the part Claude Code reads), and per
+   note the description, type, age in days (frontmatter `modified`, else the file mtime),
+   `sessions`, `last_read`, whether the index links it and the first index line that does (null
+   when none). Descriptions and index lines have control characters removed, spaces normalised and
+   are capped at 200 characters. Also the orphans (an index line whose file is gone, a note without
+   index line) and the exact duplicates across all levels shown: the same body after the
+   frontmatter, whitespace normalised, empty bodies not compared. Dot files, the ledger, its lock,
+   `.corrupt` and temp files, the trash folder, non-`.md` entries and `MEMORY.md` are not notes. A
+   level that cannot be read is skipped with a message on stderr.
+2. `apply.py --plan FILE|- [--dry-run] [--cwd PATH]` applies the plan the user approved (`-` reads
+   it from standard input, which is how the skill passes it):
+
+   ```json
+   {"actions": [{"dir": "~/.claude/projects/x/memory", "note": "a.md",
+                 "action": "delete" | "move" | "keep",
+                 "to_dir": "~/.claude/projects/y/memory", "hard": false}],
+    "reviewed_dirs": ["~/.claude/projects/x/memory"]}
+   ```
+
+   The whole plan is validated before anything is touched, and refused with exit 2 when:
+
+   - a directory is not the memory directory of the current level or of a parent, as the
+     inventory lists them (another project's silo is refused);
+   - a note name is not a plain `*.md` file name (no separator, no leading dot, not `MEMORY.md`
+     whatever its case), is a link to the index, or is neither a regular file nor a symlink;
+   - two actions have the same source, or two moves the same destination;
+   - a move has no destination, goes onto itself or onto an existing note;
+   - a marker younger than 10 minutes is in an involved directory (another reconcile runs; its
+     age is in the message).
+
+   `delete` moves the note to `<dir>/.reconcile-trash/<YYYY-MM-DD>/` (a name taken that day gets a
+   numeric suffix; the note is removed for good only with `"hard": true`), removes the index lines
+   that link to it and prunes its ledger entry. `move` adds the index line to the destination
+   index (the source line, or a link built from the note's description), then copies the file to
+   `to_dir` with an exclusive creation, so nothing is ever overwritten and a move between volumes
+   works, removes the source, removes the line from the source index and prunes the source ledger
+   entry. A symlink note moves as a link. `keep` does nothing. A plan that was interrupted is
+   applied again as it is: the note already at the destination is found, and the indexes are
+   repaired. An index line that links several notes is removed only when the plan takes out all of
+   them; otherwise it stays and the result carries `shared_index_line`. Then `last_review` (local
+   date) is set in the ledger of each reviewed directory. A note already gone is reported
+   `already_gone`. The summary is JSON on stdout; exit 1 when an action failed, with `results`
+   (the failed action carries the `steps` it completed) and `left`, the actions not attempted.
+   `--dry-run` prints the summary and changes nothing, not even the marker.
+
+For the duration of `apply.py`, each involved directory holds a `.pc-memory-reconciling` marker,
+created exclusively before anything else and removed in a `finally`, also when an action fails and
+when the process gets SIGTERM or SIGHUP. The marker is refreshed before each action. It suspends
+the consultation counter for that directory, and only the counter: the write guard does not look at
+it, since `apply.py` names no memory path in its command. A marker older than 10 minutes was left
+by a run that died (SIGKILL, power loss): the counter ignores it and the next application removes
+it. The ledger is updated under the same `flock` the counter uses. The trash folder is the only
+copy of a deleted note: nothing empties it.
+
+The skill reads a note with `cat`, not the `Read` tool, so a review does not count as a
+consultation, and a read refused by a confidentiality guard is never retried through another
+channel. It edits nothing outside memory directories: a promotion (a skill, a hook, a rule, the
+source of the instructions) is made by the session or the user, and only once they say it is done
+does the skill propose deleting the note.
 
 ## Enable
 

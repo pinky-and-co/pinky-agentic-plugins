@@ -41,11 +41,9 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -53,27 +51,29 @@ from pc_memory_lib import (  # noqa: E402
     INDEX_NAME,
     Level,
     clean_text,
+    collect_levels,
     encode,
     find_memory_dir,
     level_root,
     level_roots,
+    note_age_days,
     short,
     spinner_tips_enabled,
 )
 
 __all__ = [
     "Level",
+    "collect_levels",
     "encode",
     "find_memory_dir",
     "level_root",
     "level_roots",
+    "note_age_days",
     "short",
 ]
 
 MAX_LINE_CHARS = 200
 INDEX_BYTES = 65536
-SECONDS_PER_DAY = 86400
-FRONTMATTER_BYTES = 4096
 DEFAULT_STALE_DAYS = 30
 MAX_STALE_LISTED = 10
 PROMOTION_REMINDER = (
@@ -91,7 +91,6 @@ LEVEL_CHOICE_HINT = (
     "below."
 )
 DEFAULT_MODEL_LINES = 30
-_MODIFIED = re.compile(r"^modified:\s*(.+?)\s*$")
 
 
 @dataclass(frozen=True)
@@ -118,58 +117,6 @@ def _env_int(name: str, default: int) -> int:
     except ValueError:
         return default
     return value if value > 0 else default
-
-
-def collect_levels(cwd: Path) -> list[Level]:
-    """Levels that have a memory index, nearest first, each memory directory once."""
-    levels: list[Level] = []
-    seen: set[Path] = set()
-    for root in level_roots(cwd):
-        try:
-            memory_dir = find_memory_dir(root)
-            key = memory_dir.resolve() if memory_dir is not None else None
-        except OSError:
-            continue
-        if memory_dir is None or key is None:
-            continue
-        if key in seen:
-            continue
-        seen.add(key)
-        levels.append(Level(root=root, memory_dir=memory_dir))
-    return levels
-
-
-def _frontmatter_modified(note: Path) -> float | None:
-    """Timestamp of the `modified` frontmatter field of a note, None when absent or unparsable."""
-    try:
-        with note.open(encoding="utf-8", errors="replace") as handle:
-            head = handle.read(FRONTMATTER_BYTES).splitlines()
-    except OSError:
-        return None
-    if not head or head[0].strip() != "---":
-        return None
-    for line in head[1:]:
-        if line.strip() == "---":
-            return None
-        match = _MODIFIED.match(line)
-        if match is None:
-            continue
-        raw = match.group(1).strip("\"'")
-        try:
-            if raw[-1:] in ("Z", "z"):
-                raw = raw[:-1] + "+00:00"
-            return datetime.fromisoformat(raw).timestamp()
-        except ValueError:
-            return None
-    return None
-
-
-def note_age_days(note: Path, now: float) -> int:
-    """Age of a note in days: frontmatter `modified`, else file mtime. Never negative."""
-    stamp = _frontmatter_modified(note)
-    if stamp is None:
-        stamp = note.stat().st_mtime
-    return max(0, int((now - stamp) // SECONDS_PER_DAY))
 
 
 def note_stats(memory_dir: Path, stale_days: int, now: float) -> NoteStats:

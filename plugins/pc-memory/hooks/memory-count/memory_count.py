@@ -28,60 +28,36 @@ the level's shared `.claude/settings.json`, which a cloned repo controls: only t
 Two sessions counting together lose nothing: the read-modify-write holds an exclusive `flock` on
 `.pc-memory-ledger.lock`, and the ledger is replaced atomically (temp file in the same directory,
 then `os.replace`). The lock is polled without blocking and given up after `LOCK_TIMEOUT`
-seconds: the count is then skipped, never the tool call. A file named `.pc-memory-reconciling` in the memory directory suspends the
-count for that directory; it is checked under the lock, so a writer that creates the marker and
-then takes the lock cannot be overtaken by a count that started earlier.
+seconds: the count is then skipped, never the tool call. A file named
+`.pc-memory-reconciling` in the memory directory, a regular file less than `MARKER_MAX_AGE` seconds
+old, suspends the count for that directory; it is checked under the lock, so a writer that creates
+the marker and then takes the lock cannot be overtaken by a count that started earlier.
 
 Never blocks and never fails the tool call: any error goes to stderr, nothing to stdout, exit 0.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import sys
-import time
-from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pc_memory_lib import (  # noqa: E402
+    HAS_FLOCK,
     INDEX_NAME,
     LEDGER_NAME,
-    LOCK_NAME,
-    MARKER_NAME,
-    is_default_silo_root,
-    level_roots,
-    memory_dir_of,
+    declared_memory_dirs,
+    exclusive_lock,
+    is_memory_dir,
+    load_ledger,
+    marker_active,
+    write_ledger_atomically,
 )
 
-try:
-    import fcntl
-except ImportError:  # no flock on this platform: nothing is counted
-    fcntl = None  # type: ignore[assignment]
-
-LOCK_TIMEOUT = 1.0
-_LOCK_POLL = 0.01
 _UNRESOLVABLE = (OSError, ValueError, RuntimeError)
-
-
-def _is_memory_dir(directory: Path, declared: list[Path]) -> bool:
-    """True when `directory` is a default silo, or one of the `declared` level directories."""
-    return is_default_silo_root(directory) or directory in declared
-
-
-def _declared_dirs(cwd: Path) -> list[Path]:
-    """Memory directory of each level of `cwd`, as given and resolved."""
-    out: list[Path] = []
-    for root in level_roots(cwd):
-        try:
-            candidate = memory_dir_of(root, trust_shared_project_settings=False)
-            out.extend((candidate, candidate.resolve()))
-        except _UNRESOLVABLE:
-            continue
-    return out
 
 
 def note_location(payload: dict[str, object]) -> tuple[Path, str] | None:
@@ -108,35 +84,13 @@ def note_location(payload: dict[str, object]) -> tuple[Path, str] | None:
         cwd = Path(raw_cwd if isinstance(raw_cwd, str) and raw_cwd else os.getcwd())
         cwd = cwd.resolve()
         path = Path(os.path.normpath(cwd / os.path.expanduser(file_path)))
-        declared = _declared_dirs(cwd)
+        declared = declared_memory_dirs(cwd)
         for variant in (path, path.resolve()):
-            if _is_memory_dir(variant.parent, declared):
+            if is_memory_dir(variant.parent, declared):
                 return variant.parent, variant.name
     except _UNRESOLVABLE:
         return None
     return None
-
-
-def _clean_ledger(raw: object) -> dict[str, object]:
-    """Ledger rebuilt from decoded JSON, keeping every note entry and unknown key that is usable.
-
-    Args:
-        raw: Whatever the ledger file decoded to.
-
-    Returns:
-        A ledger with a `notes` object and a `last_review` key.
-    """
-    data = raw if isinstance(raw, dict) else {}
-    notes: dict[str, object] = {}
-    stored = data.get("notes")
-    for name, entry in (stored if isinstance(stored, dict) else {}).items():
-        if not isinstance(entry, dict):
-            continue
-        sessions = entry.get("sessions")
-        count = sessions if isinstance(sessions, int) and sessions > 0 else 0
-        notes[name] = {**entry, "sessions": count}
-    extra = {k: v for k, v in data.items() if k not in ("notes", "last_review")}
-    return {"notes": notes, "last_review": data.get("last_review"), **extra}
 
 
 def count_session(
@@ -148,7 +102,7 @@ def count_session(
     always `today`.
 
     Args:
-        ledger: A ledger as returned by `_clean_ledger`; it is updated in place.
+        ledger: A ledger as returned by `clean_ledger`; it is updated in place.
         note: The note's file name.
         session_id: The reading session.
         today: The local date to record.
@@ -171,68 +125,6 @@ def count_session(
     return ledger
 
 
-def _load(ledger_file: Path) -> dict[str, object]:
-    """Ledger from disk: empty when absent, rebuilt from what is usable when corrupt.
-
-    A ledger that cannot be decoded or parsed is moved to `<name>.corrupt` first, so the rebuilt
-    one never overwrites it. Any other read error (a directory, no permission) propagates.
-    """
-    try:
-        raw = ledger_file.read_bytes()
-    except FileNotFoundError:
-        return _clean_ledger(None)
-    try:
-        data = json.loads(raw.decode("utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
-        return _clean_ledger(data)
-    except ValueError as exc:
-        sys.stderr.write(f"memory_count: corrupt ledger {ledger_file.name}: {exc}\n")
-        os.replace(ledger_file, ledger_file.with_name(ledger_file.name + ".corrupt"))
-        return _clean_ledger(None)
-
-
-def _write_atomically(ledger_file: Path, ledger: dict[str, object]) -> None:
-    """Replace the ledger with `ledger` through a temp file in the same directory."""
-    import tempfile  # only a counted read gets here: the common read pays no import
-
-    fd, tmp = tempfile.mkstemp(dir=ledger_file.parent, prefix=".pc-memory-ledger.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(ledger, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-        os.replace(tmp, ledger_file)
-    finally:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-
-
-@contextlib.contextmanager
-def _exclusive_lock(memory_dir: Path) -> Iterator[None]:
-    """Hold an exclusive `flock` on the ledger's lock file for the duration of the block.
-
-    The lock is polled without blocking; after `LOCK_TIMEOUT` seconds a `TimeoutError` is raised.
-    """
-    if fcntl is None:
-        raise OSError("flock is not available on this platform")
-    with open(memory_dir / LOCK_NAME, "a", encoding="utf-8") as lock:
-        deadline = time.monotonic() + LOCK_TIMEOUT
-        while True:
-            try:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(
-                        "ledger lock still held, nothing counted"
-                    ) from None
-                time.sleep(_LOCK_POLL)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-
 def record_read(payload: dict[str, object], today: date | None = None) -> bool:
     """Record the consultation a PostToolUse payload reports, when it is a memory note.
 
@@ -252,16 +144,16 @@ def record_read(payload: dict[str, object], today: date | None = None) -> bool:
     if location is None:
         return False
     memory_dir, note = location
-    if fcntl is None or not (memory_dir / note).is_file():
+    if not HAS_FLOCK or not (memory_dir / note).is_file():
         return False
     ledger_file = memory_dir / LEDGER_NAME
-    with _exclusive_lock(memory_dir):
-        if (memory_dir / MARKER_NAME).exists():
+    with exclusive_lock(memory_dir):
+        if marker_active(memory_dir):
             return False
         ledger = count_session(
-            _load(ledger_file), note, session_id, today or date.today()
+            load_ledger(ledger_file), note, session_id, today or date.today()
         )
-        _write_atomically(ledger_file, ledger)
+        write_ledger_atomically(ledger_file, ledger)
     return True
 
 
