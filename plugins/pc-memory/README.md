@@ -1,6 +1,6 @@
 # pc-memory
 
-Memory index recall for Claude Code, as a plugin.
+Memory index recall, consultation counting and a guided review of the notes for Claude Code, as a plugin.
 
 ## Overview
 
@@ -8,21 +8,35 @@ A session opened in a sub-repo does not see the memory notes kept at the directo
 it. A `SessionStart` hook reads each level's `MEMORY.md` (read-only — it never writes to memory)
 and emits:
 
-- **To the user** (`systemMessage`): one summary line per level, current included — path, number
-  of notes, number at least the stale threshold old (30 d by default) — then, under it, the stale
-  notes with their age,
-  oldest first, at most 10 per level followed by a `+N more` marker. Each note is listed by its
-  full path with the home directory written `~/` (a path outside the home directory stays
-  absolute), as plain text, so a terminal that opens file paths on click can open it. The list is built from
-  the notes themselves, not from the index, so a level whose `MEMORY.md` cannot be read still
-  gets its summary and stale notes. No index line is shown; a level with no stale note is its summary line alone. When at least one stale note is listed, a
-  closing reminder says where to promote it (a skipped procedure step: fix the skill or hook; a
-  rule or pitfall beyond the directory: the source that generates the instructions, never a
-  generated copy; a local trap stays in memory) or to delete it. The last line is always a tip
-  (a light-bulb emoji, then: use `/memory` to enable or disable auto memory and to browse the memory
-  entries of the current level), with or without stale notes, unless the `spinnerTipsEnabled`
-  setting (the "Show tips" option of `/config`) is the boolean `false`. Not shown again after
-  `/compact`.
+- **To the user** (`systemMessage`): a tree of the levels, the widest first down to the current
+  one, each nested under the previous. A level is a line with its directory name, its number of
+  notes, `<K> old` when K notes are at least the stale threshold old (30 d by default) and the date
+  of its last `reconcile` review (`-` when none). The current level ends with a pin. Under a
+  level, its old notes are listed oldest first with their age, at most 10 followed by a `+N more`
+  marker, each by its full path with the home directory written `~/` (a path outside the home
+  directory stays absolute), as plain text, so a terminal that opens file paths on click can open
+  it. The branch of a level closes on its last item only when no deeper level follows:
+
+  ```text
+  📚 Memory
+  📂 pinky · 13 notes · 1 old · last review: -
+  ├── ~/.claude/projects/-Users-x-pinky/memory/reference-automode-settings-location.md (35 d)
+  └── 📂 bootstrap · 1 note · last review: -
+        └── 📂 pinky-agentic-plugins · 22 notes · 1 old · last review: 2026-09-01 📍
+              └── ~/.claude/projects/-Users-x-agentic-plugins/memory/feedback-probe-via-tool-call-path.md (34 d)
+
+  💡 Audit your memory: /memory
+
+  🔔 Clean it up: /pc-memory:reconcile (⚠️ You are on opus, best on sonnet · low effort)
+  ```
+
+  The list is built from the notes themselves, not from the index, so a level whose `MEMORY.md`
+  cannot be read still gets its line and old notes. No index line is shown. The parts are
+  separated by an empty line. The current level is always in the tree, with `0 notes` when it has
+  no index; a parent level without an index is not. The tip is hidden when the `spinnerTipsEnabled` setting (the "Show
+  tips" option of `/config`) is the boolean `false`. The bell line appears only when at least one
+  level is due for review (see [Review reminder](#review-reminder)); the tip setting does not hide
+  it. Not shown again after `/compact`.
 - **To the model** (`additionalContext`): the index of the **parent** levels only, capped per
   level and fenced as data, not instructions. One sentence after the data notice tells the model to
   choose the level of a note by subject (a note belongs at the lowest level where it stays true for
@@ -57,6 +71,28 @@ the context of its history, parent indexes included, so the hook is wired to `st
 `compact` only.
 
 The hook never blocks the session: any error prints `{}` and exits 0.
+
+### Review reminder
+
+The startup message reminds the user to run `/pc-memory:reconcile` when a level is due for review.
+A level is due when:
+
+- its ledger `last_review` (set by `reconcile` for the levels it reviewed) is a `YYYY-MM-DD` date at
+  least 30 days before today; or
+- it was never reviewed (no `last_review`, or a missing, unreadable, corrupt or non-date ledger) and
+  holds at least one note that is 30 days old or more. A never-reviewed level with only recent notes
+  is not due, so a new directory is not flagged.
+
+The threshold is `PC_MEMORY_REVIEW_DAYS` (30 by default), the same for both cases. One line closes
+the message, after the tip, whatever the number of levels due: `🔔 Clean it up:
+/pc-memory:reconcile (best on sonnet · low effort)`. When the `SessionStart` payload carries a
+`model` string that does not contain `sonnet` (any case), the parenthesis starts with a warning
+naming it, cleaned and cut at 40 characters: `(⚠️ You are on opus, best on sonnet · low effort)`. A
+missing or non-string `model` gives no warning (Claude Code omits the field on some starts, for
+example after `/clear`). The effort is not in the payload, so the line always advises the low one.
+The model and the effort are advised because a skill's model override lasts a single turn and a
+review spans several. The line is absent when no level is due, and, like the rest of the message,
+after `/compact`. Reading the ledger never renames or rewrites it, even a corrupt one.
 
 ### Write guard
 
@@ -120,6 +156,171 @@ The `Bash` net is shallow, and a false alarm costs more than a miss. Not covered
 - a case-insensitive file system (macOS): a path spelled with another case is not matched;
 - `NotebookEdit` is not intercepted.
 
+### Consultation counter
+
+A `PostToolUse` hook (`Read`) counts, per note, in how many sessions it was consulted, so a later
+review can tell the notes in use from the ones nobody opens. It acts only on a successful `Read`
+of a `*.md` file located directly in a memory directory (the default silo of any project, or the
+directory a level declares through `autoMemoryDirectory` in its `.claude/settings.local.json` or
+in the user settings), `MEMORY.md` excluded. Any other `Read`
+exits at once with no output; only a `.md` path costs a settings lookup.
+
+The count lives in `.pc-memory-ledger.json` inside the memory directory, a dot file that is not a
+note and never appears in the startup summary:
+
+```json
+{"notes": {"feedback_x.md": {"sessions": 3, "last_session": "<session id>", "last_read": "2026-10-02"}},
+ "last_review": null}
+```
+
+- A counter goes up by one only when the session differs from the note's `last_session`: ten reads
+  in one long session count once. `last_read` is the local date.
+- The note and `MEMORY.md` are never written, so a read does not change the file it reads.
+- Unknown keys and an existing `last_review` survive a rewrite. A ledger that cannot be decoded
+  or parsed is rebuilt from the entries still usable, with a message on stderr, and the original
+  is kept as `.pc-memory-ledger.json.corrupt` (an earlier `.corrupt` is overwritten). A ledger
+  that cannot be read for another reason (a directory, no permission) is left as it is and
+  nothing is counted.
+- The counter writes into the directory, so it does not follow an `autoMemoryDirectory` declared
+  in the level's shared `.claude/settings.json`, the file a cloned repo ships: a repo cannot
+  redirect the write. A team that declares its memory directory there gets no count unless it
+  also sets it in `settings.local.json` or the user settings. The default silos always count. The
+  SessionStart and PreToolUse hooks still honour the shared file.
+- Two sessions counting together lose nothing: the read-modify-write holds an exclusive `flock` on
+  `.pc-memory-ledger.lock`, and the ledger is replaced atomically (temp file, then `os.replace`),
+  so a reader never sees a truncated ledger. The lock is polled without blocking and given up
+  after about 1 s: that count is then skipped (message on stderr), the tool call is not delayed
+  further. Without `fcntl` (Windows) nothing is counted.
+- A file named `.pc-memory-reconciling` in the memory directory suspends the count for that
+  directory, as long as it is a regular file less than 10 minutes old (a marker left by a run that
+  died stops mattering). It is checked under the lock: whoever creates the marker and then takes
+  the lock is not overtaken by a count already in flight.
+- The hook never blocks: any error goes to stderr, exit 0, nothing on stdout.
+
+The counter is a biased proxy: a note is read only if its index line made the model open it. Read
+it with the note's age, not on its own. The de-duplication compares with the last session only:
+sessions A, B, A reading the same note count 3.
+
+### Reconcile skill
+
+`/pc-memory:reconcile` (user-invoked, never started by the model) reviews the notes of the current
+level and of its parent levels, in the main session because it dialogues with the user. It runs two
+deterministic scripts, with no model, kept in `skills/reconcile/scripts/`, and leaves the judgment to
+the model:
+
+1. `inventory.py [--cwd PATH]` prints JSON and writes nothing. Per level that has an index (the
+   levels of the SessionStart hook, except that a directory declared only in the shared
+   `.claude/settings.json`, which a cloned repo controls, is not listed: `apply.py` would refuse
+   it): the level and its memory directory, `last_review` from the ledger, the index size
+   (`lines`, `bytes`, `over_budget` past 200 lines or 25 KB, the part Claude Code reads), and per
+   note the description, type, age in days (frontmatter `modified`, else the file mtime),
+   `sessions`, `last_read`, whether the index links it, the first index line that does (null
+   when none) and `coverage`. Every text field read from a note, an index or the ledger (descriptions, types, index
+   lines, file names, orphan and duplicate names) has control characters removed and is capped at
+   200 characters, descriptions and index lines also have their spaces normalised; `last_read` and
+   `last_review` are kept only when they are `YYYY-MM-DD` dates, else null. Also the orphans (an index line whose file is gone, a note without
+   index line) and the exact duplicates across all levels shown: the same body after the
+   frontmatter, whitespace normalised, empty bodies not compared. Dot files, the ledger, its lock,
+   `.corrupt` and temp files, the trash folder, non-`.md` entries and `MEMORY.md` are not notes. A
+   level that cannot be read is skipped with a message on stderr.
+
+   `coverage` is a hint that a note's fact is already stated where the instructions live, so the
+   note can be deleted: up to 3 `{"file", "line", "text", "terms"}` (the line clipped to 160
+   characters, cleaned, and the words that matched), best first. It is a clue: shared words are
+   not a shared fact, so the skill reads the cited line before recommending a deletion. The sources are those of the root directory of every level shown:
+   `CLAUDE.md`, `AGENTS.md`, `.claude/rules/*.md`, the string values of
+   `.claude/settings.pinky.json`, every `skills/<name>/SKILL.md` below the root and the
+   `description` fields of every `hooks/hooks.json`. Terms are the words of 6
+   characters or more of the note's name and description and its backticked identifiers, minus
+   common words and the repo's own vocabulary (plugin, hooks, skill, scripts, working, tree,
+   files, repo, code, claude, session, memory, note, rule). A term found in more than 10% of the
+   lines or of the files read (floor of 3) is common and weighs a tenth of a rare one. A source
+   covers a note when a window of 3 lines holds at least 4 distinct rare terms, or one rare
+   backticked identifier of 8 characters or more. The rule favours precision: a fact restated in
+   other words with fewer rare terms is not reported. The work is bounded: 60 source files per
+   level, none over 200 KB, nothing deeper than 6 directories. A file is read once through its real
+   path, so a `CLAUDE.md` that links to `AGENTS.md` is not cited twice (the first name met is
+   cited, `AGENTS.md` before `CLAUDE.md`); a link is followed only when its target stays inside the
+   level's root, a link that leaves it or is broken is ignored, and no linked directory is
+   entered. A line
+   shaped like a secret (a long token after `:` or `=`, a known key prefix, a private-key header,
+   credentials in a URL, a JWT) is never read. The detector is a local subset of the one in the
+   `pc-core` plugin, which this plugin cannot import without requiring it to be installed.
+   Nothing is written.
+2. `apply.py --plan FILE|- [--dry-run] [--cwd PATH]` applies the plan the user approved (`-` reads
+   it from standard input, which is how the skill passes it):
+
+   ```json
+   {"actions": [{"dir": "~/.claude/projects/x/memory", "note": "a.md",
+                 "action": "delete" | "move" | "keep",
+                 "to_dir": "~/.claude/projects/y/memory", "hard": false}],
+    "reviewed_dirs": ["~/.claude/projects/x/memory"]}
+   ```
+
+   The whole plan is validated before anything is touched, and refused with exit 2 when:
+
+   - a directory is not the memory directory of the current level or of a parent, as the
+     inventory lists them (another project's silo is refused);
+   - a note name is not a plain `*.md` file name (no separator, no leading dot, not `MEMORY.md`
+     whatever its case), is a link to the index, or is neither a regular file nor a symlink;
+   - two actions have the same source, or two moves the same destination;
+   - a move has no destination, goes onto itself, or finds a different file at the destination
+     (the message names both paths); identical bytes at both ends are a move that was
+     interrupted, and it is finished;
+   - an involved `MEMORY.md` is a symlink (it would be replaced by a regular file);
+   - the JSON has a duplicated key, or is nested too deep;
+   - a marker younger than 10 minutes is in an involved directory (another reconcile runs, or one
+     was killed and its marker has not aged yet; the age and what to do are in the message).
+
+   `delete` moves the note to `<dir>/.reconcile-trash/<YYYY-MM-DD>/` (a name taken that day gets a
+   numeric suffix; the note is removed for good only with `"hard": true`), removes the index lines
+   that link to it and prunes its ledger entry. `move` adds the index line to the destination
+   index (the source line, or a link built from the note's description, with its brackets and
+   parentheses removed and its target percent-encoded, so it makes one link), then copies the file to
+   a hidden temporary file of `to_dir` and hard-links it to its final name: the link is atomic and
+   never replaces a file, so the destination is never partial and a move between volumes works (a
+   file system without hard links gets an exclusive copy instead). It then removes the temporary
+   file and the source, removes the line from the source index and prunes the source ledger entry. A symlink note moves as a link. `keep` does
+   nothing. A run killed without cleaning up
+   (SIGKILL, power loss) leaves its marker: a new plan is refused for 10 minutes, then the same
+   plan converges, without a duplicate or a partial file (tested by killing the run before each
+   system call of a move and of a delete, and during the copy). Hidden `.pc-memory-move.*`,
+   `.pc-memory-index.*` and `.pc-memory-ledger.*` temporaries a dead run left are removed under
+   the lock. An index line that links several notes is removed only when the plan takes out all of
+   them; otherwise it stays and the result carries `shared_index_line`. Then `last_review` (local
+   date) is set in the ledger of each reviewed directory. A note already gone is reported
+   `already_gone`. The summary is JSON on stdout; exit 1 when an action failed, with `results`
+   (the failed action carries the `steps` it completed) and `left`, the actions not attempted.
+   `--dry-run` prints every field of every action (`dir`, `note`, `action`, `to_dir`, `hard`) and
+   `reviewed_dirs`, the plan as it will run, and changes nothing, not even the marker.
+
+For the duration of `apply.py`, each involved directory holds a `.pc-memory-reconciling` marker,
+created exclusively before anything else and removed in a `finally`, also when an action fails and
+when the process gets SIGTERM or SIGHUP. The marker is refreshed before each action. It suspends
+the consultation counter for that directory, and only the counter: the write guard does not look at
+it, since `apply.py` names no memory path in its command. A marker older than 10 minutes was left
+by a run that died (SIGKILL, power loss): the counter ignores it and the next application removes
+it. The ledger is updated under the same `flock` the counter uses. The trash folder is the only
+copy of a deleted note: nothing empties it.
+
+The approval covers what runs: the skill shows the `--dry-run` output as it is in the approval
+question, with permanent deletion as a separate option that is never the default, then runs exactly
+that plan. `apply.py` is not in the skill's `allowed-tools`, so every run, the dry run included, goes
+through the usual permission prompt, which shows the command and its plan.
+
+The skill reads the `coverage` hints before judging a note and recommends deleting one that a
+source already covers, citing the path and line. It asks the user in batches of at most 4
+questions, opened by one intro line (`Batch 2/4 — 3 notes`): two or more covered notes go through
+one grouped question first (delete all, one by one, keep all), and each other question gives the
+note's title, its full path on its own line, a short summary, the covering source when there is
+one, and a 1–2 word topic as its `header`.
+
+The skill reads a note with `cat`, not the `Read` tool, so a review does not count as a
+consultation, and a read refused by a confidentiality guard is never retried through another
+channel. It edits nothing outside memory directories: a promotion (a skill, a hook, a rule, the
+source of the instructions) is made by the session or the user, and only once they say it is done
+does the skill propose deleting the note.
+
 ## Enable
 
 ```bash
@@ -134,11 +335,23 @@ Environment variables, all optional:
 |---|---|---|
 | `PC_MEMORY_CONTEXT` | on | `0` disables the hook |
 | `PC_MEMORY_STALE_DAYS` | `30` | a note at least this many days old is reported as stale |
+| `PC_MEMORY_REVIEW_DAYS` | `30` | a level whose last `reconcile` review is at least this many days old, or never reviewed with a note this old, triggers the review reminder |
 | `PC_MEMORY_MODEL_LINES` | `30` | index lines injected per parent level into the model |
 | `PC_ALLOW_MEMORY_WRITE` | unset | `1` lets memory writes through without asking; set it when launching the session |
 
 ## Limits
 
+- A note's session count is not carried over when `reconcile` moves the note to another level: the
+  destination starts at zero.
+
+- The ledger is created with mode 0600; the lock file takes the default mode. A declared memory
+  directory inside a repo or a synced folder receives a visible `.pc-memory-ledger.json` and
+  `.pc-memory-ledger.lock`, and `flock` can be a no-op on some network or synced file systems, in
+  which case two sessions counting together can lose an increment.
+- A path spelled with another case on a case-insensitive file system (macOS) is not matched, as
+  with the write guard.
+- The counter sees what goes through the `Read` tool. A recall that bypasses it (a note loaded by the
+  harness itself, a `cat` in `Bash`) is not counted.
 - The folder name of the default silo (every non-alphanumeric character becomes `-`) is an observed
   rule, not a documented one. A level whose memory exists but is not found: compare
   `ls ~/.claude/projects/` with the encoded path first.

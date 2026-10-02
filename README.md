@@ -35,7 +35,7 @@ branch, branch strategy) are read from that repo's own `.claude/settings.pinky.j
 | [`pc-craft`](plugins/pc-craft/) | Engineering conventions: `code-conventions`, `debug-brief`, `fastapi`, `improve` |
 | [`pc-delegate`](plugins/pc-delegate/) | `export`/`reintegrate`: hand kanban cards and code to an agent working outside Claude Code, then bring its results back safely |
 | [`pc-privacy`](plugins/pc-privacy/) | Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, plus an optional local decision-model gate on Read |
-| [`pc-memory`](plugins/pc-memory/) | Memory recall at session start: the user sees one summary line per directory level and its stale notes (at least N days old), the model gets the parent levels' indexes only, capped and marked as data; asks the user before any write into a memory directory |
+| [`pc-memory`](plugins/pc-memory/) | Memory recall at session start: the user sees a tree of the directory levels with their notes, old notes (at least N days old) and last review date, then a reminder to run `reconcile` when a review is due, the model gets the parent levels' indexes only, capped and marked as data; asks the user before any write into a memory directory; counts per note the sessions that read it; the `reconcile` skill reviews the notes with the user and applies the approved plan |
 | [`pc-pypi`](plugins/pc-pypi/) | `dev-prerelease`: cut a dev pre-release of a PyPI library, stopping before the publishing tag |
 | [`pc-rtk`](plugins/pc-rtk/) | RTK output filtering: a hook rewrites Bash commands to their filtered `rtk` form before they run, and the `gain` skill shows the token savings |
 | [`pc-snow`](plugins/pc-snow/) | Snowflake knowledge against training bias: `snowflake`, `snowpark`, `streamlit`, `cortex`, `snowpark-to-sql`, `sql-to-snowpark` |
@@ -313,10 +313,18 @@ pinky-agentic-plugins/
 │   │   ├── hooks/
 │   │   │   ├── memory-context/
 │   │   │   │   └── memory_context.py
+│   │   │   ├── memory-count/
+│   │   │   │   └── memory_count.py
 │   │   │   ├── memory-write/
 │   │   │   │   └── memory_write_guard.py
 │   │   │   ├── hooks.json
 │   │   │   └── pc_memory_lib.py
+│   │   ├── skills/
+│   │   │   └── reconcile/
+│   │   │       ├── scripts/
+│   │   │       │   ├── apply.py
+│   │   │       │   └── inventory.py
+│   │   │       └── SKILL.md
 │   │   └── README.md
 │   ├── pc-privacy/
 │   │   ├── evals/
@@ -452,6 +460,9 @@ pinky-agentic-plugins/
 │   ├── test_pc_kanban_migrate_agent_log.py
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pc_memory.py
+│   ├── test_pc_memory_count.py
+│   ├── test_pc_memory_reconcile.py
+│   ├── test_pc_memory_review.py
 │   ├── test_pc_memory_write.py
 │   ├── test_pc_rtk.py
 │   ├── test_pending_gate.py
