@@ -1,5 +1,5 @@
 {
-  "description": "At SessionStart, shows the user a tree of the directory levels (current and parents) with their notes at least 30 days old listed oldest first, and gives the model the parent levels' indexes only (capped, marked as data). Read-only on memory; never blocks the session — see memory-context/memory_context.py. At PreToolUse, asks the user before a Write, Edit, MultiEdit or Bash command writes into a memory directory, and gives Claude the reminder of where a note belongs; nothing is blocked — see memory-write/memory_write_guard.py. At PostToolUse, after a Read of a note in a memory directory, counts in a ledger file inside that directory how many sessions consulted it (once per session, never touching the note); nothing is blocked — see memory-count/memory_count.py. A mod (memory-ask-reason/register.ts) replaces the reason of that ask with the note's own description and its level, for the permission dialog to display.",
+  "description": "At SessionStart, shows the user a tree of the directory levels (current and parents) with their notes at least 30 days old listed oldest first, and gives the model the parent levels' indexes only (capped, marked as data). Read-only on memory; never blocks the session — see memory-context/memory_context.py. At PreToolUse, asks the user before a Write, Edit, MultiEdit or Bash command writes into a memory directory, and gives Claude the reminder of where a note belongs; nothing is blocked — see memory-write/memory_write_guard.py. At PostToolUse, after a Read of a note in a memory directory, counts in a ledger file inside that directory how many sessions consulted it (once per session, never touching the note); nothing is blocked — see memory-count/memory_count.py. A mod (memory-hold/register.tsx) holds a `Write` of a note in a default memory directory, unless the engine denies it or a settings rule decides, in a band above the prompt with its description and one button per memory level; the chosen level lets that exact write through without a second prompt, at another level the path is rewritten, and Refuse blocks it; an unanswered hold falls back to the guard's ask; Edit, MultiEdit and Bash keep the guard's ask.",
   "hooks": {
     "SessionStart": [
       {
@@ -39,6 +39,6 @@
     ]
   },
   "modules": [
-    "./memory-ask-reason/register.ts"
+    "./memory-hold/register.tsx"
   ]
 }

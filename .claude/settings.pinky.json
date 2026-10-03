@@ -3,8 +3,8 @@
   "file_placement": [
     {
       "root": "plugins",
-      "root_dirs": ["hooks", "skills", "mcp", "scripts", "agents", ".claude-plugin", "evals"],
-      "root_files": ["README.md", ".mcp.json", "settings.json"],
+      "root_dirs": ["hooks", "skills", "mcp", "scripts", "agents", ".claude-plugin", "evals", "types", "tests"],
+      "root_files": ["README.md", ".mcp.json", "settings.json", "tsconfig.json"],
       "forbidden_dirs": ["commands"],
       "reserved_dirs": { "scripts": "pc-statusline" },
       "leaf_subdirs": {

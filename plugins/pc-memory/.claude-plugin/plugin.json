@@ -4,5 +4,6 @@
   "description": "Surfaces memory at session start: the user sees a tree of the directory levels with their notes, old notes and last review date, then a reminder to run `reconcile` when a review is due, the model gets the parent levels' indexes only, capped and marked as data. Asks the user before any write into a memory directory, counts per note the sessions that read it, and its `reconcile` skill reviews the notes with the user and applies the approved plan.",
   "author": {
     "name": "Pinky & Co"
-  }
+  },
+  "types": "./types/index.d.ts"
 }

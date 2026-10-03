@@ -53,12 +53,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pc_memory_lib import (  # noqa: E402
     INDEX_NAME,
     clean_text,
-    find_memory_dir,
     is_default_silo,
     is_default_silo_root,
     level_roots,
     memory_dir_of,
     short,
+    writable_levels,
 )
 
 FILE_TOOLS = frozenset({"Write", "Edit", "MultiEdit"})
@@ -516,11 +516,7 @@ def _levels_reminder(payload: dict[str, object]) -> str:
     """
     cwd = _cwd(payload)
     roots = level_roots(cwd)
-    listed: list[tuple[Path, Path]] = []
-    for root in roots:
-        directory = memory_dir_of(root) if root == roots[0] else find_memory_dir(root)
-        if directory is not None and all(directory != d for _, d in listed):
-            listed.append((root, directory))
+    listed = [(level.root, level.memory_dir) for level in writable_levels(cwd)]
     written = _written_path(payload, cwd, memory_dirs(cwd))
     target = None
     if written is not None:

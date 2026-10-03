@@ -43,6 +43,7 @@ __all__ = [
     "LOCK_TIMEOUT",
     "MARKER_MAX_AGE",
     "MARKER_NAME",
+    "Frontmatter",
     "Level",
     "clean_ledger",
     "clean_text",
@@ -66,7 +67,9 @@ __all__ = [
     "note_age_days",
     "read_last_review",
     "short",
+    "split_frontmatter",
     "spinner_tips_enabled",
+    "writable_levels",
     "write_ledger_atomically",
 ]
 
@@ -79,6 +82,7 @@ HAS_FLOCK = fcntl is not None
 LOCK_TIMEOUT = 1.0
 SECONDS_PER_DAY = 86400
 FRONTMATTER_BYTES = 4096
+FRONTMATTER_LIMIT = 100
 _LOCK_POLL = 0.01
 _UNRESOLVABLE = (OSError, ValueError, RuntimeError)
 _GITDIR = re.compile(r"^gitdir:\s*(.+?)\s*$")
@@ -330,6 +334,45 @@ def collect_levels(
         seen.add(key)
         levels.append(Level(root=root, memory_dir=memory_dir))
     return levels
+
+
+def writable_levels(cwd: Path) -> list[Level]:
+    """Levels a note can be written to: the current level, then each ancestor level that has an index.
+
+    Each memory directory once; the current level is listed even before its index exists.
+    """
+    roots = level_roots(cwd)
+    levels: list[Level] = []
+    for root in roots:
+        directory = memory_dir_of(root) if root == roots[0] else find_memory_dir(root)
+        if directory is not None and all(
+            directory != level.memory_dir for level in levels
+        ):
+            levels.append(Level(root=root, memory_dir=directory))
+    return levels
+
+
+@dataclass(frozen=True)
+class Frontmatter:
+    """Flat `key: value` pairs of a leading `---` block, and the body that follows it."""
+
+    fields: dict[str, str]
+    body: str
+
+
+def split_frontmatter(text: str) -> Frontmatter:
+    """Flat `key: value` pairs of a leading `---` block, and the body that follows it."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return Frontmatter({}, text)
+    fields: dict[str, str] = {}
+    for index, line in enumerate(lines[1 : FRONTMATTER_LIMIT + 1], start=1):
+        if line.strip() == "---":
+            return Frontmatter(fields, "\n".join(lines[index + 1 :]))
+        key, sep, value = line.partition(":")
+        if sep and key.strip() and not key.startswith((" ", "\t")):
+            fields[key.strip()] = value.strip().strip("\"'")
+    return Frontmatter({}, text)
 
 
 def _frontmatter_modified(note: Path) -> float | None:
