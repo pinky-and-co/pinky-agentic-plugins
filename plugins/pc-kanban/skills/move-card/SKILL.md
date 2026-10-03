@@ -1,7 +1,7 @@
 ---
 name: move-card
 description: Move one kanban card by its slug — `select` (1-todo to 2-selected-for-dev, checked), `archive` (done card, requirements retired) or `drop` (obsolete card, with a reason). Typed with a conforming verb and slug it runs with no model call. Use when the user selects, archives or drops a card.
-argument-hint: "select|archive <card-slug> | drop <card-slug> <reason...>"
+argument-hint: "select <card-slug> [--force] | archive <card-slug> | drop <card-slug> <reason...>"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py:*)
 ---
 
@@ -17,7 +17,7 @@ the verb only on their word, never on your own initiative.
 
 | Verb | Looks in | Does |
 |---|---|---|
-| `select` | `1-todo/` | Moves to `2-selected-for-dev/` and sets `date:` — after checking that the card traces to at least one requirement declared in its chantier's story, has a valid `model`, a `## Done when`, and that any `blocked_by` card is done. Every unmet condition is listed. |
+| `select` | `1-todo/` | Moves to `2-selected-for-dev/` and sets `date:` — after checking that the card traces to at least one requirement declared in its chantier's story, has a valid `model`, a `## Done when`, and that any `blocked_by` card is done. Every unmet condition is listed. `--force` skips the requirements check only — a card that deserves no requirement of its own; the other conditions still apply. |
 | `archive` | `4-done/`, `3-in-progress/` | `chantier`'s `archive_card.sh`: dated archive, requirements retired, reviewed-box check. A card carrying a durable decision needs its ADR first. |
 | `drop` | `0-ideas/` to `3-in-progress/` | `chantier`'s `drop_card.sh`: `-dropped` archive, the reason appended, requirements retired. To keep the requirements, run `drop_card.sh --keep-requirements` instead. |
 
