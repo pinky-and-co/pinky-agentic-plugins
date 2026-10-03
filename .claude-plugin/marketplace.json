@@ -32,6 +32,11 @@
       "description": "Snowflake anti-training-bias knowledge (distilled, provenance tracked) — public."
     },
     {
+      "name": "pc-harness",
+      "source": "./plugins/pc-harness",
+      "description": "Claude Code harness knowledge measured in real sessions (mods, plugin loading, tool exposure, testing) — public."
+    },
+    {
       "name": "pc-craft",
       "source": "./plugins/pc-craft",
       "description": "Generic engineering conventions — code and infra-as-code, zero profile-resolved values."
