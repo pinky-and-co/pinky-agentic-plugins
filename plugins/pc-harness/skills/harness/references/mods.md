@@ -17,8 +17,10 @@ them for the noun at hand before guessing.
 - **Waiting for a person inside `tool.call`**: the hook has a 10 s budget, but time spent inside
   `$` calls does not count. Poll with `$.process.run(['sleep', '0.25'])` and `$.clock.now()`, not a
   bare promise; bound the wait and fall back to `next(e)` (the native prompt) when nobody answers.
-- **No surface, no hold**: under `claude -p`, `$.session.surfaces()` is empty — pass the call
-  through, or the run blocks until the bound.
+- **Hold only where the prompt can be drawn**: `$.session.surfaces()` is empty under `claude -p`,
+  and `AbovePrompt` (like the other prompt-side components) is raised on `terminal` and `desktop`
+  only. Check that one of those two is in the list, not that it is non-empty: a VS Code-only session
+  (`['vscode']`) would otherwise hold a call nobody sees until the bound expires.
 
 ## Session
 
