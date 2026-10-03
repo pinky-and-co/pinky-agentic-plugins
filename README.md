@@ -316,13 +316,14 @@ pinky-agentic-plugins/
 │   │   └── README.md
 │   ├── pc-memory/
 │   │   ├── hooks/
-│   │   │   ├── memory-ask-reason/
-│   │   │   │   ├── register.test.ts
-│   │   │   │   └── register.ts
 │   │   │   ├── memory-context/
 │   │   │   │   └── memory_context.py
 │   │   │   ├── memory-count/
 │   │   │   │   └── memory_count.py
+│   │   │   ├── memory-hold/
+│   │   │   │   ├── index_note.py
+│   │   │   │   ├── levels.py
+│   │   │   │   └── register.tsx
 │   │   │   ├── memory-write/
 │   │   │   │   └── memory_write_guard.py
 │   │   │   ├── hooks.json
@@ -333,7 +334,12 @@ pinky-agentic-plugins/
 │   │   │       │   ├── apply.py
 │   │   │       │   └── inventory.py
 │   │   │       └── SKILL.md
-│   │   └── README.md
+│   │   ├── tests/
+│   │   │   └── memory-hold.test.tsx
+│   │   ├── types/
+│   │   │   └── index.d.ts
+│   │   ├── README.md
+│   │   └── tsconfig.json
 │   ├── pc-privacy/
 │   │   ├── evals/
 │   │   │   ├── decision_compare.py
@@ -471,6 +477,8 @@ pinky-agentic-plugins/
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pc_memory.py
 │   ├── test_pc_memory_count.py
+│   ├── test_pc_memory_hold_index.py
+│   ├── test_pc_memory_hold_levels.py
 │   ├── test_pc_memory_reconcile.py
 │   ├── test_pc_memory_review.py
 │   ├── test_pc_memory_write.py

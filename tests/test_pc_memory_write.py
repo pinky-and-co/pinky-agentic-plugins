@@ -15,6 +15,7 @@ HOOK = PLUGIN / "hooks" / "memory-write" / "memory_write_guard.py"
 sys.path.insert(0, str(HOOK.parent))
 
 import memory_write_guard as mw  # noqa: E402
+import pc_memory_lib  # noqa: E402
 from pc_memory_lib import encode, short  # noqa: E402
 
 
@@ -340,7 +341,7 @@ def test_resolution_error_falls_back_to_the_reminder_without_point_four(
     def boom(_level: Path) -> Path:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(mw, "find_memory_dir", boom)
+    monkeypatch.setattr(pc_memory_lib, "find_memory_dir", boom)
     assert _note_output(repo) == {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -1047,11 +1048,3 @@ def test_index_reached_through_a_symlink_is_exempt(home, repo):
     link.symlink_to(silo)
     out = mw.build_output(_payload("Write", repo, file_path=str(link / "MEMORY.md")))
     assert out == {}
-
-
-def test_the_mod_matches_the_guard_reason():
-    """The mod finds the guard's `ask` by this exact string."""
-    mod = (PLUGIN / "hooks" / "memory-ask-reason" / "register.ts").read_text(
-        encoding="utf-8"
-    )
-    assert f"'{mw.REASON}'" in mod

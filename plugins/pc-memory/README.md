@@ -156,6 +156,45 @@ The `Bash` net is shallow, and a false alarm costs more than a miss. Not covered
 - a case-insensitive file system (macOS): a path spelled with another case is not matched;
 - `NotebookEdit` is not intercepted.
 
+#### Write band
+
+For a `Write` into a default memory directory (`<config>/.claude/projects/<project>/memory/`), a mod
+(`hooks/memory-hold/register.tsx`, written for the Claude Code mods API, early access, measured on
+2.1.288) holds the call and draws a framed band above the prompt: `✍︎ Memory note`, the note's file name and line count, its
+`description:` line, then one button per level:
+
+- `✔︎` (`1`) writes the note where it was aimed (`here` when that is the current level, `write` when
+  the levels are unknown);
+- `⎘` (`2`…`8`) writes it, under the same relative path, in the memory directory of another level —
+  the levels the guard lists to Claude, read from `hooks/memory-hold/levels.py` from the session's
+  project root (a shell `cd` does not move it) — then adds its line to that level's `MEMORY.md`
+  (`hooks/memory-hold/index_note.py`, nothing added when a line already links to it) and tells Claude
+  to remove any line it added to the index of the level first aimed at; when indexing fails, Claude is
+  told to update that index itself;
+- `✘` (`0`) returns a refusal to Claude, which asks what to change or where the note belongs.
+
+The digits are not drawn; a digit presses a button from an empty prompt. The mod lifts only an `ask` that carries no settings
+rule, and only for the exact path and content that were chosen, so a rule or a mode that denies still
+denies and neither the guard's `ask` nor the native dialog prompts a second time. When `levels.py`
+fails, the band offers `✔︎` and `✘` only. One write is held at a time; the next waits its turn, in
+order, and gets its own minute once the turn comes.
+
+When nobody answers within one minute, or when the session has no surface that draws (such as
+`claude -p`), the write is not held and the guard's `ask` and the native dialog apply.
+`PC_ALLOW_MEMORY_WRITE=1` skips the band as it skips the guard.
+
+Not held, and so left to the guard's `ask` and the native dialog: `Edit`, `MultiEdit` and `Bash`, the
+root `MEMORY.md`, a path with a `.`, `..` or empty segment (the guard normalises it and judges the
+real target), any other memory location (`autoMemoryDirectory`, a custom config directory), and a
+write the permission check denies by itself or decides because of a settings rule. That check runs
+without the `PreToolUse` hooks, so it never sees the guard's `ask`: a write it allows (`auto` mode,
+or `~/.claude` as a working directory) is held all the same.
+
+The mod is TypeScript, which the repo's gates do not run. Check it with
+`claude plugin validate plugins/pc-memory`, `claude plugin test plugins/pc-memory` and
+`tsc -p plugins/pc-memory` (the config it extends is written by Claude Code the first time the plugin
+loads from a folder you own).
+
 ### Consultation counter
 
 A `PostToolUse` hook (`Read`) counts, per note, in how many sessions it was consulted, so a later

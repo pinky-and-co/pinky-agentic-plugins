@@ -74,12 +74,12 @@ from pc_memory_lib import (  # noqa: E402
     link_targets,
     note_age_days,
     short,
+    split_frontmatter,
 )
 
 INDEX_MAX_LINES = 200
 INDEX_MAX_BYTES = 25 * 1024
 TEXT_CHARS = 200
-FRONTMATTER_LIMIT = 100
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 COVERAGE_MATCHES = 3
 COVERAGE_TEXT_CHARS = 160
@@ -124,21 +124,6 @@ _SECRET_SHAPES = (
         r"[A-Za-z0-9+]{32,}={0,2}\b"
     ),
 )
-
-
-def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """Flat `key: value` pairs of a leading `---` block, and the body that follows it."""
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}, text
-    fields: dict[str, str] = {}
-    for index, line in enumerate(lines[1 : FRONTMATTER_LIMIT + 1], start=1):
-        if line.strip() == "---":
-            return fields, "\n".join(lines[index + 1 :])
-        key, sep, value = line.partition(":")
-        if sep and key.strip() and not key.startswith((" ", "\t")):
-            fields[key.strip()] = value.strip().strip("\"'")
-    return {}, text
 
 
 def _text(value: str) -> str:
@@ -494,7 +479,8 @@ def _level_report(
     names: set[str] = set()
     for path in _note_files(directory):
         text = path.read_text(encoding="utf-8", errors="replace")
-        fields, body = _split_frontmatter(text)
+        front = split_frontmatter(text)
+        fields, body = front.fields, front.body
         entry = stored.get(path.name)
         counted = entry if isinstance(entry, dict) else {}
         sessions = counted.get("sessions")
