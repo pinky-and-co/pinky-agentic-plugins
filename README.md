@@ -316,6 +316,9 @@ pinky-agentic-plugins/
 │   │   └── README.md
 │   ├── pc-memory/
 │   │   ├── hooks/
+│   │   │   ├── memory-ask-reason/
+│   │   │   │   ├── register.test.ts
+│   │   │   │   └── register.ts
 │   │   │   ├── memory-context/
 │   │   │   │   └── memory_context.py
 │   │   │   ├── memory-count/

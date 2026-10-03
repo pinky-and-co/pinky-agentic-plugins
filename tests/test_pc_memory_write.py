@@ -1047,3 +1047,11 @@ def test_index_reached_through_a_symlink_is_exempt(home, repo):
     link.symlink_to(silo)
     out = mw.build_output(_payload("Write", repo, file_path=str(link / "MEMORY.md")))
     assert out == {}
+
+
+def test_the_mod_matches_the_guard_reason():
+    """The mod finds the guard's `ask` by this exact string."""
+    mod = (PLUGIN / "hooks" / "memory-ask-reason" / "register.ts").read_text(
+        encoding="utf-8"
+    )
+    assert f"'{mw.REASON}'" in mod
