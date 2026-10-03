@@ -74,7 +74,7 @@ settings (Claude Code only reads `agent` and `subagentStatusLine` there), so add
 
 That path carries the plugin version, so it stops matching the moment the plugin is upgraded — with
 no error, since the old version's directory survives in the cache. Re-point it after every
-`claude plugin update pc-statusline`. In this workspace `pinky install --plugin pc-statusline`
+`claude plugin update pc-statusline`. In this workspace `pinky claude-plugin install pc-statusline`
 re-resolves it from the install registry.
 
 Editing the plugin without bumping needs one more step: an install fills a cache directory only

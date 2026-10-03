@@ -171,7 +171,7 @@ def _hook(*args: str, allow_empty: bool = False) -> str:
     if not out and not allow_empty:
         raise SystemExit(
             f"spawn-workers: `stop_handoff.py {args[0]}` returned nothing — the installed "
-            "pc-kanban is likely stale (run: pinky install --plugin pc-kanban --force)"
+            "pc-kanban is likely stale (run: pinky claude-plugin install pc-kanban --force)"
         )
     return out
 
