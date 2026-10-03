@@ -87,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_kanban_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py\" --interpreter python3 --grammar '{\"forms\":[{\"match\":[\"select\",{\"re\":\"\\\\w[\\\\w.-]*\"}],\"emit\":[\"select\",\"{1}\"]},{\"match\":[\"archive\",{\"re\":\"\\\\w[\\\\w.-]*\"}],\"emit\":[\"archive\",\"{1}\"]},{\"match\":[\"drop\",{\"re\":\"\\\\w[\\\\w.-]*\"},{\"re\":\"[^\\\\s]+\",\"repeat\":true,\"allow_dash\":true}],\"emit\":[\"{*}\"]}]}'",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pc_kanban_direct_command_runner.py\" --script \"${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py\" --interpreter python3 --grammar '{\"forms\":[{\"match\":[\"select\",{\"re\":\"\\\\w[\\\\w.-]*\"}],\"emit\":[\"select\",\"{1}\"]},{\"match\":[\"select\",{\"re\":\"\\\\w[\\\\w.-]*\"},\"--force\"],\"emit\":[\"select\",\"{1}\",\"--force\"]},{\"match\":[\"archive\",{\"re\":\"\\\\w[\\\\w.-]*\"}],\"emit\":[\"archive\",\"{1}\"]},{\"match\":[\"drop\",{\"re\":\"\\\\w[\\\\w.-]*\"},{\"re\":\"[^\\\\s]+\",\"repeat\":true,\"allow_dash\":true}],\"emit\":[\"{*}\"]}]}'",
             "timeout": 60
           }
         ]

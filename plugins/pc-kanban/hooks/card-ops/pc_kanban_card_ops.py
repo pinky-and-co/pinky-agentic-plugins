@@ -3,7 +3,7 @@
 
     pc_kanban_card_ops.py [--board DIR]... archive <slug>
     pc_kanban_card_ops.py [--board DIR]... drop <slug> <reason...>
-    pc_kanban_card_ops.py [--board DIR]... select <slug>
+    pc_kanban_card_ops.py [--board DIR]... select <slug> [--force]
 
 The slug is the card's filename without `.md`. It is resolved across the kanban boards in the
 columns the verb accepts; zero or several matches is an error, never a guess. `archive` and `drop`
@@ -157,23 +157,26 @@ def requirement_ids(head: list[str]) -> list[str]:
     return ids
 
 
-def selection_problems(card: Path, text: str, boards: list[Path]) -> list[str]:
+def selection_problems(
+    card: Path, text: str, boards: list[Path], force: bool = False
+) -> list[str]:
     """List what keeps a card from being selected for development.
 
     Args:
         card: The card in `1-todo/`.
         text: The whole card.
         boards: The board roots.
+        force: Skip the requirements check only; every other condition still applies.
 
     Returns:
         One message per unmet condition; empty when the card is selectable.
     """
     head = frontmatter(text)
     problems = []
-    ids = requirement_ids(head)
+    ids = [] if force else requirement_ids(head)
     story = card.parent.parent / "story.md"
     declared = story.read_text(encoding="utf-8") if story.is_file() else ""
-    if not ids:
+    if not ids and not force:
         problems.append(
             "no `requirements:` — a card traces to at least one requirement"
         )
@@ -200,18 +203,19 @@ def selection_problems(card: Path, text: str, boards: list[Path]) -> list[str]:
     return problems
 
 
-def select(card: Path, boards: list[Path]) -> int:
+def select(card: Path, boards: list[Path], force: bool = False) -> int:
     """Move a card from `1-todo/` to `2-selected-for-dev/` and stamp the selection date.
 
     Args:
         card: The card in `1-todo/`.
         boards: The board roots.
+        force: Select even if the card traces to no requirement.
 
     Returns:
         The exit status; 1 when a selection condition is unmet or the target exists.
     """
     text = card.read_text(encoding="utf-8")
-    problems = selection_problems(card, text, boards)
+    problems = selection_problems(card, text, boards, force)
     dest = card.parent.parent / "2-selected-for-dev" / card.name
     if dest.exists():
         problems.append(f"{dest} already exists")
@@ -266,13 +270,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("verb", choices=sorted(COLUMNS))
     parser.add_argument("slug")
     parser.add_argument("reason", nargs="*")
+    parser.add_argument(
+        "--force", action="store_true", help="select without requirements"
+    )
     args = parser.parse_args(argv)
     if args.verb == "drop" and not args.reason:
         parser.error("drop needs a reason")
     boards = args.board or default_boards()
     card = _resolve(args.slug, COLUMNS[args.verb], boards)
     if args.verb == "select":
-        return select(card, boards)
+        return select(card, boards, args.force)
     if args.verb == "archive":
         return run_script("archive_card.sh", str(card))
     return run_script("drop_card.sh", str(card), " ".join(args.reason))

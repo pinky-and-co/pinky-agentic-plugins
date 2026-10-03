@@ -172,3 +172,18 @@ def test_select_inserts_a_missing_date(tmp_path: Path) -> None:
     assert _run(tmp_path, "select", "demo").returncode == 0
     moved = tmp_path / "CHANTIER0001-x" / "2-selected-for-dev" / "demo.md"
     assert moved.read_text().startswith("---\ndate: 20")
+
+
+def test_force_selects_a_card_without_requirements(tmp_path: Path) -> None:
+    _card(tmp_path, "1-todo", head="model: sonnet\nrequirements: []\n")
+    assert _run(tmp_path, "select", "demo").returncode == 1
+    assert _run(tmp_path, "select", "demo", "--force").returncode == 0
+
+
+def test_force_does_not_skip_the_other_conditions(tmp_path: Path) -> None:
+    card = _card(tmp_path, "1-todo", head="requirements: []\n")
+    result = _run(tmp_path, "select", "demo", "--force")
+    assert result.returncode == 1
+    assert "`model:`" in result.stderr
+    assert "`requirements:`" not in result.stderr
+    assert card.exists()
