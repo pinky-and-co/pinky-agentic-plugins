@@ -42,11 +42,12 @@ def _fire(plugin, command, command_args, tmp_path):
     return proc.stdout
 
 
-def test_registry_lists_the_three_direct_commands():
+def test_registry_lists_the_direct_commands():
     matchers = sorted(m for _, m, _ in _entries())
     assert matchers == [
         "^pc-git:clean-gone$",
         "^pc-kanban:init$",
+        "^pc-kanban:move-card$",
         "^pc-kanban:permission-change$",
     ]
 

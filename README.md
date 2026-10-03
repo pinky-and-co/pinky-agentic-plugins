@@ -264,6 +264,8 @@ pinky-agentic-plugins/
 │   │   │   │   └── pc_kanban_migrate_agent_log.py
 │   │   │   ├── card-discipline/
 │   │   │   │   └── card_discipline.py
+│   │   │   ├── card-ops/
+│   │   │   │   └── pc_kanban_card_ops.py
 │   │   │   ├── agent_log_writer.py
 │   │   │   ├── hooks.json
 │   │   │   ├── orchestrator_freeze.py
@@ -297,6 +299,8 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── next_card_recommendation.py
 │   │   │   │   │   ├── open_cards_brief.py
 │   │   │   │   │   └── pi_review.py
+│   │   │   │   └── SKILL.md
+│   │   │   ├── move-card/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── permission-change/
 │   │   │   │   ├── scripts/
@@ -458,6 +462,7 @@ pinky-agentic-plugins/
 │   ├── test_open_cards_brief.py
 │   ├── test_orchestrator_freeze.py
 │   ├── test_pc_core_server_offline.py
+│   ├── test_pc_kanban_card_ops.py
 │   ├── test_pc_kanban_init.py
 │   ├── test_pc_kanban_migrate_agent_log.py
 │   ├── test_pc_kanban_spawn_workers.py
