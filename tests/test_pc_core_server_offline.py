@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -24,6 +25,18 @@ def _import_server():
 
 
 class TestOfflineToolZeroEgress(unittest.TestCase):
+    def setUp(self):
+        # La réponse va dans un dossier propre au test, pas dans /tmp où elle resterait après le run.
+        server = _import_server()
+        self.out_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(
+            unittest.mock.patch.object(
+                server.model_offline,
+                "default_out",
+                lambda: self.out_dir / "answer.md",
+            )
+        )
+
     @unittest.mock.patch("subprocess.run")
     def test_success_returns_status_line_never_the_body(self, mock_run):
         server = _import_server()
@@ -33,6 +46,7 @@ class TestOfflineToolZeroEgress(unittest.TestCase):
         out = server.offline("do it")
         self.assertNotIn("SENSITIVE ANSWER BODY", out)
         self.assertTrue(out.startswith("[offline]"))
+        self.assertIn(str(self.out_dir / "answer.md"), out)
 
     @unittest.mock.patch("subprocess.run")
     def test_pi_failure_never_leaks_stdout_stderr(self, mock_run):
