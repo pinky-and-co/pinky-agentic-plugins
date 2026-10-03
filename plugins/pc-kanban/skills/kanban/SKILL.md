@@ -19,7 +19,7 @@ _KANBAN/
 │   ├── 2-selected-for-dev/   ← commitment point — next session takes the highest `priority:`,
 │   │                            file position tie-breaks
 │   ├── 3-in-progress/        ← active — the card carries its handoff
-│   └── 4-done/               ← done (airlock) — an ADR if it carries a durable decision, then archive
+│   └── 4-done/               ← done, waiting for its ADR — a card with no ADR to write skips it
 └── _ARCHIVE/
     └── CHANTIER{NNNN}-done/
         ├── .nav.yml              ← display only: sort: {direction: desc, by: filename} — scoped to
@@ -31,8 +31,8 @@ _KANBAN/
 ```
 
 A card is a deliverable worth a multi-session handoff, never a micro-step (those are a checklist
-*inside* the card). `0-ideas` → `1-todo` → `2-selected-for-dev` → `3-in-progress` → `4-done` →
-archive (`mv` between column directories).
+*inside* the card). `0-ideas` → `1-todo` → `2-selected-for-dev` → `3-in-progress` → archive
+(`mv` between column directories), through `4-done` only when the card needs an ADR first.
 
 ## The board's own table (`INDEX.md`)
 
@@ -235,8 +235,9 @@ sequentially between workers; see `references/finishing-a-card.md` § "Relaying 
 - Durable facts (user profile, conventions, contract constraints) live in the agent's persistent
   memory, not here — `_KANBAN/_FACTS.md` is a human-readable mirror, not the source.
 - A file open in an editor is not a task; do not fold IDE context into a card.
-- `4-done/` is an airlock. A card that carries a durable decision — a rejected alternative written
-  nowhere else (code, skill, existing ADR) — gets an ADR first; every other card is archived as is.
+- A finished card with no ADR to write is archived straight from `3-in-progress/` (skill
+  `move-card`, verb `archive`). `4-done/` holds only a card that carries a durable decision — a
+  rejected alternative written nowhere else (code, skill, existing ADR) — until its ADR exists.
   Nothing goes into the story: it holds the chantier's current state, never a card's history.
   Archiving moves the card to `_ARCHIVE/CHANTIER{NNNN}-done/`, prefixed with the archive date —
   `YYYY-MM-DD_<filename>.md`, underscore, computed at archive time, not the card's own `date:` field
