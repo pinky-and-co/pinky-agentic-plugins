@@ -1,0 +1,9 @@
+{
+  "name": "pc-harness",
+  "version": "0.1.0",
+  "description": "Claude Code harness knowledge measured in real sessions — mods, plugin loading, tool exposure, testing pitfalls — public.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"]
+}

@@ -39,6 +39,7 @@ branch, branch strategy) are read from that repo's own `.claude/settings.pinky.j
 | [`pc-pypi`](plugins/pc-pypi/) | `dev-prerelease`: cut a dev pre-release of a PyPI library, stopping before the publishing tag |
 | [`pc-rtk`](plugins/pc-rtk/) | RTK output filtering: a hook rewrites Bash commands to their filtered `rtk` form before they run, and the `gain` skill shows the token savings |
 | [`pc-snow`](plugins/pc-snow/) | Snowflake knowledge against training bias: `snowflake`, `snowpark`, `streamlit`, `cortex`, `snowpark-to-sql`, `sql-to-snowpark` |
+| [`pc-harness`](plugins/pc-harness/) | Claude Code harness pitfalls measured in real sessions: `harness` (mods, reloading, missing tools, testing) |
 | [`pc-statusline`](plugins/pc-statusline/) | Multi-line status line — model, effort, context, cache hit, cost, rate limits — plus a per-subagent row |
 
 ## Install
@@ -254,6 +255,16 @@ pinky-agentic-plugins/
 │   │   │   │   │   └── conflict-reaction.md
 │   │   │   │   └── SKILL.md
 │   │   │   └── commit-convention/
+│   │   │       └── SKILL.md
+│   │   └── README.md
+│   ├── pc-harness/
+│   │   ├── skills/
+│   │   │   └── harness/
+│   │   │       ├── references/
+│   │   │       │   ├── mods.md
+│   │   │       │   ├── plugins.md
+│   │   │       │   ├── testing.md
+│   │   │       │   └── tools.md
 │   │   │       └── SKILL.md
 │   │   └── README.md
 │   ├── pc-kanban/
