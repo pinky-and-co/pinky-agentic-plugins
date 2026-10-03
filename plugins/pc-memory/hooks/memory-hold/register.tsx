@@ -169,8 +169,9 @@ export const register: Register = on => {
     if (typeof e.file_path !== 'string' || typeof e.content !== 'string' || !isMemoryNote(e.file_path)) return next(e)
     // La même porte de sortie que la garde Python : la personne a demandé de ne pas être interrogée.
     if ((await $.env.get('PC_ALLOW_MEMORY_WRITE')) === '1') return next(e)
-    // Aucune interface qui dessine la bande (`claude -p`) : le `ask` de la garde et le dialogue natif s'appliquent.
-    if ((await $.session.surfaces()).length === 0) return next(e)
+    // La bande (`AbovePrompt`) ne se dessine que dans le terminal et le desktop : ailleurs (`claude -p`, VS Code seul),
+    // le `ask` de la garde et le dialogue natif s'appliquent tout de suite, sans attente.
+    if (!(await $.session.surfaces()).some(s => s === 'terminal' || s === 'desktop')) return next(e)
 
     // `$.tool.check` ne voit pas le `ask` de la garde Python (aucun hook PreToolUse n'y est consulté) : en mode `auto` ou
     // avec `~/.claude` en répertoire de travail il répond `allow`, et la garde pose quand même son `ask`. L'écriture est

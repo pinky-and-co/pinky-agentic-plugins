@@ -179,8 +179,8 @@ denies and neither the guard's `ask` nor the native dialog prompts a second time
 fails, the band offers `✔︎` and `✘` only. One write is held at a time; the next waits its turn, in
 order, and gets its own minute once the turn comes.
 
-When nobody answers within one minute, or when the session has no surface that draws (such as
-`claude -p`), the write is not held and the guard's `ask` and the native dialog apply.
+When nobody answers within one minute, or when the session draws on neither a terminal nor the
+desktop app (`claude -p`, the VS Code extension alone: the band is not raised there), the write is not held and the guard's `ask` and the native dialog apply.
 `PC_ALLOW_MEMORY_WRITE=1` skips the band as it skips the guard.
 
 Not held, and so left to the guard's `ask` and the native dialog: `Edit`, `MultiEdit` and `Bash`, the

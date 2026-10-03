@@ -169,6 +169,13 @@ describe('pc-memory write pane', () => {
     expect(ran).toEqual([PATH])
   })
 
+  test('a session drawn only in VS Code is not held: the band is not raised there', async ($, on) => {
+    const ran: string[] = []
+    engine(on, ran, { surfaces: ['vscode'] })
+    await $.tool.call(write('t1'))
+    expect(ran).toEqual([PATH])
+  })
+
   test('a failing pause stops the wait instead of spinning', async ($, on) => {
     const ran: string[] = []
     engine(on, ran, { sleepExit: 1 })
