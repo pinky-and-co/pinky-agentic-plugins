@@ -1,48 +1,29 @@
 #!/usr/bin/env python3
 """pc_kanban_spawn_workers.py — hand one kanban card, per repo, to a `card-worker` agent.
 
-The orchestrator session (opened outside any git repo, board curation only) runs this to resolve a
-selected card — its `repos:`, its `model:`, and each repo's local clone — then, for each target
-repo, prints the two-block prompt (`build_worker_prompt`) and the resolved model tier
-(`effective_model`) the orchestrator hands to an `Agent(subagent_type: "card-worker", ...)` call.
-This script never calls that tool itself — only the calling session can — so its job stops at
-computing the deterministic half: the repo's own conventions (test location, gates/test commands,
-probed from disk/PATH rather than retyped from memory — the source of the 2026-09-20 witness run's
-miss) plus the card's absolute path, its repo, and any judgment call to resolve.
+Run by the orchestrator session to resolve a card (its `repos:`, `model:` and each repo's local
+clone). For each target repo it prints the two-block worker prompt (`build_worker_prompt`) and the
+resolved model tier (`effective_model`), which the orchestrator passes to an
+`Agent(subagent_type: "card-worker", ...)` call. The script never calls that tool itself.
 
-**`--cmux`** keeps the older path for a repo whose environment does not reduce to commands (a
-project-scoped plugin resolved at process start, a scoped MCP server) — a real `claude` process is
-opened instead of a subagent, one worker session per repo:
+The prompt embeds the repo's conventions (test location, gates/test commands, probed from
+disk/PATH), the card's absolute path, its repo, and any judgment call to resolve.
 
-- **Inside cmux / wmux** (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID`): `<mux> new-workspace --cwd <path>
-  --command '<claude ...>'`, one per repo, booting `/pc-kanban:chantier <id> <slug>` on the card's
-  `model:` (`--advisor` one tier above, never for `opus`/`fable`).
-- **Outside any multiplexer**: prints a `cd <path> && claude ...` line per repo for the user to run,
-  and spawns nothing.
+`--cmux` opens a real `claude` session per repo instead of a subagent, for repos whose environment
+does not reduce to commands (project-scoped plugin, scoped MCP server):
+- Inside cmux/wmux (`CMUX_SURFACE_ID` / `WMUX_SURFACE_ID`): `<mux> new-workspace --cwd <path>
+  --command '<claude ...>'`, booting `/pc-kanban:chantier <id> <slug>` on the card's `model:`
+  (`--advisor` one tier above, never for `opus`/`fable`).
+- Outside a multiplexer: prints a `cd <path> && claude ...` line per repo, spawns nothing.
+In this mode, project-scoped plugins covering the repo are first enabled in its versioned
+`.claude/settings.json`, so the session boots with them live.
 
-Only in `--cmux` mode does `enable_project_plugins` run first — at project scope, in the target
-repo's *versioned* `.claude/settings.json` — every installed project-scoped plugin whose
-`projectPath` covers the repo, so that real session's boot has them live with no `/reload-plugins`.
-A `card-worker` subagent carries no such cold-start dependency (it shells the repo's own gates/test
-commands directly, no plugin skill in the loop), so the default path skips this entirely.
+Multi-repo cards are sequential: pass a single `<repo-slug>` to spawn only that repo; without
+a slug, every repo is spawned in `repos:` order.
 
-No dependency on the `pinky` CLI: card lookup, board resolution, `repos:` and `model:`
-all go through `stop_handoff.py`'s CLI (same plugin, same pattern guard.py uses); slug->path
-resolution reuses `resolve_repos.sh` (sibling skill); the project-scope enable shells out to
-`claude plugin` directly. The workspace root is derived from the board that holds the card — never
-a configured value.
-
-Multi-repo cards are sequential by convention: pass the single next `<repo-slug>` to
-spawn just that one. With no slug filter every repo of the card is spawned, in `repos:` order.
-
-`--model <tier>` overrides the card's own `model:` frontmatter for the Agent call — the caller's
-judgment on how much the card is already briefed (a card fully briefed by this skill's own fixed
-block needs less than its `model:` says an unbriefed run would). `--arbitrage <text>` carries a
-judgment call the generated block should surface to the worker. Neither adds a card frontmatter
-field — both are call-time only.
-
-`--dry-run` only affects `--cmux` mode: it previews the command line(s) and skips the project-scope
-plugin enable. The default (agent) path already does nothing but print — there is nothing to defer.
+`--model <tier>` overrides the card's `model:` and `--arbitrage <text>` passes a judgment call to
+the worker; both are call-time only. `--dry-run` only affects `--cmux` (previews the command
+and skips the plugin enable).
 
 Python 3.11+, stdlib only.
 
@@ -295,9 +276,8 @@ def repo_test_command(repo: Path) -> str:
 
 
 def repo_conventions_block(repo: Path) -> str:
-    """The 'fixe' half of the worker prompt (card point 3): `repo`'s own conventions, probed from
-    disk/PATH so they are the same on every card for this repo — the 2026-09-20 witness run's
-    hand-typed prompt missed the test location for exactly the opposite reason.
+    """The fixed half of the worker prompt (card point 3): `repo`'s own conventions, probed from
+    disk/PATH so they are the same on every card for this repo.
 
     Args:
         repo: absolute path to the target repo's worktree root.

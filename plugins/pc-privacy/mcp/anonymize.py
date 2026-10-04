@@ -1,57 +1,27 @@
 #!/usr/bin/env python3
-"""Coherent, deterministic PII pseudonymization — the implementation behind the `pc-privacy` MCP server.
+"""Deterministic, coherent PII pseudonymization — the implementation behind the `pc-privacy` MCP server.
 
-Two-phase design, no LLM in the loop (data never leaves the machine at this stage — LLMs are
-unreliable at exhaustive/consistent PII masking; deterministic by default, an LLM only for the
-analysis that follows):
+No LLM in the loop: data never leaves the machine at this stage.
 
-    detect  — sample each column, run Presidio (French NLP engine) + a column-name heuristic
-              backstop, return a report of columns judged sensitive. Writes nothing. Always run
-              this first and have a human confirm/correct the column list before ``apply``.
-    apply   — given a confirmed column list (matched by column name across ALL input files in the
-              same call, so the SAME real value maps to the SAME pseudonym everywhere — preserving
-              joins across tables), write an anonymized copy of each file next to the original
-              (``<name>.anon.<ext>``).
+    detect  — sample each column, run Presidio (French NLP) + a column-name heuristic, report the
+            columns judged sensitive. Writes nothing; a human confirms the list before ``apply``.
+    apply   — pseudonymize the confirmed columns (matched by name across ALL files of the call, so
+            joins survive) and write ``<n>.anon.<ext>`` next to each original.
 
-Pseudonym = ``f"{COLUMN}_{blake2b(salt:column:value)[:8]}"`` — a pure function of (salt, column,
-value), so the same real value always produces the same pseudonym within one ``apply`` call (across
-every file passed to it) and across reruns that pass the same salt. A fresh salt is generated per
-call and returned by :func:`apply_anonymization` (never written to disk) unless one is pinned.
+Pseudonym = ``f"{COLUMN}_{blake2b(salt:column:value)[:8]}"``: a pure function of (salt, column,
+value). A fresh salt is generated per call and returned (never written to disk) unless pinned.
 
 Masked by default: PERSON, EMAIL_ADDRESS, PHONE_NUMBER, IBAN_CODE, CREDIT_CARD, FR_SIRET, FR_SIREN,
-FR_NIR, BIC_SWIFT (FR_SIRET/FR_SIREN/FR_NIR/BIC_SWIFT are custom pattern recognizers — Presidio has
-no built-in for them). DATE_TIME and generic LOCATION are deliberately left alone: they usually
-carry the debugging signal itself (order dates, shipping city) and masking them by default would
-cripple the analysis this exists for.
+FR_NIR, BIC_SWIFT. DATE_TIME and LOCATION are left alone: they usually carry the debugging signal.
 
-Formats: CSV and JSON (array-of-objects) via stdlib only. Parquet via a lazy ``pyarrow`` import.
-XLSX via a lazy ``openpyxl`` import, every sheet, columns named ``Sheet!Column``. XML via regex on
-leaf-tag text content (no parser — sidesteps the undeclared-namespace-prefix ``ParseError`` common
-in Workday PECI exports); the column list becomes tag *local names* (namespace prefix stripped)
-instead of column names, everything else identical, same pseudonym scheme.
+Formats, decided by content rather than extension (:func:`detect_format`): CSV, JSON (array of
+objects), JSONL, Parquet (``pyarrow``), XLSX (``openpyxl``, columns named ``Sheet!Column``), XML
+(regex on leaf tags, names are tag local names). Config, code and binary files are skipped.
+Unrecognized tabular shapes (e.g. fixed-width) are scanned line by line and masked automatically
+with a same-length filler, with no salt and no column confirmation.
 
-Format is decided by content, not extension (:func:`detect_format`) — the ``file`` binary first
-(``--mime-type``), a few pure-content fallbacks when it's unavailable or its magic db is old. The
-extension is used for exactly two things: a deny-list of known config formats (``.yml``, ``.toml``,
-``.ini``...) that are never scanned even if they'd otherwise look tabular, and as a hint for
-``.parquet``/``.xlsx`` (binary formats `file` sometimes calls generic "zip"/"data"). A bare JSON
-object (not an array) is also treated as config-shaped, not a dataset, on the same reasoning: most
-config files are one object, not a table.
-
-An unrecognized tabular shape — a positional/fixed-width extract, a CSV `file`/the sniffer couldn't
-place, an exotic extension that isn't actually XML/XLSX/JSON — falls back to scanning every line as
-plain text (no sampling: there's no column to sample from, so every line is checked). This fallback
-has a different trust model than the column-based formats above: there, a human confirms the column
-list before ``apply`` touches anything; here, there are no columns to confirm, so ``apply`` masks
-every matched entity automatically, replacing each with a **same-length** filler computed from
-Presidio's exact character offsets — the point being that a fixed-width extract's column boundaries
-(defined externally, invisible in the file itself) survive untouched since nothing shifts. This path
-also has no coherent pseudonym/salt: masking is a straight per-value substitution, not a join-
-preserving pseudonym, since there's no schema to reason about joins over.
-
-Dual-use: importable by ``mcp/server.py`` (which calls these functions and composes its own return
-strings — never prints from here, stdout is the JSON-RPC channel over stdio) and runnable as a
-standalone CLI via :func:`main` (which does print).
+Importable by ``mcp/server.py`` (never prints: stdout is the JSON-RPC channel) and runnable as a
+CLI via :func:`main`.
 
 Usage (CLI):
     anonymize.py detect FILE [FILE ...]
@@ -77,20 +47,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-# Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
+# Console Windows (cp1252) : forcer UTF-8 en sortie.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
 FR_SIRET_PATTERN = r"\b\d{3}\s?\d{3}\s?\d{3}\s?\d{5}\b"
 FR_SIREN_PATTERN = r"\b\d{3}\s?\d{3}\s?\d{3}\b"
-# NIR — sexe(1) AA(2) MM(2) dept(2-3, "2A"/"2B" Corse) commune(2-3) ordre(3) clé(2). Ni la clé
-# de contrôle (mod 97) ni le préfixe NIA (7/8) ne sont validés — recall privilégié sur precision.
+# NIR : clé (mod 97) et préfixe NIA (7/8) non validés — recall privilégié sur precision.
 FR_NIR_PATTERN = r"\b[12][\s-]?\d{2}[\s-]?\d{2}[\s-]?(?:\d{2,3}|2[AB])[\s-]?\d{2,3}[\s-]?\d{3}[\s-]?\d{2}\b"
-# BIC/SWIFT (ISO 9362) — code banque(4) + pays(2) + localisation(2) + code agence optionnel(3).
+# BIC/SWIFT (ISO 9362) : banque(4) + pays(2) + localisation(2) + agence(3, optionnel).
 BIC_SWIFT_PATTERN = r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b"
-# ISO 3166-1 alpha-2 (+ XK, which SWIFT uses for Kosovo): letters 5-6 of a real BIC. Without this
-# check the pattern accepts any all-caps 8/11-letter word (`APPROVED`, `CREATION`).
+# ISO 3166-1 alpha-2 (+ XK, Kosovo) : lettres 5-6 d'un vrai BIC, filtre les mots en majuscules.
 _ISO_COUNTRIES = frozenset(
     """
     AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS
@@ -105,12 +73,8 @@ _ISO_COUNTRIES = frozenset(
 )
 
 
-# A pattern-only match tells you "14 digits", not "actually a SIRET" — arbitrary business IDs of
-# the same length collide constantly (see the `IDS`/FR_SIREN false positive). INSEE requires SIREN/
-# SIRET to satisfy the Luhn (mod 10) checksum, same algorithm as credit cards. Known, documented
-# exception: La Poste's own legacy numbers predate this rule and fail it despite being real — left
-# unhandled here: these recognizers exist to flag *supplier* SIRENs, where La Poste itself rarely
-# appears as a supplier (its commercial subsidiaries validate normally).
+# SIREN/SIRET : checksum Luhn (mod 10) exigé par l'INSEE, ce qui filtre les identifiants de même
+# longueur. Exception connue, non gérée : les numéros historiques de La Poste échouent au Luhn.
 def _luhn_valid(digits: str) -> bool:
     if not digits.isdigit():
         return False
@@ -127,13 +91,9 @@ def _luhn_valid(digits: str) -> bool:
 
 SPACY_MODEL = "fr_core_news_md"
 
-# Opt-in GLiNER NER, *added to* spaCy's (union, not replacement). spaCy's French model misses
-# ALL-CAPS names (`JEAN DUPONT` comes back as LOCATION); GLiNER is the usual answer. Off by default:
-# it needs `presidio-analyzer[gliner]` and a model download of several hundred MB, and it adds
-# latency to a hook that already pays for the spaCy load.
-#   PC_PRIVACY_NER=gliner                      enable
-#   PC_PRIVACY_GLINER_MODEL=<hf-id or path>    default below (multilingual PII model)
-#   PC_PRIVACY_GLINER_THRESHOLD=0.3            Presidio's own default
+# GLiNER (opt-in) s'ajoute à spaCy, qui rate les noms en majuscules. Requiert
+# `presidio-analyzer[gliner]` et un téléchargement de modèle.
+#   PC_PRIVACY_NER=gliner | PC_PRIVACY_GLINER_MODEL=<id ou chemin> | PC_PRIVACY_GLINER_THRESHOLD=0.3
 GLINER_DEFAULT_MODEL = "urchade/gliner_multi_pii-v1"
 GLINER_ENTITY_MAPPING = {
     "person": "PERSON",
@@ -190,9 +150,7 @@ NAME_HEURISTIC_KEYWORDS = {
 
 SAMPLE_SIZE = 15
 
-# Extensions that are never scanned, whatever their content looks like — known config formats.
-# A `.json` config (single object, not an array) is caught separately in detect_format(), since
-# the same reasoning ("this is config-shaped, not a dataset") can't be expressed as an extension.
+# Formats de config jamais scannés, quel que soit le contenu (un JSON-objet : cf. detect_format).
 CONFIG_EXTENSIONS = {
     ".yml",
     ".yaml",
@@ -204,8 +162,7 @@ CONFIG_EXTENSIONS = {
     ".properties",
 }
 
-# Source and documentation — never a dataset. `.sql` is deliberately absent: a data dump
-# (`INSERT ... VALUES`) carries real PII.
+# Code et documentation, jamais scannés. `.sql` volontairement absent : un dump contient du PII.
 CODE_EXTENSIONS = {
     ".py",
     ".pyi",
@@ -235,25 +192,22 @@ CODE_EXTENSIONS = {
     ".lock",
 }
 
-# `key: value` / `key=value` — one non-comment line of INI/YAML/dotenv-style config. A colon needs
-# a space after it: `12:30,...` is a time in a CSV row, not a key.
+# Ligne de config `clé: valeur` / `clé=valeur` ; le « : » exige un espace (`12:30,` est une heure).
 _KV_LINE_RE = re.compile(r"^[ \t]*[\w.\-]+[ \t]*(?:=[ \t]*\S|:[ \t]+\S)")
 
-# Leaf tag = no nested `<` in its content — a container (e.g. <Legal_Name><First_Name>…) never
-# matches `[^<]*` and is correctly skipped; namespace prefix (peci:, ptdf:, …) stripped to local name.
+# Balise feuille (aucun `<` imbriqué) ; le préfixe de namespace est retiré.
 _XML_LEAF_TAG_RE = re.compile(
     r"<(?:[\w-]+:)?([A-Za-z_][\w.-]*)\b[^>]*>([^<]*)</(?:[\w-]+:)?\1>"
 )
 
 
 class AnonymizeError(Exception):
-    """A caller-facing error (bad file, missing dependency) — the server turns it into a status line."""
+    """Caller-facing error (bad file, missing dependency)."""
 
 
 @dataclass(frozen=True)
 class Finding:
-    """One column/tag judged sensitive. `reason` names WHY (entity type + votes, or keyword match) —
-    it never carries a sampled value, so a report built from Findings cannot leak real PII."""
+    """One column/tag judged sensitive. `reason` never carries a sampled value."""
 
     file: str
     column: str
@@ -262,15 +216,12 @@ class Finding:
 
 @dataclass(frozen=True)
 class ApplyOutcome:
-    """Result of one `apply` run — output paths, how many columns each file matched, the salt used,
-    and the count of distinct real values pseudonymized. Never carries a value or a pseudonym."""
+    """Result of one `apply` run: outputs, salt, distinct-value count. Never carries a value."""
 
-    outputs: list[
-        tuple[str, str, int]
-    ]  # (input name, output name, columns/tags masked)
+    outputs: list[tuple[str, str, int]]  # (entrée, sortie, colonnes/balises masquées)
     salt: str
     unique_values: int
-    skipped: list[str]  # files where none of the requested columns were present
+    skipped: list[str]  # fichiers sans aucune colonne demandée
 
 
 # ── spaCy / Presidio availability ────────────────────────────────────────────
@@ -326,17 +277,14 @@ def _build_analyzer():  # type: ignore[no-untyped-def]  # noqa: DAR201
     from presidio_analyzer.nlp_engine import NlpEngineProvider
 
     class _LuhnRecognizer(PatternRecognizer):
-        """A PatternRecognizer whose regex candidates must also pass `_luhn_valid` — confirms a
-        SIRET/SIREN-shaped match is actually one, not an arbitrary same-length ID. A pass gets
-        boosted to score 1.0 by Presidio; a fail drops the match entirely (defined here, inside
-        `_build_analyzer`, so the `presidio_analyzer` import stays lazy like the rest of the file)."""
+        """PatternRecognizer whose candidates must also pass the Luhn checksum (defined here to
+        keep the `presidio_analyzer` import lazy)."""
 
         def validate_result(self, pattern_text: str) -> bool | None:
             return _luhn_valid(re.sub(r"\D", "", pattern_text))
 
     class _BicRecognizer(PatternRecognizer):
-        """A PatternRecognizer whose candidates must carry a valid ISO 3166 country code at
-        letters 5-6 — the only cheap validity check a BIC has (it has no checksum)."""
+        """PatternRecognizer whose candidates must carry an ISO 3166 country code at letters 5-6."""
 
         def validate_result(self, pattern_text: str) -> bool | None:
             return pattern_text[4:6] in _ISO_COUNTRIES
@@ -350,8 +298,7 @@ def _build_analyzer():  # type: ignore[no-untyped-def]  # noqa: DAR201
     analyzer = AnalyzerEngine(
         nlp_engine=provider.create_engine(), supported_languages=["fr"]
     )
-    # supported_language="fr" required on every recognizer below: an "en" recognizer (the
-    # default) on an "fr"-only `analyze()` call is silently never queried.
+    # supported_language="fr" obligatoire : un recognizer "en" (défaut) n'est jamais interrogé.
     analyzer.registry.add_recognizer(
         _LuhnRecognizer(
             supported_entity="FR_SIRET",
@@ -378,16 +325,11 @@ def _build_analyzer():  # type: ignore[no-untyped-def]  # noqa: DAR201
             supported_entity="BIC_SWIFT",
             supported_language="fr",
             patterns=[Pattern("bic_swift", BIC_SWIFT_PATTERN, 0.5)],
-            # PatternRecognizer's global_regex_flags default to IGNORECASE, which would turn this
-            # uppercase-only ISO-9362 pattern into a case-insensitive match against any ordinary
-            # 8- or 11-letter word (e.g. "lovelace") — drop it, BIC/SWIFT codes are uppercase by spec.
+            # Sans IGNORECASE (défaut de Presidio) : un BIC est en majuscules par spec.
             global_regex_flags=re.DOTALL | re.MULTILINE,
         )
     )
-    # Presidio only instantiates some of its predefined recognizers outside "en" — CreditCard is
-    # not one of them, so on this fr-only analyzer CREDIT_CARD (in DEFAULT_MASK_ENTITIES) was never
-    # detected at all: not in a column, not in free text. Registering it for "fr" fixes that; it
-    # keeps Presidio's Luhn checksum, so only well-formed card numbers match.
+    # CreditCard n'est pas instancié par Presidio hors "en" : on l'enregistre en "fr" (Luhn conservé).
     from presidio_analyzer.predefined_recognizers import CreditCardRecognizer
 
     analyzer.registry.add_recognizer(CreditCardRecognizer(supported_language="fr"))
@@ -404,8 +346,7 @@ def _add_gliner(analyzer) -> None:  # type: ignore[no-untyped-def]
             ships no stubs).
 
     Raises:
-        AnonymizeError: If GLiNER was requested but is not installed or the model cannot load —
-            never a silent fallback to spaCy-only: someone who opted in expects the recall.
+        AnonymizeError: If GLiNER is not installed or its model cannot load (no silent fallback).
     """
     try:
         from presidio_analyzer.predefined_recognizers import GLiNERRecognizer
@@ -420,8 +361,7 @@ def _add_gliner(analyzer) -> None:  # type: ignore[no-untyped-def]
         recognizer = GLiNERRecognizer(
             model_name=model,
             entity_mapping=GLINER_ENTITY_MAPPING,
-            # Required: the default is "en", and an "en" recognizer is silently never queried by
-            # an "fr"-only analyzer — GLiNER would load, cost its latency, and detect nothing.
+            # Obligatoire : le défaut "en" ne serait jamais interrogé (même cause que plus haut).
             supported_language="fr",
             threshold=threshold,
             flat_ner=False,
@@ -429,7 +369,7 @@ def _add_gliner(analyzer) -> None:  # type: ignore[no-untyped-def]
         )
     except (
         Exception
-    ) as e:  # download failure, offline without cache, bad model id, missing torch
+    ) as e:  # téléchargement, hors-ligne sans cache, id invalide, torch absent
         raise AnonymizeError(f"GLiNER model `{model}` could not be loaded: {e}") from e
     analyzer.registry.add_recognizer(recognizer)
 
@@ -437,7 +377,7 @@ def _add_gliner(analyzer) -> None:  # type: ignore[no-untyped-def]
 # ── format detection ─────────────────────────────────────────────────────────
 
 
-_SKIP_FORMATS = {"config", "code", "binary"}  # never scanned: not datasets
+_SKIP_FORMATS = {"config", "code", "binary"}  # jamais scannés : pas des jeux de données
 _TEXTLIKE_MIMES = {
     "application/json",
     "application/x-ndjson",
@@ -466,18 +406,14 @@ def _looks_like_config(lines: list[str]) -> bool:
     return hits >= max(2, (len(body) * 2) // 3)
 
 
-# Une sortie de `file` qui ressemble à un vrai mime (`type/subtype`) — BSD file imprime
-# « cannot open: Permission denied » sur stdout avec exit 0 pour un fichier illisible, et ce
-# texte n'est pas un mime : il doit retomber sur les checks de contenu, pas passer pour un.
+# Mime valide (`type/subtype`) : BSD `file` imprime « cannot open » sur stdout avec exit 0.
 _MIME_RE = re.compile(r"^[\w.+-]+/[\w.+-]+$")
 
 
 def _file_mime(path: Path) -> str | None:
-    """`file --mime-type -b <path>`, or None when `file` is unavailable or answers anything
-    other than a `type/subtype` mime.
+    """`file --mime-type -b <path>`, or None if `file` is unavailable or answers a non-mime.
 
-    Never raises — a missing/failing `file` command degrades to the pure-content checks in
-    :func:`detect_format`, it never blocks detection outright.
+    Never raises: detection degrades to the content checks of :func:`detect_format`.
     """
     if shutil.which("file") is None:
         return None
@@ -496,8 +432,7 @@ def _file_mime(path: Path) -> str | None:
 
 
 def detect_format(path: Path) -> str:
-    """Decide how to scan `path` — content signature first, extension only as a config deny-list
-    and as a hint for binary formats `file` sometimes reports generically.
+    """Decide how to scan `path`: content first, extension only as a deny-list and a binary hint.
 
     Args:
         path: The file to classify.
@@ -520,14 +455,12 @@ def detect_format(path: Path) -> str:
         return "parquet"
 
     mime = _file_mime(path)
-    # xlsx first: its mime (`...openxmlformats-officedocument.spreadsheetml.sheet`) contains "xml",
-    # so a substring test for XML would swallow it. XML itself is matched on exact mimes only.
+    # xlsx d'abord : son mime contient « xml ». XML n'est testé que sur des mimes exacts.
     if mime and "spreadsheetml" in mime:
         return "xlsx"
     if mime in {"text/xml", "application/xml"} or (mime or "").endswith("+xml"):
         return "xml"
-    # Anything `file` identifies as neither text nor a container we parse (pdf, image, docx, pptx,
-    # archives...) is not a dataset — never feed binary to Presidio.
+    # Ni texte ni conteneur géré (pdf, image, docx, archive…) : jamais de binaire à Presidio.
     if (
         mime
         and not mime.startswith("text/")
@@ -542,8 +475,7 @@ def detect_format(path: Path) -> str:
     except OSError as e:
         raise AnonymizeError(f"{path.name}: cannot read ({e})") from e
     if head[:2] == b"PK":
-        # Zip container `file` called generic (or `file` absent): only a workbook part inside makes
-        # it an xlsx — a docx or plain zip is not a dataset.
+        # Zip générique : seul un `xl/workbook.xml` en fait un xlsx.
         try:
             with zipfile.ZipFile(path) as z:
                 return "xlsx" if "xl/workbook.xml" in z.namelist() else "binary"
@@ -552,30 +484,27 @@ def detect_format(path: Path) -> str:
     if b"\x00" in head or head.startswith(b"%PDF"):
         return "binary"
 
-    # Classify from the head only — never read a multi-GB file whole just to name its format.
+    # Classification sur le début seul : jamais de lecture complète d'un gros fichier.
     text = head.decode("utf-8", errors="ignore")
     truncated = path.stat().st_size > len(head)
     stripped = text.lstrip()
 
-    # Pure-content XML fallback: `file` unavailable, or its magic db calls a declaration-less
-    # XML document (e.g. a namespaced PECI fragment) plain "text/plain".
+    # Repli XML par le contenu : `file` absent, ou XML sans déclaration vu comme text/plain.
     if stripped.startswith("<?xml") or re.match(r"<[A-Za-z_][\w.:-]*", stripped):
         return "xml"
 
     head_lines = text.splitlines()
     if truncated and len(head_lines) > 1:
-        head_lines = head_lines[:-1]  # last line may be cut mid-record
+        head_lines = head_lines[:-1]  # dernière ligne possiblement coupée
     nonblank = [ln for ln in head_lines[:30] if ln.strip()]
     if len(nonblank) >= 2 and all(_is_json_object_line(ln) for ln in nonblank):
         return "jsonl"
 
-    # `[{` or empty `[]` only — a bracketed log line (`[INFO] ...`) is text, not JSON.
+    # `[{` ou `[]` seulement : une ligne de log `[INFO] …` n'est pas du JSON.
     if re.match(r"\[\s*[{\]]", stripped):
         return "json"
     if stripped.startswith("{"):
-        return (
-            "config"  # one (pretty-printed) JSON object: config-shaped, not a dataset
-        )
+        return "config"  # objet JSON unique : config, pas un jeu de données
 
     sample_lines = head_lines[:30]
     if _looks_like_config(sample_lines):
@@ -594,17 +523,13 @@ def detect_format(path: Path) -> str:
 
 
 def _sniff_csv_dialect(path: Path) -> csv.Dialect | type[csv.Dialect]:
-    """The delimiter actually used — French exports are often `;`, stdlib's default is `,`.
-
-    `Sniffer.sniff` hands back a dialect subclass and the fallback is the `csv.excel` class
-    itself — `DictReader` accepts either.
-    """
+    """The delimiter actually used (French exports are often `;`); falls back to `csv.excel`."""
     with path.open(newline="", encoding="utf-8", errors="ignore") as f:
         sample = f.read(4096)
     try:
         return csv.Sniffer().sniff(sample, delimiters=",;\t|")
     except csv.Error:
-        return csv.excel  # comma, last resort
+        return csv.excel  # virgule, dernier recours
 
 
 def _read_rows(path: Path, fmt: str) -> tuple[list[str], list[dict]]:
@@ -612,8 +537,7 @@ def _read_rows(path: Path, fmt: str) -> tuple[list[str], list[dict]]:
 
     Args:
         path: The file to read.
-        fmt: The format decided by :func:`detect_format` — xml/xlsx/text are handled by their own
-            dedicated functions and never reach this one.
+        fmt: Format from :func:`detect_format` (xml/xlsx/text never reach this function).
 
     Returns:
         (fieldnames, rows) — column order and a list of row dicts.
@@ -697,7 +621,7 @@ def _xlsx_column_samples(path: Path) -> dict[str, list[str]]:
         ) from e
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    except Exception as e:  # openpyxl raises its own zip/xml errors on a non-xlsx zip
+    except Exception as e:  # openpyxl lève ses propres erreurs zip/xml
         raise AnonymizeError(f"{path.name}: not a readable xlsx ({e})") from e
     samples: dict[str, list[str]] = {}
     for ws in wb.worksheets:
@@ -760,28 +684,23 @@ def _mask_xlsx(
     return out, len(hit)
 
 
-# Fixed-format identifiers that have no reason to sit inside a sentence: a value counts only when
-# the match covers the whole value, and the column needs this share of conforming values (the
-# profiling approach). Emails, IBAN, phones... stay lenient: they can legitimately appear in a
-# free-text comment.
+# Identifiants à format fixe : le match doit couvrir toute la valeur, et la colonne exige cette
+# part de valeurs conformes. Les autres entités restent tolérantes (texte libre possible).
 WHOLE_VALUE_ENTITIES = frozenset({"BIC_SWIFT", "FR_SIREN", "FR_SIRET"})
 WHOLE_VALUE_MIN_RATIO = 0.8
 
 
-# What `_make_pseudonymizer` writes: `COLUMN_` + 8 hex digits.
+# Format produit par `_make_pseudonymizer` : `COLUMN_` + 8 hexa.
 _PSEUDONYM_RE = re.compile(r"[A-Z][A-Z0-9_]*_[0-9a-f]{8}")
 
 
 def _maskable_results(results, text: str) -> list:
     """The analyzer results that count as PII, once implausible ones are dropped:
 
-    - a `PHONE_NUMBER` guess overlapping a higher-scored `DATE_TIME`: Presidio returns both for
-      `2021-10-01-07:00` (date 0-10 at 0.6, phone 0-13 at 0.4). Scoped to that one pair so a
-      genuine phone number is never dropped;
-    - a `PERSON` whose text holds an underscore: `COST_CENTER` is an identifier, a name never has
-      one, whatever the NLP model guesses.
-    - a `PHONE_NUMBER` with fewer than 8 digits: Presidio reads a bare `1640` as a phone (0.4), and
-      no real number is that short.
+    - a `PHONE_NUMBER` overlapping a higher-scored `DATE_TIME` (only that pair, so a real phone
+      number is kept);
+    - a `PERSON` containing an underscore (an identifier, not a name);
+    - a `PHONE_NUMBER` with fewer than 8 digits.
 
     Args:
         results: Presidio ``RecognizerResult`` list for `text`.
@@ -809,8 +728,8 @@ def _maskable_results(results, text: str) -> list:
     ]
 
 
-# Line-by-line scan has no column vote to absorb the NLP model's guesses: only entities whose format
-# a rule can check raise an alert. `PERSON` is a guess and floods prose with false positives.
+# Scan ligne à ligne : pas de vote par colonne, donc seules les entités vérifiables par leur
+# format alertent (PERSON exclu : trop de faux positifs en prose).
 _STRICT_TEXT_ENTITIES = DEFAULT_MASK_ENTITIES - {"PERSON"}
 
 
@@ -863,12 +782,9 @@ def _text_line_findings(
 def _mask_text(path: Path, analyzer) -> tuple[Path, int]:
     """Mask every DEFAULT_MASK_ENTITIES span, line by line, with a same-length filler.
 
-    No column confirmation (there are none) and no coherent pseudonym/salt (no schema to preserve
-    joins over) — every matched span is masked automatically. Same-length substitution means
-    offsets never shift, so a fixed-width file's external column boundaries stay valid.
-
-    The file is read leniently and written as UTF-8: character offsets are preserved, but a file in
-    another encoding (latin-1) is re-encoded, so byte offsets shift on non-ASCII lines.
+    No column confirmation and no salt: every matched span is masked automatically. Same-length
+    substitution keeps a fixed-width file's column boundaries valid. The file is written as UTF-8,
+    so byte offsets shift on non-ASCII lines of a file in another encoding.
     """
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines(
@@ -894,7 +810,7 @@ def _mask_text(path: Path, analyzer) -> tuple[Path, int]:
         cursor = 0
         for r in results:
             if r.start < cursor:
-                continue  # overlapping span from Presidio — keep the first, skip the rest
+                continue  # span chevauchant : on garde le premier
             pieces.append(body[cursor : r.start])
             length = r.end - r.start
             filler = ((r.entity_type + "#") * (length // (len(r.entity_type) + 1) + 1))[
@@ -947,17 +863,13 @@ def detect_findings(
 ) -> list[Finding]:
     """Run Presidio + the name heuristic over sampled values of every column/tag in `files`.
 
-    Format is decided per file by :func:`detect_format` (content-based, not extension) — a file
-    judged config-shaped is silently skipped (not an error: most `Read` calls target things that
-    aren't datasets at all, so this needs to be a cheap no-op, not an exception to catch every
-    time). An unrecognized tabular shape (positional, an unplaceable CSV) is scanned line-by-line
-    instead of by column.
+    Format is decided per file by :func:`detect_format`; config, code and binary files are
+    silently skipped, and an unrecognized tabular shape is scanned line by line.
 
     Args:
-        files: Paths to any file — format is auto-detected, not assumed from the caller.
-        values_only: For an anonymized copy, which keeps its column/tag names (`IBAN`,
-            `First_Name`) and only replaces the values: skip the column-name heuristic and the
-            values already shaped like our pseudonyms.
+        files: Paths to any file (format auto-detected).
+        values_only: For an anonymized copy (names kept, values replaced): skip the column-name
+            heuristic and values already shaped like our pseudonyms.
         text_max_lines: Line budget for a file scanned line by line (None: no limit).
         truncated: Called with the file name when that budget cut a scan short.
 
@@ -967,7 +879,7 @@ def detect_findings(
     Raises:
         AnonymizeError: If Presidio/the spaCy model is missing, or a file cannot be read at all.
     """
-    analyzer = None  # built on first need — a config/binary-only call never loads spaCy
+    analyzer = None  # construit au premier besoin (spaCy chargé seulement si utile)
     findings: list[Finding] = []
     for fp in files:
         path = Path(fp)
@@ -983,25 +895,21 @@ def detect_findings(
             continue
         for name, values in _column_samples(path, fmt).items():
             if values_only:
-                # Our own pseudonyms: the NLP model takes roughly one in ten for a person's name.
+                # Nos pseudonymes : le modèle NLP en prend ~1 sur 10 pour un nom.
                 values = [v for v in values if not _PSEUDONYM_RE.fullmatch(v)]
             if not values:
                 continue
             name_hit = not values_only and any(
                 k in name.lower() for k in NAME_HEURISTIC_KEYWORDS
             )
-            # Each value votes once per maskable entity type it contains; the column is judged on
-            # how many values carry ANY maskable entity, not on the single most frequent type.
-            # Top-1 handled a column of pure emails but missed a mixed one (a few phones, a few
-            # emails, a few names) where no single type reaches the threshold on its own.
+            # Chaque valeur vote une fois par type d'entité masquable ; la colonne est jugée sur le
+            # nombre de valeurs portant une entité, pas sur le type dominant (colonnes mixtes).
             votes: Counter[str] = Counter()
             whole_votes: Counter[str] = Counter()
             hit_values = 0
             whole_hit_values = 0
             for v in values:
-                # Only maskable entities count: Presidio often returns LOCATION/URL on the same
-                # span as an EMAIL_ADDRESS/IBAN, and two NER engines (spaCy + GLiNER) or a value
-                # naming two people would otherwise let one value cast several votes.
+                # Seules les entités masquables comptent (LOCATION/URL doublonnent EMAIL/IBAN).
                 results = _maskable_results(analyzer.analyze(text=v, language="fr"), v)
                 found = {
                     r.entity_type
@@ -1024,7 +932,7 @@ def detect_findings(
             min_hits = max(2, len(values) // 3)
             min_whole = max(2, math.ceil(WHOLE_VALUE_MIN_RATIO * len(values)))
             lenient_ok = hit_values >= min_hits
-            # SIRET and SIREN can share a column: the ratio is over values, not per entity.
+            # SIRET et SIREN peuvent partager une colonne : ratio sur les valeurs, pas par entité.
             whole_ok = whole_votes if whole_hit_values >= min_whole else Counter()
             is_pii = lenient_ok or bool(whole_ok)
             qualified: Counter[str] = Counter(whole_ok)
@@ -1122,8 +1030,7 @@ def apply_anonymization(
         files: Paths to CSV, JSON, JSONL, Parquet, XML, XLSX or line-scanned text files. Config,
             code and binary files are skipped and get no copy.
         columns: Column names (CSV/JSON/JSONL/Parquet), `Sheet!Column` (XLSX) or tag local
-            names (XML) to mask. Ignored for a file scanned line by line, which is masked entity
-            by entity. Order and duplicates are irrelevant.
+            names (XML) to mask. Ignored for a file scanned line by line.
         salt: Pin the salt to keep several runs joinable. Default: a fresh random salt, returned
             in the outcome so the caller can reuse it.
 
@@ -1138,7 +1045,7 @@ def apply_anonymization(
     pseudonym, mapping = _make_pseudonymizer(salt)
     outputs: list[tuple[str, str, int]] = []
     skipped: list[str] = []
-    analyzer = None  # built lazily — only the text/positional path needs it
+    analyzer = None  # construit à la demande (chemin texte seulement)
 
     for fp in files:
         path = Path(fp)
@@ -1163,8 +1070,7 @@ def apply_anonymization(
             continue
 
         if fmt == "text":
-            # No columns to confirm here — every matched entity is masked automatically, not just
-            # the ones named in `columns`. See _mask_text's docstring for the trust-model note.
+            # Pas de colonnes à confirmer : toute entité détectée est masquée (cf. _mask_text).
             if analyzer is None:
                 analyzer = _build_analyzer()
             out, n_hit = _mask_text(path, analyzer)
@@ -1203,8 +1109,7 @@ def format_apply_report(outcome: ApplyOutcome) -> str:
     """
     lines = []
     for src, dst, n in outcome.outputs:
-        # n == 0 is exactly the skipped condition (no column/tag matched) — a per-row flag, so two
-        # inputs sharing a basename can't cross-contaminate the way a name lookup in `skipped` would.
+        # n == 0 ⇔ rien de masqué ; flag par ligne, donc deux entrées de même nom ne se mélangent pas.
         note = (
             " (none of the requested columns present, copied as-is)" if n == 0 else ""
         )

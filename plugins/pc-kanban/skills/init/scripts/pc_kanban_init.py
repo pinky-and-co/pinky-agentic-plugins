@@ -89,9 +89,6 @@ def _write_json_object(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-# ── settings.pinky.json — kanban_boards ───────────────────────────────────────────────────────
-
-
 def write_kanban_boards(root: Path) -> str:
     """Ensure `kanban_boards[<root>]` exists in `SETTINGS_PINKY_PATH` — an empty list on a fresh
     root, left untouched if already present (an additional board declared there by hand since
@@ -116,9 +113,6 @@ def write_kanban_boards(root: Path) -> str:
     data["kanban_boards"] = boards
     _write_json_object(SETTINGS_PINKY_PATH, data)
     return f"kanban_boards[{key}] = []"
-
-
-# ── settings.json — permissions.additionalDirectories ─────────────────────────────────────────
 
 
 def write_additional_directories(root: Path) -> str:
@@ -164,9 +158,6 @@ def write_additional_directories(root: Path) -> str:
     data["permissions"] = permissions
     _write_json_object(CLAUDE_SETTINGS_PATH, data)
     return f"additionalDirectories += {missing}"
-
-
-# ── INDEX.md ───────────────────────────────────────────────────────────────────────────────────
 
 
 def existing_chantiers(kanban: Path) -> list[tuple[str, str]]:
@@ -219,9 +210,6 @@ def render_index(chantiers: list[tuple[str, str]]) -> str:
     for chantier_id, slug in chantiers:
         lines.append(f"| {chantier_id} | {slug} | ⚪ |")
     return "\n".join(lines) + "\n"
-
-
-# ── _AGENT_LOG/ ────────────────────────────────────────────────────────────────────────────────
 
 
 def _migrate_agent_log(kanban: Path) -> str:
