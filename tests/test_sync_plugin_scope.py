@@ -245,7 +245,7 @@ class TestActivateForPathAscend(_AscendBase):
         self.assertEqual(newly, [])
 
     def test_skips_a_plugin_already_project_scope_installed_here(self):
-        # projectPath == ce repo (pas un ancêtre) → déjà installé, à sauter même sans settings.json.
+        # projectPath == ce repo (pas un ancêtre) → déjà installé, à sauter même sans activation déclarée.
         self._write_installed(
             {"pc-snow@mp": [{"scope": "project", "projectPath": str(self.project_dir)}]}
         )

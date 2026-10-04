@@ -117,8 +117,8 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
     size = path.stat().st_size
     if size == 0:
         return None
-    # Cheap classification first (reads the head of the file only). Config/code/binary never pay
-    # the NLP model load and never trigger an alert.
+    # Cheap classification first (reads the head of the file only). Config, code and binaries
+    # never pay the NLP model load and never trigger an alert.
     fmt = anonymize.detect_format(path)
     if fmt in anonymize._SKIP_FORMATS:
         return None

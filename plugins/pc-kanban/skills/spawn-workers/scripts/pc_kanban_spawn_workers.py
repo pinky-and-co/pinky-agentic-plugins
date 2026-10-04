@@ -392,7 +392,7 @@ def build_claude_command(
 
     Returns:
         One POSIX shell string — for a sonnet card:
-        claude --name pinky-bootstrap-fix --model "sonnet[1m]" --advisor "opus" "/pc-kanban:chantier 0025 fix"
+        claude --name pinky-bootstrap-fix --model "sonnet[1m]" --advisor "opus" "/pc-kanban:chantier <id> <slug>"
     """
     parts = ["claude", "--name", shlex.quote(name)]
     model = model_arg(card_model)

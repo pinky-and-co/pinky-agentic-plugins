@@ -25,7 +25,7 @@ import card_discipline as cd
 
 
 def _card_path(tmp: Path, column: str, name: str = "my-card.md") -> Path:
-    """Build a `_KANBAN/CHANTIER0025-x/<column>/<name>` path under `tmp`, parents created."""
+    """Build a `_KANBAN/<chantier>/<column>/<name>` path under `tmp`, parents created."""
     path = tmp / "_KANBAN" / "CHANTIER0025-plugins-claude" / column / name
     path.parent.mkdir(parents=True, exist_ok=True)
     return path

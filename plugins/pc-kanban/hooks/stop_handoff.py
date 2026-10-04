@@ -86,7 +86,7 @@ def read_event() -> dict:
         return {}
 
 
-# ── Declared boards — read from `kanban_boards` in the user's settings.pinky.json ────────────
+# ── Declared boards — read from the user-level `kanban_boards` key ────────────
 SETTINGS_PINKY_PATH = Path.home() / ".claude" / "settings.pinky.json"
 
 

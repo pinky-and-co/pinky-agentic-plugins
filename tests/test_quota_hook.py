@@ -26,7 +26,7 @@ hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hook)
 
 
-# --- hooks.json — the registration contract -----------------------------------------------------
+# --- the registration contract ------------------------------------------------------------------
 
 
 def _registered_commands():

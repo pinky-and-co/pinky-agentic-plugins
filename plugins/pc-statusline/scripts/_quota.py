@@ -71,8 +71,8 @@ def write_cache(provider: str, payload: dict, now: float) -> None:
 
 # Above this an epoch is in milliseconds (10^11 s is the year 5138; 10^11 ms is 1973).
 _EPOCH_MS_FLOOR = 1e11
-# The two windows a status line shows, and how far ahead each one's reset can possibly be (the
-# same lengths as `statusline.py`'s own table). Z.ai's classification below is inferred from its
+# The two windows a status line shows, and how far ahead each one's reset can possibly be — the
+# same lengths the status line itself renders. Z.ai's classification below is inferred from its
 # payload, so a "5-hour" window resetting further out than that is a mislabel, not data.
 _WINDOW_S = {"five_hour": 5 * 3600, "seven_day": 7 * 24 * 3600}
 _WINDOW_TOLERANCE_S = 300  # clock skew + how the endpoint rounds a reset

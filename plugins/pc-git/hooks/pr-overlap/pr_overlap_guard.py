@@ -115,10 +115,7 @@ def _resolve_base_branch(repo_root: Path) -> str | None:
             check=False,
         )
         if out.returncode == 0:
-            ref = out.stdout.strip()
-            if ref.startswith("origin/"):
-                return ref[7:]  # Remove "origin/" prefix
-            return ref
+            return out.stdout.strip().removeprefix("origin/")
     except (OSError, subprocess.TimeoutExpired):
         pass
 

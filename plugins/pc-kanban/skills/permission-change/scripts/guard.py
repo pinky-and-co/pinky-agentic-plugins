@@ -361,9 +361,9 @@ def is_session_scratchpad(target: str) -> bool:
         tgt = tgt.resolve()
     except OSError:
         return False
-    # Ne pas ancrer sur `tempfile.gettempdir()` : sur macOS il suit `$TMPDIR`
-    # (`/var/folders/.../T`), alors que le harness écrit sous `/private/tmp` — deux racines
-    # différentes. On reconnaît la forme du chemin à la place, indépendamment de sa racine.
+    # Ne pas ancrer sur `tempfile.gettempdir()` : sur macOS il suit `$TMPDIR`, dont la racine
+    # diffère de celle où le harness écrit le scratchpad. On reconnaît la forme du chemin à la
+    # place, indépendamment de sa racine.
     parts = tgt.parts
     for i, part in enumerate(parts):
         if re.fullmatch(r"claude-\d+", part) and "scratchpad" in parts[i + 1 :]:

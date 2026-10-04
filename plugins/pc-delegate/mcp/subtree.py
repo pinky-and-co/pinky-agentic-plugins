@@ -67,8 +67,8 @@ def _via_grimp(root: _PackageRoot) -> set[Path]:
 
     sys.path.insert(0, str(root.sys_path_root))
     try:
-        # cache_dir=None : appel interactif ponctuel, jamais une boucle chaude — sans ça, le cache
-        # disque de grimp disperserait un `.grimp_cache/` selon le cwd de l'appelant du moment.
+        # cache_dir=None : appel interactif ponctuel, jamais une boucle chaude — sinon grimp
+        # écrirait son cache disque au cwd de l'appelant du moment, qui change à chaque appel.
         graph = grimp.build_graph(root.top_package, cache_dir=None)
     finally:
         sys.path.remove(str(root.sys_path_root))
