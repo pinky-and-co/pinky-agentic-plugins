@@ -51,6 +51,7 @@ BULK_CI_PARALLEL="${BULK_CI_PARALLEL:-4}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESOLVE_POLICY="$SCRIPT_DIR/resolve_policy.py"
+COMMIT_TRAILER="$SCRIPT_DIR/commit_trailer.py"
 
 # Chemins non gardés par la politique de branche : un commit qui ne touche QUE ces chemins va
 # directement sur la branche d'intégration, sans feature branch. Liste + `is_unguarded()`
@@ -640,7 +641,7 @@ push_with_recovery() {
 
 # ── apply ─────────────────────────────────────────────────────────────────────
 do_apply() {
-    local root="$1" filter="$2" msgfile="$3" dry="$4" nopr="$5" watchci="$6"
+    local root="$1" filter="$2" msgfile="$3" dry="$4" nopr="$5" watchci="$6" session_id="${7:-}"
     [ -f "$msgfile" ] || die "message file not found: $msgfile"
 
     # `--no-pr` s'arrête au commit : aucune PR/MR n'est ouverte, donc rien à watcher.
@@ -654,14 +655,21 @@ do_apply() {
     local -a pw_names=() pw_repos=() pw_branches=() pw_urls=() pw_hosts=()
 
     # Trailer d'attribution : composé ici, jamais du system-reminder (absent d'un fork
-    # commit-and-pr). `Co-Authored-By` sans version — le fork tourne `haiku` mais le
-    # travail est piloté par le parent ; router le modèle réintroduirait le couplage
-    # "l'agent fournit la vérité" que RESULTS supprime. `CLAUDE_CODE_BRIDGE_SESSION_ID`
-    # (vérifié : hérité dans un fork avec la valeur du parent) donne l'URL de session.
+    # commit-and-pr). Le modèle nommé est celui de la session PRINCIPALE, lu par
+    # `commit_trailer.py` dans son transcript via `--session-id` : le fork tourne `haiku`,
+    # nommer son modèle serait faux. `CLAUDE_CODE_BRIDGE_SESSION_ID` (hérité dans un fork avec
+    # la valeur du parent) ne donne que l'URL de session, pas le transcript.
+    # Repli — sans id, sans transcript lisible, sans python — la ligne neutre ci-dessous.
     local trailer="Co-Authored-By: Claude <noreply@anthropic.com>"
     if [ -n "${CLAUDE_CODE_BRIDGE_SESSION_ID:-}" ]; then
         trailer="$trailer
 Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
+    fi
+    local helper_trailer=""
+    if [ -f "$COMMIT_TRAILER" ] \
+       && helper_trailer="$(python3 "$COMMIT_TRAILER" --session-id "$session_id" 2>/dev/null)" \
+       && [ -n "$helper_trailer" ]; then
+        trailer="$helper_trailer"
     fi
 
     while IFS= read -r repo; do
@@ -844,13 +852,14 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 MODE="${1:-}"; shift || true
-ROOT="$PWD"; ROOT_SET="no"; REPO_PATH_SET="no"; REPO_PATH=""; FILTER=""; MSGFILE=""; DRY="no"; NOPR="no"; WATCHCI="yes"
+ROOT="$PWD"; ROOT_SET="no"; REPO_PATH_SET="no"; REPO_PATH=""; FILTER=""; MSGFILE=""; DRY="no"; NOPR="no"; WATCHCI="yes"; SESSION_ID=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --root)        ROOT="$2"; ROOT_SET="yes"; shift 2 ;;
         --repo-path)   [ $# -ge 2 ] || die "--repo-path needs a value"; REPO_PATH="$2"; REPO_PATH_SET="yes"; shift 2 ;;
         --repo)        FILTER="$2"; shift 2 ;;
         --messages)    MSGFILE="$2"; shift 2 ;;
+        --session-id)  [ $# -ge 2 ] || die "--session-id needs a value"; SESSION_ID="$2"; shift 2 ;;
         --dry-run)     DRY="yes"; shift ;;
         --no-pr)       NOPR="yes"; shift ;;
         --watch-ci)    WATCHCI="yes"; shift ;;   # défaut désormais — gardé pour compat/intention explicite
@@ -876,6 +885,6 @@ fi
 case "$MODE" in
     discover) do_discover "$ROOT" ;;
     plan)     do_plan  "$ROOT" "$FILTER" ;;
-    apply)    do_apply "$ROOT" "$FILTER" "$MSGFILE" "$DRY" "$NOPR" "$WATCHCI" ;;
-    *)        die "usage: bulk_commit.sh {discover|plan|apply} [--root PATH] [--repo NAME | --repo-path ABS_PATH] [--messages FILE] [--dry-run] [--no-pr] [--no-watch-ci]" ;;
+    apply)    do_apply "$ROOT" "$FILTER" "$MSGFILE" "$DRY" "$NOPR" "$WATCHCI" "$SESSION_ID" ;;
+    *)        die "usage: bulk_commit.sh {discover|plan|apply} [--root PATH] [--repo NAME | --repo-path ABS_PATH] [--messages FILE] [--session-id ID] [--dry-run] [--no-pr] [--no-watch-ci]" ;;
 esac

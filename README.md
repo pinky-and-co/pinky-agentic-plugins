@@ -230,6 +230,7 @@ pinky-agentic-plugins/
 │   │   │   │   ├── branch_guard.py
 │   │   │   │   ├── branch_paths.sh
 │   │   │   │   ├── bulk_commit.sh
+│   │   │   │   ├── commit_trailer.py
 │   │   │   │   ├── resolve_policy.py
 │   │   │   │   └── test_bulk_commit.sh
 │   │   │   ├── clean-gone/
@@ -464,6 +465,7 @@ pinky-agentic-plugins/
 │   ├── test_card_discipline.py
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
+│   ├── test_commit_trailer.py
 │   ├── test_decision_client.py
 │   ├── test_detect_findings.py
 │   ├── test_detect_format.py

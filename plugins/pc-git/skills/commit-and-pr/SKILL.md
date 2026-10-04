@@ -134,8 +134,12 @@ correct, not a shortcut.
 ## Step 3 — Apply
 
 ```
-${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> [--repo <target>] [--no-watch-ci]
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> --session-id "${CLAUDE_SESSION_ID}" [--repo <target>] [--no-watch-ci]
 ```
+
+`--session-id "${CLAUDE_SESSION_ID}"` is always passed, in every scope (path mode included): the
+script reads the session's model from that session's transcript to name it in the commit trailer —
+your own model, the fork's, is not the one that wrote the code.
 
 Pass the **same `--repo <target>`** you resolved in Step 1 — omit it only for `--all` / `all of
 them`, and in path mode (`--repo-path "<path>"` alone, never with `--root`/`--repo`). Add `--dry-run` first if the plan looked surprising — it prints what each repo would get,

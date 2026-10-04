@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit | /absolute/repo/path> or --all"
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(test -e:*), Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Read, Write
+allowed-tools: Bash(test -e:*), Bash(find:*), Bash(rg:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git checkout:*), Bash(git add:*), Bash(git commit:*), Bash(command -v prek:*), Bash(command -v pre-commit:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/commit_trailer.py:*), Read, Write
 ---
 
 # Commit — gitmoji convention
@@ -66,7 +66,7 @@ hand the whole lot to the script, which does every deterministic part in one sub
 ```
 ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
 ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply  --root "${CLAUDE_PROJECT_DIR}" \
-    --messages <file> --no-pr
+    --messages <file> --no-pr --session-id "${CLAUDE_SESSION_ID}"
 ```
 
 The plan groups repos by **diff fingerprint** — the common case for `--all` is one identical
@@ -97,15 +97,17 @@ means the commit is there, the second that nothing was committed. Derive no stat
     - `⚠️  missing pre-commit hooks` -> check repo criticality. For POCs/Assets, ignore. For Production, alert user and suggest adding security hooks.
 6. Apply the `branch-workflow` skill's Guard section before staging anything — it decides whether
   a feature branch is needed first. Follow what it says, then `git add <files>` and commit with the
-  attribution trailer built programmatically (never hand-assembled — an empty env var must drop the
-  line, not emit a broken URL):
+  attribution trailer produced by the script (never hand-assembled, never named after your own
+  model — you run a different model from the session's, and the script reads the session's):
 
   ```
-  trailer="Co-Authored-By: Claude <noreply@anthropic.com>"
-  [ -n "${CLAUDE_CODE_BRIDGE_SESSION_ID:-}" ] && trailer="$trailer
-  Claude-Session: https://claude.ai/code/$CLAUDE_CODE_BRIDGE_SESSION_ID"
+  trailer="$(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/commit_trailer.py --session-id "${CLAUDE_SESSION_ID}")"
   git commit -m "<message>" -m "$trailer"
   ```
 
-  `$CLAUDE_CODE_BRIDGE_SESSION_ID` is inherited from the parent even in a fork. Report
-  `<emoji> <subject>` (+ file list) and the branch you committed on.
+  The script prints the session's model line (`Co-Authored-By: Claude Sonnet 5 <...>`, or
+  `Claude Code (<model>)` for a non-Anthropic model) and, only when
+  `$CLAUDE_CODE_BRIDGE_SESSION_ID` is set, the `Claude-Session` line — no broken URL on an empty
+  variable. If the session cannot be read it prints the neutral `Co-Authored-By: Claude` line:
+  use what it prints, whatever it is. Report `<emoji> <subject>` (+ file list) and the branch you
+  committed on.

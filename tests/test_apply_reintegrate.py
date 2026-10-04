@@ -17,6 +17,7 @@ never silently dropped; a nested `sub/REPORT.md` is an ordinary repo file, not t
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import zipfile
@@ -37,20 +38,52 @@ sys.path.insert(0, str(SCRIPTS))
 import apply_reintegrate as ar  # noqa: E402
 
 
+# Identité fournie par l'environnement, jamais par `git config` : un `config` local écrit dans
+# `.git/config`, et si un `GIT_DIR` hérité du hook pointe vers le vrai repo, c'est lui qui le reçoit.
+_GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
+
+
+def _scrub_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop every inherited `GIT_*` variable, then set the throwaway test identity.
+
+    A git process running this suite (the pre-commit hook) exports `GIT_INDEX_FILE`, and
+    sometimes `GIT_DIR`: they redirect repo discovery whatever `-C` says, so a temp repo's
+    `init`/`add`/`commit`/`config` would land in the real repo's index and `.git/config`.
+    The scrub covers the test process too, so the code under test gets the same clean env.
+    """
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(key)
+    for key, value in _GIT_IDENTITY.items():
+        monkeypatch.setenv(key, value)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test runs with a scrubbed git environment."""
+    _scrub_git_env(monkeypatch)
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+def _init_repo(root: Path) -> None:
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    (root / "tracked.py").write_text('"""Doc."""\nx = 1\n')
+    _git(root, "add", "tracked.py")
+    _git(root, "commit", "-q", "-m", "initial")
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
-    root.mkdir()
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "test@example.com")
-    _git(root, "config", "user.name", "test")
-    (root / "tracked.py").write_text('"""Doc."""\nx = 1\n')
-    _git(root, "add", "tracked.py")
-    _git(root, "commit", "-q", "-m", "initial")
+    _init_repo(root)
     return root
 
 
@@ -60,6 +93,59 @@ def _zip_of(tmp_path: Path, name: str, entries: dict[str, str]) -> Path:
         for path, content in entries.items():
             zf.writestr(path, content)
     return archive
+
+
+def _witness_state(witness: Path) -> tuple[str, str, bytes, str]:
+    """Config, HEAD, raw index and status of a witness repo, to compare before/after."""
+    git_dir = witness / ".git"
+    status = subprocess.run(
+        ["git", "-C", str(witness), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return (
+        (git_dir / "config").read_text(),
+        (git_dir / "HEAD").read_text(),
+        (git_dir / "index").read_bytes(),
+        status,
+    )
+
+
+def _leak_hook_env(monkeypatch: pytest.MonkeyPatch, witness: Path) -> None:
+    """Point git at `witness` the way an outer git process does."""
+    monkeypatch.setenv("GIT_DIR", str(witness / ".git"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(witness / ".git" / "index"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(witness))
+
+
+class TestGitEnvIsolation:
+    def test_leaked_env_without_scrub_reaches_the_witness(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Control: the leak is real, so the test below can fail."""
+        witness = tmp_path / "witness"
+        _init_repo(witness)
+        before = _witness_state(witness)
+        _leak_hook_env(monkeypatch, witness)
+        temp = tmp_path / "temp"
+        temp.mkdir()
+        _git(temp, "config", "user.name", "leaky")
+        assert _witness_state(witness) != before
+        assert "leaky" in (witness / ".git" / "config").read_text()
+
+    def test_fixture_repo_leaves_a_hook_targeted_repo_untouched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        witness = tmp_path / "witness"
+        _init_repo(witness)
+        before = _witness_state(witness)
+        _leak_hook_env(monkeypatch, witness)
+        _scrub_git_env(monkeypatch)
+        _init_repo(tmp_path / "temp")
+        assert _witness_state(witness) == before
+        assert "GIT_DIR" not in os.environ
+        assert "user" not in (tmp_path / "temp" / ".git" / "config").read_text()
 
 
 class TestClassifyChange:
@@ -259,7 +345,7 @@ class TestUnbornHead:
     ) -> None:
         root = tmp_path / "fresh_repo"
         root.mkdir()
-        _git(root, "init", "-q")
+        _git(root, "init", "-q", "-b", "main")
         (root / "staged.py").write_text("x = 1\n")
         _git(root, "add", "staged.py")
         archive = _zip_of(tmp_path, "u1.zip", {"staged.py": "x = 1\n"})
