@@ -8,6 +8,11 @@
 
 set -uo pipefail
 
+# Un hook git (prek/pre-commit) exporte `GIT_INDEX_FILE`, parfois `GIT_DIR` : ils redirigent la
+# découverte du repo quel que soit `-C`, donc les `init`/`add`/`commit` des repos jetables ci-dessous
+# écriraient dans l'index et le `.git/config` du vrai repo. Purgés AVANT l'identité de test.
+for _v in $(compgen -e | grep '^GIT_' || true); do unset "$_v"; done
+
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bulk_commit.sh"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
@@ -142,6 +147,42 @@ check "Co-Authored-By trailer in the commit" \
     "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Co-Authored-By: Claude <noreply@anthropic.com>$')" 1
 check "Claude-Session trailer derived from the bridge id" \
     "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Claude-Session: https://claude.ai/code/session_TESTBRIDGE$')" 1
+
+# ── Trailer : le modèle de la session PRINCIPALE, lu dans son transcript via --session-id ──
+# Le fork commit-and-pr tourne `haiku` : nommer son modèle serait faux. Le transcript de la
+# session (`<config>/projects/<projet>/<session-id>.jsonl`) enregistre le vrai, quel que soit
+# le fournisseur ; sans id exploitable on retombe sur la ligne neutre (déjà vérifiée ci-dessus).
+sid="11111111-2222-3333-4444-555555555555"
+mkdir -p "$T/cfg/projects/-tmp-trailermodel"
+printf '%s\n' \
+    '{"isSidechain":false,"attachment":{"type":"model","identity":{"modelId":"glm-5.3[1m]","marketingName":null,"knowledgeCutoff":null}},"type":"attachment","sessionId":"'"$sid"'"}' \
+    > "$T/cfg/projects/-tmp-trailermodel/$sid.jsonl"
+baretm="$T/origin-trailermodel.git"
+git init -q --bare -b main "$baretm"
+mkdir -p "$T/trailermodel" && git -C "$T/trailermodel" init -q -b main
+git -C "$T/trailermodel" remote add origin "$baretm"
+git -C "$T/trailermodel" commit -q --allow-empty -m init
+git -C "$T/trailermodel" push -q -u origin main
+git -C "$T/trailermodel" remote set-head origin main
+git -C "$T/trailermodel" checkout -q -b feature/trailermodel
+printf 'def h():\n    return 3\n' > "$T/trailermodel/lib.py"
+plantrailermodel="$("$SCRIPT" plan --root "$T" --repo trailermodel 2>&1)"
+fptrailermodel="$(printf '%s' "$plantrailermodel" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: add h\n' "$fptrailermodel" > "$T/mtrailermodel.tsv"
+PATH="$ghbin:$PATH" CLAUDE_CONFIG_DIR="$T/cfg" \
+    "$SCRIPT" apply --root "$T" --repo trailermodel --messages "$T/mtrailermodel.tsv" --session-id "$sid" --no-watch-ci >/dev/null 2>&1
+check "non-Anthropic session model named in the trailer, [1m] stripped" \
+    "$(git -C "$T/trailermodel" log -1 --format=%B | grep -c '^Co-Authored-By: Claude Code (glm-5.3) <noreply@anthropic.com>$')" 1
+check "Claude-Session line kept next to the model line" \
+    "$(git -C "$T/trailermodel" log -1 --format=%B | grep -c '^Claude-Session: https://claude.ai/code/session_TESTBRIDGE$')" 1
+printf 'def k():\n    return 4\n' > "$T/trailermodel/lib2.py"
+plantrailermodel2="$("$SCRIPT" plan --root "$T" --repo trailermodel 2>&1)"
+fptrailermodel2="$(printf '%s' "$plantrailermodel2" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: add k\n' "$fptrailermodel2" > "$T/mtrailermodel2.tsv"
+PATH="$ghbin:$PATH" CLAUDE_CONFIG_DIR="$T/cfg" \
+    "$SCRIPT" apply --root "$T" --repo trailermodel --messages "$T/mtrailermodel2.tsv" --session-id '${CLAUDE_SESSION_ID}' --no-watch-ci >/dev/null 2>&1
+check "unsubstituted session id degrades to the neutral trailer" \
+    "$(git -C "$T/trailermodel" log -1 --format=%B | grep -c '^Co-Authored-By: Claude <noreply@anthropic.com>$')" 1
 
 # Le run foxtrot ci-dessus porte `--no-watch-ci` (le watch est ON par
 # défaut désormais) — donc aucun bloc CI, et `gh pr checks` jamais appelé.
