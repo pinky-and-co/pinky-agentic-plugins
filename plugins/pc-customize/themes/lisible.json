@@ -3,12 +3,12 @@
   "description": "High-contrast light theme — darker text, clearer message borders, built for readability over polish",
   "base": "light",
   "overrides": {
-    "userMessageBackground": "#e4e4e4",
-    "userMessageBackgroundHover": "#d8d8d8",
+    "userMessageBackground": "#FFE6F2",
+    "userMessageBackgroundHover": "#FFB8DA",
     "subtle": "#4a4a4a",
     "text": "#1a1a1a",
     "briefLabelYou": "#1a1a1a",
     "briefLabelClaude": "#1a1a1a",
-    "promptBorder": "#8a8a8a"
+    "promptBorder": "#FE2E93"
   }
 }
