@@ -393,7 +393,7 @@ def test_build_lines_oracle_rich_payload_readable_content(monkeypatch):
     assert "v2.1.228" in stripped[0]
     assert "🤖 Opus 4.8" in stripped[2]
     assert "💪 high" in stripped[2]
-    assert "⚡ fast" in stripped[2]
+    assert "⚡️ fast" in stripped[2]
     assert "🧠 ON" in stripped[2]
     assert "🎨 adhd" in stripped[2]
     assert "Session 🆔 abc123" in stripped[4]

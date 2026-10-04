@@ -55,7 +55,7 @@ _HEADROOM_CACHE = os.path.join(
     tempfile.gettempdir(), f"pc-statusline-headroom-{os.getuid()}.json"
 )
 
-_MIN_GAP = 10
+_MIN_GAP = 4
 _BLANK = "⠀"
 _SPACER_ROW = _BLANK
 
@@ -664,7 +664,7 @@ def build_lines(data: dict) -> list[str]:
         if warning:
             warnings.append(warning)
         if used is not None and used >= 100:
-            bg = RED_BG
+            bg = RED_BG + WHITE
 
     if warnings:
         line0_left_parts = [f"{bg} ⚠ RATE LIMIT — {' | '.join(warnings)} {RESET}"]
@@ -675,11 +675,11 @@ def build_lines(data: dict) -> list[str]:
     effort = _safe_get(data, "effort.level")
     thinking_on = _safe_get(data, "thinking.enabled", False)
     fast_on = _safe_get(data, "fast_mode", False)
-    style = _safe_get(data, "output_style.name", "default")
+    style = str(_safe_get(data, "output_style.name", "default")).split(":")[-1]
 
     effort_txt = f"💪 {effort}" if effort else f"{DIM}💪 —{RESET}"
     thinking_txt = "🧠 ON" if thinking_on else f"{DIM}🧠 off{RESET}"
-    fast_txt = "⚡ fast" if fast_on else f"{DIM}🐢 normal{RESET}"
+    fast_txt = "⚡️ fast" if fast_on else f"{DIM}🐢 normal{RESET}"
 
     advisor_model = _short_model(_get_advisor_model(transcript_path))
 
