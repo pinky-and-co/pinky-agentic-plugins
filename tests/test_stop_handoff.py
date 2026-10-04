@@ -786,7 +786,7 @@ class TestListAgentLogsCLI(unittest.TestCase):
             (nested / "2026-09-26_claude-code-Perrine_a.md").write_text(
                 "# Nested entry\nbody\n"
             )
-            stale = board / "_AGENT_LOG"  # pre-nesting sibling, no longer read
+            stale = board / "_AGENT_LOG"  # legacy sibling: must be ignored
             stale.mkdir()
             (stale / "2026-09-25_claude-code-Perrine_b.md").write_text(
                 "# Stale entry\nbody\n"

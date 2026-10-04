@@ -55,8 +55,8 @@ COMMIT_TRAILER="$SCRIPT_DIR/commit_trailer.py"
 
 # Chemins non gardés par la politique de branche : un commit qui ne touche QUE ces chemins va
 # directement sur la branche d'intégration, sans feature branch. Liste + `is_unguarded()`
-# mutualisées avec branch_guard.py, ce dossier (deux-hooks-branche-et-cout-de-lecture,
-# 2026-08-19) — voir branch_paths.sh pour le détail glob par glob (`uv.lock` notamment).
+# mutualisées avec branch_guard.py, ce dossier — voir branch_paths.sh pour le détail glob par
+# glob (`uv.lock` notamment).
 # shellcheck source=branch_paths.sh
 source "$SCRIPT_DIR/branch_paths.sh"
 
@@ -166,7 +166,7 @@ discover_repos() {
 # ── discover ──────────────────────────────────────────────────────────────────
 # READ-ONLY : le nom de base de chaque repo sale, un par ligne. Sert au skill à
 # résoudre le scope AVANT de lancer `plan` (qui, lui, stage). `plan` sans `--repo`
-# ferait `git add -A` sur tout le workspace — l'incident 2026-09-02.
+# ferait `git add -A` sur tout le workspace.
 #
 # Émet `NO-REPOS-FOUND` + exit non nul si AUCUN dépôt sous la racine (racine périmée,
 # workspace déplacé) — distinct de « des repos, tous propres » (sortie vide, exit 0),
@@ -281,9 +281,8 @@ do_plan() {
 # passage par une feature branch en demande une.
 #
 # Émet UNE ligne `<verdict>\t<url|->` sur stdout, jamais de prose : do_apply en dérive
-# l'état et la ligne humaine. verdict ∈ pr | pr-open | pr-na | pr-failed. C'est le
-# correctif de l'incident 2026-09-02 : le silence d'open_pr sur un commit direct laissait
-# l'agent forké inventer « PR created ». `|| true` partout : `gh`/`glab` échouent
+# l'état et la ligne humaine. verdict ∈ pr | pr-open | pr-na | pr-failed. Sans ce verdict,
+# le silence d'open_pr sur un commit direct laisserait l'agent forké inventer « PR created ». `|| true` partout : `gh`/`glab` échouent
 # normalement (pas d'auth, quota) et `set -e` tuerait le lot sur une capture d'URL ratée.
 
 # Dernière URL de la sortie `gh`/`glab` : `pr create` l'imprime en dernière ligne,
@@ -823,8 +822,7 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
 
     # Bloc machine : l'agent (Step 4 du skill) le reproduit tel quel, sans en dériver une
     # phrase absente. `state` ∈ pushed-pr | pushed-nopr | pushed-prfailed | commit-nopush
-    # | push-conflict | skipped | failed. Correctif de l'incident 2026-09-02 (résumé
-    # forké inventé). Pour `push-conflict`, la colonne 3 est un chemin de fichier
+    # | push-conflict | skipped | failed. Pour `push-conflict`, la colonne 3 est un chemin de fichier
     # (liste des fichiers en conflit), pas une URL — cf. push_with_recovery().
     # Sauté en `--dry-run` : rien n'a été fait, un bloc vide serait un piège pour l'agent.
     if [ "$dry" != "yes" ]; then

@@ -207,7 +207,7 @@ def test_main_never_crashes_on_adversarial_json_shapes():
         )
 
 
-# --- agent type, read from the subagent's meta.json ----------------------------------------
+# --- agent type, read from the subagent metadata -------------------------------------------
 
 
 def _write_meta(tmp_path: Path, task_id: str, body: str) -> Path:

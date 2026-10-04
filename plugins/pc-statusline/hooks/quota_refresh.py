@@ -16,9 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import _quota  # noqa: E402
 
 # Seconds a cache stays good enough per event. A session start always fetches; prompt/turn edges
-# only collapse duplicate firings; the tool edge fires after every tool call, so it is what keeps
-# `used` current during one long turn — throttled to a couple of minutes, since the 5h window
-# burns over tens of minutes and a fresher reading would only be polling.
+# only collapse duplicate firings; the tool edge keeps `used` current through one long turn,
+# throttled to minutes — the 5h window burns over tens of minutes, fresher would be polling.
 MIN_AGE_S = {"session": 0, "prompt": 10, "stop": 10, "tool": 120}
 
 
