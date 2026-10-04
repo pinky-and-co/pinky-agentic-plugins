@@ -16,6 +16,9 @@ SCRIPT = (
 )
 
 
+DEFINER = "# D\n\n## Requirements\n\n| Id | P | E | C |\n|---|---|---|---|\n| PKG-0001-01 | MUST | x | y |\n"
+
+
 def _run(board: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--board", str(board), *args],
@@ -37,9 +40,10 @@ def _card(
         f"---\ndate: 2026-01-01\n{head}---\n# Demo\n\n## Done when\n\nx\n",
         encoding="utf-8",
     )
-    story = root / "CHANTIER0001-x" / "story.md"
-    if not story.exists():
-        story.write_text("| PKG-0001-01 | MUST | x | y |\n", encoding="utf-8")
+    definer = root / "CHANTIER0001-x" / "0-ideas" / "definer.md"
+    if not definer.exists():
+        definer.parent.mkdir(parents=True, exist_ok=True)
+        definer.write_text(DEFINER, encoding="utf-8")
     return card
 
 
@@ -155,7 +159,20 @@ def test_select_refuses_a_requirement_the_story_does_not_declare(
     card = _card(tmp_path, "1-todo", head="model: opus\nrequirements: [PKG-0099-99]\n")
     result = _run(tmp_path, "select", "demo")
     assert result.returncode == 1
-    assert "requirement PKG-0099-99 is not declared" in result.stderr
+    assert "requirement PKG-0099-99 is not defined" in result.stderr
+    assert card.exists()
+
+
+def test_select_refuses_an_id_defined_only_in_an_archived_card(
+    tmp_path: Path,
+) -> None:
+    card = _card(tmp_path, "1-todo", head="model: opus\nrequirements: [PKG-0001-02]\n")
+    archived = tmp_path / "_ARCHIVE" / "CHANTIER0001-done" / "2026-01-02_old.md"
+    archived.parent.mkdir(parents=True)
+    archived.write_text(DEFINER.replace("PKG-0001-01", "PKG-0001-02"), encoding="utf-8")
+    result = _run(tmp_path, "select", "demo")
+    assert result.returncode == 1
+    assert "PKG-0001-02 is not defined" in result.stderr
     assert card.exists()
 
 
@@ -166,8 +183,9 @@ def test_select_inserts_a_missing_date(tmp_path: Path) -> None:
         "---\nmodel: sonnet\nrequirements: [PKG-0001-01]\n---\n## Done when\nx\n",
         encoding="utf-8",
     )
-    (tmp_path / "CHANTIER0001-x" / "story.md").write_text(
-        "| PKG-0001-01 | MUST | x | y |\n", encoding="utf-8"
+    (tmp_path / "CHANTIER0001-x" / "0-ideas").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "CHANTIER0001-x" / "0-ideas" / "definer.md").write_text(
+        DEFINER, encoding="utf-8"
     )
     assert _run(tmp_path, "select", "demo").returncode == 0
     moved = tmp_path / "CHANTIER0001-x" / "2-selected-for-dev" / "demo.md"
@@ -187,3 +205,12 @@ def test_force_does_not_skip_the_other_conditions(tmp_path: Path) -> None:
     assert "`model:`" in result.stderr
     assert "`requirements:`" not in result.stderr
     assert card.exists()
+
+
+def test_select_accepts_an_id_still_defined_in_the_story(tmp_path: Path) -> None:
+    _card(tmp_path, "1-todo", head="model: sonnet\nrequirements: [PKG-0001-05]\n")
+    (tmp_path / "CHANTIER0001-x" / "story.md").write_text(
+        DEFINER.replace("PKG-0001-01", "PKG-0001-05"), encoding="utf-8"
+    )
+    result = _run(tmp_path, "select", "demo")
+    assert result.returncode == 0, result.stderr

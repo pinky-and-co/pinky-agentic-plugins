@@ -1,13 +1,13 @@
 ---
 name: grill
-description: Interview a plan, an idea or an imported brief until nothing is silently assumed, then write the result as a chantier story with numbered, verifiable requirements. Use before starting a chantier, to stress-test a design, or to land an external brainstorm (written elsewhere, in another tool) into the board.
+description: Interview a plan, an idea or an imported brief until nothing is silently assumed, then write the result into the chantier's cards — numbered, verifiable requirements, open questions and steps, each in the card that carries it. Use before starting a chantier, to stress-test a design, or to land an external brainstorm (written elsewhere, in another tool) into the board.
 argument-hint: "[<path-to-an-existing-brief>] [free-text idea]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(find:*), Bash(rg:*), Bash(git log:*), Bash(git remote:*), Bash(command -v:*), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(find:*), Bash(rg:*), Bash(git log:*), Bash(git remote:*), Bash(command -v:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), AskUserQuestion
 ---
 
 # Grill
 
-Turns an intention into a story someone else can build from. The value is not the document — it is
+Turns an intention into cards someone else can build from. The value is not the document — it is
 the **questions that get asked before anyone writes code**. Someone who has designed systems for
 years asks them without noticing; someone who has not does not know they exist. This skill
 enumerates them in dependency order so that ignorance of the question is no longer the failure mode.
@@ -19,7 +19,8 @@ enumerates them in dependency order so that ignorance of the question is no long
 | nothing, or a free-text idea | the user |
 | a path to an existing brief/design doc | **the document first**, the user only for what it leaves unanswered |
 
-Both produce the same artefact: the chantier's story file (schema and columns: skill `kanban`).
+Both produce the same artefacts: the chantier's story (`## Objective`, `## Scope`) and the cards
+that carry the work (schema and columns: skill `kanban`).
 An external brainstorm is not a rival input format — it is the same interview, already half done
 somewhere else.
 
@@ -83,8 +84,8 @@ which claims were measured and which were assumed, and the questions nobody aske
 So run the same frontier, and route each question to one of three outcomes:
 
 1. **Answered by the document** → record the decision *and where in the document it came from*.
-2. **Left open by the document** → a line under `## Open questions` only if implementation alone
-   can settle it; otherwise treat it as case 3 and ask the user in the next round.
+2. **Left open by the document** → a line under the carrying card's `## Open questions` only if
+   implementation alone can settle it; otherwise treat it as case 3 and ask the user in the next round.
 3. **Never asked** → this one, and only this one, goes to the user in the next round.
 
 Treat a stated cause the same way: a brief that asserts *why* something is the case states a
@@ -110,28 +111,34 @@ opens a branch, run its rounds, then ask once more.
 
 ## What the interview writes
 
-The story file, on the fixed template (skill `kanban` § The story file →
-`references/story-template.md`): `## Objective`, `## Scope`, `## Requirements`, `## Open questions`,
-`## Implementation priority`, nothing else. In particular:
+The story keeps only `## Objective` (one line, and the constraint that shapes everything else) and
+`## Scope` (skill `kanban` § The story file → `references/story-template.md`). Everything the
+interview settles about the work lands in **the card that carries it** (skill `kanban` § Card body):
 
-- **`## Objective`** — one line, and the constraint that shapes everything else.
 - **`## Requirements`** — the table, in the form the skill `kanban` § Requirements defines: id
   `{FAM}-{NNNN}-{NN}`, priority, statement, verification criterion. That norm is authoritative; do
-  not restate or bend it here.
+  not restate or bend it here. Take each new id from
+  `${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py --next-id <FAM> <chantier-dir>`. A
+  requirement is defined in one card only; another card that traces to it cites the id in its
+  frontmatter `requirements:`.
 - **`## Open questions`** — empty by default: the grill exists to close every question. An entry is
   allowed only when the answer can come solely from implementing, and it names what the
   implementation will reveal. A question the user can answer now is asked in a round, never
   written down.
-- **`## Implementation priority`** — what has to exist first for the rest to be testable.
+- **`## Steps`** — what has to exist first for the rest to be testable. An order *between* cards is
+  a `blocked_by`, never a list.
+
+An item no existing card carries gets a card of its own — `0-ideas` if it is not scoped yet. Nothing
+is left in the story for lack of a card.
 
 **The source card**, when the input was an existing `0-ideas` card (not free text, not an imported
-document), moves to `1-todo` on convergence — `date:` set to today, `requirements:` backfilled with
-the ids it now traces to. Never `drop` it: `kanban`'s drop mechanism is for a card confirmed
+document), moves to `1-todo` on convergence — `date:` set to today, its `## Requirements` written and
+`requirements:` listing the ids it now traces to. Never `drop` it: `kanban`'s drop mechanism is for a card confirmed
 obsolete, never for one whose own open questions the interview just closed. Document-mode input has
 no source card to move.
 
-No dated decision block, no state dump — a closed grill folds into `## Requirements` and
-`## Open questions` (the two rules in `references/story-template.md`).
+No dated decision block, no state dump — a closed grill folds into the cards' `## Requirements` and
+`## Open questions`.
 
 Every claim carries its status: measured (with what command or test), assumed, or decided by the
 user. Cards then trace back to these ids through their own `requirements` field.
@@ -162,8 +169,8 @@ visible in a sorted set and invisible in the order they were thought of.
   prescriptively, with its reason. Undecided stays optative; decided stays decided.
 - **Do not grill what is already settled.** A question the user has answered, in this session or in
   a document, is a fact to record, not a round to re-run.
-- **Stop at the story.** This skill does not implement, and does not open cards beyond the first
-  ones the priority order implies.
+- **Stop at the cards.** This skill does not implement, and opens no card beyond the ones that carry
+  what the interview settled.
 - **A goal already active on entry was set too early.** Say so: a Stop-hook goal fights this
   interview (the session cannot yield while the user thinks between rounds). The goal belongs
   *after* the grill, set from the `## Done when` this interview produces — `pc-kanban:chantier`'s

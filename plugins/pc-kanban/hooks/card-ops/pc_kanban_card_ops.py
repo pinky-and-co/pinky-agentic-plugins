@@ -30,6 +30,7 @@ COLUMNS = {
     "drop": ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress"),
     "select": ("1-todo",),
 }
+OPEN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress")
 MODELS = ("haiku", "sonnet", "opus", "fable")
 EMPTY = ("", "null", "~")
 ID_RE = re.compile(r"\b[A-Z]+-\d{4}-\d+\b")
@@ -157,6 +158,25 @@ def requirement_ids(head: list[str]) -> list[str]:
     return ids
 
 
+def requirements_section(text: str) -> list[str]:
+    """Collect the lines under every `## Requirements` heading of the given card texts.
+
+    Args:
+        text: One or several cards, concatenated.
+
+    Returns:
+        The lines of each `## Requirements` section.
+    """
+    lines: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].strip() == "Requirements"
+        elif inside:
+            lines.append(line)
+    return lines
+
+
 def selection_problems(
     card: Path, text: str, boards: list[Path], force: bool = False
 ) -> list[str]:
@@ -174,16 +194,25 @@ def selection_problems(
     head = frontmatter(text)
     problems = []
     ids = [] if force else requirement_ids(head)
+    declared = "\n".join(
+        c.read_text(encoding="utf-8", errors="ignore")
+        for col in OPEN_COLUMNS
+        for c in sorted((card.parent.parent / col).glob("*.md"))
+    )
     story = card.parent.parent / "story.md"
-    declared = story.read_text(encoding="utf-8") if story.is_file() else ""
+    if story.is_file():  # une story pas encore migrée garde sa table de requirements
+        declared += "\n" + story.read_text(encoding="utf-8", errors="ignore")
     if not ids and not force:
         problems.append(
             "no `requirements:` — a card traces to at least one requirement"
         )
     problems += [
-        f"requirement {i} is not declared in the chantier's story"
+        f"requirement {i} is not defined in any open card's `## Requirements` (nor the story's)"
         for i in ids
-        if not re.search(rf"(?m)^\|\s*{re.escape(i)}\s*\|", declared)
+        if not any(
+            re.search(rf"^\|\s*{re.escape(i)}\s*\|", line)
+            for line in requirements_section(declared)
+        )
     ]
     if field(head, "model") not in MODELS:
         problems.append(

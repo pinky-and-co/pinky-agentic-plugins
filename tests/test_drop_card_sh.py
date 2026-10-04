@@ -115,3 +115,12 @@ def test_refuses_to_overwrite_an_existing_archive_entry(tmp_path):
     assert result.returncode != 0
     assert "refusing to overwrite" in result.stderr
     assert card.exists()
+
+
+def test_leaves_story_md_untouched(tmp_path):
+    kanban = tmp_path / "_KANBAN"
+    card = _card(kanban, "0025", "1-todo", "foo.md")
+    story = card.parent.parent / "story.md"
+    story.write_bytes(b"| PKG-0025-1 | MUST | x | y |\n")
+    assert _run(str(card), "raison").returncode == 0
+    assert story.read_bytes() == b"| PKG-0025-1 | MUST | x | y |\n"

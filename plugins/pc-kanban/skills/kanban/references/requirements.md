@@ -1,7 +1,7 @@
-# Requirements — the norm a story's `## Requirements` table follows
+# Requirements — the norm a card's `## Requirements` table follows
 
 Referenced from the `requirements` field in `SKILL.md`. Read this when writing or reading a
-chantier story's requirements table; the method for *finding* requirements is the skill `grill`.
+card's requirements table; the method for *finding* requirements is the skill `grill`.
 
 Cards trace to requirements; this is what a requirement has to be for the trace to mean anything.
 The method for *finding* them is the skill `grill` — this section is only the written form.
@@ -41,5 +41,5 @@ from the table, and no requirement is invented to fill a row.
 - **Verification criterion** — measurable and objective: a command, a test path, a threshold with
   its range. "Verified by inspection" is acceptable; "obviously true" is not.
 
-The **rationale** — why the requirement is necessary — belongs in the story's prose above the table,
+The **rationale** — why the requirement is necessary — belongs in the card's prose above the table,
 never inside the statement: mixing them makes the statement untestable and the reason unfindable.

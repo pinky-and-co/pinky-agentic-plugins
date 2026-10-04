@@ -292,7 +292,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── pc_kanban_pending_user_action.py
 │   │   │   │   │   ├── pc_kanban_plugin_scope_lib.py
 │   │   │   │   │   ├── resolve_repos.sh
-│   │   │   │   │   └── retire_requirements.py
+│   │   │   │   │   └── story_view.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── grill/
 │   │   │   │   └── SKILL.md
@@ -509,13 +509,13 @@ pinky-agentic-plugins/
 │   ├── test_reconcile.py
 │   ├── test_reconcile_oracle.py
 │   ├── test_repo_path_flag.py
-│   ├── test_retire_requirements.py
 │   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
 │   ├── test_settings_commit_nudge.py
 │   ├── test_statusline.py
 │   ├── test_statusline_common.py
 │   ├── test_stop_handoff.py
+│   ├── test_story_view.py
 │   ├── test_structure_guard.py
 │   ├── test_subagent_statusline.py
 │   ├── test_subtree.py

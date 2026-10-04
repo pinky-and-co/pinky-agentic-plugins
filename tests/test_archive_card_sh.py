@@ -68,3 +68,11 @@ def test_refuses_missing_card(tmp_path: Path) -> None:
     result = _run(str(tmp_path / "nowhere.md"))
     assert result.returncode == 1
     assert "no such card" in result.stderr
+
+
+def test_leaves_story_md_untouched(tmp_path: Path) -> None:
+    card = _card(tmp_path, "4-done")
+    story = card.parent.parent / "story.md"
+    story.write_bytes(b"| PKG-0099-1 | MUST | x | y |\n")
+    assert _run(str(card)).returncode == 0
+    assert story.read_bytes() == b"| PKG-0099-1 | MUST | x | y |\n"
