@@ -205,3 +205,70 @@ def test_main_never_crashes_on_adversarial_json_shapes():
         assert result.returncode == 0, (
             f"subagent_statusline.py exited {result.returncode} on input {raw!r}\n{result.stderr}"
         )
+
+
+# --- agent type, read from the subagent's meta.json ----------------------------------------
+
+
+def _write_meta(tmp_path: Path, task_id: str, body: str) -> Path:
+    transcript = tmp_path / "session.jsonl"
+    meta_dir = tmp_path / "session" / "subagents"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / f"agent-{task_id}.meta.json").write_text(body, encoding="utf-8")
+    return transcript
+
+
+def test_agent_type_reads_the_meta_json_next_to_the_transcript(tmp_path):
+    transcript = _write_meta(
+        tmp_path, "t1", json.dumps({"agentType": "general-purpose"})
+    )
+    assert sal._agent_type(str(transcript), "t1") == "general-purpose"
+
+
+def test_agent_type_is_none_when_the_meta_json_is_missing_or_unreadable(tmp_path):
+    transcript = _write_meta(tmp_path, "t1", "not json {")
+    assert sal._agent_type(str(transcript), "t1") is None
+    assert sal._agent_type(str(transcript), "absent") is None
+    assert sal._agent_type(None, "t1") is None
+
+
+def test_render_task_oracle_with_agent_type():
+    task = {
+        "id": "t1",
+        "name": "worker",
+        "description": "Fix flaky test",
+        "status": "running",
+        "model": "claude-haiku-4-5",
+        "effort": "high",
+        "tokenCount": 5000,
+        "contextWindowSize": 200000,
+    }
+    stripped = _strip_ansi(
+        sal.render_task(task, columns=120, agent_type="general-purpose")["content"]
+    )
+    assert stripped == (
+        "Running ⚙️ worker · 🧬 general-purpose · 🤖 Haiku 4.5 · 💪 : high · "
+        f"{_strip_ansi(sal._mini_bar(2))} 2%"
+    )
+
+
+def test_main_shows_the_agent_type_from_meta_json(tmp_path):
+    import subprocess
+
+    transcript = _write_meta(
+        tmp_path, "t1", json.dumps({"agentType": "general-purpose"})
+    )
+    payload = {
+        "columns": 120,
+        "transcript_path": str(transcript),
+        "tasks": [{"id": "t1", "description": "Fix flaky test", "status": "running"}],
+    }
+    result = subprocess.run(
+        [sys.executable, str(HOOKS / "subagent_statusline.py")],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+    )
+    assert "🧬 general-purpose" in _strip_ansi(json.loads(result.stdout)["content"])

@@ -9,6 +9,7 @@ Un id absent du flux de sortie garde le rendu par défaut de Claude Code.
 
 import json
 import sys
+from pathlib import Path
 
 from _common import (
     BLUE,
@@ -16,6 +17,7 @@ from _common import (
     DIM,
     GREEN,
     GREY,
+    MAGENTA,
     RED,
     RESET,
     YELLOW,
@@ -83,7 +85,23 @@ def _visible_len(s):
     return out
 
 
-def render_task(task: dict, columns: int) -> dict | None:
+def _agent_type(transcript_path: str | None, task_id: str) -> str | None:
+    """`agentType` of a subagent, read from `<transcript>/subagents/agent-<id>.meta.json`, or
+    None when that file is missing or unreadable (layout observed, not a documented contract)."""
+    if not transcript_path:
+        return None
+    meta = (
+        Path(transcript_path).with_suffix("")
+        / "subagents"
+        / f"agent-{task_id}.meta.json"
+    )
+    try:
+        return json.loads(meta.read_text(encoding="utf-8")).get("agentType")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def render_task(task: dict, columns: int, agent_type: str | None = None) -> dict | None:
     """Build the `{"id": ..., "content": ...}` line for one task, or None to skip it (an id
     absent from the output falls back to Claude Code's default rendering for that row — the
     schema's own graceful-degradation path, reused here instead of inventing another one)."""
@@ -92,6 +110,13 @@ def render_task(task: dict, columns: int) -> dict | None:
         return None
 
     name = task.get("name") or task.get("label") or task.get("type") or "agent"
+    subagent = agent_type or (
+        (str(task.get("description")).split(" ")[0]).split(":")[-1].replace("/", "")
+    )
+    if name == subagent:
+        subagent = ""
+    else:
+        subagent = f"{SEP}{MAGENTA}🧬 {subagent}"
     status = (task.get("status") or "").lower()
     status_emoji = (
         status.capitalize().replace("-", " ") + " " + STATUS_EMOJI.get(status, "▪️")
@@ -122,7 +147,7 @@ def render_task(task: dict, columns: int) -> dict | None:
     if len(name) > name_budget:
         name = name[: max(1, name_budget - 1)] + "…"
 
-    content = f"{status_emoji} {BLUE}{name}{RESET}{suffix}"
+    content = f"{status_emoji} {BLUE}{name}{subagent}{RESET}{suffix}"
     return {"id": task_id, "content": content}
 
 
@@ -153,7 +178,11 @@ def main():
         if not isinstance(task, dict):
             continue
         try:
-            line = render_task(task, columns)
+            line = render_task(
+                task,
+                columns,
+                _agent_type(data.get("transcript_path"), str(task.get("id"))),
+            )
         except Exception as e:
             print(
                 json.dumps({"error": str(e), "task_id": task.get("id")}),

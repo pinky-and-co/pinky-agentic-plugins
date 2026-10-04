@@ -664,12 +664,10 @@ def build_lines(data: dict) -> list[str]:
         if warning:
             warnings.append(warning)
         if used is not None and used >= 100:
-            bg = RED_BG
+            bg = RED_BG + WHITE
 
     if warnings:
-        line0_left_parts = [
-            f"{bg}{WHITE} ⚠ RATE LIMIT — {' | '.join(warnings)} {RESET}"
-        ]
+        line0_left_parts = [f"{bg} ⚠ RATE LIMIT — {' | '.join(warnings)} {RESET}"]
     else:
         line0_left_parts = [_BLANK]
 
