@@ -229,6 +229,10 @@ _RATE_LIMIT_FLOOR_PCT = {"five_hour": 75, "seven_day": 90}
 # With less than this before the reset, the wall is not worth a warning: the window is about to
 # renew anyway.
 _RATE_LIMIT_MIN_RESET_S = 3600
+# From this percentage up, the projected wall is hidden: `used_percentage` is an integer, and near
+# 100% one point halves the projection `elapsed * (100 - u) / u` (0 at 100). Such a figure would
+# claim a precision the payload lacks, so only the observed state is shown.
+_RATE_LIMIT_PROJECTION_CEILING_PCT = 98
 
 
 def _rate_limit_wall_seconds(used_pct, resets_at, window_s, now=None):
@@ -258,8 +262,10 @@ def _rate_limit_warning(label, key, used, resets_at):
     """One warning fragment for a rate-limit window, or `None` to stay silent.
 
     Silent below the window's floor (`_RATE_LIMIT_FLOOR_PCT`). At 100% or with no `resets_at`,
-    the percentage is all there is to show. Otherwise a warning only appears when the projection
-    says the quota won't last until the reset, expressed as time rather than a percentage."""
+    the percentage is all there is to show. From `_RATE_LIMIT_PROJECTION_CEILING_PCT` up the
+    projection is too unstable to print, so the observed percentage is shown (still silent when
+    the reset is imminent). Below it, a warning only appears when the projection says the quota
+    won't last until the reset, expressed as time rather than a percentage."""
     if used is None or used < _RATE_LIMIT_FLOOR_PCT[key]:
         return None
     if not resets_at:
@@ -270,6 +276,13 @@ def _rate_limit_warning(label, key, used, resets_at):
             f"reset {_fmt_epoch(resets_at)})"
         )
     now = datetime.now().timestamp()
+    if used >= _RATE_LIMIT_PROJECTION_CEILING_PCT:
+        if resets_at - now <= _RATE_LIMIT_MIN_RESET_S:
+            return None
+        return (
+            f"{label}: {used:.0f}% (in {_fmt_duration_until(resets_at)}, "
+            f"reset {_fmt_epoch(resets_at)})"
+        )
     wall = _rate_limit_wall_seconds(used, resets_at, _RATE_LIMIT_WINDOW_S[key], now)
     if wall is None:
         return None
@@ -279,6 +292,17 @@ def _rate_limit_warning(label, key, used, resets_at):
         f"{label}: limit in {wall_txt} "
         f"(reset in {_fmt_duration_until(resets_at)}, {_fmt_epoch(resets_at)})"
     )
+
+
+def _rate_limit_banner_rows(warnings, bg):
+    """One banner row per warning, stacked without a spacer row between them. Every row is padded
+    to the widest warning's visible width *inside* the background colour, so the coloured block
+    is a clean rectangle rather than a ragged edge when the two warnings differ in length."""
+    width = max((_visible_len(w) for w in warnings), default=0)
+    return [
+        f"{bg} ⚠ RATE LIMIT — {w}{' ' * (width - _visible_len(w))} {RESET}"
+        for w in warnings
+    ]
 
 
 def _count_subagents(transcript_path, session_id):
@@ -666,10 +690,11 @@ def build_lines(data: dict) -> list[str]:
         if used is not None and used >= 100:
             bg = RED_BG + WHITE
 
-    if warnings:
-        line0_left_parts = [f"{bg} ⚠ RATE LIMIT — {' | '.join(warnings)} {RESET}"]
-    else:
-        line0_left_parts = [_BLANK]
+    # One row per warning; the version rides on the first row only. The extra rows have no right
+    # group, so they sit outside `_content_widths` (which measures left and right groups
+    # independently and would push the right column a whole `max_right` past the banner).
+    banner_rows = _rate_limit_banner_rows(warnings, bg) if warnings else [_BLANK]
+    line0_left_parts = [banner_rows[0]]
 
     model = _safe_get(data, "model.display_name", "?")
     effort = _safe_get(data, "effort.level")
@@ -775,8 +800,18 @@ def build_lines(data: dict) -> list[str]:
         ]
     )
     right_edge = max_left + max_right + _MIN_GAP
+    # The banner row counts too: its own natural width (banner + gap + version) is a floor for the
+    # right column, otherwise the version lands at `banner + gap` instead of on the column every
+    # other row uses. All banner rows are equally wide, so measuring the first is enough.
+    right_edge = max(
+        right_edge,
+        _visible_len(SEP.join(line0_left_parts))
+        + _MIN_GAP
+        + _visible_len(SEP.join(line0_right_parts)),
+    )
 
     lines.append(_render_flex(line0_left_parts, line0_right_parts, right_edge))
+    lines.extend(banner_rows[1:])
     lines.append(_SPACER_ROW)
     lines.append(_render_flex(line1_left_parts, line1_right_parts, right_edge))
     lines.append(_SPACER_ROW)
