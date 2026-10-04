@@ -3,33 +3,44 @@
 Referenced from `SKILL.md`. Read before writing or pruning a story.
 
 The story file is re-read in full on every orientation (the orchestrator's board report, every
-spawned worker loading its card's requirements). Every line pays rent on a repeat read, so the
-structure is fixed and closed:
+spawned worker). Every line pays rent on a repeat read, so the structure is fixed and closed:
 
 ```
 # Chantier NNNN — <name>
 
 ## Objective                 — one line + the constraint that shapes the rest
 ## Scope                     — in / out, dated
-## Requirements              — the table: id · priority · statement · verification criterion
-## Open questions            — what is knowingly undecided
-## Implementation priority   — ordered list of what must exist first
 ```
 
 Section headers are English even when the statements are not — they are structural markers, not
-prose. `## Requirements` follows [requirements.md](requirements.md) — id format, the five families,
-the four invariants, the table's columns.
+prose.
 
-## Three rules
+## Where the rest lives
 
-- **No session-narrated prose.** No `## Decisions (grill YYYY-MM-DD)` block, no `## State` dump.
-  When a grill closes, its outcome folds into `## Requirements` and `## Open questions`.
-- **A delivered requirement leaves the table when its card leaves the board** — mechanically:
-  `archive_card.sh`/`drop_card.sh` call `retire_requirements.py`, which removes the rows the
-  card's frontmatter `requirements` lists — unless another open card still carries the id — and
-  copies them verbatim into the archived card (the board is not versioned; that copy is the only
-  way back). `drop_card.sh --keep-requirements` keeps the story when the need survives the card.
-  The durable form of a delivered requirement is the code, never this table.
-- **A retired requirement is deleted**, never struck through; its id stays burnt.
+Requirements, open questions and steps live in **the card that carries them** (`SKILL.md` § Card
+body), never in the story: an item in the story has no card to leave with, so nothing ever retires
+it. A card leaving the board takes its items with it — archived, they stay readable in the card,
+the only way back on an unversioned board. An item no card carries becomes a card (`0-ideas` if not
+scoped yet).
 
-A story past ~200 lines has accreted prose — prune it back to the template, don't grow the file.
+The chantier-wide view — every requirement of the open cards, their open questions, the open cards
+with blockers first, and any id cited by an open card but defined in none — is rebuilt on demand:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py" <chantier-dir>
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py" --next-id <FAM> <chantier-dir>
+```
+
+`--next-id` counts open cards, the chantier's archive and the story, so a burnt id is never reused.
+A story still carrying a `## Requirements` table is read as one more definer — by the view and by
+`move-card select` — until its rows are moved into their cards.
+
+## Two rules
+
+- **No session-narrated prose.** No `## Decisions (grill YYYY-MM-DD)` block, no `## State` dump. A
+  decision that shapes the whole chantier folds into `## Scope`, phrased for the present.
+- **A card leaving the board while another open card still cites one of its ids** — archived or
+  dropped — first hands those rows to an open card; otherwise they leave with it and `story_view.py`
+  flags the citation as defined nowhere.
+
+A story past ~50 lines has accreted card content — move it into its card, don't grow the file.

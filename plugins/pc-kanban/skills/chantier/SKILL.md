@@ -2,7 +2,7 @@
 name: chantier
 description: Resume a chantier — load its story, cards and in-progress handoff from the kanban boards visible to this session, then report state and take the next card. Use when the user says "resume chantier NNNN", "reprends le chantier", or names a chantier id/slug.
 argument-hint: "<chantier-id-or-slug-substring> [free-text instruction]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(ls:*), Bash(find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/drop_card.sh:*), Bash(mv:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(ls:*), Bash(find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/drop_card.sh:*), Bash(mv:*), Read, Edit, AskUserQuestion
 ---
 
 # Chantier
@@ -35,7 +35,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 2. **List its cards.** `ls` the matched chantier's column dirs
   (`0-ideas/ 1-todo/ 2-selected-for-dev/ 3-in-progress/ 4-done/`) — lazily, only this chantier.
   Most dormant chantiers have no `2-selected-for-dev/` — absent is normal.
-3. **Read the story** (the chantier's spec file at its root) — the why / scope / architecture.
+3. **Read the story** (the chantier's spec file at its root) — the objective and scope — then its
+  open cards' requirements, open questions and blockers-first order, rebuilt on demand:
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py" <chantier-dir>
+  ```
+  A `Warning: cited but defined in no open card` line is worth one line in the report.
 4. **Read the live state, in priority order:**
   - `3-in-progress/` first — an in-progress card is the thread to resume.
   - `2-selected-for-dev/` — the work order, not a queue to browse: if non-empty, its highest
@@ -175,8 +180,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     ```
    - **Grill gate — before the goal.** Set the goal only when the card is execution-ready: its
     `## Done when` is a concrete demonstrable state and its requirements are settled. **If the card
-    still carries open design questions** — a `## Options to explore` / `## To decide` /
-    `## Open questions` section, a "grill before coding" note, `requirements: []` on a card that is not
+    still carries open design questions** — a `## Options to explore` / `## To decide`
+    section, an `## Open questions` entry the user could answer now (one only implementation can
+    settle does not count), a "grill before coding" note, `requirements: []` on a card that is not
     a single mechanical change, or a written *cause* the plan rests on (`verify-diagnosis`) — do
     **not** emit the goal block. The grill can rewrite the `## Done when` out from under it, and an
     active Stop-hook goal fights a multi-turn interview: the session cannot yield while the user
@@ -228,7 +234,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     tool`. An active `/goal` blocks the turn from ending even when the only way forward needs the
     user — without this branch the pasted command queues silently instead of running (repro: a
     session whose tools died mid-turn from `anthropics/claude-code#90135`, so the deadlock itself is
-    *assumed*, not confirmed clean on healthy tools — see chantier 0025's story § Open questions).
+    *assumed*, not confirmed clean on healthy tools).
     Anti-cheat: the named action must be precise, nameable, and necessary — never a vague "I'm
     stuck", and never an action the agent could have run itself instead of yielding.
     Once `<condition>` is fully resolved (clauses included), queue this bullet's own `goal` key —

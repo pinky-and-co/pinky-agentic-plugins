@@ -18,7 +18,7 @@ ordinary repo-scoped session shouldn't otherwise have — see the `permission-ch
 - **`chantier`** — resume a chantier: load its story, cards, and in-progress handoff, report
   state, and take the next card.
 - **`grill`** — interview a plan, idea, or imported brief until nothing is silently assumed, then
-  write it as a chantier story with numbered, verifiable requirements.
+  write it into the chantier's cards — numbered, verifiable requirements, open questions and steps.
 - **`kanban`** *(reference)* — the board's own mechanics: column lifecycle, card frontmatter
   schema, filiation, cross-agent log.
 - **`permission-change`** — toggle the PreToolUse permission guards: `careful` (confirm

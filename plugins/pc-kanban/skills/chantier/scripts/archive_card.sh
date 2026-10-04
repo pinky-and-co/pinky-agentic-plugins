@@ -3,8 +3,6 @@
 # e.g. archive_card.sh _KANBAN/CHANTIER0022-migration-.../4-done/foo.md
 # A reviewed card in 3-in-progress/ skips 4-done/ — the script refuses one without a checked
 # reviewed box.
-# Also retires from the chantier's story the requirements listed in the card's frontmatter
-# (retire_requirements.py) — unless another open card of the chantier still carries them.
 set -euo pipefail
 
 card="$1"
@@ -57,11 +55,3 @@ fi
 
 mv -- "$card" "$dest"
 echo "archived -> $dest"
-
-# Après le mv, comme dans drop_card.sh : un échec ici laisse une card archivée et une story intacte,
-# jamais une card encore en 4-done dont la story a déjà perdu ses exigences.
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-if ! python3 "$here/retire_requirements.py" "$dest" "$chantier_dir"; then
-  echo "card archived, but the story was not updated — re-run: python3 $here/retire_requirements.py $dest $chantier_dir" >&2
-  exit 1
-fi

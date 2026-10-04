@@ -46,11 +46,23 @@ session that needs it opens the folder. A cell that has grown a clause is over-c
 
 ## The story file
 
-A fixed template — `## Objective`, `## Scope`, `## Requirements`, `## Open questions`,
-`## Implementation priority`, nothing else — with two rules that keep it from accreting (no
-session-narrated prose, no struck-through rows). See
+A fixed template — `## Objective` and `## Scope`, nothing else. Requirements, open questions and
+steps live in the cards (§ Card body); `skills/chantier/scripts/story_view.py <chantier-dir>`
+rebuilds the chantier-wide view from the open cards on demand. See
 [references/story-template.md](references/story-template.md); read it before writing or pruning a
 story.
+
+## Card body
+
+Markdown under the frontmatter. `## Why` and `## Done when` on every card; the three below only
+when the card has something to put there — an empty section is left out:
+
+- **`## Requirements`** — the table of the requirements this card defines (§ Requirements below for
+  its form). A requirement is defined in one card only.
+- **`## Open questions`** — what only implementing this card can settle.
+- **`## Steps`** — the order inside the card. An order between cards is `blocked_by`.
+
+Archiving or dropping the card takes all three with it; nothing is retired from anywhere else.
 
 ## Card frontmatter
 
@@ -121,23 +133,23 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   critical path a render off the board instead of a hand-maintained list: nothing enumerates what a
   parent needs, every child declares what it serves.
 
-- **`requirements`** — the requirement ids from the chantier's story that this card traces to, as a
-  list; `[]` or omitted = none. Orthogonal to `sert`: `sert` is card-to-card filiation (critical
+- **`requirements`** — the requirement ids this card traces to, as a list; `[]` or omitted = none. Orthogonal to `sert`: `sert` is card-to-card filiation (critical
   path), `requirements` is card-to-requirement traceability, and a card may trace to several
-  requirements where `sert` allows only one parent. A requirement id is only valid if the
-  chantier's story declares it with a verification criterion — never invent an id.
+  requirements where `sert` allows only one parent. A requirement id is only valid if an open card
+  of the chantier defines it in its `## Requirements` table with a verification criterion — this
+  card or another — never invent an id. `move-card select` refuses an id defined nowhere.
 
   **A chantier earns its requirements when it is reopened, never in a campaign.** Backfilling this
-  field across a sleeping chantier assumes its story already states requirements; where the story is
-  a stub, that is not a migration but the product work of writing the spec — and a table written for
+  field across a sleeping chantier assumes its requirements are already stated; where they are not,
+  that is not a migration but the product work of writing the spec — and a table written for
   work nobody is doing goes stale before it is read. So the requirements come from the interview that
   reopens the chantier (skill `grill`), and its cards are backfilled in the same session, while the
   content is loaded. Leave the field omitted until then; omitted and `[]` mean the same thing.
 
   What a requirement has to be for the trace to mean anything — id format, the five families, the
-  four invariants, the story table's columns — is the § Requirements of this skill. See
+  four invariants, the table's columns — is the § Requirements of this skill. See
   [references/requirements.md](references/requirements.md), and read it before writing or auditing
-  a story's table.
+  a card's table.
 
 - **`blocked_by`** — a hard dependency only, never a preference. Position inside
   `2-selected-for-dev` already carries ordering preference; conflating the two loses the distinction
@@ -238,7 +250,7 @@ sequentially between workers; see `references/finishing-a-card.md` § "Relaying 
 - A finished card with no ADR to write is archived straight from `3-in-progress/` (skill
   `move-card`, verb `archive`). `4-done/` holds only a card that carries a durable decision — a
   rejected alternative written nowhere else (code, skill, existing ADR) — until its ADR exists.
-  Nothing goes into the story: it holds the chantier's current state, never a card's history.
+  Nothing goes into the story: it holds the objective and scope, never a card's history.
   Archiving moves the card to `_ARCHIVE/CHANTIER{NNNN}-done/`, prefixed with the archive date —
   `YYYY-MM-DD_<filename>.md`, underscore, computed at archive time, not the card's own `date:` field
   (still "done since"). Never a bare `mv`; see `chantier` skill for the archiving mechanics.
