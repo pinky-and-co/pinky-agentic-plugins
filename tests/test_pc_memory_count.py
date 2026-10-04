@@ -588,8 +588,8 @@ def _worker(barrier, directory: str, cwd: str, prefix: str) -> None:
         )
 
 
-def test_forked_workers_incrementing_one_note_lose_nothing(home, repo, silo):
-    ctx = multiprocessing.get_context("fork")
+def test_spawned_workers_incrementing_one_note_lose_nothing(home, repo, silo):
+    ctx = multiprocessing.get_context("spawn")
     barrier = ctx.Barrier(4)
     workers = [
         ctx.Process(target=_worker, args=(barrier, str(silo), str(repo), f"w{i}"))
