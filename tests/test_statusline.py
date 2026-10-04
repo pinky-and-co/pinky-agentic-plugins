@@ -609,6 +609,132 @@ def test_rate_limit_warning_at_100pct_always_shows_the_percentage(monkeypatch):
     assert warning == "Weekly: 100% (in 6h, reset 13/08 00:00)"
 
 
+def _fixed_now_18h(monkeypatch):
+    import datetime as dt_mod
+
+    class _FixedDatetime(dt_mod.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 12, 18, 0, 0)
+
+    monkeypatch.setattr(sl, "datetime", _FixedDatetime)
+    return _FixedDatetime
+
+
+def test_rate_limit_warning_next_to_100pct_shows_the_state_not_a_projection(
+    monkeypatch,
+):
+    """Regression: 99% 128h into the weekly window used to print "limit in ~1h 18min" — a figure
+    the integer percentage cannot support (the wall is anywhere between 0 and 1h 18min)."""
+    fixed = _fixed_now_18h(monkeypatch)
+    resets_at = fixed.now().timestamp() + 39 * 3600 + 17 * 60
+    warning = sl._rate_limit_warning("Weekly", "seven_day", 99, resets_at)
+    assert warning == "Weekly: 99% (in 39h 17min, reset 14/08 09:17)"
+    assert "limit in" not in warning
+
+
+def test_rate_limit_projection_ceiling_is_98(monkeypatch):
+    fixed = _fixed_now_18h(monkeypatch)
+    resets_at = fixed.now().timestamp() + 32 * 3600
+    assert "limit in" in sl._rate_limit_warning("Weekly", "seven_day", 97, resets_at)
+    assert "limit in" not in sl._rate_limit_warning(
+        "Weekly", "seven_day", 98, resets_at
+    )
+
+
+def test_rate_limit_warning_next_to_100pct_stays_silent_when_reset_is_imminent(
+    monkeypatch,
+):
+    fixed = _fixed_now_18h(monkeypatch)
+    resets_at = fixed.now().timestamp() + 30 * 60
+    assert sl._rate_limit_warning("Weekly", "seven_day", 99, resets_at) is None
+
+
+def test_build_lines_99pct_weekly_keeps_the_yellow_background(monkeypatch):
+    """Red is reserved for >= 100% (credit usage); 99% must not light it."""
+    fixed = _fixed_now_18h(monkeypatch)
+    resets_at = fixed.now().timestamp() + 39 * 3600
+    data = {
+        "rate_limits": {"seven_day": {"used_percentage": 99, "resets_at": resets_at}}
+    }
+    line0 = sl.build_lines(data)[0]
+    assert sl.YELLOW_BG in line0
+    assert sl.RED_BG not in line0
+
+
+def test_rate_limit_banner_rows_pad_every_row_to_the_widest_inside_the_background():
+    rows = sl._rate_limit_banner_rows(["AB", "ABCDEF"], sl.YELLOW_BG)
+    assert [_strip_ansi(r) for r in rows] == [
+        " ⚠ RATE LIMIT — AB     ",
+        " ⚠ RATE LIMIT — ABCDEF ",
+    ]
+    assert len({sl._visible_len(r) for r in rows}) == 1
+    # the padding sits before RESET: it is coloured, not trailing blank space
+    assert all(r.startswith(sl.YELLOW_BG) and r.endswith(sl.RESET) for r in rows)
+
+
+def _two_warnings_data(fixed):
+    now = fixed.now().timestamp()
+    return {
+        "version": "2.1.289",
+        "rate_limits": {
+            "five_hour": {"used_percentage": 90, "resets_at": now + 2 * 3600},
+            "seven_day": {"used_percentage": 99, "resets_at": now + 39 * 3600},
+        },
+    }
+
+
+def test_build_lines_two_warnings_stack_on_two_rows_without_a_spacer(monkeypatch):
+    fixed = _fixed_now_18h(monkeypatch)
+    lines = sl.build_lines(_two_warnings_data(fixed))
+    stripped = [_strip_ansi(ln) for ln in lines]
+    assert "RATE LIMIT — Session: limit in ~20 min" in stripped[0]
+    assert "RATE LIMIT — Weekly: 99%" in stripped[1]
+    assert " | " not in stripped[0]
+    assert (
+        stripped[0].rstrip().endswith("v2.1.289")
+    )  # version rides on the first row only
+    assert "v2.1.289" not in stripped[1]
+    assert stripped[2].strip() == sl._SPACER_ROW  # one spacer after the whole block
+
+
+def test_build_lines_two_warnings_share_the_same_background_width(monkeypatch):
+    fixed = _fixed_now_18h(monkeypatch)
+    lines = sl.build_lines(_two_warnings_data(fixed))
+
+    def block_width(line):
+        start = line.index(sl.YELLOW_BG)
+        return sl._visible_len(line[start : line.index(sl.RESET, start)])
+
+    assert block_width(lines[0]) == block_width(lines[1])
+
+
+def test_build_lines_banner_row_counts_in_the_right_column_alignment(monkeypatch):
+    """Regression: the banner row was left out of the width calculation, so with a warning wider
+    than the other rows the version landed at `banner + gap`, off the shared right column."""
+    fixed = _fixed_now_18h(monkeypatch)
+    one = {
+        "version": "2.1.289",
+        "rate_limits": {
+            "seven_day": {
+                "used_percentage": 99,
+                "resets_at": fixed.now().timestamp() + 39 * 3600,
+            }
+        },
+    }
+    for data in (one, _two_warnings_data(fixed)):
+        lines = sl.build_lines(data)
+        banner_width = sl._visible_len(lines[0])
+        model_row = next(ln for ln in lines if "🤖" in ln)
+        assert sl._visible_len(model_row) == banner_width
+
+
+def test_build_lines_without_warning_the_version_row_still_aligns():
+    lines = sl.build_lines({"version": "2.1.289"})
+    model_row = next(ln for ln in lines if "🤖" in ln)
+    assert sl._visible_len(lines[0]) == sl._visible_len(model_row)
+
+
 def test_rate_limit_warning_no_resets_at_falls_back_to_the_percentage():
     assert sl._rate_limit_warning("Session", "five_hour", 80, None) == (
         "Session: 80% (reset ?)"
@@ -657,8 +783,7 @@ def test_write_rate_limit_state_missing_rate_limits_is_noop(tmp_path, monkeypatc
     assert list(tmp_path.iterdir()) == []
 
 
-# --- non-Anthropic quota: `main()` injects the active provider's cached quota, but only when the
-# harness sent no `rate_limits` — the adapter itself is covered in test_quota.py ------------------
+# --- non-Anthropic quota: `main()` injects the cached quota when no `rate_limits` were sent ---
 
 
 def _run_main(payload, base_url, tmp_path):

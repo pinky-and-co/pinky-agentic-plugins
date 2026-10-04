@@ -199,8 +199,8 @@ def test_free_text_with_a_strict_format_entity_is_still_flagged(tmp_path):
 
 @requires_model
 def test_xml_date_tags_with_a_utc_offset_are_not_phone_columns(tmp_path):
-    """`2021-10-01-07:00` comes back from Presidio as DATE_TIME (0.6) AND PHONE_NUMBER (0.4) on
-    the same span — the lower-scored phone guess must not make a date tag look like PII."""
+    """A timestamp-like span can come back from Presidio as both DATE_TIME (0.6) and PHONE_NUMBER (0.4)
+    — the lower-scored phone guess must not make a date tag look like PII."""
     body = "".join(
         f"<w:Worker><w:Hire_Date>2021-10-0{i}-07:00</w:Hire_Date>"
         f"<w:End_Date>2026-06-3{i % 2}-07:00</w:End_Date></w:Worker>"

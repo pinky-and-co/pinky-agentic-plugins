@@ -105,9 +105,6 @@ def test_zai_rate_limits_falls_back_to_reset_order_without_numbers():
     }
 
 
-# The payload of a real `lite` plan (fetched 2026-09-29): both windows are `CREDIT_LIMIT` — unit 3
-# / number 5 is the 5-hour window, unit 6 / number 1 the weekly one — and `percentage` is the
-# floored 0-100 share of `usage` (87 / 2000 = 4.35% -> 4).
 _LITE_FETCHED_AT = 1790666825.085985
 _LITE_PAYLOAD = {
     "code": 200,
