@@ -42,7 +42,7 @@ from _quota import provider_rate_limits
 enable_ansi_on_windows()
 force_utf8_stdout()
 
-WHITE = "\033[37m"
+WHITE = "\033[38;2;255;255;255m"
 YELLOW_BG = "\033[43;30m"
 RED_BG = "\033[41;30m"
 
