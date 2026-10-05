@@ -165,8 +165,8 @@ repos:
         types: [text]
         exclude: ^(scripts/hooks/|hygiene/hooks/|tests/test_check_(narrative_comments|requirement_ids)\.py$)
 
-  # ── Narrated history in comments and docstrings (warn-only) ───────────────
-  # `verbose: true` sur tout hook warn-only : sans lui, pre-commit masque la sortie d'un hook qui passe.
+  # ── Narrated history in comments and docstrings (bloquant) ────────────────
+  # Un nom de fichier légitime va en docstring, pas en commentaire — c'est l'échappatoire.
   - repo: local
     hooks:
       - id: check-narrative-comments
@@ -175,7 +175,6 @@ repos:
         language: python
         types: [python]
         exclude: ^scripts/hooks/
-        verbose: true
 
   # ── Commit message format ─────────────────────────────────────────────────
   - repo: local

@@ -9,8 +9,8 @@ A docstring may name a file: reading one is behaviour. A block of more than thre
 comments is flagged as well: a comment that clarifies fits in three lines; past that it narrates,
 or what it explains belongs in a docstring.
 
-Warn-only (exit 0), one ``path:line: kinds: text`` line per finding. Registered with
-``verbose: true``: pre-commit hides a passing hook's output otherwise.
+Blocking (exit 1 on any finding), one ``path:line: kinds: text`` line per finding. A file name
+belongs in a docstring, where reading it is behaviour — that is the escape hatch for ``file ref``.
 
 Python only: ``tokenize`` separates comments from string literals exactly, so a ``#`` inside a
 string is never read as a comment. The shebang, PEP 723 ``# /// script`` blocks and every tool
@@ -23,7 +23,6 @@ Usage (pre-commit local hook):
   entry: python scripts/hooks/check_narrative_comments.py
   language: python
   types: [python]
-  verbose: true
 """
 
 from __future__ import annotations
@@ -173,10 +172,10 @@ def _is_disabled() -> bool:
 
 
 def main() -> int:
-    """Print every narrative line of the files pre-commit passes; never block.
+    """Print every narrative line of the files pre-commit passes; block on any finding.
 
     Returns:
-        Always 0 — this hook warns, it does not gate.
+        1 when at least one narrative line was found, 0 otherwise.
     """
     if _is_disabled():
         return 0
@@ -192,7 +191,7 @@ def main() -> int:
             f"   💡 {total} narrative line(s) — a comment clarifies, a docstring states behaviour; "
             "git holds the history."
         )
-    return 0
+    return 1 if total else 0
 
 
 if __name__ == "__main__":
