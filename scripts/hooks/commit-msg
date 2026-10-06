@@ -16,6 +16,45 @@
 COMMIT_MSG_FILE=$1
 COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
 
+# Même rendu que `_report.py` (ruff-style), en bash pur : ce hook n'a pas le droit de dépendre de
+# python. Couleur : `NO_COLOR` coupe, `FORCE_COLOR` / `CLICOLOR_FORCE` forcent, sinon terminal seul.
+if [ -z "$NO_COLOR" ] \
+    && { [ -n "$FORCE_COLOR" ] || [ -n "$CLICOLOR_FORCE" ] \
+        || { [ -t 1 ] && [ "$TERM" != "dumb" ]; }; }; then
+    RED=$'\e[1;31m' BLUE=$'\e[1;34m' CYAN=$'\e[1;36m' BOLD=$'\e[1m' DIM=$'\e[2m' RESET=$'\e[0m'
+else
+    RED="" BLUE="" CYAN="" BOLD="" DIM="" RESET=""
+fi
+
+# fail <line> <col> <width> <message> [help-line...] — un finding, son résumé, puis exit 1.
+fail() {
+    local line=$1 col=$2 width=$3 message=$4
+    shift 4
+    local pad src underline lead dir=""
+    case "$COMMIT_MSG_FILE" in */*) dir="${COMMIT_MSG_FILE%/*}/" ;; esac
+    pad=${line//?/ }
+    src=$(sed -n "${line}p" "$COMMIT_MSG_FILE")
+    underline="$(printf '%*s' "$((col - 1))" '')$(printf '%*s' "$width" '' | tr ' ' '^')"
+    echo "${DIM}${dir}${RESET}${BOLD}${COMMIT_MSG_FILE##*/}${RESET} ${DIM}(1)${RESET}"
+    echo ""
+    echo "  ${RED}COMMIT-MSG${RESET} ${BOLD}${message}${RESET}"
+    echo "  ${pad}${BLUE}-->${RESET} ${COMMIT_MSG_FILE}:${line}:${col}"
+    echo "  ${pad} ${BLUE}|${RESET}"
+    echo "  ${BLUE}${line}${RESET} ${BLUE}|${RESET} ${src}"
+    echo "  ${pad} ${BLUE}|${RESET} ${RED}${underline}${RESET}"
+    if [ $# -gt 0 ]; then
+        echo "  ${pad} ${BLUE}|${RESET}"
+        lead="  ${pad} ${BLUE}=${RESET} ${CYAN}help:${RESET} "
+        for help_line in "$@"; do
+            echo "${lead}${help_line}"
+            lead="  ${pad}         "
+        done
+    fi
+    echo ""
+    echo "${RED}Found 1 error in 1 file.${RESET}"
+    exit 1
+}
+
 if echo "$COMMIT_MSG" | grep -qE "^Merge "; then
     exit 0
 fi
@@ -36,118 +75,122 @@ TYPE=""
 [[ "$REST" =~ ^([a-z_-]+) ]] && TYPE="${BASH_REMATCH[1]}"
 
 if [ -z "$EMOJI" ] || [ -z "$TYPE" ]; then
-    echo "❌ Invalid format — missing emoji or type."
-    echo "   Format: <emoji> <type>[!]: <description>"
-    exit 1
+    fail 1 1 "${#COMMIT_MSG}" "invalid format — missing emoji or type" \
+        "format: <emoji> <type>[!]: <description>"
 fi
 
+# Table unique emoji → type : sert à valider le couple et à lister les emojis d'un type.
+EMOJI_TABLE="🎉 feat
+✨ feat
+📈 feat
+🌐 feat
+🚩 feat
+🛂 feat
+👔 feat
+♿️ feat
+🦺 feat
+🚸 feat
+📱 feat
+🥚 feat
+🔍️ feat
+🧵 feat
+🌍 feat
+🐛 fix
+🥅 fix
+🩹 fix
+🚑️ fix
+🔒️ fix
+👽️ fix
+🚨 fix
+🍎 fix
+🐧 fix
+🏁 fix
+🤖 fix
+🍏 fix
+📝 docs
+💡 docs
+💬 docs
+📄 docs
+👥 docs
+🎨 style
+✏️ style
+💄 style
+💫 style
+♻️ refactor
+🔥 refactor
+🗑️ refactor
+⚰️ refactor
+🗃️ refactor
+🏗️ refactor
+💩 refactor
+🍻 refactor
+🚚 move
+⚡️ perf
+✅ test
+🧪 test
+🤡 test
+📸 test
+🩺 test
+⏪️ revert
+📦️ build
+⬆️ build
+⬇️ build
+➕ build
+➖ build
+📌 build
+🔧 chore
+🔨 chore
+👷 chore
+💚 chore
+🔊 chore
+🔇 chore
+🔐 chore
+🚧 chore
+🔀 chore
+🍱 chore
+🏷️ chore
+🌱 chore
+🧱 chore
+🙈 chore
+⚗️ chore
+💸 chore
+🚀 release
+🔖 release"
+
 allowed_type=""
-case "$EMOJI" in
-    🎉) allowed_type="feat" ;;
-    ✨) allowed_type="feat" ;;
-    📈) allowed_type="feat" ;;
-    🌐) allowed_type="feat" ;;
-    🚩) allowed_type="feat" ;;
-    🛂) allowed_type="feat" ;;
-    👔) allowed_type="feat" ;;
-    ♿️) allowed_type="feat" ;;
-    🦺) allowed_type="feat" ;;
-    🚸) allowed_type="feat" ;;
-    📱) allowed_type="feat" ;;
-    🥚) allowed_type="feat" ;;
-    🔍️) allowed_type="feat" ;;
-    🧵) allowed_type="feat" ;;
-    🌍) allowed_type="feat" ;;
-    🐛) allowed_type="fix" ;;
-    🥅) allowed_type="fix" ;;
-    🩹) allowed_type="fix" ;;
-    🚑️) allowed_type="fix" ;;
-    🔒️) allowed_type="fix" ;;
-    👽️) allowed_type="fix" ;;
-    🚨) allowed_type="fix" ;;
-    🍎) allowed_type="fix" ;;
-    🐧) allowed_type="fix" ;;
-    🏁) allowed_type="fix" ;;
-    🤖) allowed_type="fix" ;;
-    🍏) allowed_type="fix" ;;
-    📝) allowed_type="docs" ;;
-    💡) allowed_type="docs" ;;
-    💬) allowed_type="docs" ;;
-    📄) allowed_type="docs" ;;
-    👥) allowed_type="docs" ;;
-    🎨) allowed_type="style" ;;
-    ✏️) allowed_type="style" ;;
-    💄) allowed_type="style" ;;
-    💫) allowed_type="style" ;;
-    ♻️) allowed_type="refactor" ;;
-    🔥) allowed_type="refactor" ;;
-    🗑️) allowed_type="refactor" ;;
-    ⚰️) allowed_type="refactor" ;;
-    🗃️) allowed_type="refactor" ;;
-    🏗️) allowed_type="refactor" ;;
-    💩) allowed_type="refactor" ;;
-    🍻) allowed_type="refactor" ;;
-    🚚) allowed_type="move" ;;
-    ⚡️) allowed_type="perf" ;;
-    ✅) allowed_type="test" ;;
-    🧪) allowed_type="test" ;;
-    🤡) allowed_type="test" ;;
-    📸) allowed_type="test" ;;
-    🩺) allowed_type="test" ;;
-    ⏪️) allowed_type="revert" ;;
-    📦️) allowed_type="build" ;;
-    ⬆️) allowed_type="build" ;;
-    ⬇️) allowed_type="build" ;;
-    ➕) allowed_type="build" ;;
-    ➖) allowed_type="build" ;;
-    📌) allowed_type="build" ;;
-    🔧) allowed_type="chore" ;;
-    🔨) allowed_type="chore" ;;
-    👷) allowed_type="chore" ;;
-    💚) allowed_type="chore" ;;
-    🔊) allowed_type="chore" ;;
-    🔇) allowed_type="chore" ;;
-    🔐) allowed_type="chore" ;;
-    🚧) allowed_type="chore" ;;
-    🔀) allowed_type="chore" ;;
-    🍱) allowed_type="chore" ;;
-    🏷️) allowed_type="chore" ;;
-    🌱) allowed_type="chore" ;;
-    🧱) allowed_type="chore" ;;
-    🙈) allowed_type="chore" ;;
-    ⚗️) allowed_type="chore" ;;
-    💸) allowed_type="chore" ;;
-    🚀) allowed_type="release" ;;
-    🔖) allowed_type="release" ;;
-    *)
-        echo "❌ Emoji '$EMOJI' not in mapping."
-        echo "   See CLAUDE.md for the full emoji ↔ type table."
-        exit 1
-        ;;
-esac
+type_emojis=""
+while read -r row_emoji row_type; do
+    [ "$row_emoji" = "$EMOJI" ] && allowed_type="$row_type"
+    [ "$row_type" = "$TYPE" ] && type_emojis="$type_emojis $row_emoji"
+done <<< "$EMOJI_TABLE"
+
+if [ -z "$allowed_type" ]; then
+    if [ -n "$type_emojis" ]; then
+        fail 1 1 "${#EMOJI}" "emoji '$EMOJI' not in mapping" "emojis for '$TYPE':$type_emojis"
+    fi
+    fail 1 1 "${#EMOJI}" "emoji '$EMOJI' not in mapping" \
+        "types: feat fix docs style refactor move perf test revert build chore release"
+fi
 
 if [ "$TYPE" != "$allowed_type" ]; then
-    echo "❌ Emoji '$EMOJI' requires type '$allowed_type', got '$TYPE'."
-    echo "   Use: $EMOJI $allowed_type: <description>"
-    exit 1
+    fail 1 "$((${#EMOJI} + 2))" "${#TYPE}" \
+        "emoji '$EMOJI' requires type '$allowed_type', got '$TYPE'" \
+        "use: $EMOJI $allowed_type: <description>"
 fi
 
 TYPES="feat|fix|docs|style|refactor|move|perf|test|revert|build|chore|release"
 PATTERN="^.+ (${TYPES})!?: .{3,}"
 
 if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
-    echo "❌ Invalid commit format."
-    echo ""
-    echo "   Format : <emoji> <type>[!]: <description>"
-    echo ""
-    echo "   Examples:"
-    echo "     ✨ feat: add manifest variable resolution"
-    echo "     🐛 fix: handle missing warehouse field"
-    echo "     🔧 chore: add release workflow"
-    echo "     📝 docs: add plan command usage"
-    echo "     ♻️ refactor!: rename upload_packages signature"
-    echo "     💾 save: core/manifest.py in progress [skip ci]"
-    exit 1
+    fail 1 1 "${#COMMIT_MSG}" "invalid commit format" \
+        "format: <emoji> <type>[!]: <description>" \
+        "examples:" \
+        "  ✨ feat: add manifest variable resolution" \
+        "  🐛 fix: handle missing warehouse field" \
+        "  🔧 chore: add release workflow" \
+        "  📝 docs: add plan command usage" \
+        "  ♻️ refactor!: rename upload_packages signature" \
+        "  💾 save: core/manifest.py in progress [skip ci]"
 fi
 
 # Breaking-change footer — one house form only: `BREAKING CHANGE:` (a space,
@@ -160,10 +203,13 @@ fi
 # off the start of a line when you don't mean the footer.
 if grep -qiE "^BREAKING[- ]CHANGE:" "$COMMIT_MSG_FILE"; then
     if ! grep -qE "^BREAKING CHANGE: .{3,}" "$COMMIT_MSG_FILE"; then
-        echo "❌ Malformed BREAKING CHANGE footer."
-        echo "   Must be exactly: BREAKING CHANGE: <description>  (one space, both words uppercase)"
-        echo "   BREAKING-CHANGE: and other casings are rejected on purpose — use the space form."
-        exit 1
+        footer_line=$(grep -niE -m1 "^BREAKING[- ]CHANGE:" "$COMMIT_MSG_FILE")
+        footer_no=${footer_line%%:*}
+        footer_text=${footer_line#*:}
+        footer_key=${footer_text%%:*}
+        fail "$footer_no" 1 "$((${#footer_key} + 1))" "malformed BREAKING CHANGE footer" \
+            "must be exactly: BREAKING CHANGE: <description>  (one space, both words uppercase)" \
+            "BREAKING-CHANGE: and other casings are rejected on purpose — use the space form"
     fi
 fi
 

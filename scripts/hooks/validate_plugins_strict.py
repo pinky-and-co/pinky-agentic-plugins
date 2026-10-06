@@ -18,6 +18,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from _report import Diagnostic, emit
+
 REPO_ROOT = Path(__file__).parent.parent.parent
 
 
@@ -54,28 +56,34 @@ def main() -> int:
     """Validate plugin + marketplace manifests, print results per path."""
     manifests = find_plugin_manifests() + find_marketplace_manifests()
     if not manifests:
-        print("No plugin.json / marketplace.json found — nothing to validate.")
         return 0
 
     try:
         results = [(path, validate(path)) for path in manifests]
     except FileNotFoundError:
-        print("`claude` CLI not found on PATH — cannot validate manifests.")
+        emit(
+            [
+                Diagnostic(
+                    "PLUGIN",
+                    "`claude` CLI not found on PATH — cannot validate manifests",
+                    ".",
+                )
+            ]
+        )
         return 1
 
-    failed = [path for path, result in results if not result.passed]
-    for path, result in results:
-        mark = "OK" if result.passed else "FAIL"
-        print(f"[{mark}] {path.relative_to(REPO_ROOT)}")
-        if not result.passed:
-            print(result.output)
-
-    if failed:
-        print(f"{len(failed)}/{len(manifests)} manifest(s) failed --strict validation.")
-        return 1
-
-    print(f"{len(manifests)} manifest(s) OK.")
-    return 0
+    findings = [
+        Diagnostic(
+            "PLUGIN",
+            "failed `claude plugin validate --strict`",
+            str(path.relative_to(REPO_ROOT)),
+            help=result.output or None,
+        )
+        for path, result in results
+        if not result.passed
+    ]
+    emit(findings)
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

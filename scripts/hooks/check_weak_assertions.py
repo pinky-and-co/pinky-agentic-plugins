@@ -46,6 +46,8 @@ import os
 import sys
 from pathlib import Path
 
+from _report import Diagnostic, at, emit
+
 # Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -236,22 +238,25 @@ def main() -> int:
         return 0
     paths = sys.argv[1:]
     repo_covered = _repo_covered(paths)
-    failed = False
+    findings: list[Diagnostic] = []
     for filepath in paths:
         for line, gen in check_file(Path(filepath)):
             if gen in repo_covered:
                 continue  # oracle ailleurs : ce fragment est de la documentation, pas un trou de couverture
-            print(
-                f"❌ [WEAK-ASSERT] {filepath}:{line}: `{gen}` — fragment `in` assertion with no "
-                f"equality oracle for the whole output"
+            findings.append(
+                at(
+                    "WEAK-ASSERT",
+                    f"fragment `in` assertion on `{gen}` with no equality oracle for the whole output",
+                    filepath,
+                    line,
+                )
             )
-            failed = True
-    if failed:
-        print(
-            "   💡 Add one `assert <generator(...)> == <full expected output>` in the same test "
-            "file (tests.md § generator oracle). Fragment asserts stay welcome alongside it."
-        )
-    return 1 if failed else 0
+    emit(
+        findings,
+        footer="add one `assert <generator(...)> == <full expected output>` in the same test "
+        "file (tests.md § generator oracle); fragment asserts stay welcome alongside it",
+    )
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

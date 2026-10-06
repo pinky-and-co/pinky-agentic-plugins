@@ -22,6 +22,8 @@ import re
 import sys
 from pathlib import Path
 
+from _report import Diagnostic, at, emit
+
 # La console Windows (cp1252 par défaut) ne sait pas encoder la sortie ❌.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -56,18 +58,17 @@ def main() -> int:
     """
     if _is_disabled():
         return 0
-    total = 0
-    for filepath in sys.argv[1:]:
-        for line, found in find_ids(Path(filepath)):
-            print(f"❌ [REQ-ID] {filepath}:{line}: {found}")
-            total += 1
-    if total:
-        print(
-            f"   💡 {total} requirement id(s) — the spec they point to lives outside the repo and "
-            "is pruned after implementation: delete the id, state the behaviour."
-        )
-        return 1
-    return 0
+    findings: list[Diagnostic] = [
+        at("REQ-ID", f"requirement id `{found}`", filepath, line, found)
+        for filepath in sys.argv[1:]
+        for line, found in find_ids(Path(filepath))
+    ]
+    emit(
+        findings,
+        footer="the spec an id points to lives outside the repo and is pruned after "
+        "implementation: delete the id, state the behaviour",
+    )
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

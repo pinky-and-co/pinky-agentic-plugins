@@ -15,6 +15,8 @@ import re
 import sys
 from pathlib import Path
 
+from _report import Diagnostic, at, emit
+
 # Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -104,20 +106,24 @@ def _is_disabled() -> bool:
 def main() -> int:
     if _is_disabled():
         return 0
-    failed = False
-    for filepath in sys.argv[1:]:
-        lines = check_file(filepath)
-        if lines:
-            print(
-                f"❌ [LATEX] Raw LaTeX notation instead of Unicode symbol in: {filepath} (lines: {','.join(map(str, lines))})"
-            )
-            print(
-                "   💡 Fix: replace the LaTeX command with its Unicode character "
-                "(e.g. \\rightarrow -> →). Likely source: a local LLM (Gemma/Ollama) "
-                "falling back to its training notation on long, freely-composed text."
-            )
-            failed = True
-    return 1 if failed else 0
+    findings: list[Diagnostic] = [
+        at(
+            "LATEX",
+            "raw LaTeX notation instead of a Unicode symbol",
+            filepath,
+            line,
+            _PATTERN,
+            help="replace the command with its Unicode character (e.g. `\\rightarrow` → `→`)",
+        )
+        for filepath in sys.argv[1:]
+        for line in check_file(filepath)
+    ]
+    emit(
+        findings,
+        footer="likely source: a local LLM (Gemma/Ollama) falling back to its training "
+        "notation on long, freely-composed text",
+    )
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

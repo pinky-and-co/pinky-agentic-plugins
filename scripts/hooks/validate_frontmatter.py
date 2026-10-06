@@ -13,14 +13,14 @@ Skill schema, beyond the `name`/`description` presence floor:
     — the directory gives the slash-command name for a non-root skill, and the runtime loads a
     skill named `debug_brief` without complaint, so only the hook catches a malformed name.
   - `description` ≤ 1024 chars, no XML-style tags (`<url>`, `</agent>` — angle-bracket
-    placeholders read as markup), and carrying a usage trigger (warn only: the "when", not just
-    the "what").
+    placeholders read as markup), and carrying a usage trigger (the "when", not just the "what").
   - body under 500 lines; every local `.md` link resolves (plain links only — a
     `file.md#fragment` link is not resolved, none exists in the corpus); a linked reference
     over 100 lines opens on `## Contents` / `## Sommaire` within its first 40 lines; every
     `.md` sitting DIRECTLY in the skill directory is mentioned from the SKILL.md (anti-orphan).
-  - a body that takes arguments (`$ARGUMENTS`, `$1`, `arguments:`) declares `argument-hint`
-    (warn only).
+  - a body that takes arguments (`$ARGUMENTS`, `$1`, `arguments:`) declares `argument-hint`.
+
+Every finding blocks (exit 1) and is printed through `_report` — a passing run prints nothing.
 
 Deliberately NOT checked — measured false positives on the plugin corpus, do not re-add:
   - Windows-style `\` paths in bodies: shell quoting (`'\''`), literal `\t` in output templates
@@ -38,19 +38,12 @@ Usage:
 
 import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
+from _report import Diagnostic, display, emit
+
 REPO_ROOT = Path(__file__).parent.parent.parent
-
-
-@dataclass
-class Report:
-    """Validation outcome — `problems` fail the hook, `warnings` only surface in output."""
-
-    problems: list[str]
-    warnings: list[str]
-
+CODE = "FRONTMATTER"
 
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 REQUIRED_COMMON = {"name", "description"}
@@ -102,7 +95,36 @@ def parse_frontmatter(text: str) -> dict[str, str] | None:
     return fields
 
 
-def _reference_problems(path: Path, body: str) -> list[str]:
+def _finding(
+    path: Path,
+    text: str,
+    message: str,
+    *,
+    needle: str | None = None,
+    key: str | None = None,
+    help: str | None = None,
+) -> Diagnostic:
+    """A finding on `path`, pointing at `needle` (first occurrence) or at the value of frontmatter
+    field `key` when found in `text`, on the whole file otherwise."""
+    where = display(path)
+    for number, line in enumerate(text.splitlines(), start=1):
+        if key is not None and line.partition(":")[0].strip() == key:
+            value = line.partition(":")[2].strip()
+            col = line.index(value, len(key)) + 1 if value else len(line) + 1
+            span = needle or value
+            if needle and needle in line:
+                col = line.index(needle) + 1
+            return Diagnostic(
+                CODE, message, where, number, col, max(1, len(span)), help
+            )
+        if key is None and needle is not None and needle in line:
+            return Diagnostic(
+                CODE, message, where, number, line.index(needle) + 1, len(needle), help
+            )
+    return Diagnostic(CODE, message, where, help=help)
+
+
+def _reference_problems(path: Path, body: str, text: str) -> list[Diagnostic]:
     """Check the local `.md` links of a skill body: existence, TOC on long files, orphans."""
     problems = []
     for link in MD_LINK_RE.findall(body):
@@ -110,142 +132,236 @@ def _reference_problems(path: Path, body: str) -> list[str]:
             continue
         target = (path.parent / link).resolve()
         if not target.exists():
-            problems.append(f"{path}: linked reference `{link}` not found")
+            problems.append(
+                _finding(
+                    path,
+                    text,
+                    f"linked reference `{link}` not found",
+                    needle=link,
+                )
+            )
             continue
         try:
             lines = target.read_text().splitlines()
         except UnicodeDecodeError:
             problems.append(
-                f"{target}: not valid UTF-8 — cannot check for a table of contents"
+                _finding(
+                    target,
+                    "",
+                    "not valid UTF-8 — cannot check for a table of contents",
+                )
             )
             continue
         if len(lines) > REFERENCE_TOC_MIN_LINES and not TOC_HEADING_RE.search(
             "\n".join(lines[:REFERENCE_TOC_HEAD_LINES])
         ):
             problems.append(
-                f"{target}: {len(lines)} lines but no `## Contents` / `## Sommaire` "
-                f"within the first {REFERENCE_TOC_HEAD_LINES} lines"
+                _finding(
+                    target,
+                    "",
+                    f"{len(lines)} lines but no `## Contents` / `## Sommaire` "
+                    f"within the first {REFERENCE_TOC_HEAD_LINES} lines",
+                    help="open the reference with a table of contents",
+                )
             )
     for md in sorted(path.parent.glob("*.md")):
         if md.name != "SKILL.md" and md.name not in body:
             problems.append(
-                f"{md}: not mentioned from SKILL.md — every .md in the skill "
-                f"directory must be reachable from the skill"
+                _finding(
+                    md,
+                    "",
+                    "not mentioned from SKILL.md",
+                    help="every .md in the skill directory must be reachable from the skill",
+                )
             )
     return problems
 
 
-def validate_skill(path: Path, fields: dict[str, str], body: str) -> Report:
-    """Check skill-specific rules: frontmatter shape, reference hygiene.
-
-    Warnings are printed but never fail the hook.
-    """
-    problems: list[str] = []
-    warnings: list[str] = []
+def validate_skill(
+    path: Path, fields: dict[str, str], body: str, text: str
+) -> list[Diagnostic]:
+    """Check skill-specific rules: frontmatter shape, reference hygiene."""
+    problems: list[Diagnostic] = []
     name = fields.get("name", "")
     description = fields.get("description", "")
+    kebab_help = (
+        "use lowercase letters, digits and single hyphens: `^[a-z0-9]+(-[a-z0-9]+)*$`"
+    )
 
     if name and not KEBAB_RE.match(name):
         problems.append(
-            f"{path}: `name: {name}` must be kebab-case `^[a-z0-9]+(-[a-z0-9]+)*$`"
+            _finding(
+                path, text, "`name` must be kebab-case", key="name", help=kebab_help
+            )
         )
     if not KEBAB_RE.match(path.parent.name):
         problems.append(
-            f"{path}: skill directory `{path.parent.name}` must be kebab-case "
-            f"`^[a-z0-9]+(-[a-z0-9]+)*$`"
+            _finding(
+                path,
+                text,
+                f"skill directory `{path.parent.name}` must be kebab-case",
+                help=kebab_help,
+            )
         )
     if name and name != path.parent.name:
         problems.append(
-            f"{path}: `name: {name}` must equal the skill directory name `{path.parent.name}`"
+            _finding(
+                path,
+                text,
+                f"`name` must equal the skill directory name `{path.parent.name}`",
+                key="name",
+            )
         )
     if len(name) > NAME_MAX_CHARS:
-        problems.append(f"{path}: `name` is {len(name)} chars, max {NAME_MAX_CHARS}")
+        problems.append(
+            _finding(
+                path,
+                text,
+                f"`name` is {len(name)} chars, max {NAME_MAX_CHARS}",
+                key="name",
+            )
+        )
     if len(description) > DESCRIPTION_MAX_CHARS:
         problems.append(
-            f"{path}: `description` is {len(description)} chars, "
-            f"max {DESCRIPTION_MAX_CHARS}"
+            _finding(
+                path,
+                text,
+                f"`description` is {len(description)} chars, max {DESCRIPTION_MAX_CHARS}",
+                key="description",
+            )
         )
     xml_tag = XML_TAG_RE.search(description)
     if xml_tag:
         problems.append(
-            f"{path}: `description` carries an XML-style tag (`{xml_tag.group(0)}`) — "
-            f"keep the description plain text, angle-bracket placeholders read as markup"
+            _finding(
+                path,
+                text,
+                "`description` carries an XML-style tag",
+                key="description",
+                needle=xml_tag.group(0),
+                help="keep the description plain text — angle-bracket placeholders read as markup",
+            )
         )
 
     context = fields.get("context")
     if context and context not in KNOWN_CONTEXT_VALUES:
-        problems.append(f'{path}: `context: {context}` — only "fork" is a known value')
+        problems.append(
+            _finding(
+                path,
+                text,
+                f'`context: {context}` — only "fork" is a known value',
+                key="context",
+            )
+        )
     if context == "fork" and not fields.get("agent"):
-        problems.append(f"{path}: `context: fork` set but no `agent:` declared")
-    for field in BOOLEAN_FIELDS:
+        problems.append(
+            _finding(
+                path,
+                text,
+                "`context: fork` set but no `agent:` declared",
+                key="context",
+            )
+        )
+    for field in sorted(BOOLEAN_FIELDS):
         value = fields.get(field)
         if value is not None and value not in ("true", "false"):
-            problems.append(f"{path}: `{field}: {value}` must be `true` or `false`")
+            problems.append(
+                _finding(
+                    path,
+                    text,
+                    f"`{field}: {value}` must be `true` or `false`",
+                    key=field,
+                )
+            )
 
     if len(body.splitlines()) >= BODY_MAX_LINES:
         problems.append(
-            f"{path}: body is {len(body.splitlines())} lines, "
-            f"must stay under {BODY_MAX_LINES}"
+            _finding(
+                path,
+                text,
+                f"body is {len(body.splitlines())} lines, must stay under {BODY_MAX_LINES}",
+                help="move detail into a linked reference file",
+            )
         )
-    problems += _reference_problems(path, body)
+    problems += _reference_problems(path, body, text)
 
-    if ARGS_RE.search(body) and not fields.get("argument-hint"):
-        warnings.append(
-            f"{path}: body takes arguments (`$ARGUMENTS` / `$1` / `arguments:`) "
-            f"but no `argument-hint` in frontmatter"
+    args = ARGS_RE.search(body)
+    if args and not fields.get("argument-hint"):
+        problems.append(
+            _finding(
+                path,
+                text,
+                "body takes arguments but declares no `argument-hint`",
+                needle=args.group(0).strip(),
+                help='add `argument-hint: "[...]"` to the frontmatter',
+            )
         )
     if description and not TRIGGER_RE.search(description):
-        warnings.append(
-            f"{path}: `description` says what the skill does but not when to use it "
-            f"(add a trigger: when / before / after / Use for / TRIGGER)"
+        problems.append(
+            _finding(
+                path,
+                text,
+                "`description` says what the skill does but not when to use it",
+                key="description",
+                help="add a trigger: when / before / after / Use for / TRIGGER",
+            )
         )
-    return Report(problems, warnings)
+    return problems
 
 
-def validate_agent(path: Path, fields: dict[str, str], body: str) -> Report:
+def validate_agent(path: Path, fields: dict[str, str], body: str) -> list[Diagnostic]:
     """Check agent-specific frontmatter rules.
 
     No agent-specific constraints verified yet beyond the common name/description floor — add
     checks here once a real agent ships and a real schema requirement is confirmed.
     """
-    return Report([], [])
+    return []
 
 
-def validate_file(path: Path, kind: str) -> Report:
-    """Validate one artefact file against its type's schema (`kind`: skill/agent).
-
-    Problems fail the hook, warnings do not.
-    """
+def validate_file(path: Path, kind: str) -> list[Diagnostic]:
+    """Validate one artefact file against its type's schema (`kind`: skill/agent)."""
     text = path.read_text()
     fields = parse_frontmatter(text)
     if fields is None:
-        return Report([f"{path}: no YAML frontmatter block (--- ... ---) found"], [])
+        return [
+            _finding(
+                path,
+                text,
+                "no YAML frontmatter block found",
+                help="open the file with `---` ... `---`",
+            )
+        ]
 
     problems = [
-        f"{path}: missing or empty required field `{field}`"
-        for field in REQUIRED_COMMON
+        _finding(
+            path,
+            text,
+            f"missing or empty required field `{field}`",
+            key=field if field in fields else None,
+            help=f"declare `{field}:` in the frontmatter",
+        )
+        for field in sorted(REQUIRED_COMMON)
         if not fields.get(field)
     ]
     body = text[FRONTMATTER_RE.match(text).end() :]  # type: ignore[union-attr]
-    report = (
-        validate_skill(path, fields, body)
-        if kind == "skill"
-        else validate_agent(path, fields, body)
-    )
-    return Report(problems + report.problems, report.warnings)
+    if kind == "skill":
+        return problems + validate_skill(path, fields, body, text)
+    return problems + validate_agent(path, fields, body)
 
 
 def main() -> int:
     """Validate staged/given files, or scan the whole repo if none were passed."""
     args = [Path(p) for p in sys.argv[1:]]
 
-    legacy_dirs = find_legacy_commands_dirs()
-    if legacy_dirs:
-        for d in legacy_dirs:
-            print(
-                f"{d}: commands/*.md is the legacy format this repo replaces — forbidden here"
-            )
-        return 1
+    findings = [
+        Diagnostic(
+            CODE,
+            "commands/*.md is the legacy format this repo replaces — forbidden here",
+            display(d),
+            help="migrate each command to `skills/<name>/SKILL.md`",
+        )
+        for d in find_legacy_commands_dirs()
+    ]
 
     if args:
         skill_files = [p for p in args if p.match("*/skills/*/SKILL.md")]
@@ -254,27 +370,14 @@ def main() -> int:
         skill_files = find_skill_files()
         agent_files = find_agent_files()
 
-    all_problems: list[str] = []
-    all_warnings: list[str] = []
-    for path in skill_files:
-        report = validate_file(path, "skill")
-        all_problems.extend(report.problems)
-        all_warnings.extend(report.warnings)
-    for path in agent_files:
-        report = validate_file(path, "agent")
-        all_problems.extend(report.problems)
-        all_warnings.extend(report.warnings)
+    if not findings:
+        for path in skill_files:
+            findings += validate_file(path, "skill")
+        for path in agent_files:
+            findings += validate_file(path, "agent")
 
-    for warning in all_warnings:
-        print(f"WARN {warning}")
-    if all_problems:
-        for problem in all_problems:
-            print(problem)
-        return 1
-
-    total = len(skill_files) + len(agent_files)
-    print(f"{total} artefact(s) OK (0 legacy commands/*.md found).")
-    return 0
+    emit(findings)
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

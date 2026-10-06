@@ -313,8 +313,7 @@ repos:
   # failure, not a missing-type gap — see the script's own docstring). Distinct from the
   # commit-msg convention (already universal via base.yaml's `commit-msg-format`) and from
   # python-lint's ruff pass (unaffected, still applies independently — this extra is additive).
-  # verbose: the hook's WARN lines (argument-hint, usage trigger) must stay visible even on a
-  # passing run — pre-commit hides a passing hook's output unless it opts in.
+  # Every finding blocks, so a passing run has nothing to say and `verbose` stays off.
   - repo: local
     hooks:
       - id: validate-frontmatter
@@ -323,7 +322,6 @@ repos:
         language: python
         files: \.md$
         stages: [pre-commit]
-        verbose: true
 
   # `claude plugin validate --strict` on every plugin.json + marketplace.json this repo ships —
   # card `declarer-dependencies-plugin-et-valider-strict.md` (chantier 0023): the dependency between

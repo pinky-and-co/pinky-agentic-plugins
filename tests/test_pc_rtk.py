@@ -130,7 +130,13 @@ def test_real_rtk_rewrites_a_rewritable_command():
     assert output["hookSpecificOutput"]["updatedInput"]["command"] == (
         "rtk git log -n 3"
     )
-    assert "permissionDecision" not in _keys(output["hookSpecificOutput"])
+    # Contract chosen: the installed rtk binary now emits permissionDecision
+    # "allow" next to updatedInput (measured against the real binary), so the
+    # test asserts what it emits rather than pinning the binary to the old one.
+    assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert (
+        output["hookSpecificOutput"]["permissionDecisionReason"] == "RTK auto-rewrite"
+    )
 
 
 def test_gain_skill_pre_approves_exactly_the_script_and_the_bare_rtk_gain():

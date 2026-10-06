@@ -6,8 +6,11 @@ Detected characters: U+200B, U+200C, U+200D, U+FEFF.
 """
 
 import os
+import re
 import sys
 from pathlib import Path
+
+from _report import Diagnostic, at, emit
 
 # Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
@@ -15,6 +18,7 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 ZWS = [chr(0x200B), chr(0x200C), chr(0x200D), chr(0xFEFF)]
+_ZWS_RE = re.compile("[" + "".join(ZWS) + "]")
 
 
 def _looks_binary(filepath: str) -> bool:
@@ -51,20 +55,17 @@ def main() -> int:
     """Fail if any CLI argument contains a zero-width character; returns 1 on any hit."""
     if _is_disabled():
         return 0
-    failed = False
-    for filepath in sys.argv[1:]:
-        lines = check_file(filepath)
-        if lines:
-            print(
-                f"❌ [ZWS] Invisible character (zero-width) in: {filepath} (lines: {','.join(map(str, lines))})"
-            )
-            print(
-                "   💡 Fix: search for invisible chars in your editor "
-                "(regex: [\\u200b\\u200c\\u200d\\ufeff]) and delete them. "
-                "Likely source: copy-paste from Outlook or Teams."
-            )
-            failed = True
-    return 1 if failed else 0
+    findings: list[Diagnostic] = [
+        at("ZWS", "invisible character (zero-width)", filepath, line, _ZWS_RE)
+        for filepath in sys.argv[1:]
+        for line in check_file(filepath)
+    ]
+    emit(
+        findings,
+        footer="search your editor for `[\\u200b\\u200c\\u200d\\ufeff]` and delete them — "
+        "likely source: copy-paste from Outlook or Teams",
+    )
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

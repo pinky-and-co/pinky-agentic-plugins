@@ -24,6 +24,8 @@ import os
 import sys
 from pathlib import Path
 
+from _report import Diagnostic, at, emit
+
 # Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -147,16 +149,16 @@ def main() -> int:
     """Fail if any CLI argument's public API uses a blocked raw composite annotation."""
     if _is_disabled():
         return 0
-    failed = False
-    for filepath in sys.argv[1:]:
-        for line, reason in check_file(Path(filepath)):
-            print(f"❌ [TYPED-API] {filepath}:{line}: {reason}")
-            failed = True
-    if failed:
-        print(
-            "   💡 Replace raw dict/tuple/set annotations with Pydantic models or dataclasses."
-        )
-    return 1 if failed else 0
+    findings: list[Diagnostic] = [
+        at("TYPED-API", reason, filepath, line)
+        for filepath in sys.argv[1:]
+        for line, reason in check_file(Path(filepath))
+    ]
+    emit(
+        findings,
+        footer="replace raw dict/tuple/set annotations with Pydantic models or dataclasses",
+    )
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

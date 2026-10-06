@@ -19,6 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _report import Diagnostic, emit
+
 REPO_ROOT = Path(__file__).parent.parent.parent
 MANIFEST_NAME = ".vendor-manifest.json"
 
@@ -45,39 +47,37 @@ def main() -> int:
     """Recompute each manifest entry's sha256, print a line per path, exit 1 on any mismatch."""
     manifest = load_manifest()
     if not manifest:
-        print("No .vendor-manifest.json — nothing to check.")
         return 0
     if _manifest_is_ignored():
-        print(
-            f"[IGNORED] {MANIFEST_NAME} is git-ignored — a CI checkout never has it, so this "
-            "check passes on nothing there. Remove it from .gitignore and commit it."
+        emit(
+            [
+                Diagnostic(
+                    "VENDOR",
+                    "manifest is git-ignored — a CI checkout never has it, so this check "
+                    "passes on nothing there",
+                    MANIFEST_NAME,
+                    help="remove it from .gitignore and commit it",
+                )
+            ]
         )
         return 1
 
-    mismatched = []
+    findings: list[Diagnostic] = []
     for rel_path, expected in sorted(manifest.items()):
         path = REPO_ROOT / rel_path
         if not path.exists():
-            print(f"[MISSING] {rel_path}")
-            mismatched.append(rel_path)
-            continue
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual != expected:
-            print(f"[DRIFT] {rel_path}")
-            mismatched.append(rel_path)
-        else:
-            print(f"[OK] {rel_path}")
+            findings.append(Diagnostic("VENDOR", "vendored file is missing", rel_path))
+        elif hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            findings.append(
+                Diagnostic("VENDOR", "drifted from its source checksum", rel_path)
+            )
 
-    if mismatched:
-        print(
-            f"{len(mismatched)}/{len(manifest)} vendored file(s) drifted from their source — "
-            "edit the source in pinky-bootstrap's hygiene/vendor/, then `pinky distribute`, "
-            "never this copy directly."
-        )
-        return 1
-
-    print(f"{len(manifest)} vendored file(s) OK.")
-    return 0
+    emit(
+        findings,
+        footer="edit the source in pinky-bootstrap's hygiene/vendor/, then `pinky distribute`, "
+        "never this copy directly",
+    )
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ import tokenize
 from pathlib import Path
 from typing import NamedTuple
 
+from _report import Diagnostic, at, emit
 from tool_directives import DIRECTIVE_RE
 
 # La console Windows (cp1252 par défaut) ne sait pas encoder la sortie ⚠.
@@ -179,19 +180,22 @@ def main() -> int:
     """
     if _is_disabled():
         return 0
-    total = 0
-    for filepath in sys.argv[1:]:
-        for finding in check_file(Path(filepath)):
-            print(
-                f"⚠️  [NARRATIVE] {filepath}:{finding.line}: {finding.kinds}: {finding.text}"
-            )
-            total += 1
-    if total:
-        print(
-            f"   💡 {total} narrative line(s) — a comment clarifies, a docstring states behaviour; "
-            "git holds the history."
+    findings: list[Diagnostic] = [
+        at(
+            "NARRATIVE",
+            f"narrated history ({finding.kinds})",
+            filepath,
+            finding.line,
+            finding.text,
         )
-    return 1 if total else 0
+        for filepath in sys.argv[1:]
+        for finding in check_file(Path(filepath))
+    ]
+    emit(
+        findings,
+        footer="a comment clarifies, a docstring states behaviour; git holds the history",
+    )
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

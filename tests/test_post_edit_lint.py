@@ -29,6 +29,7 @@ def _repo(tmp_path: Path) -> Path:
     dst = tmp_path / "scripts" / "hooks"
     dst.mkdir(parents=True)
     for name in (
+        "_report.py",
         "check_zws.py",
         "check_latex_notation.py",
         "check_forbidden_keywords.py",
@@ -50,7 +51,7 @@ class TestDecide(unittest.TestCase):
             f.write_text(f"hello{ZWS}world\n", encoding="utf-8")
             report = pel.decide(_edit_event(f))
             self.assertIsNotNone(report)
-            self.assertIn("[ZWS]", report)
+            self.assertIn("ZWS invisible character", report)
 
     def test_reports_raw_latex_notation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -59,7 +60,7 @@ class TestDecide(unittest.TestCase):
             f.write_text("A `SAINT` $\\rightarrow$ `ST`.\n", encoding="utf-8")
             report = pel.decide(_edit_event(f))
             self.assertIsNotNone(report)
-            self.assertIn("[LATEX]", report)
+            self.assertIn("LATEX raw LaTeX notation", report)
 
     def test_clean_file_reports_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,7 +96,7 @@ class TestDecide(unittest.TestCase):
             )
             report = pel.decide(_edit_event(f))
             self.assertIsNotNone(report)
-            self.assertIn("[TYPED-API]", report)
+            self.assertIn("TYPED-API param `x`", report)
 
     def test_non_src_python_does_not_get_typed_api_checker(self):
         with tempfile.TemporaryDirectory() as tmp:

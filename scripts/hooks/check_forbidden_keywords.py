@@ -27,6 +27,8 @@ import re
 import sys
 from pathlib import Path
 
+from _report import Diagnostic, at, emit
+
 # Script autonome, n'importe pas `setup` : la console Windows (cp1252) ne sait pas encoder ✓/⚠.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -111,16 +113,20 @@ def main() -> int:
     pattern = _make_pattern(keywords)
     assert pattern is not None
 
-    failed = False
+    findings: list[Diagnostic] = []
     for filepath in sys.argv[1:]:
-        path = Path(filepath)
-        for line, keyword in check_file(path, pattern):
-            print(f"❌ [FORBIDDEN] {filepath}:{line}: found '{keyword}'")
-            failed = True
-
-    if failed:
-        print(f"   💡 Employer reference detected. Check {_config_hint()}")
-    return 1 if failed else 0
+        for line, keyword in check_file(Path(filepath), pattern):
+            findings.append(
+                at(
+                    "FORBIDDEN",
+                    f"forbidden keyword '{keyword}'",
+                    filepath,
+                    line,
+                    keyword,
+                )
+            )
+    emit(findings, footer=f"employer reference detected — check {_config_hint()}")
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

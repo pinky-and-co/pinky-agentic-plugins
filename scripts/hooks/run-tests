@@ -47,8 +47,21 @@ if [ -d tests ]; then
         fi
         # Pas de `-p no:cacheprovider` : les repos configurent déjà cache_dir en pyproject ;
         # désactiver le plugin ferait cracher un PytestConfigWarning à chaque commit.
-        $PY -m pytest -q $COV_FLAG
-        rc=$?
+        # Aucune option pytest ne retire les lignes de progression (`....F.. [ 42%]`, même en -qq) :
+        # on les filtre, le détail des échecs et le résumé restent. Le code de sortie est celui de
+        # pytest, pas du filtre.
+        #
+        # Derrière un pipe pytest croit n'être plus sur un terminal et coupe sa couleur : on la
+        # redemande tant que NO_COLOR ne s'y oppose pas. Les codes ANSI sont ôtés avant de juger
+        # si une ligne est de la progression, puis la ligne est imprimée telle quelle.
+        COLOR_FLAG=""
+        if [ -z "$NO_COLOR" ] && { [ -t 1 ] || [ -n "$FORCE_COLOR" ]; }; then
+            COLOR_FLAG="--color=yes"
+        fi
+        $PY -m pytest -q $COV_FLAG $COLOR_FLAG 2>&1 | awk '
+            { plain = $0; gsub(/\033\[[0-9;]*m/, "", plain) }
+            plain !~ /^[.sxXFE]+ *(\[ *[0-9]+%\])?$/ { print; fflush() }'
+        rc=${PIPESTATUS[0]}
         # 5 = aucun test collecté : pas un échec, même catégorie que « pytest absent ».
         # Arrive quand tests/ ne contient que des tests d'un autre langage.
         if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
