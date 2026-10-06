@@ -275,6 +275,22 @@ def test_no_warning_for_a_sonnet_or_a_missing_or_non_string_model(home, model):
     assert _bell_for(home, model) == BELL
 
 
+@pytest.mark.parametrize(
+    ("model", "shown"),
+    [
+        ("claude-haiku-4-5-20251001", "Haiku 4.5"),
+        ("claude-opus-4-8", "Opus 4.8"),
+        ("claude-haiku-4-5-20251001[1m]", "Haiku 4.5"),
+        ("us.anthropic.claude-opus-5-v1:0", "Opus 5"),
+    ],
+)
+def test_a_claude_model_id_is_shown_by_its_short_name(home, model, shown):
+    assert _bell_for(home, model) == (
+        "\U0001f514 Clean it up: /pc-memory:reconcile "
+        f"(\u26a0\ufe0f You are on {shown}, best on sonnet \u00b7 low effort)"
+    )
+
+
 def test_the_model_is_cleaned_and_capped_at_40_characters(home):
     named = _bell_for(home, "op\x1b[1mus-" + "x" * 80)
     assert "\x1b" not in named
