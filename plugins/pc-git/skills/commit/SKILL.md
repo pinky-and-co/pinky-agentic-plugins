@@ -49,19 +49,17 @@ in this order:
     session this hard-fail is the second line behind `orchestrator_freeze.py`, which already
     freezes such a session out of the repos; no code dependency is asserted between the two.
 
-**Bulk branch.** Discover the dirty repos:
+**Bulk branch.** Discover the dirty repos with the script, read-only — never a hand-written
+`rg`/`find` block or a shell loop (an `if`/`for` block matches no allowed command and asks for a
+permission):
 
 ```
-if command -v rg >/dev/null 2>&1; then
-  rg --files -uu --max-depth 6 -g '**/.git/HEAD' "${CLAUDE_PROJECT_DIR}"
-else
-  find "${CLAUDE_PROJECT_DIR}" -maxdepth 6 -path '*/.git/HEAD'
-fi
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh discover --root "${CLAUDE_PROJECT_DIR}"
 ```
 
-Each hit's grandparent directory is a candidate repo. `git -C <candidate> status --porcelain` per
-candidate — non-empty = dirty. Zero dirty → say so, stop. Then **do not spawn an agent per repo** —
-hand the whole lot to the script, which does every deterministic part in one sub-second pass:
+It prints one dirty-repo basename per line and stages nothing. `NO-REPOS-FOUND` (non-zero exit) →
+the root is wrong, say so and stop. An empty list, exit 0 → nothing to commit, say so, stop. Then
+**do not spawn an agent per repo** — hand the whole lot to the script, which does every deterministic part in one sub-second pass:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
@@ -81,7 +79,7 @@ is the one that opens the PR/MR.
 
 Reproduce the script's `=== RESULTS` block verbatim (one `<repo>\t<state>\t-` line per repo;
 `--no-pr` so `pr_url` is always `-`), keeping `commit-nopush` distinct from `failed` — the first
-means the commit is there, the second that nothing was committed. Derive no state not in the block.
+means the commit is there, the second that nothing was committed. Derive no state not in the block. Do not re-check the repos afterwards with a shell loop — the block is the check.
 
 ## Step 2 — Commit
 
