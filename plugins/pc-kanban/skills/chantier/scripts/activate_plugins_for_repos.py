@@ -24,42 +24,55 @@ already on (`already_enabled`) is a stderr note and skipped; a real enable
 failure is a stderr error and skipped — neither aborts the rest, same
 posture as sync_plugin_scope.py's own activate_for_path().
 
-Usage: activate_plugins_for_repos.py <resolved-repo-path> [<path>...]
+Usage: activate_plugins_for_repos.py --session-id "${CLAUDE_SESSION_ID}" <resolved-repo-path> [<path>...]
 """
 
-import os
+import argparse
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from pc_kanban_plugin_scope_lib import (
     enable_plugin_local,
+    load_state,
     matching_plugin_ids,
     settings_local_plugin_ids,
 )
 
 
-def session_open_path() -> Path:
+def session_open_path(session_id: str) -> Path | None:
     """The directory `claude plugin enable -s local` resolves "local" against
-    — CLAUDE_PROJECT_DIR, fixed at session launch, with the cwd as a last
-    resort. Same value plugin_scope_lib and sync_plugin_scope work from."""
-    return Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+    — the one the session was opened in, recorded at SessionStart in the
+    session's state file. None when the session is unknown: the shell's cwd
+    drifts between calls, so it never stands in for it."""
+    settings_local = load_state(session_id)["settings_local_path"]
+    return Path(settings_local).parent.parent if settings_local else None
 
 
 def main() -> int:
-    paths = sys.argv[1:]
-    if not paths:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--session-id", default="")
+    parser.add_argument("paths", nargs="*")
+    args = parser.parse_args()
+    if not args.paths:
         print(
-            "usage: activate_plugins_for_repos.py <resolved-repo-path>...",
+            "usage: activate_plugins_for_repos.py --session-id <id> <resolved-repo-path>...",
             file=sys.stderr,
         )
         return 2
 
-    open_path = session_open_path()
+    open_path = session_open_path(args.session_id) if args.session_id else None
+    if open_path is None:
+        print(
+            "activate_plugins_for_repos: no --session-id, or no state recorded for"
+            f" {args.session_id!r} — nothing enabled (the session's open directory is unknown)",
+            file=sys.stderr,
+        )
+        return 2
     already = set(settings_local_plugin_ids(open_path))
     newly_enabled: list[str] = []
 
-    for raw_path in paths:
+    for raw_path in args.paths:
         for plugin_id in matching_plugin_ids(Path(raw_path), open_path=open_path):
             if plugin_id in already or plugin_id in newly_enabled:
                 continue

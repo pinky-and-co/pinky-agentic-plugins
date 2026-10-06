@@ -134,7 +134,7 @@ re-review.
 Closing a card is not the end of the session's job — the next card does not pick itself. Once
 the `## Done when` state is verified, propose candidate cards for `2-selected-for-dev`; never move
 one there without an explicit OK in the same exchange — the commitment column stays a human
-decision (`.claude/rules/kanban-proactivity.md`).
+decision (the `kanban-proactivity` rule).
 
 **Candidates** — open cards in the same chantier's `1-todo/` (a card still in `0-ideas/` needs
 scoping first, never proposed directly), filtered and ordered:
@@ -218,7 +218,7 @@ the candidate card's `repos:`/`sert` against the current session's own:
    entirely, nothing to base it on) against the `<50` / `≥50` band gives the default recommendation
    (continue / spawn a fresh session); a candidate sharing `repos:` or `sert` with the current
    session modulates the wording toward "continue" but never flips a `≥50` verdict to the
-   opposite — this stays a recommendation, never a gate (`.claude/rules/kanban-proactivity.md`).
+   opposite — this stays a recommendation, never a gate (the `kanban-proactivity` rule).
 
 ```
 → Proposition : <card-slug>

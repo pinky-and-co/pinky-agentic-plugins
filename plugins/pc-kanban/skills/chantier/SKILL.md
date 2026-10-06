@@ -85,9 +85,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   - Session already at or above the card's `model:` → nothing to say, proceed.
 
   `/chantier` sets the scope and the goal, never the execution strategy — that judgment call is
-  made once work starts, not here. No generic "run this on haiku" mechanism exists on purpose:
-  "one routing axis = one named agent" rules out a catch-all executor that
-  would become a dumping ground. In order:
+  made once work starts, not here. In order:
   - an existing `context: fork` skill already covers this exact shape (`apply-pattern` for
     replaying a witness diff, `commit-and-pr` for commits) → use it.
   - none does → the session does the work itself, once, at its own tier — a single mechanical
@@ -104,9 +102,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
     ```
     Exit 0 → **worker** (the session is scoped to a repo). Non-zero → **orchestrator** (opened
-    outside any git repo — board curation/selection/spawning, never edits code). Same criterion as
-    `orchestrator_freeze.py`'s own `SessionStart` check, applied here at a different call site (this
-    skill's own body, not a hook payload) — the duplication is intentional, not drift.
+    outside any git repo — board curation/selection/spawning, never edits code).
      - **Orchestrator + the card has `repos:` non-empty** → do not take it: no `mv`, no freeze, no
        **Grill gate**, no **Goal**. Invoke `pc-kanban:spawn-workers
        <chantier-id> <card-slug>` instead and stop — every bullet below this one is worker-only. The
@@ -131,8 +127,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
       <the parent's `## Why` section, verbatim>
       <!-- auto-parent:end -->
       ```
-      Idempotent by construction — this bullet only ever runs once per card (see above) — never
-      hand-edit between the markers on a later resume.
+      Never hand-edit between the markers on a later resume.
     - Parent found but has no `## Why` → append the block with `## Done when` only, same markers.
     - Parent not `done` yet, `dropped`, not found (purged without archive), or
       `sert` orphaned → say so plainly, append nothing, and move on; never invent parent content.
@@ -147,12 +142,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     ```
     0 or >1 local clones for a slug is reported on stderr with a nonzero exit — stop and say so,
      never guess which clone. Then activate the plugins those resolved repos need, **before**
-    freezing — `claude plugin enable -s local` writes to `settings.local.json` at the workspace
-    root, which is not necessarily among the paths about to be frozen, so activating after freezing
-    risks the write itself being blocked by the freeze it would need to survive:
+    freezing:
     ```bash
-    python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py" <resolved-repo-paths...>
+    python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py" --session-id "${CLAUDE_SESSION_ID}" <resolved-repo-paths...>
     ```
+    Exit 2 (session unknown) → nothing is enabled: say so in one line and continue to the freeze.
     Non-empty output (one plugin id per line) means something was newly enabled — its skills/LSP/MCP
     aren't available until `/reload-plugins` runs, and step 8's execution depends on them. Stop here:
     no freeze yet, no Grill gate. Emit only:
@@ -167,9 +161,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 
     A worker session already scoped to the card's repo (worker/orchestrator model, skill `kanban`
     § Session write-scope) has that repo's plugins ambient, so this call finds nothing to enable —
-    empty output, no `/reload-plugins`. It stays wired in because the legacy one-session-many-repos
-    model still coexists during the transition, where the resolved repos are not the session's cwd
-    and the activation is real.
+    empty output, no `/reload-plugins`.
 
     Then freeze to the resolved paths
     **plus every kanban board root** (`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py"
@@ -184,12 +176,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     section, an `## Open questions` entry the user could answer now (one only implementation can
     settle does not count), a "grill before coding" note, `requirements: []` on a card that is not
     a single mechanical change, or a written *cause* the plan rests on (`verify-diagnosis`) — do
-    **not** emit the goal block. The grill can rewrite the `## Done when` out from under it, and an
-    active Stop-hook goal fights a multi-turn interview: the session cannot yield while the user
-    thinks between rounds, so the model loops re-answering "waiting for your input" while the hook
-    re-fires (observed repeatedly). Instead, end the response by routing to `pc-kanban:grill`, and
+    **not** emit the goal block. Instead, end the response by routing to `pc-kanban:grill`, and
     say the goal is set from the rewritten `## Done when` once the grill converges. Then skip the
     rest of this bullet.
+   - **Questions before the goal — once the Grill gate has passed or the grill has converged.** Every
+    question still left to the user (a branch to work on, a choice between two designs, a fallback if a premise falls, how a
+    check will be demonstrated) is asked **before** the goal block is emitted, in one
+    `AskUserQuestion` round, and the answers are written into the `<condition>`. A card with no
+    open question skips the round; the goal block still comes last.
    - **Goal.** Resolve `sert`: `sert: null` → the condition is this card's own `## Done when` line;
     `sert: <parent>` → walk up to the root card (`sert: null`) this chain ultimately serves, and use
      **its** `## Done when` line instead — the session may then work any card in that group, not
@@ -219,22 +213,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     `[answered by …]` line when the first line carries the model name alone —
     an `adversarial` call that returned nothing stated as such — verdict on the reviewer alone —
     and the `- [x] reviewed (<method>)` box checked on the card` — `<method>` is the `Method:`
-    line the reviewer opens its report with. Naming the checkbox in the clause makes
-    satisfying the goal and stamping the box one action, not two — so the retroactive audit does
-    not later flag a genuinely-reviewed card. The decision is made pre-work, on `## Done when` and
-    `requirements:` alone, so **when it is unclear, include the clause** — a spurious clause on a
-    card that turns out mechanical costs one `- [x] reviewed (n/a — mechanical)` stamp at close; a
-    missing clause on judgment work is the expensive failure this card exists to stop. A card that
+    line the reviewer opens its report with. The decision is made pre-work, on `## Done when` and
+    `requirements:` alone, so **when it is unclear, include the clause**. A card that
     is *obviously* mechanical (doc typo, a rename, a one-line config) gets no clause and is closed
     with `- [x] reviewed (n/a — mechanical)`.
     **Escape clause.** Append an OR branch to `<condition>`: `… OR the agent's last message names a
     precise, user-only action (a literal command to paste, a named permission to grant,
     `/reload-plugins`, an input asked for by name) that is the only remaining path — no
     agent-executable alternative is available — and the agent yielded the turn without relaunching a
-    tool`. An active `/goal` blocks the turn from ending even when the only way forward needs the
-    user — without this branch the pasted command queues silently instead of running (repro: a
-    session whose tools died mid-turn from `anthropics/claude-code#90135`, so the deadlock itself is
-    *assumed*, not confirmed clean on healthy tools).
+    tool`.
     Anti-cheat: the named action must be precise, nameable, and necessary — never a vague "I'm
     stuck", and never an action the agent could have run itself instead of yielding.
     Once `<condition>` is fully resolved (clauses included), queue this bullet's own `goal` key —
