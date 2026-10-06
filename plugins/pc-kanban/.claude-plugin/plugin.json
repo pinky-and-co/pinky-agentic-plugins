@@ -6,5 +6,6 @@
     "name": "Pinky & Co"
   },
   "skills": ["./skills"],
-  "dependencies": ["pc-core"]
+  "dependencies": ["pc-core"],
+  "types": "./types/index.d.ts"
 }

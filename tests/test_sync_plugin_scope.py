@@ -327,6 +327,62 @@ class TestHandleCwdChanged(unittest.TestCase):
         self.assertEqual(pua.pending(self.session), {})
 
 
+class TestHandleSessionStartSettingsNote(unittest.TestCase):
+    """The ascend writes the versioned `.claude/settings.json`; the hook says
+    so in `additionalContext` (and in the user-facing reload message) only
+    when something was newly enabled."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self._orig_psl_dir, psl.STATE_DIR = psl.STATE_DIR, root / "scope"
+        self._orig_pua_dir, pua.STATE_DIR = pua.STATE_DIR, root / "pending"
+        self.session = "sess-start"
+        self.repo = root / "repo"
+        (self.repo / ".claude").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        self._env = unittest.mock.patch.dict(
+            os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}
+        )
+        self._env.start()
+        self._orig_activate = sps.activate_for_path
+
+    def tearDown(self):
+        self._env.stop()
+        psl.STATE_DIR = self._orig_psl_dir
+        pua.STATE_DIR = self._orig_pua_dir
+        sps.activate_for_path = self._orig_activate
+        self._tmp.cleanup()
+
+    def _start(self, newly: list[str]) -> dict:
+        sps.activate_for_path = lambda *a, **k: newly
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            sps.handle_session_start(
+                {"session_id": self.session, "cwd": str(self.repo)}
+            )
+        return json.loads(out.getvalue())["hookSpecificOutput"]
+
+    def test_newly_enabled_names_the_settings_file(self):
+        out = self._start(["pc-snow@mp", "pc-pypi@mp"])
+        ctx = out["additionalContext"]
+        self.assertIn(".claude/settings.json", ctx)
+        self.assertNotIn(str(self.repo.resolve()), ctx)
+        self.assertIn("pc-snow@mp, pc-pypi@mp", ctx)
+        self.assertIn("not a stray file", ctx)
+        self.assertIn(
+            ".claude/settings.json mis à jour, à committer",
+            pua.pending(self.session)["reload-plugins"],
+        )
+
+    def test_nothing_new_has_no_additional_context(self):
+        self.assertNotIn("additionalContext", self._start([]))
+
+    def test_cwd_changed_does_not_mention_settings_json(self):
+        message = sps._reload_message(["pc-snow@mp"])
+        self.assertNotIn("settings.json", message)
+
+
 class TestHandleSessionEndScopeIsolation(unittest.TestCase):
     """SessionEnd restores the descent's settings.local.json only — the
     ascend's project-scope settings.json (a versioned file, meant to

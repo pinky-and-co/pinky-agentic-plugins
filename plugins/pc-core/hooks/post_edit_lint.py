@@ -83,12 +83,15 @@ def _run_checker(script: Path, filepath: str) -> str | None:
     if not script.is_file():
         return None
     try:
+        env = os.environ.copy()
+        env["NO_COLOR"] = "1"
         result = subprocess.run(
             [sys.executable, str(script), filepath],
             capture_output=True,
             text=True,
             encoding="utf-8",
             timeout=10,
+            env=env,
         )
     except Exception:
         return None

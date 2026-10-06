@@ -103,5 +103,8 @@
         ]
       }
     ]
-  }
+  },
+  "modules": [
+    "./board-pane/register.tsx"
+  ]
 }

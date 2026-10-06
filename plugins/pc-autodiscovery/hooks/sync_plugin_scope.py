@@ -54,6 +54,7 @@ from plugin_scope_lib import (
     settings_json_plugin_ids,
     settings_local_plugin_ids,
 )
+from settings_commit_nudge import SETTINGS_REL, repo_root
 
 
 def settings_local_for(project_dir: str) -> Path:
@@ -146,19 +147,46 @@ def handle_session_start(payload: dict) -> None:
     )
     save_state(session_id, state)
 
+    out: dict = {"hookSpecificOutput": {"hookEventName": "SessionStart"}}
     if newly_enabled:
-        require(session_id, "reload-plugins", _reload_message(newly_enabled))
+        require(
+            session_id,
+            "reload-plugins",
+            _reload_message(newly_enabled, settings_written=True),
+        )
+        out["hookSpecificOutput"]["additionalContext"] = _settings_written_context(
+            newly_enabled, Path(project_dir)
+        )
 
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart"}}))
+    print(json.dumps(out))
 
 
-def _reload_message(newly_enabled: list[str]) -> str:
-    n = len(newly_enabled)
+def _settings_written_context(newly_enabled: list[str], session_dir: Path) -> str:
+    """Model-facing note: the ascend wrote the versioned settings.json, so the
+    change is legitimate and belongs in the current work's commit."""
+    settings = session_dir / SETTINGS_REL
+    root = repo_root(session_dir)
+    try:
+        shown = settings.relative_to(root) if root else settings
+    except ValueError:
+        shown = settings
     return (
+        f"`{shown}` was written by plugin autodiscovery to enable "
+        f"{', '.join(newly_enabled)} for this repo. It is a legitimate, versioned "
+        "change: commit it with the current work. It is not a stray file."
+    )
+
+
+def _reload_message(newly_enabled: list[str], *, settings_written: bool = False) -> str:
+    n = len(newly_enabled)
+    message = (
         f"/reload-plugins  — {n} plugin{'s' if n > 1 else ''} "
         f"activé{'s' if n > 1 else ''} ({', '.join(newly_enabled)}), "
         "à charger pour cette session"
     )
+    if settings_written:
+        message += " ; .claude/settings.json mis à jour, à committer"
+    return message
 
 
 def handle_cwd_changed(payload: dict) -> None:
