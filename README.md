@@ -90,6 +90,10 @@ pinky-agentic-plugins/
 │   │   └── skills/
 │   │       └── agents-md/
 │   │           └── SKILL.md
+│   ├── pc-bash-guard/
+│   │   └── hooks/
+│   │       ├── dangerous_bash_ask.py
+│   │       └── hooks.json
 │   ├── pc-core/
 │   │   ├── agents/
 │   │   │   └── reviewer.md
@@ -471,6 +475,7 @@ pinky-agentic-plugins/
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
 │   ├── test_commit_trailer.py
+│   ├── test_dangerous_bash_ask.py
 │   ├── test_decision_client.py
 │   ├── test_detect_findings.py
 │   ├── test_detect_format.py

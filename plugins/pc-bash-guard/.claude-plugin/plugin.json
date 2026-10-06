@@ -1,0 +1,8 @@
+{
+  "name": "pc-bash-guard",
+  "version": "0.1.0",
+  "description": "Asks before a broadly allowlisted Bash command does something destructive (find -delete/-exec, echo redirected to a file) — skipped in auto mode, where the classifier already judges each call.",
+  "author": {
+    "name": "Pinky & Co"
+  }
+}

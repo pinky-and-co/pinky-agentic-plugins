@@ -80,6 +80,11 @@
       "name": "pc-memory",
       "source": "./plugins/pc-memory",
       "description": "Memory recall at session start — the user sees a tree of the directory levels with their notes, old notes (at least N days old) and last review date, then a reminder to run `reconcile` when a review is due; the model gets the parent levels' indexes only, capped and marked as data. Asks the user before any write into a memory directory, counts per note the sessions that read it, and its `reconcile` skill reviews the notes with the user and applies the approved plan."
+    },
+    {
+      "name": "pc-bash-guard",
+      "source": "./plugins/pc-bash-guard",
+      "description": "Asks before a destructive form of an allowlisted Bash command (find -delete/-exec, echo > file) — skipped in auto mode, where the classifier already judges each call."
     }
   ]
 }

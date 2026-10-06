@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -94,6 +95,7 @@ BRANCH = "\u251c\u2500\u2500 "
 LAST_BRANCH = "\u2514\u2500\u2500 "
 INDENT = 6
 MAX_MODEL_CHARS = 40
+CONTEXT_SUFFIX = re.compile(r"\[[^\]]*\]$")
 RECONCILE_COMMAND = "/pc-memory:reconcile"
 RECOMMENDED_MODEL = "sonnet"
 RECOMMENDED_EFFORT = "low effort"
@@ -167,6 +169,19 @@ def review_due(memory_dir: Path, review_days: int, now: float) -> bool:
         return False
 
 
+def short_model(name: str) -> str:
+    """Short display name of a Claude model id (`claude-haiku-4-5-20251001` -> `Haiku 4.5`).
+
+    A name that is not a Claude id is returned unchanged.
+    """
+    cut = name.lower().find("claude-")
+    if cut < 0:
+        return name
+    parts = CONTEXT_SUFFIX.sub("", name[cut + len("claude-") :]).split("-")
+    version = [p for p in parts[1:] if p.isdigit() and len(p) < 6]
+    return f"{parts[0].capitalize()} {'.'.join(version)}".strip()
+
+
 def build_review_line(model: object) -> str:
     """The reminder to run `reconcile`, with the model to switch from when it is not a sonnet.
 
@@ -176,7 +191,8 @@ def build_review_line(model: object) -> str:
     advice = f"best on {RECOMMENDED_MODEL}{SEPARATOR}{RECOMMENDED_EFFORT}"
     name = clean_text(model).strip() if isinstance(model, str) else ""
     if name and RECOMMENDED_MODEL not in name.casefold():
-        advice = f"\u26a0\ufe0f You are on {name[:MAX_MODEL_CHARS].rstrip()}, {advice}"
+        shown = short_model(name)[:MAX_MODEL_CHARS].rstrip()
+        advice = f"\u26a0\ufe0f You are on {shown}, {advice}"
     return f"\U0001f514 Clean it up: {RECONCILE_COMMAND} ({advice})"
 
 

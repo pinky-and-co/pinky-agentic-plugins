@@ -2,7 +2,7 @@
 name: reconcile
 description: Review the memory notes of the current directory level and of its parent levels with the user, note by note (promote, keep, move to another level, delete), then apply the approved plan. Use when the user asks to review, clean up or reconcile memory, or when the startup message says a review is due.
 disable-model-invocation: true
-allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/inventory.py:*), Bash(cat:*), AskUserQuestion
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/inventory.py:*), Bash(cat:*), Bash(rtk read:*), AskUserQuestion
 ---
 
 # Reconcile

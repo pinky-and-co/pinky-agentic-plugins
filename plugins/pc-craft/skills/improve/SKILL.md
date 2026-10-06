@@ -2,7 +2,7 @@
 name: improve
 description: "Surface architectural friction in a codebase and propose deepening opportunities — shallow modules, scattered locality, hidden seams — using the deletion test. Writes an HTML report, then grills the candidate the user picks. Use when asked to review a repo's design, find refactor opportunities, or assess module depth. Not a bug hunt (use a review skill) and not a style pass."
 user-invocable: true
-allowed-tools: Read, Write, Edit, Bash(rg:*), Bash(find:*), Bash(ls:*), Bash(git rev-parse:*), Bash(date:*), Bash(basename:*)
+allowed-tools: Read, Write, Edit, Bash(rg:*), Bash(rtk rg:*), Bash(find:*), Bash(rtk find:*), Bash(ls:*), Bash(rtk ls:*), Bash(git rev-parse:*), Bash(git -C * rev-parse*), Bash(date:*), Bash(basename:*)
 metadata:
   source: original — method after Ousterhout, "A Philosophy of Software Design"
   updated: 2026-08-27

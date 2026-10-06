@@ -1,0 +1,17 @@
+{
+  "description": "Turns a destructive form of an allowlisted Bash command (find with -delete/-exec/-execdir/-ok/-fprint, echo redirected to a file) into a permission prompt, in every permission mode except auto. Fails open: a malformed payload or an unexpected error leaves the command untouched.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/dangerous_bash_ask.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

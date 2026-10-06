@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews code changes, or a described claim/result, with a fresh context that never saw the generating session's own reasoning. Decides by itself whether a non-Claude model should challenge the change. Use proactively for a second opinion on this session's own work — never for producing work.
-tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, Skill, mcp__plugin_pc-core_pc-core-models__adversarial, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git branch:*), Bash(git merge-base:*), Bash(git stash list:*), Bash(pi:*)
+tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, Skill, mcp__plugin_pc-core_pc-core-models__adversarial, Bash(git diff:*), Bash(git -C * diff*), Bash(rtk git -C * diff*), Bash(rtk git diff:*), Bash(git log:*), Bash(git -C * log*), Bash(rtk git -C * log*), Bash(rtk git log:*), Bash(git show:*), Bash(git -C * show*), Bash(rtk git -C * show*), Bash(rtk git show:*), Bash(git status:*), Bash(git -C * status*), Bash(rtk git -C * status*), Bash(rtk git status:*), Bash(git rev-parse:*), Bash(git -C * rev-parse*), Bash(git branch:*), Bash(git -C * branch*), Bash(rtk git -C * branch*), Bash(rtk git branch:*), Bash(git merge-base:*), Bash(git -C * merge-base*), Bash(git stash list:*), Bash(rtk git stash list:*), Bash(pi:*)
 model: sonnet
 effort: high
 color: red

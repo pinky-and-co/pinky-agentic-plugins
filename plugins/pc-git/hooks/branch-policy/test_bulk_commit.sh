@@ -86,6 +86,15 @@ check "group with no message -> skipped"  "$(printf '%s' "$dry" | grep -c 'no me
 check "unfiltered plan -> stderr note (not a die)" \
     "$("$SCRIPT" plan --root "$T" 2>&1 >/dev/null | grep -c 'note: unfiltered plan')"           1
 
+# `--messages -` lit les messages sur l'entrée standard : un skill qui tourne en acceptEdits
+# n'a ainsi aucun fichier à écrire hors du répertoire de travail (un fichier sous /tmp
+# déclenche une demande de permission).
+fp="$(printf '%s' "$plan" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+dry_stdin="$(printf '%s\t📝 docs: add README\n' "$fp" | "$SCRIPT" apply --root "$T" --messages - --dry-run 2>&1)"
+check "--messages - : same dry-run as the file form" "$dry_stdin" "$dry"
+check "--messages - : the message is read from stdin" "$(printf '%s' "$dry_stdin" | grep -c 'docs: add README')" "$(printf '%s' "$dry" | grep -c 'docs: add README')"
+check "--messages - : no 'message file not found'" "$(printf '%s' "$dry_stdin" | grep -c 'message file not found')" 0
+
 # Une racine sans aucun dépôt n'est pas un workspace propre : c'est une racine fausse.
 # Les confondre annonce "rien à faire" après avoir regardé au mauvais endroit — vu en vrai
 # juste après un déplacement de workspace, avec 11 repos sales laissés au sol.
