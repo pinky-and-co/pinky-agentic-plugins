@@ -1,6 +1,7 @@
 ---
 name: snowpark-to-sql
 description: "Translate Snowpark Python (DataFrame API) into the equivalent Snowflake SQL. Prefers Snowpark's own generated SQL (`df.queries`) as the deterministic oracle when the code can run; otherwise a static translation using the sibling `snowpark` skill's mapping in reverse. Use for code review or de-migrating Snowpark to SQL. For the reverse direction use `sql-to-snowpark`."
+argument-hint: "<path-to-source.py | python-snippet> [output-path]"
 user-invocable: true
 allowed-tools: Read, Write, Edit, Bash(find:*), Bash(ls:*), Bash(cat:*)
 metadata:
