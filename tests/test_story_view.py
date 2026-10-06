@@ -166,3 +166,47 @@ def test_next_id_rejects_a_bad_family(tmp_path: Path) -> None:
     chantier = tmp_path / "_KANBAN" / "CHANTIER0025-demo"
     chantier.mkdir(parents=True)
     assert _run("--next-id", "pkg", str(chantier)).returncode == 2
+
+
+def _row_card(path: Path, row: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\nblocked_by: null\nrequirements: []\n---\n"
+        f"# {path.stem}\n\n## Requirements\n\n| Id | P | E | C |\n|---|---|---|---|\n{row}\n",
+        encoding="utf-8",
+    )
+
+
+def test_same_id_with_identical_rows_is_listed_once(tmp_path: Path) -> None:
+    chantier = tmp_path / "_KANBAN" / "CHANTIER0025-demo"
+    _row_card(chantier / "1-todo" / "a.md", "| PKG-0025-1 | MUST | x | y |")
+    _row_card(chantier / "3-in-progress" / "b.md", "| PKG-0025-1 | MUST | x | y |")
+    assert _run(str(chantier)).stdout == (
+        "## Requirements (open cards)\n\n"
+        "| PKG-0025-1 | MUST | x | y |  <- a, b\n\n"
+        "## Open questions\n\n\n"
+        "## Open cards (blockers first)\n\n"
+        "- a\n"
+        "- b\n"
+    )
+
+
+def test_same_id_with_different_rows_warns_and_names_the_cards(
+    tmp_path: Path,
+) -> None:
+    chantier = tmp_path / "_KANBAN" / "CHANTIER0025-demo"
+    _row_card(chantier / "1-todo" / "a.md", "| PKG-0025-1 | MUST | x | y |")
+    _row_card(chantier / "1-todo" / "b.md", "| PKG-0025-1 | SHOULD | x | y |")
+    _row_card(chantier / "3-in-progress" / "c.md", "| PKG-0025-1 | MUST | x | y |")
+    assert _run(str(chantier)).stdout == (
+        "## Requirements (open cards)\n\n"
+        "| PKG-0025-1 | MUST | x | y |  <- a, c\n"
+        "| PKG-0025-1 | SHOULD | x | y |  <- b\n\n"
+        "## Open questions\n\n\n"
+        "## Open cards (blockers first)\n\n"
+        "- a\n"
+        "- b\n"
+        "- c\n\n"
+        "## Warning: defined with different rows\n\n"
+        "- PKG-0025-1 in a, b, c\n"
+    )

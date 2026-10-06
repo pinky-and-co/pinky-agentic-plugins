@@ -248,6 +248,122 @@ class TestBuildWorkerPrompt(unittest.TestCase):
             self.assertIn("Card to work:", prompt)
 
 
+def _write_card(path: Path, cites: str, rows: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = f"---\nrequirements: [{cites}]\n---\n# {path.stem}\n"
+    if rows:
+        body += "\n## Requirements\n\n| Id | P | E | C |\n|---|---|---|---|\n"
+        body += "".join(f"{r}\n" for r in rows)
+    path.write_text(body, encoding="utf-8")
+
+
+class TestBuildWorkerPromptRequirementRows(unittest.TestCase):
+    def _prompt(self, tmp: str, card: Path) -> tuple[str, str]:
+        """Return the prompt and the conventions block, both probed with no tool on PATH."""
+        repo = Path(tmp) / "repo"
+        repo.mkdir()
+        with mock.patch.object(sw.shutil, "which", return_value=None):
+            return (
+                sw.build_worker_prompt(card, repo, "org/repo"),
+                sw.repo_conventions_block(repo),
+            )
+
+    def test_cited_row_defined_elsewhere_is_added_verbatim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chantier = Path(tmp) / "_KANBAN" / "CHANTIER0025-demo"
+            row = "| PKG-0025-1 | MUST | the statement | the check |"
+            _write_card(chantier / "1-todo" / "definer.md", "", [row])
+            card = chantier / "3-in-progress" / "citer.md"
+            _write_card(card, "PKG-0025-1, PKG-0025-99", [])
+            prompt, conventions = self._prompt(tmp, card)
+            self.assertEqual(
+                prompt,
+                f"{conventions}\n\n"
+                f"Card to work:\n- Card: {card}\n- Repo: org/repo\n"
+                "- Requirements cited by the card, defined in other cards (full rows):\n"
+                f"  {row}",
+            )
+
+    def test_card_defining_its_own_ids_gets_the_unchanged_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chantier = Path(tmp) / "_KANBAN" / "CHANTIER0025-demo"
+            row = "| PKG-0025-1 | MUST | the statement | the check |"
+            card = chantier / "3-in-progress" / "own.md"
+            _write_card(card, "PKG-0025-1", [row])
+            _write_card(chantier / "1-todo" / "other.md", "", [row])
+            prompt, conventions = self._prompt(tmp, card)
+            self.assertEqual(
+                prompt,
+                f"{conventions}\n\n{sw.generated_card_block(card, 'org/repo')}",
+            )
+
+
+class TestCitedRowsAcrossCards(unittest.TestCase):
+    _MARK = "  (definitions differ across cards — verify with the user)"
+
+    def _lines(self, tmp: str, card: Path) -> str:
+        """Return the generated block of the prompt, the part after the conventions."""
+        repo = Path(tmp) / "repo"
+        repo.mkdir()
+        with mock.patch.object(sw.shutil, "which", return_value=None):
+            prompt = sw.build_worker_prompt(card, repo, "org/repo")
+        return prompt[prompt.index("Card to work:") :]
+
+    def _head(self, card: Path) -> str:
+        return (
+            f"Card to work:\n- Card: {card}\n- Repo: org/repo\n"
+            "- Requirements cited by the card, defined in other cards (full rows):\n"
+        )
+
+    def test_differing_definitions_list_every_row_after_a_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chantier = Path(tmp) / "_KANBAN" / "CHANTIER0025-demo"
+            r1 = "| PKG-0025-1 | MUST | s | c1 |"
+            r2 = "| PKG-0025-1 | MUST | s | c2 |"
+            _write_card(chantier / "0-ideas" / "a.md", "", [r1])
+            _write_card(chantier / "1-todo" / "b.md", "", [r2])
+            _write_card(chantier / "2-selected-for-dev" / "c.md", "", [r1])
+            card = chantier / "3-in-progress" / "citer.md"
+            _write_card(card, "PKG-0025-1", [])
+            self.assertEqual(
+                self._lines(tmp, card),
+                self._head(card) + f"{self._MARK}\n  {r1}\n  {r2}",
+            )
+
+    def test_identical_definitions_across_columns_give_one_row_no_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chantier = Path(tmp) / "_KANBAN" / "CHANTIER0025-demo"
+            row = "| PKG-0025-1 | MUST | s | c |"
+            _write_card(chantier / "0-ideas" / "a.md", "", [row])
+            _write_card(chantier / "3-in-progress" / "b.md", "", [row])
+            card = chantier / "1-todo" / "citer.md"
+            _write_card(card, "PKG-0025-1", [])
+            self.assertEqual(self._lines(tmp, card), self._head(card) + f"  {row}")
+
+    def test_several_cited_ids_keep_the_citing_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chantier = Path(tmp) / "_KANBAN" / "CHANTIER0025-demo"
+            r1 = "| PKG-0025-1 | MUST | s | c |"
+            r2 = "| PKG-0025-2 | MUST | s | c |"
+            _write_card(chantier / "1-todo" / "a.md", "", [r1, r2])
+            card = chantier / "3-in-progress" / "citer.md"
+            _write_card(card, "PKG-0025-2, PKG-0025-1", [])
+            self.assertEqual(
+                self._lines(tmp, card), self._head(card) + f"  {r2}\n  {r1}"
+            )
+
+    def test_unreadable_sibling_card_does_not_fail_the_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chantier = Path(tmp) / "_KANBAN" / "CHANTIER0025-demo"
+            row = "| PKG-0025-1 | MUST | s | c |"
+            _write_card(chantier / "1-todo" / "good.md", "", [row])
+            (chantier / "0-ideas").mkdir(parents=True)
+            (chantier / "0-ideas" / "broken.md").symlink_to(Path(tmp) / "missing.md")
+            card = chantier / "3-in-progress" / "citer.md"
+            _write_card(card, "PKG-0025-1", [])
+            self.assertEqual(self._lines(tmp, card), self._head(card) + f"  {row}")
+
+
 class TestEffectiveModel(unittest.TestCase):
     def test_requested_wins_over_frontmatter(self):
         self.assertEqual(sw.effective_model("opus", "sonnet"), "sonnet")

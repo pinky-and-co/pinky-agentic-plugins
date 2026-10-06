@@ -281,6 +281,8 @@ pinky-agentic-plugins/
 │   │   │   ├── kanban-proactivity/
 │   │   │   │   ├── kanban-proactivity.md
 │   │   │   │   └── kanban_proactivity.py
+│   │   │   ├── requirement-rows/
+│   │   │   │   └── pc_kanban_requirement_rows.py
 │   │   │   ├── agent_log_writer.py
 │   │   │   ├── hooks.json
 │   │   │   ├── orchestrator_freeze.py
@@ -491,6 +493,7 @@ pinky-agentic-plugins/
 │   ├── test_pc_kanban_card_ops.py
 │   ├── test_pc_kanban_init.py
 │   ├── test_pc_kanban_migrate_agent_log.py
+│   ├── test_pc_kanban_requirement_rows.py
 │   ├── test_pc_kanban_spawn_workers.py
 │   ├── test_pc_memory.py
 │   ├── test_pc_memory_count.py

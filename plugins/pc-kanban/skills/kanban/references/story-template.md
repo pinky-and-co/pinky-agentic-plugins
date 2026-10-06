@@ -24,7 +24,8 @@ the only way back on an unversioned board. An item no card carries becomes a car
 scoped yet).
 
 The chantier-wide view — every requirement of the open cards, their open questions, the open cards
-with blockers first, and any id cited by an open card but defined in none — is rebuilt on demand:
+with blockers first, any id cited by an open card but defined in none, and any id defined with
+different rows in several cards — is rebuilt on demand:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py" <chantier-dir>
