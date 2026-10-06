@@ -5,7 +5,7 @@ argument-hint: "<witness-repo> <target> [<target>…] — or <witness-repo> --re
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(git diff:*), Bash(git status:*), Bash(git log:*), Bash(git rev-parse:*), Bash(rg:*), Bash(find:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(jq:*), Bash(mktemp:*), Bash(gh:*), Bash(glab:*), Read, Edit, Write, Glob, Grep
+allowed-tools: Bash(git diff:*), Bash(rtk git diff:*), Bash(git status:*), Bash(rtk git status:*), Bash(git log:*), Bash(rtk git log:*), Bash(git rev-parse:*), Bash(rg:*), Bash(rtk rg:*), Bash(find:*), Bash(rtk find:*), Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(jq:*), Bash(rtk jq:*), Bash(mktemp:*), Bash(gh:*), Bash(rtk gh:*), Bash(glab:*), Bash(rtk glab:*), Read, Edit, Write, Glob, Grep
 ---
 
 # Apply a pattern to the remaining targets

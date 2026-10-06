@@ -3,7 +3,7 @@ name: sql-to-snowpark
 description: "Translate a Snowflake SQL query into the Snowpark Python DataFrame API. Thin driver — the SQL↔Snowpark mapping and the translation pitfalls live in the sibling `snowpark` skill's reference; this applies them to your query, CTE by CTE. Use when migrating a SQL query or view to Snowpark Python. For the reverse direction use `snowpark-to-sql`."
 argument-hint: "<path-to-source.sql | sql-snippet> [output-path]"
 user-invocable: true
-allowed-tools: Read, Write, Edit, Bash(find:*), Bash(ls:*), Bash(cat:*)
+allowed-tools: Read, Write, Edit, Bash(find:*), Bash(rtk find:*), Bash(ls:*), Bash(rtk ls:*), Bash(cat:*), Bash(rtk read:*)
 metadata:
   source: original — driver over the `snowpark` skill reference
   updated: 2026-08-27

@@ -5,7 +5,7 @@ argument-hint: "<repository-to-commit | /absolute/repo/path> or --all [--no-watc
 model: haiku
 context: fork
 agent: general-purpose
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git rev-parse:*), Bash(test -e:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(gh:*), Bash(glab:*), Bash(jq:*), Bash(mktemp:*), Read, Write, Bash(prek run:*), Bash(pre-commit run:*)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh:*), Bash(git rev-parse:*), Bash(test -e:*), Bash(git status:*), Bash(rtk git status:*), Bash(git diff:*), Bash(rtk git diff:*), Bash(git log:*), Bash(rtk git log:*), Bash(gh:*), Bash(rtk gh:*), Bash(glab:*), Bash(rtk glab:*), Bash(jq:*), Bash(rtk jq:*), Bash(mktemp:*), Read, Write, Bash(prek run:*), Bash(pre-commit run:*), Bash(rtk pre-commit run:*)
 ---
 
 # Commit + push + PR/MR

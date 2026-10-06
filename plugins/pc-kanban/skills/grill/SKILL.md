@@ -2,7 +2,7 @@
 name: grill
 description: Interview a plan, an idea or an imported brief until nothing is silently assumed, then write the result into the chantier's cards — numbered, verifiable requirements, open questions and steps, each in the card that carries it. Use before starting a chantier, to stress-test a design, or to land an external brainstorm (written elsewhere, in another tool) into the board.
 argument-hint: "[<path-to-an-existing-brief>] [free-text idea]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(find:*), Bash(rg:*), Bash(git log:*), Bash(git remote:*), Bash(command -v:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(rtk ls:*), Bash(find:*), Bash(rtk find:*), Bash(rg:*), Bash(rtk rg:*), Bash(git log:*), Bash(rtk git log:*), Bash(git remote:*), Bash(command -v:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), AskUserQuestion
 ---
 
 # Grill
