@@ -39,8 +39,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
      where its Python tests live, its test command, its gate command, and the standing worker
      invariants (dedicated branch, no commit/push/PR). The same every time for this repo — never
      retyped by whoever is running this skill.
-   - **generated** — the card's absolute path, the repo, and `--arbitrage` (any judgment call the
-     card leaves for the worker to resolve rather than ask back).
+   - **generated** — the card's absolute path, the repo, the full table row of each requirement the
+     card cites without defining (taken from the open cards of its chantier, since the worker reads no
+     other card), and `--arbitrage` (any judgment call the card leaves for the worker to resolve
+     rather than ask back).
 4. **This script never calls the `Agent` tool — only the calling session can.** For each block of
    printed output, invoke:
    ```

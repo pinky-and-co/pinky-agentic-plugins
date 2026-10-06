@@ -119,8 +119,8 @@ interview settles about the work lands in **the card that carries it** (skill `k
   `{FAM}-{NNNN}-{NN}`, priority, statement, verification criterion. That norm is authoritative; do
   not restate or bend it here. Take each new id from
   `${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py --next-id <FAM> <chantier-dir>`. A
-  requirement is defined in one card only; another card that traces to it cites the id in its
-  frontmatter `requirements:`.
+  requirement is defined in the card that carries it, and may be repeated in another card only with
+  an identical row; a card that merely traces to it cites the id in its frontmatter `requirements:`.
 - **`## Open questions`** — empty by default: the grill exists to close every question. An entry is
   allowed only when the answer can come solely from implementing, and it names what the
   implementation will reveal. A question the user can answer now is asked in a round, never

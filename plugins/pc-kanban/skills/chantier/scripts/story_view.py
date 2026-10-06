@@ -5,10 +5,12 @@
     story_view.py --next-id <FAMILY> <chantier-dir>
 
 Open cards are the ones in ``0-ideas`` to ``3-in-progress``. A requirement is *defined* in the
-``## Requirements`` table of exactly one card and *cited* by other cards through their frontmatter
-``requirements:`` key. The view prints the requirements defined in open cards, the open questions of
-open cards, the open cards ordered so a card follows the one that blocks it, and a warning for each
-id cited by an open card but defined in no open card.
+``## Requirements`` table of a card (several cards may repeat an identical row) and *cited* by
+other cards through their frontmatter ``requirements:`` key. The view prints the requirements
+defined in open cards (identical rows listed once), the open questions of open cards, the open
+cards ordered so a card follows the one that blocks it, a warning for each id whose rows differ
+between the open cards that define it, and a warning for each id cited by an open card but defined
+in no open card.
 
 ``--next-id PKG`` prints the next free id of the family for the chantier (``PKG-0025-13``), counting
 open cards, the chantier's cards under ``_ARCHIVE/`` and ``story.md``.
@@ -23,49 +25,20 @@ import re
 import sys
 from pathlib import Path
 
-OPEN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress")
-ID_RE = re.compile(r"\b([A-Z]+)-(\d{4})-(\d+)\b")
-KEY_RE = re.compile(r"^[A-Za-z_][\w-]*:")
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[3] / "hooks" / "requirement-rows")
+)
+from pc_kanban_requirement_rows import (  # noqa: E402
+    ID_RE,
+    RequirementRow,
+    cited_ids,
+    frontmatter,
+    read_open_cards,
+    requirement_rows,
+    section,
+)
+
 EMPTY = ("", "null", "~", "[]")
-
-
-def frontmatter(text: str) -> list[str]:
-    """Return the lines between the opening and closing ``---`` of a card.
-
-    Args:
-        text: The whole card.
-
-    Returns:
-        The frontmatter lines, empty when there is none.
-    """
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return []
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            return lines[1:i]
-    return []
-
-
-def cited_ids(head: list[str]) -> list[str]:
-    """Return the ids under the ``requirements`` frontmatter key (inline or list form).
-
-    Args:
-        head: The frontmatter lines.
-
-    Returns:
-        The ids in order, without duplicates.
-    """
-    ids: list[str] = []
-    inside = False
-    for line in head:
-        if line.startswith("requirements:"):
-            inside = True
-        elif KEY_RE.match(line):
-            inside = False
-        if inside:
-            ids += [m.group(0) for m in ID_RE.finditer(line)]
-    return list(dict.fromkeys(ids))
 
 
 def blocker(head: list[str]) -> str:
@@ -82,45 +55,6 @@ def blocker(head: list[str]) -> str:
             value = line.partition(":")[2].strip().strip("'\"")
             return "" if value in EMPTY else value
     return ""
-
-
-def section(text: str, title: str) -> list[str]:
-    """Return the body lines of a ``## <title>`` section, up to the next ``## `` heading.
-
-    Args:
-        text: The whole card.
-        title: The heading text.
-
-    Returns:
-        The body lines, empty when the section is absent.
-    """
-    body: list[str] = []
-    inside = False
-    for line in text.splitlines():
-        if line.startswith("## "):
-            inside = line[3:].strip() == title
-        elif inside:
-            body.append(line)
-    return body
-
-
-def defined_rows(text: str) -> dict[str, str]:
-    """Return the requirement rows of a card's ``## Requirements`` table, by id.
-
-    Args:
-        text: The whole card.
-
-    Returns:
-        Id mapped to the verbatim table row.
-    """
-    rows: dict[str, str] = {}
-    for line in section(text, "Requirements"):
-        if not line.startswith("|"):
-            continue
-        cells = line.split("|")
-        if len(cells) > 2 and ID_RE.fullmatch(cells[1].strip()):
-            rows.setdefault(cells[1].strip(), line.rstrip())
-    return rows
 
 
 def open_questions(text: str) -> list[str]:
@@ -144,22 +78,6 @@ def open_questions(text: str) -> list[str]:
         else:
             items.append(stripped)
     return items
-
-
-def read_open_cards(chantier: Path) -> list[tuple[str, str]]:
-    """Read the open cards of a chantier in column then name order.
-
-    Args:
-        chantier: The chantier directory.
-
-    Returns:
-        ``(slug, text)`` pairs.
-    """
-    cards = []
-    for column in OPEN_COLUMNS:
-        for card in sorted((chantier / column).glob("*.md")):
-            cards.append((card.stem, card.read_text(encoding="utf-8", errors="ignore")))
-    return cards
 
 
 def order_cards(cards: list[tuple[str, str]]) -> list[str]:
@@ -238,7 +156,6 @@ def render(chantier: Path) -> str:
     """
     cards = read_open_cards(chantier)
     out = ["## Requirements (open cards)", ""]
-    defined: set[str] = set()
     story = chantier / "story.md"
     # Une story pas encore migrée garde sa table : ses lignes restent valides jusqu'au déplacement.
     sources = (
@@ -246,10 +163,19 @@ def render(chantier: Path) -> str:
         if story.is_file()
         else []
     )
-    for slug, text in sources + cards:
-        for rid, row in defined_rows(text).items():
-            defined.add(rid)
-            out.append(f"{row}  <- {slug}")
+    all_rows = requirement_rows(sources + cards)
+    defined = {r.id for r in all_rows}
+    differing: list[str] = []
+    for rid in dict.fromkeys(r.id for r in all_rows):
+        mine = [r for r in all_rows if r.id == rid]
+        # Les lignes iso (même priorité, énoncé, critère) sont listées une fois, cards groupées.
+        groups: dict[RequirementRow, list[str]] = {}
+        for r in mine:
+            groups.setdefault(r, []).append(r.slug)
+        for r, slugs in groups.items():
+            out.append(f"{r.row}  <- {', '.join(slugs)}")
+        if len(groups) > 1:
+            differing.append(f"{rid} in {', '.join(r.slug for r in mine)}")
     out += ["", "## Open questions", ""]
     out += [f"- [{slug}] {q}" for slug, text in cards for q in open_questions(text)]
     out += ["", "## Open cards (blockers first)", ""]
@@ -260,6 +186,9 @@ def render(chantier: Path) -> str:
         for rid in cited_ids(frontmatter(text))
         if rid not in defined
     ]
+    if differing:
+        out += ["", "## Warning: defined with different rows", ""]
+        out += [f"- {d}" for d in differing]
     if unresolved:
         out += ["", "## Warning: cited but defined in no open card", ""]
         out += [f"- {u}" for u in unresolved]

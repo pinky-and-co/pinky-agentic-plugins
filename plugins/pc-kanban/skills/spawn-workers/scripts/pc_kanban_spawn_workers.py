@@ -45,6 +45,18 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pc_kanban_spawn_plugin_scope_lib import matching_plugin_ids
 
+# Le parseur des lignes d'exigences est partagé avec `chantier` : il vit dans un dossier de concern.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[3] / "hooks" / "requirement-rows")
+)
+from pc_kanban_requirement_rows import (  # noqa: E402
+    cited_ids,
+    defined_rows,
+    frontmatter,
+    read_open_cards,
+    requirement_rows,
+)
+
 _USAGE = (
     "Usage: pc_kanban_spawn_workers.py [--dry-run] [--cmux] [--model <tier>] "
     "[--arbitrage <text>] <chantier-id> <card-slug> [<repo-slug>...]"
@@ -297,8 +309,49 @@ def repo_conventions_block(repo: Path) -> str:
     return "\n".join(lines)
 
 
+def cited_requirement_rows(card_path: Path) -> list[str]:
+    """The table rows of the requirements a card cites without defining them.
+
+    The rows come from the open cards (`0-ideas` to `3-in-progress`) of the same chantier — the
+    worker may read no card but its own, so the check criterion has to travel in the prompt.
+    `story.md` is not a source: the worker reads only the cards of its chantier, so a row that
+    lives only in an unmigrated story table is not added.
+
+    Args:
+        card_path: absolute path to the card file, `<chantier>/<column>/<slug>.md`.
+
+    Returns:
+        Lines in the order the card cites its ids. An id defined identically (same priority,
+        statement and check) in every card gives one verbatim row; an id defined with differing
+        rows gives a warning line then each distinct row, in board order. An id defined in no
+        open card adds nothing. Empty when the card cannot be read.
+    """
+    try:
+        text = card_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    own = defined_rows(text)
+    siblings = [
+        c for c in read_open_cards(card_path.parent.parent) if c[0] != card_path.stem
+    ]
+    rows = requirement_rows(siblings)
+    lines: list[str] = []
+    for rid in cited_ids(frontmatter(text)):
+        if rid in own:
+            continue
+        # Les lignes iso sont dédupliquées (la première rencontrée est gardée, ordre de la board).
+        distinct = list(dict.fromkeys(r for r in rows if r.id == rid))
+        if len(distinct) > 1:
+            lines.append("  (definitions differ across cards — verify with the user)")
+        lines += [f"  {r.row}" for r in distinct]
+    return lines
+
+
 def generated_card_block(
-    card_path: Path, repo_slug: str, arbitrage: str | None = None
+    card_path: Path,
+    repo_slug: str,
+    arbitrage: str | None = None,
+    cited_rows: list[str] | None = None,
 ) -> str:
     """The 'généré' half of the worker prompt (card point 3): the card, its repo, and any
     judgment call the worker should resolve rather than ask back.
@@ -307,6 +360,8 @@ def generated_card_block(
         card_path: absolute path to the card file.
         repo_slug: the target repo's `org/repo` slug.
         arbitrage: a judgment call to surface to the worker, or None.
+        cited_rows: indented lines (full rows) of the requirements the card cites but does not
+            define, or None.
 
     Returns:
         The generated block, newline-joined.
@@ -318,6 +373,11 @@ def generated_card_block(
     ]
     if arbitrage:
         lines.append(f"- Judgment call to resolve: {arbitrage}")
+    if cited_rows:
+        lines.append(
+            "- Requirements cited by the card, defined in other cards (full rows):"
+        )
+        lines += cited_rows
     return "\n".join(lines)
 
 
@@ -338,7 +398,7 @@ def build_worker_prompt(
     """
     return (
         f"{repo_conventions_block(repo)}\n\n"
-        f"{generated_card_block(card_path, repo_slug, arbitrage)}"
+        f"{generated_card_block(card_path, repo_slug, arbitrage, cited_requirement_rows(card_path))}"
     )
 
 

@@ -58,7 +58,8 @@ Markdown under the frontmatter. `## Why` and `## Done when` on every card; the t
 when the card has something to put there — an empty section is left out:
 
 - **`## Requirements`** — the table of the requirements this card defines (§ Requirements below for
-  its form). A requirement is defined in one card only.
+  its form). A requirement may be defined in several cards provided the rows are identical
+  (priority, statement, check); `story_view.py` warns when they differ.
 - **`## Open questions`** — what only implementing this card can settle.
 - **`## Steps`** — the order inside the card. An order between cards is `blocked_by`.
 

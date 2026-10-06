@@ -40,7 +40,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   ```bash
   python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py" <chantier-dir>
   ```
-  A `Warning: cited but defined in no open card` line is worth one line in the report.
+  A `Warning: cited but defined in no open card` or `Warning: defined with different rows` line is
+  worth one line in the report.
 4. **Read the live state, in priority order:**
   - `3-in-progress/` first — an in-progress card is the thread to resume.
   - `2-selected-for-dev/` — the work order, not a queue to browse: if non-empty, its highest
