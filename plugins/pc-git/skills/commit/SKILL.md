@@ -66,8 +66,12 @@ hand the whole lot to the script, which does every deterministic part in one sub
 ```
 ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
 ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply  --root "${CLAUDE_PROJECT_DIR}" \
-    --messages <file> --no-pr --session-id "${CLAUDE_SESSION_ID}"
+    --messages - --no-pr --session-id "${CLAUDE_SESSION_ID}" <<'EOF'
+<fingerprint><TAB><message>
+EOF
 ```
+
+Messages go in on **standard input** (`--messages -` plus a `<<'EOF'` heredoc) — never write a message file: a file under `/tmp` is outside the working directory and asks for a permission, and neither `cat > file` nor `printf > file` is allowed.
 
 The plan groups repos by **diff fingerprint** — the common case for `--all` is one identical
 distribution across many repos, so N repos share one diff and need one message. Write one

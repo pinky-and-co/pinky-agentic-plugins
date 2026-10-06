@@ -273,7 +273,7 @@ do_plan() {
     done
 
     printf 'Write ONE message per group, then:\n'
-    printf '  bulk_commit.sh apply --messages <file>   # lines "<fingerprint><TAB><message>"\n'
+    printf '  bulk_commit.sh apply --messages <file|->   # lines "<fingerprint><TAB><message>"\n'
 }
 
 # ── PR / MR ───────────────────────────────────────────────────────────────────
@@ -641,6 +641,13 @@ push_with_recovery() {
 # ── apply ─────────────────────────────────────────────────────────────────────
 do_apply() {
     local root="$1" filter="$2" msgfile="$3" dry="$4" nopr="$5" watchci="$6" session_id="${7:-}"
+    # `--messages -` : les messages arrivent sur l'entrée standard, recopiés dans un fichier
+    # temporaire du script (jamais écrit par le skill, donc jamais hors du répertoire de travail).
+    if [ "$msgfile" = "-" ]; then
+        msgfile="$(mktemp)"
+        trap 'rm -f "$msgfile"' RETURN
+        cat > "$msgfile"
+    fi
     [ -f "$msgfile" ] || die "message file not found: $msgfile"
 
     # `--no-pr` s'arrête au commit : aucune PR/MR n'est ouverte, donc rien à watcher.

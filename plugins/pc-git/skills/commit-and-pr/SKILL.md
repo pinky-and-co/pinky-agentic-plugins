@@ -134,8 +134,12 @@ correct, not a shortcut.
 ## Step 3 — Apply
 
 ```
-${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages <file> --session-id "${CLAUDE_SESSION_ID}" [--repo <target>] [--no-watch-ci]
+${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply --root "${CLAUDE_PROJECT_DIR}" --messages - --session-id "${CLAUDE_SESSION_ID}" [--repo <target>] [--no-watch-ci] <<'EOF'
+<fingerprint><TAB><message>
+EOF
 ```
+
+Messages go in on **standard input** (`--messages -` plus a `<<'EOF'` heredoc) — never write a message file: a file under `/tmp` is outside the working directory and asks for a permission, and neither `cat > file` nor `printf > file` is allowed.
 
 `--session-id "${CLAUDE_SESSION_ID}"` is always passed, in every scope (path mode included): the
 script reads the session's model from that session's transcript to name it in the commit trailer —
