@@ -37,6 +37,8 @@ import activate_plugins_for_repos as apr  # noqa: E402
 
 
 class _Base(unittest.TestCase):
+    SESSION_ID = "11111111-2222-3333-4444-555555555555"
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -49,8 +51,17 @@ class _Base(unittest.TestCase):
         self._orig_installed = psl.INSTALLED_PLUGINS_PATH
         psl.INSTALLED_PLUGINS_PATH = self.installed
 
-        self._prev_env = os.environ.get("CLAUDE_PROJECT_DIR")
-        os.environ["CLAUDE_PROJECT_DIR"] = str(self.open_path)
+        self._orig_state_dir = psl.STATE_DIR
+        psl.STATE_DIR = self.root / "state"
+        psl.save_state(
+            self.SESSION_ID,
+            {
+                "activated": [],
+                "settings_local_path": str(
+                    self.open_path / ".claude" / "settings.local.json"
+                ),
+            },
+        )
 
         self.enable_calls: list[tuple[str, Path]] = []
         self._enable_outcome = psl.EnableResult(True, False, "")
@@ -60,10 +71,7 @@ class _Base(unittest.TestCase):
     def tearDown(self):
         psl.INSTALLED_PLUGINS_PATH = self._orig_installed
         apr.enable_plugin_local = self._orig_enable
-        if self._prev_env is None:
-            os.environ.pop("CLAUDE_PROJECT_DIR", None)
-        else:
-            os.environ["CLAUDE_PROJECT_DIR"] = self._prev_env
+        psl.STATE_DIR = self._orig_state_dir
         self._tmp.cleanup()
 
     def _fake_enable(self, plugin_id: str, *, cwd: Path) -> psl.EnableResult:
@@ -78,8 +86,11 @@ class _Base(unittest.TestCase):
             json.dumps({"enabledPlugins": enabled})
         )
 
-    def _run(self, *paths: str):
-        sys.argv = ["activate_plugins_for_repos.py", *(paths or [str(self.card_repo)])]
+    def _run(self, *paths: str, session_id: str | None = SESSION_ID):
+        sys.argv = ["activate_plugins_for_repos.py"]
+        if session_id is not None:
+            sys.argv += ["--session-id", session_id]
+        sys.argv += paths or [str(self.card_repo)]
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = apr.main()
@@ -154,6 +165,34 @@ class TestActivatePluginsForRepos(_Base):
         _, out, _ = self._run(str(self.card_repo), str(other))
         self.assertEqual(self.enable_calls, [("pc-snow@mp", self.open_path)])
         self.assertEqual(out.strip(), "pc-snow@mp")
+
+    def test_session_open_dir_comes_from_session_state_not_cwd(self):
+        self._write_installed(
+            {"pc-snow@mp": [{"scope": "project", "projectPath": str(self.card_repo)}]}
+        )
+        prev_cwd = os.getcwd()
+        os.chdir(self.root)
+        try:
+            self._run()
+        finally:
+            os.chdir(prev_cwd)
+        self.assertEqual(self.enable_calls, [("pc-snow@mp", self.open_path)])
+
+    def test_unknown_session_enables_nothing(self):
+        self._write_installed(
+            {"pc-snow@mp": [{"scope": "project", "projectPath": str(self.card_repo)}]}
+        )
+        rc, out, err = self._run(session_id="no-such-session")
+        self.assertEqual(rc, 2)
+        self.assertEqual(self.enable_calls, [])
+        self.assertEqual(out, "")
+        self.assertIn("no-such-session", err)
+
+    def test_missing_session_id_enables_nothing(self):
+        rc, out, err = self._run(session_id=None)
+        self.assertEqual(rc, 2)
+        self.assertEqual(self.enable_calls, [])
+        self.assertIn("--session-id", err)
 
     def test_no_paths_returns_usage_error(self):
         sys.argv = ["activate_plugins_for_repos.py"]

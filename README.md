@@ -278,6 +278,9 @@ pinky-agentic-plugins/
 │   │   │   │   └── card_discipline.py
 │   │   │   ├── card-ops/
 │   │   │   │   └── pc_kanban_card_ops.py
+│   │   │   ├── kanban-proactivity/
+│   │   │   │   ├── kanban-proactivity.md
+│   │   │   │   └── kanban_proactivity.py
 │   │   │   ├── agent_log_writer.py
 │   │   │   ├── hooks.json
 │   │   │   ├── orchestrator_freeze.py
@@ -474,6 +477,7 @@ pinky-agentic-plugins/
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py
+│   ├── test_kanban_proactivity_hook.py
 │   ├── test_keychain.py
 │   ├── test_load_secrets.py
 │   ├── test_model_adversarial.py
