@@ -278,6 +278,9 @@ pinky-agentic-plugins/
 │   │   ├── hooks/
 │   │   │   ├── agent-log-migration/
 │   │   │   │   └── pc_kanban_migrate_agent_log.py
+│   │   │   ├── board-pane/
+│   │   │   │   ├── board_data.py
+│   │   │   │   └── register.tsx
 │   │   │   ├── card-discipline/
 │   │   │   │   └── card_discipline.py
 │   │   │   ├── card-ops/
@@ -334,7 +337,12 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   └── yt/
 │   │   │       └── SKILL.md
-│   │   └── README.md
+│   │   ├── tests/
+│   │   │   └── board-pane.test.tsx
+│   │   ├── types/
+│   │   │   └── index.d.ts
+│   │   ├── README.md
+│   │   └── tsconfig.json
 │   ├── pc-memory/
 │   │   ├── hooks/
 │   │   │   ├── memory-context/
@@ -468,6 +476,7 @@ pinky-agentic-plugins/
 │   ├── test_apply_anonymization.py
 │   ├── test_apply_reintegrate.py
 │   ├── test_archive_card_sh.py
+│   ├── test_board_pane_data.py
 │   ├── test_branch_guard.py
 │   ├── test_build_export.py
 │   ├── test_bulk_commit_sh.py

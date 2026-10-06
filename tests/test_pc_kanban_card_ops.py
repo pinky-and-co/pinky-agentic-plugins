@@ -113,6 +113,15 @@ def test_drop_needs_a_reason_and_records_it(tmp_path: Path) -> None:
     assert "superseded by bar" in dropped.read_text()
 
 
+def test_a_reason_starting_with_a_dash_follows_a_double_dash(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    _card(board, "0-ideas")
+    result = _run(board, "--", "drop", "demo", "-h")
+    assert result.returncode == 0, result.stderr
+    dropped = next((board / "_ARCHIVE" / "CHANTIER0001-dropped").glob("*_demo.md"))
+    assert "-h" in dropped.read_text()
+
+
 def test_select_lists_every_unmet_condition(tmp_path: Path) -> None:
     card = tmp_path / "CHANTIER0001-x" / "1-todo" / "demo.md"
     card.parent.mkdir(parents=True)
