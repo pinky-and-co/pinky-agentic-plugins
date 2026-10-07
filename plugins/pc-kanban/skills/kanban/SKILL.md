@@ -34,6 +34,10 @@ A card is a deliverable worth a multi-session handoff, never a micro-step (those
 *inside* the card). `0-ideas` → `1-todo` → `2-selected-for-dev` → `3-in-progress` → archive
 (`mv` between column directories), through `4-done` only when the card needs an ADR first.
 
+A card's slug — its file name without `.md`, the identifier the commands take — is at most 30
+characters, so `/board` shows it whole. The `card-discipline` hook asks when a new card exceeds it;
+existing cards are not renamed.
+
 ## The board's own table (`INDEX.md`)
 
 `INDEX.md` (one per board) carries a `## Board` table — one row per chantier: id, objective, status.
