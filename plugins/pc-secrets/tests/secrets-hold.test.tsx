@@ -163,8 +163,8 @@ describe('pc-secrets read band', () => {
     engine(on, ran, calls)
     const call = $.tool.call(read('t1'))
     const ui = await heldBand($)
-    await ui.press({ key: 'deny' })
-    await ui.press({ key: 'pragma' })
+    // Les deux appuis partent ensemble : la bande disparaît dès la première réponse, le second peut ne plus trouver son bouton.
+    await Promise.allSettled([ui.press({ key: 'deny' }), ui.press({ key: 'pragma' })])
     const r: any = await call
     expect(r.deny).toMatch(/refused to let you read/)
     expect(calls.some(a => a.includes('--pragma'))).toBe(false)
@@ -259,6 +259,6 @@ describe('pc-secrets read band', () => {
   })
 
   test('strips bidi and format characters', () => {
-    expect(clean('a b c\nd')).toBe('a b c d')
+    expect(clean('a\u202eb\u200bc\nd')).toBe('a b c d')
   })
 })

@@ -109,8 +109,8 @@ describe('pc-privacy read band', () => {
     engine(on, ran, [])
     const call = $.tool.call(read('t1'))
     const ui = await heldBand($)
-    await ui.press({ key: 'deny' })
-    await ui.press({ key: 'allow' })
+    // Les deux appuis partent ensemble : la bande disparaît dès la première réponse, le second peut ne plus trouver son bouton.
+    await Promise.allSettled([ui.press({ key: 'deny' }), ui.press({ key: 'allow' })])
     const r: any = await call
     expect(r.deny).toMatch(/refused to let you read/)
     expect(ran).toEqual([])
@@ -250,6 +250,6 @@ describe('pc-privacy read band', () => {
 
   test('cleans the column names it shows', () => {
     expect(parseVerdict(JSON.stringify({ ...VERDICT, columns: ['a b'] }))?.columns).toEqual(['a b'])
-    expect(clean('x y\nz')).toBe('x y z')
+    expect(clean('x\u200by\nz')).toBe('x y z')
   })
 })
