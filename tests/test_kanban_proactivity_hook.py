@@ -49,6 +49,9 @@ class TestKanbanProactivityHook(unittest.TestCase):
     def test_rule_says_to_take_a_card_in_place_when_the_skill_is_loaded(self):
         self.assertIn("in place when already loaded", _RULE.read_text(encoding="utf-8"))
 
+    def test_rule_ends_a_closure_with_the_next_card_proposal(self):
+        self.assertIn("Proposing the next card", _RULE.read_text(encoding="utf-8"))
+
     def test_missing_rule_file_exits_zero_silently(self):
         with tempfile.TemporaryDirectory() as tmp:
             copy = Path(tmp) / _SCRIPT.name

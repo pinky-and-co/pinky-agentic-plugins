@@ -19,7 +19,9 @@ Do not wait for "create a card" or "move it to done". Surface the board update a
   in place when already loaded), never a hand move — it moves the card to in-progress and
   routes the implementation to the `card-worker` agent. Finished
   and verified means archiving it (`move-card archive`), straight from in-progress — through done
-  only when it needs an ADR first.
+  only when it needs an ADR first. Archiving or dropping a card ends with the next-card proposal
+  (`kanban/references/finishing-a-card.md` § Proposing the next card): read that section, then
+  propose candidates — never select one unasked.
 - **End of session → handoff.** Before context runs out or the session ends, update the in-progress
   card's handoff so the next session resumes cleanly — narrative first, mechanical state second.
 - **Narrate → log.** Cross-chantier work another session needs to know about goes in
