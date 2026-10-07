@@ -108,6 +108,52 @@ class TestDecide(unittest.TestCase):
                     decision["hookSpecificOutput"]["permissionDecision"], "ask"
                 )
 
+    def test_slug_of_30_characters_keeps_the_usual_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _card_path(Path(tmp), "1-todo", "a" * 30 + ".md")
+            decision = cd.decide(_write_event(path))
+            self.assertEqual(
+                decision["hookSpecificOutput"]["permissionDecisionReason"], cd._REASON
+            )
+
+    def test_slug_is_counted_in_characters_not_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _card_path(Path(tmp), "1-todo", "\u00e9" * 30 + ".md")
+            decision = cd.decide(_write_event(path))
+            self.assertEqual(
+                decision["hookSpecificOutput"]["permissionDecisionReason"], cd._REASON
+            )
+
+    def test_new_card_with_31_character_slug_asks_with_the_length_reason(self):
+        for column in ("0-ideas", "1-todo", "2-selected-for-dev"):
+            with self.subTest(column=column), tempfile.TemporaryDirectory() as tmp:
+                path = _card_path(Path(tmp), column, "a" * 31 + ".md")
+                decision = cd.decide(_write_event(path))
+                output = decision["hookSpecificOutput"]
+                self.assertEqual(output["permissionDecision"], "ask")
+                self.assertEqual(
+                    output["permissionDecisionReason"],
+                    "card-discipline: the slug of this new card is 31 characters long, "
+                    "the maximum is 30 — shorten the file name so `/board` shows it whole.",
+                )
+                self.assertNotEqual(output["permissionDecisionReason"], cd._REASON)
+
+    def test_existing_card_with_40_character_slug_keeps_the_usual_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _card_path(Path(tmp), "1-todo", "a" * 40 + ".md")
+            path.write_text("# card\n")
+            for event in (_write_event(path), _edit_event(path)):
+                decision = cd.decide(event)
+                self.assertEqual(
+                    decision["hookSpecificOutput"]["permissionDecisionReason"],
+                    cd._REASON,
+                )
+
+    def test_engaged_column_ignores_slug_length_on_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _card_path(Path(tmp), "3-in-progress", "a" * 40 + ".md")
+            self.assertIsNone(cd.decide(_write_event(path)))
+
     def test_engaged_columns_pass_every_guarded_tool(self):
         for column in ("3-in-progress", "4-done"):
             with self.subTest(column=column), tempfile.TemporaryDirectory() as tmp:

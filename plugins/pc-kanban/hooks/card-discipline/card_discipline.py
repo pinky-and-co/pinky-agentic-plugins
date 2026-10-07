@@ -19,6 +19,11 @@ the user, who approves once the framing is ripe. Creating a card counts as a wri
 a path that does not exist yet is asked about like any other. Once engaged, the card is the work's
 own log and is kept up to date without asking.
 
+A new card whose slug (file name without `.md`) exceeds `MAX_SLUG_LENGTH` characters gets its own
+`ask` reason naming the length and the maximum — only at creation, in the three asking columns; an
+existing card keeps the usual reason whatever its slug length. A shell `mv` that renames a card is
+not seen by this hook (it watches the four write tools only).
+
 Only `ask` — never `deny` — and never on a read. A path outside `_KANBAN` or not matching a
 recognized column gets no decision at all: no column, no rule.
 
@@ -28,6 +33,7 @@ Python 3.12+, stdlib only. A hook failure must never block a tool call → unexp
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 
@@ -55,6 +61,14 @@ _COLUMN_ASK = {
 _REASON = (
     "card-discipline: this card is still being framed — write it once the framing is ripe, "
     "not after every answer."
+)
+
+# Le slug (nom de fichier sans `.md`) est lu en entier dans `/board` : au-delà, il est coupé.
+MAX_SLUG_LENGTH = 30
+
+_LONG_SLUG_REASON = (
+    "card-discipline: the slug of this new card is {length} characters long, "
+    "the maximum is {maximum} — shorten the file name so `/board` shows it whole."
 )
 
 
@@ -111,6 +125,11 @@ def decide(event: dict) -> dict | None:
         return None  # not a recognized card path — nothing to enforce
     if not _COLUMN_ASK.get(column, False):
         return None  # card engagée — l'agent la tient à jour seul
+    slug = os.path.basename(path.replace("\\", "/")).removesuffix(".md")
+    if len(slug) > MAX_SLUG_LENGTH and not os.path.exists(path):
+        return _decision(
+            _LONG_SLUG_REASON.format(length=len(slug), maximum=MAX_SLUG_LENGTH)
+        )
     return _decision(_REASON)
 
 
