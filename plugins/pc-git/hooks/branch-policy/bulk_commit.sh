@@ -316,6 +316,31 @@ open_pr() {
     esac
 }
 
+# Fichiers publiés par un repo en état poussé, un chemin par ligne — alimente le bloc FILES.
+# `pushed-pr` : `gh pr diff <n> --name-only` (la liste que GitHub affiche pour la PR) ; si `gh`
+# ne rend rien (échec, MR GitLab), repli sur le diff git. Sinon : `git diff --name-only` entre la
+# base et HEAD ; sur la branche d'intégration (commit direct, base == HEAD), le diff d'une base
+# déjà poussée serait vide, donc le contenu du commit lui-même.
+published_files() {
+    local repo="$1" branch="$2" base="$3" state="$4" url="$5" out="" ref
+    if [ "$state" = "pushed-pr" ] && [ "$url" != "-" ]; then
+        case "$(git -C "$repo" remote get-url origin 2>/dev/null || true)" in
+            *gitlab*) ;;
+            *) out="$( (cd "$repo" && gh pr diff "${url##*/}" --name-only 2>/dev/null || true) )" ;;
+        esac
+    fi
+    if [ -z "$out" ]; then
+        if [ "$branch" = "$base" ]; then
+            out="$(git -C "$repo" -c core.quotepath=false show --name-only --format= HEAD 2>/dev/null || true)"
+        else
+            ref="origin/$base"
+            git -C "$repo" rev-parse --verify -q "$ref" >/dev/null 2>&1 || ref="$base"
+            out="$(git -C "$repo" -c core.quotepath=false diff --name-only "$ref...HEAD" 2>/dev/null || true)"
+        fi
+    fi
+    printf '%s\n' "$out" | sed '/^$/d'
+}
+
 # ── watch CI (`--watch-ci`) ───────────────────────────────────────────────────
 # Après l'ouverture d'une PR/MR, attend le verdict CI et l'émet en UNE ligne
 # machine `<verdict>\t<url>\t<log|->` — verdict ∈ pass | fail | no-ci | timeout.
@@ -657,7 +682,8 @@ do_apply() {
 
     local ok=0 failed=0 skipped=0 partial=0
     local repo name fp msg strategy base head branch slug prv state url
-    local -a results=() ci_results=()
+    local -a results=() ci_results=() files_rows=()
+    local pushed_n=0
     local -a pw_names=() pw_repos=() pw_branches=() pw_urls=() pw_hosts=()
 
     # Trailer d'attribution : composé ici, jamais du system-reminder (absent d'un fork
@@ -769,6 +795,11 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
             esac
         fi
         results+=("$(printf '%s\t%s\t%s' "$name" "$state" "${url:--}")")
+        local pf_path
+        while IFS= read -r pf_path; do
+            if [ -n "$pf_path" ]; then files_rows+=("$(printf '%s\t%s' "$name" "$pf_path")"); fi
+        done < <(published_files "$repo" "$branch" "$base" "$state" "$url")
+        pushed_n=$((pushed_n + 1))
         # `pushed-prfailed` : commité + poussé, mais une PR reste à ouvrir à la main —
         # compté comme partiel, jamais dans le ✅.
         [ "$state" = "pushed-prfailed" ] && partial=$((partial + 1)) || ok=$((ok + 1))
@@ -837,6 +868,18 @@ Claude-Session: https://claude.ai/code/${CLAUDE_CODE_BRIDGE_SESSION_ID}"
         local line
         for line in "${results[@]:-}"; do [ -n "$line" ] && printf '%s\n' "$line"; done
         printf '=== END RESULTS\n'
+
+        # Bloc FILES : seulement si au moins un repo est en état poussé (`pushed-pr`,
+        # `pushed-nopr`, `pushed-prfailed`) ; jamais pour `commit-nopush`/`push-conflict`.
+        # Après RESULTS (dont le contenu reste inchangé), avant CI. Reproduit tel quel.
+        if [ "$pushed_n" -gt 0 ]; then
+            printf '\n=== FILES (repo\tpath) — reproduce verbatim\n'
+            local frow
+            for frow in "${files_rows[@]:-}"; do
+                [ -n "$frow" ] && printf '%s\n' "$frow"
+            done
+            printf '=== END FILES\n'
+        fi
 
         # Bloc CI : absent seulement avec `--no-watch-ci` (watch par défaut depuis la
         # parallélisation par lots — voir `BULK_CI_PARALLEL`). L'agent le reproduit tel
