@@ -72,6 +72,13 @@ mechanical check, in this order:
    stack checklist included — the real change of perspective) and reviewing the diff itself
    under the `review-guidelines` skill. It opens its report with `Method: adversarial (<model>)`
    or `Method: reviewer`.
+
+   When the card declares `mockup:`, the hand-off also carries the mockup path (the unpacked
+   folder for a `.zip`, the sibling `<zip name>/`) and the card's `mockup_fidelity` levels, an axis
+   not listed counting as `guided`. The reviewer checks the fidelity axis by axis: `strict` is
+   reproduced identically, `guided` follows the intent with each deviation justified in the
+   worker's report, `free` is not checked against the mockup. The unpacked folder exists only when
+   the worker was spawned on the default path, not with `--cmux`.
 2. **Same-session self-review** — last resort only, when the agent cannot run, and **say plainly
    that it is degraded** (same model, same context) rather than presenting it as equivalent to (1).
 

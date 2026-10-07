@@ -81,6 +81,8 @@ priority: 1-5          # 1 (low) to 5 (urgent); omitted = 3
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
 effort: low | medium | high | xhigh | max   # optional — how hard the worker reasons; absent = inherit the session
+mockup: /abs/path | ~/path   # optional — a file, folder or .zip holding the mocked-up rendering
+mockup_fidelity: [layout=strict, design=free]   # optional, needs mockup — axe=niveau items
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
 requirements: []          # requirement ids this card traces to, e.g. [<id>, …]; [] = none
 blocked_by: <card-slug> | null         # a hard dependency, never a mere ordering preference
@@ -124,6 +126,23 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   `xhigh` or `max` (no `auto`). Absent = nothing imposed, the worker inherits the session's.
   `select` refuses any other value. `spawn-workers` passes it to the `Agent` call (and
   `claude --effort` on `--cmux`); `--effort` overrides it at call time.
+
+- **`mockup`** / **`mockup_fidelity`** — optional; a card whose rendering was mocked up (HTML POC,
+  screenshot, design) names the mockup as an absolute or `~/` path to a file, a folder or a `.zip`.
+  The mockup is a throwaway working document that lives where it was dropped (`_TEMP/` included);
+  the delivered work becomes the reference at closure. `mockup_fidelity` is a list of `axe=niveau`
+  items, one flat key. Axes: `layout` (zones, order, heights, button rows), `design` (colour, font,
+  icons), `content` (texts, labels), `behavior` (keyboard, hover, states, search). Levels: `strict`
+  (reproduce identically), `guided` (follow the intent, justify every deviation in the report),
+  `free` (inspiration only). An axis not listed is `guided`. `select` refuses a path that does not
+  exist, an axis or level outside these lists, and a `mockup_fidelity` without `mockup`.
+  `spawn-workers` puts the path and the levels in the worker's brief — it unpacks a `.zip` into the
+  sibling folder `<zip name>/`, created if absent and reused otherwise — and asks for a
+  `mockup element → implementation → status` table (status `done | deviation | missing`) on the
+  `strict` and `guided` axes; a `strict` axis that cannot be met is reported, not silently
+  deviated from. Only the inline `[a=b, c=d]` form of `mockup_fidelity` is read — a block-style
+  (`- item`) list is not. The brief and the unpacking exist on the default path only, not on
+  `--cmux`. The review before closing receives the same path and levels (`finishing-a-card.md`).
 
 - **`repos`** — the repo-scope a session needs for this card, as `org/repo` slugs derived from each
   repo's `git remote get-url origin` — never a bare directory name. A name collides across orgs (see

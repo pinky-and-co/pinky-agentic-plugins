@@ -33,6 +33,8 @@ COLUMNS = {
 OPEN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress")
 MODELS = ("haiku", "sonnet", "opus", "fable")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+MOCKUP_AXES = ("layout", "design", "content", "behavior")
+MOCKUP_LEVELS = ("strict", "guided", "free")
 EMPTY = ("", "null", "~")
 ID_RE = re.compile(r"\b[A-Z]+-\d{4}-\d+\b")
 
@@ -178,6 +180,64 @@ def requirements_section(text: str) -> list[str]:
     return lines
 
 
+def mockup_problems(head: list[str]) -> list[str]:
+    """List what is wrong with a card's `mockup:` and `mockup_fidelity:`.
+
+    Args:
+        head: The frontmatter lines.
+
+    Returns:
+        One message per refusal; empty when both fields are absent or valid.
+    """
+    mockup = field(head, "mockup")
+    fidelity = field(head, "mockup_fidelity")
+    problems = []
+    if mockup in EMPTY:
+        if fidelity not in EMPTY:
+            problems.append(
+                "`mockup_fidelity:` without a `mockup:` — declare the mockup"
+            )
+        return problems
+    path = Path(mockup).expanduser()
+    if not path.is_absolute():
+        problems.append(f"`mockup: {mockup}` is not an absolute (or `~/`) path")
+    elif not path.exists():
+        problems.append(f"`mockup: {mockup}` does not exist")
+    block_style = any(
+        line.startswith("mockup_fidelity:") and nxt.lstrip().startswith("- ")
+        for line, nxt in zip(head, head[1:])
+    )
+    if block_style or (
+        fidelity not in EMPTY
+        and not (fidelity.startswith("[") and fidelity.endswith("]"))
+    ):
+        problems.append(
+            f"`mockup_fidelity: {fidelity}` is not a bracketed list — "
+            "write `[layout=strict, design=free]`"
+        )
+        return problems
+    inner = fidelity[1:-1] if fidelity not in EMPTY else ""
+    seen: set[str] = set()
+    for item in (i.strip() for i in inner.split(",")) if inner.strip() else ():
+        axis, sep, level = item.partition("=")
+        if axis.strip() in seen:
+            problems.append(f"`mockup_fidelity` names the axis '{axis.strip()}' twice")
+        seen.add(axis.strip())
+        if not sep:
+            problems.append(f"`mockup_fidelity` element '{item}' is not `axe=niveau`")
+        elif axis.strip() not in MOCKUP_AXES:
+            problems.append(
+                f"`mockup_fidelity` axis '{axis.strip()}' is not one of "
+                f"{', '.join(MOCKUP_AXES)}"
+            )
+        elif level.strip() not in MOCKUP_LEVELS:
+            problems.append(
+                f"`mockup_fidelity` level '{level.strip()}' is not one of "
+                f"{', '.join(MOCKUP_LEVELS)}"
+            )
+    return problems
+
+
 def selection_problems(
     card: Path, text: str, boards: list[Path], force: bool = False
 ) -> list[str]:
@@ -224,6 +284,7 @@ def selection_problems(
         problems.append(
             f"`effort: {effort}` is not one of {', '.join(EFFORTS)} — or omit it"
         )
+    problems += mockup_problems(head)
     if not re.search(r"(?m)^## Done when", text):
         problems.append("no `## Done when` section — set at selection")
     blocker = field(head, "blocked_by")

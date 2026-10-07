@@ -27,6 +27,12 @@ and skips the plugin enable).
 
 Python 3.11+, stdlib only.
 
+A card's optional `mockup:` (absolute or `~/` path to a file, folder or `.zip`) and
+`mockup_fidelity:` (`axe=niveau` items; an absent axis is `guided`) add a mockup brief to the
+default path's prompt; a `.zip` is unpacked into its sibling folder `<zip stem>/` (created if
+absent, reused otherwise). Mockup handling is default-path only: `--cmux` neither reads the
+mockup nor unpacks the zip.
+
 `--effort <level>` overrides the card's optional `effort:` (`low`, `medium`, `high`, `xhigh`,
 `max`); the default path prints `effort: <level>` only when one is set, and `--cmux` adds
 `claude --effort <level>`.
@@ -43,6 +49,8 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import NamedTuple
 
@@ -87,6 +95,8 @@ _MODEL_ARG = {
     "fable": "fable[1m]",
 }
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+AXES = ("layout", "design", "content", "behavior")
+LEVELS = ("strict", "guided", "free")
 # advisor = one model tier above the card's model; `opus` and `fable` are already the ceiling.
 _ADVISOR_ABOVE = {"haiku": "sonnet", "sonnet": "opus"}
 
@@ -352,11 +362,107 @@ def cited_requirement_rows(card_path: Path) -> list[str]:
     return lines
 
 
+def fidelity_levels(items: list[str]) -> dict[str, str]:
+    """The fidelity level of every mockup axis, from the card's `axe=niveau` items.
+
+    Args:
+        items: the card's `mockup_fidelity:` elements, e.g. ["layout=strict"].
+
+    Returns:
+        One level per axis in `AXES` order; an axis the items do not name is `guided`.
+
+    Raises:
+        SystemExit: an item names an axis outside `AXES` or a level outside `LEVELS`.
+    """
+    levels = dict.fromkeys(AXES, "guided")
+    for item in items:
+        axis, _, level = (part.strip() for part in item.partition("="))
+        if axis not in AXES or level not in LEVELS:
+            raise SystemExit(
+                f"spawn-workers: mockup_fidelity {item!r} — axis one of {list(AXES)}, "
+                f"level one of {list(LEVELS)}"
+            )
+        levels[axis] = level
+    return levels
+
+
+def prepare_mockup(path: Path) -> Path:
+    """The path a worker reads the mockup from: `path`, or the unpacked folder of a `.zip`.
+
+    The folder is the sibling `<zip stem>/`: created from the archive when absent, reused as is
+    otherwise. Every entry is checked before anything is written.
+
+    Args:
+        path: the card's `mockup:` path, `~` already expanded.
+
+    Returns:
+        `path` unchanged unless it is a `.zip` file; then the sibling folder.
+
+    Raises:
+        SystemExit: an archive entry would land outside the folder.
+    """
+    if path.suffix.lower() != ".zip" or not path.is_file():
+        return path
+    target = path.with_suffix("")
+    if target.exists():
+        if not target.is_dir():
+            raise SystemExit(f"spawn-workers: {target} exists and is not a directory")
+        return target
+    staging = Path(tempfile.mkdtemp(prefix=f".{target.name}-", dir=target.parent))
+    try:
+        root = staging.resolve()
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                if not (root / name).resolve().is_relative_to(root):
+                    raise SystemExit(
+                        f"spawn-workers: {path} has an entry outside its folder: {name}"
+                    )
+            archive.extractall(staging)
+        staging.rename(target)
+    except zipfile.BadZipFile:
+        raise SystemExit(f"spawn-workers: {path} is not a valid zip archive") from None
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return target
+
+
+def mockup_lines(mockup: Path, levels: dict[str, str]) -> list[str]:
+    """The brief lines for a card that declares a mockup.
+
+    Args:
+        mockup: the file or folder the worker reads (`prepare_mockup`'s result).
+        levels: the level of each axis (`fidelity_levels`'s result).
+
+    Returns:
+        The path, the per-axis levels with their meaning, and — unless every axis is `free` —
+        the table the worker hands back.
+    """
+    lines = [
+        f"- Mockup (the rendering spec — read it in full before writing any code): {mockup}",
+        "- Mockup fidelity per axis: "
+        + ", ".join(f"{axis}={level}" for axis, level in levels.items()),
+        "  - strict: reproduce identically; if that cannot be met, say so in the report "
+        "instead of deviating silently",
+        "  - guided: follow the intent, justify every deviation in the report",
+        "  - free: the mockup is only an inspiration",
+    ]
+    reported = [axis for axis, level in levels.items() if level != "free"]
+    if reported:
+        lines.append(
+            "- Mockup report: hand back a table `mockup element | implementation | status` "
+            "(status: done | deviation | missing) covering the strict and guided axes "
+            f"({', '.join(reported)}); for a guided axis, add the justified deviation."
+        )
+    return lines
+
+
 def generated_card_block(
     card_path: Path,
     repo_slug: str,
     arbitrage: str | None = None,
     cited_rows: list[str] | None = None,
+    mockup: Path | None = None,
+    levels: dict[str, str] | None = None,
 ) -> str:
     """The 'généré' half of the worker prompt (card point 3): the card, its repo, and any
     judgment call the worker should resolve rather than ask back.
@@ -367,6 +473,8 @@ def generated_card_block(
         arbitrage: a judgment call to surface to the worker, or None.
         cited_rows: indented lines (full rows) of the requirements the card cites but does not
             define, or None.
+        mockup: the mockup file or folder the card declares, or None.
+        levels: the level of each mockup axis; read only with `mockup`.
 
     Returns:
         The generated block, newline-joined.
@@ -383,11 +491,18 @@ def generated_card_block(
             "- Requirements cited by the card, defined in other cards (full rows):"
         )
         lines += cited_rows
+    if mockup:
+        lines += mockup_lines(mockup, levels or fidelity_levels([]))
     return "\n".join(lines)
 
 
 def build_worker_prompt(
-    card_path: Path, repo: Path, repo_slug: str, arbitrage: str | None = None
+    card_path: Path,
+    repo: Path,
+    repo_slug: str,
+    arbitrage: str | None = None,
+    mockup: Path | None = None,
+    levels: dict[str, str] | None = None,
 ) -> str:
     """The full prompt for an `Agent(subagent_type: "card-worker", ...)` call: the fixed
     repo-conventions block, then the generated card block.
@@ -397,13 +512,15 @@ def build_worker_prompt(
         repo: absolute path to the target repo's worktree root.
         repo_slug: the target repo's `org/repo` slug.
         arbitrage: a judgment call to surface to the worker, or None.
+        mockup: the mockup file or folder the card declares, or None.
+        levels: the level of each mockup axis; read only with `mockup`.
 
     Returns:
         The two blocks, separated by a blank line.
     """
     return (
         f"{repo_conventions_block(repo)}\n\n"
-        f"{generated_card_block(card_path, repo_slug, arbitrage, cited_requirement_rows(card_path))}"
+        f"{generated_card_block(card_path, repo_slug, arbitrage, cited_requirement_rows(card_path), mockup, levels)}"
     )
 
 
@@ -688,8 +805,25 @@ def main(argv: list[str]) -> int:
     # `Agent(subagent_type: "card-worker", model: <tier>, effort: <level>, prompt: <text>)`
     # (`effort` only when printed); this script never calls the Agent tool itself.
     tier = effective_model(card_model, model_override)
+    mockup: Path | None = None
+    levels = None
+    declared_mockup = _hook("--card-mockup", str(card_path), allow_empty=True)
+    if declared_mockup:
+        mockup = Path(declared_mockup).expanduser()
+        if not mockup.exists():
+            raise SystemExit(
+                f"spawn-workers: card '{slug}' has mockup: {mockup} — not found"
+            )
+        levels = fidelity_levels(
+            _hook(
+                "--card-mockup-fidelity", str(card_path), allow_empty=True
+            ).splitlines()
+        )
+        mockup = prepare_mockup(mockup)
     for target in targets:
-        prompt = build_worker_prompt(card_path, target.path, target.slug, arbitrage)
+        prompt = build_worker_prompt(
+            card_path, target.path, target.slug, arbitrage, mockup, levels
+        )
         name = f"{target.slug.split('/')[-1]}-{slug}"
         print(f"=== worker: {name} ===")
         print(f"model: {tier}")
