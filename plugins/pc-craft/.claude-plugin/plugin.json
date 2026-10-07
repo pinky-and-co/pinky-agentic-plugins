@@ -6,5 +6,5 @@
     "name": "Pinky & Co"
   },
   "skills": ["./skills"],
-  "dependencies": ["pc-core", "pc-privacy", "pc-read"]
+  "dependencies": ["pc-core", "pc-privacy"]
 }
