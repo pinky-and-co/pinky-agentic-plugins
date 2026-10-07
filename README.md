@@ -104,9 +104,7 @@ pinky-agentic-plugins/
 │   │   │   ├── load_secrets.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
-│   │   │   ├── privacy_egress.py
 │   │   │   ├── read_cost.py
-│   │   │   ├── secret_patterns.py
 │   │   │   ├── structure_guard.py
 │   │   │   └── style_reminder.py
 │   │   ├── mcp/
@@ -376,13 +374,20 @@ pinky-agentic-plugins/
 │   │   │   ├── tev_compare.py
 │   │   │   └── tev_systemone.py
 │   │   ├── hooks/
+│   │   │   ├── pii-hold/
+│   │   │   │   └── register.tsx
 │   │   │   ├── decision_gate.py
 │   │   │   ├── hooks.json
 │   │   │   └── pii_guard.py
 │   │   ├── mcp/
 │   │   │   ├── anonymize.py
 │   │   │   └── pc_privacy_server.py
-│   │   └── README.md
+│   │   ├── tests/
+│   │   │   └── pii-hold.test.tsx
+│   │   ├── types/
+│   │   │   └── index.d.ts
+│   │   ├── README.md
+│   │   └── tsconfig.json
 │   ├── pc-pypi/
 │   │   └── skills/
 │   │       └── dev-prerelease/
@@ -418,6 +423,19 @@ pinky-agentic-plugins/
 │   │   │       │   └── gain.sh
 │   │   │       └── SKILL.md
 │   │   └── README.md
+│   ├── pc-secrets/
+│   │   ├── hooks/
+│   │   │   ├── secrets-hold/
+│   │   │   │   └── register.tsx
+│   │   │   ├── hooks.json
+│   │   │   ├── privacy_egress.py
+│   │   │   └── secret_patterns.py
+│   │   ├── tests/
+│   │   │   └── secrets-hold.test.tsx
+│   │   ├── types/
+│   │   │   └── index.d.ts
+│   │   ├── README.md
+│   │   └── tsconfig.json
 │   ├── pc-snow/
 │   │   ├── agents/
 │   │   │   └── snowflake-guide.md

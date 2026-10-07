@@ -1,0 +1,20 @@
+{
+  "description": "Denies a Read, or a read-like Bash command (cat, head, tail…), whose target file content carries secret-shaped data, before it reaches the cloud model — see privacy_egress.py. A mod (secrets-hold/register.tsx) holds a `Read` of a flagged file in a band above the prompt with one button per outcome — add the allowlist pragma on the flagged lines, delegate to the local model (only when its server answers), or deny; an unanswered hold falls back to the guard's deny, and the Bash channel keeps the deny.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/privacy_egress.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "modules": [
+    "./secrets-hold/register.tsx"
+  ]
+}

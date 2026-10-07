@@ -1,0 +1,9 @@
+{
+  "name": "pc-secrets",
+  "version": "0.1.0",
+  "description": "Keeps secret-shaped content out of the cloud model: denies a Read, or a read-like Bash command, whose file carries a secret, and offers the person a choice on a Read.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "types": "./types/index.d.ts"
+}

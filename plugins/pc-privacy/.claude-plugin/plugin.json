@@ -1,8 +1,9 @@
 {
   "name": "pc-privacy",
   "version": "0.1.0",
-  "description": "Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, plus an optional local decision-model gate on Read.",
+  "description": "Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, an optional local decision-model gate on Read, and a band above the prompt to anonymize, read as-is or deny a Read of personal data.",
   "author": {
     "name": "Pinky & Co"
-  }
+  },
+  "types": "./types/index.d.ts"
 }

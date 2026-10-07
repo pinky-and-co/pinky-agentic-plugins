@@ -31,6 +31,10 @@ memory notes included — is skipped on both channels (a `Read` target and an ``
 mention). Blocking the agent on its own journal and settings is all friction, no protection, and
 the repeated false positives end up getting the guard disabled.
 
+The same script also answers the band mod (``hooks/pii-hold``): ``--verdict`` prints the guard's
+judgement of a ``Read`` event as JSON, ``--anonymize <path>`` writes the anonymized copy and prints
+its path. The guard stays the one source of the verdict; the mod only presents it.
+
 Fail-open by design (same rule as `read_cost.py`): a guard's own bug must never block a tool call.
 The flip side is that a broken guard is silent, so ``pii_guard.py --check`` exists — run it after
 install and after any dependency change.
@@ -119,7 +123,7 @@ def _is_excluded(path: Path) -> bool:
     which mechanically covers the default ``projects/<project>/memory`` silo. Lexical only (no
     filesystem call), so it stays cheaper than any format detection.
 
-    Duplicated in ``privacy_egress.py`` (pc-core) rather than shared, so the plugins stay
+    Duplicated in ``privacy_egress.py`` (pc-secrets) rather than shared, so the plugins stay
     import-independent; ``tests/test_read_guard_parity.py`` keeps the two copies in step.
 
     Args:
@@ -282,6 +286,93 @@ def run_hook() -> int:
     return 0
 
 
+def _columns(path: Path, anonymize) -> list[str]:
+    """Names of the columns judged sensitive in `path`, empty for a skipped format or no finding."""
+    if anonymize.detect_format(path) in anonymize._SKIP_FORMATS:
+        return []
+    kwargs: dict = {"text_max_lines": MAX_TEXT_LINES}
+    if ".anon." in path.name:
+        kwargs["values_only"] = True
+    return [f.column for f in anonymize.detect_findings([str(path)], **kwargs)]
+
+
+def verdict(event: dict, anonymize) -> dict:
+    """The guard's judgement of a `Read` event, shaped for the band that offers the choices.
+
+    Args:
+        event: The PreToolUse event.
+        anonymize: The ``anonymize`` module.
+
+    Returns:
+        dict: A dictionary with flagged status. Either ``{"flagged": False}`` or the flagged path
+        with its kind (``pii`` or ``oversize``), its sensitive columns, and whether an anonymized
+        copy can be offered (never for an oversize file, nor for a copy that is already anonymized).
+    """
+    file_path = (event.get("tool_input") or {}).get("file_path")
+    if event.get("tool_name") != "Read" or not file_path:
+        return {"flagged": False}
+    path = Path(file_path)
+    scanned = _scan(path, anonymize)
+    if scanned is None:
+        return {"flagged": False}
+    kind = scanned[0]
+    columns = _columns(path, anonymize) if kind == "pii" else []
+    return {
+        "flagged": True,
+        "kind": kind,
+        "path": str(path),
+        "columns": columns,
+        "anonymize": bool(columns) and ".anon." not in path.name,
+    }
+
+
+def make_copy(path: Path, anonymize) -> str | None:
+    """Write the anonymized copy of `path` next to it.
+
+    Args:
+        path: The file to anonymize.
+        anonymize: The ``anonymize`` module.
+
+    Returns:
+        The copy's path, or None when no column is flagged or nothing was masked.
+    """
+    columns = _columns(path, anonymize)
+    if not columns:
+        return None
+    outcome = anonymize.apply_anonymization([str(path)], columns)
+    copies = [dst for _, dst, masked in outcome.outputs if masked]
+    return str(path.parent / copies[0]) if copies else None
+
+
+def main(argv: list[str]) -> int:
+    """Run the hook, or one of the mod's helper modes (``--verdict``, ``--anonymize <path>``).
+
+    Args:
+        argv: The arguments after the script name.
+
+    Returns:
+        The process exit code; 1 when a helper mode has nothing to answer.
+    """
+    if argv[:1] == ["--check"]:
+        return check()
+    if argv[:1] == ["--verdict"] or (argv[:1] == ["--anonymize"] and len(argv) == 2):
+        try:
+            anonymize = _import_anonymize()
+            if argv[0] == "--verdict":
+                print(
+                    json.dumps(verdict(json.loads(sys.stdin.read() or "{}"), anonymize))
+                )
+                return 0
+            copy = make_copy(Path(argv[1]), anonymize)
+        except Exception:  # the mod treats no answer as « no band » or « no copy »
+            return 1
+        if copy is None:
+            return 1
+        print(json.dumps({"copy": copy}))
+        return 0
+    return run_hook()
+
+
 def check() -> int:
     """Self-test — a fail-open guard that is broken looks exactly like a guard that is fine."""
     try:
@@ -300,4 +391,4 @@ def check() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(check() if "--check" in sys.argv[1:] else run_hook())
+    sys.exit(main(sys.argv[1:]))

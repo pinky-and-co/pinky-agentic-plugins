@@ -1,5 +1,5 @@
 {
-  "description": "Alert before Read loads a dataset that looks like it holds personal data, and block a prompt whose @file mention would inline one (pc-privacy).",
+  "description": "Alert before Read loads a dataset that looks like it holds personal data, and block a prompt whose @file mention would inline one (pc-privacy). A mod (pii-hold/register.tsx) holds a `Read` the guard flags in a band above the prompt with one button per outcome — read an anonymized copy, read as-is, or deny; an unanswered hold falls back to the guard's ask.",
   "hooks": {
     "PreToolUse": [
       {
@@ -24,5 +24,8 @@
         ]
       }
     ]
-  }
+  },
+  "modules": [
+    "./pii-hold/register.tsx"
+  ]
 }
