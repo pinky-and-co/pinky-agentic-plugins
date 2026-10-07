@@ -167,7 +167,7 @@ before its first probe, to let CI register — that delay is expected, not a han
 
 ## Step 4 — Report what the script reported
 
-The script ends with a `=== RESULTS` block, one tab-separated line per repo — `<repo>\t<state>\t<pr_url|->`.
+The script prints a `=== RESULTS` block, one tab-separated line per repo — `<repo>\t<state>\t<pr_url|->`.
 **Reproduce those lines. Derive no sentence that is not in them** — in particular never write "PR
 created" / "PR opened" for a repo whose `state` is not `pushed-pr`. The forked agent that broke this
 filled the script's silence with a guess; the block exists so there is no silence to fill.
@@ -188,9 +188,15 @@ is worse than one that fails loudly. If any line is `push-conflict`, tell the pa
 `${CLAUDE_PLUGIN_ROOT}/skills/commit-and-pr/references/conflict-reaction.md` and that the
 conflicting-files list is at the path in column 3.
 
+After `=== END RESULTS`, a `=== FILES` … `=== END FILES` block lists the files published, one
+`<repo>\t<path>` line each, for every repo whose `state` is `pushed-pr`, `pushed-nopr` or
+`pushed-prfailed` (none for `commit-nopush`, `push-conflict`, `skipped`, `failed`; the block is absent
+when no repo was pushed). **Relay it verbatim, like `RESULTS` and `CI`.** The parent compares it with
+what it meant to publish — an unexpected path means a stray file went out.
+
 ## Step 5 — Report the CI verdicts (skip only if `--no-watch-ci` was passed)
 
-Unless `--no-watch-ci` was passed, the script appends a second block, `=== CI` … `=== END CI`, one
+Unless `--no-watch-ci` was passed, the script appends a block, `=== CI` … `=== END CI`, one
 tab-separated line per PR/MR it watched — `<repo>\t<verdict>\t<url>\t<log_path|->`. **Reproduce those
 lines too. Derive nothing.**
 

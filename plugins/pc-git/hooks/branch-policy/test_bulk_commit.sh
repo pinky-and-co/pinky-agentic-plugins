@@ -125,6 +125,7 @@ echo "gh $*" >> "$GH_LOG"
 case "$1 $2" in
   "pr view")   exit 1 ;;
   "pr create") echo "https://github.com/x/foxtrot/pull/1" ;;
+  "pr diff")   printf 'lib.py\nextra/from-gh.txt\n' ;;
 esac
 exit 0
 EOF
@@ -152,6 +153,16 @@ check "RESULTS foxtrot = exact pushed-pr line + URL" \
     "$results_block" "foxtrot${tab}pushed-pr${tab}https://github.com/x/foxtrot/pull/1"
 check "=== END RESULTS marker emitted" \
     "$(printf '%s' "$outfox" | grep -c '^=== END RESULTS$')" 1
+# ── Bloc FILES : `pushed-pr` = la sortie de `gh pr diff <n> --name-only` ──
+# Le stub rend une liste qui diffère du diff git (`extra/from-gh.txt` n'existe pas) : seule
+# la sortie de `gh` peut produire cette ligne.
+fblock() { printf '%s' "$1" | awk '/^=== FILES/{f=1;next} /^=== END FILES/{f=0} f'; }
+check "FILES foxtrot (pushed-pr) = exact gh pr diff output, repo-prefixed" \
+    "$(fblock "$outfox")" "$(printf 'foxtrot\tlib.py\nfoxtrot\textra/from-gh.txt')"
+check "=== END FILES marker emitted once" \
+    "$(printf '%s' "$outfox" | grep -c '^=== END FILES$')" 1
+check "gh pr diff called with the PR number from the URL" \
+    "$(grep -c '^gh pr diff 1 --name-only$' "$GH_LOG")" 1
 check "Co-Authored-By trailer in the commit" \
     "$(git -C "$T/foxtrot" log -1 --format=%B | grep -c '^Co-Authored-By: Claude <noreply@anthropic.com>$')" 1
 check "Claude-Session trailer derived from the bridge id" \
@@ -219,6 +230,8 @@ check "RESULTS golf = direct commit, exact pushed-nopr state" \
     "$golf_block" "golf${tab}pushed-nopr${tab}-"
 check "golf: no PR attempted on a direct commit" \
     "$(grep -c '^gh pr create' "$GH_LOG")" 0
+check "FILES golf (pushed-nopr, direct commit) = the commit's own files" \
+    "$(fblock "$outg")" "golf${tab}README.md"
 
 # ── --watch-ci : les verdicts + les régressions de review (carte session-babysitte) ──
 # Stub `gh` piloté par env. stdout et stderr SÉPARÉS : `GH_CI_JSON_STDERR` /
@@ -448,6 +461,21 @@ outglp="$(run_watch_gl gl-pass GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.exam
     GL_PIPE_COUNT=1 GL_STATUS=success BULK_CI_TIMEOUT=3)"
 check "watch-ci gitlab: success -> pass" "$(ci_block "$outglp" | cut -f1-3)" \
     "gl-pass${tab}pass${tab}https://gitlab.example.com/g/gl-pass/-/merge_requests/11"
+
+# Bloc FILES, `pushed-pr` sur un remote GitLab : git diff base...HEAD, `gh` jamais appelé.
+nogh="$T/nogh"; mkdir -p "$nogh"
+printf '#!/usr/bin/env bash\necho "gh $*" >> "$T/nogh.log"\nexit 1\n' > "$nogh/gh"
+chmod +x "$nogh/gh"; : > "$T/nogh.log"
+mk_watch_repo_gitlab gl-files
+outglfi="$(PATH="$nogh:$PATH" run_watch_gl gl-files GL_LOG="$T/gl.log" \
+    GL_MR_URL='https://gitlab.example.com/g/gl-files/-/merge_requests/14' \
+    GL_PIPE_COUNT=1 GL_STATUS=success BULK_CI_TIMEOUT=3)"
+check "gl-files: state pushed-pr" \
+    "$(printf '%s' "$outglfi" | awk '/^=== RESULTS/{f=1;next} /^=== END RESULTS/{f=0} f')" \
+    "gl-files${tab}pushed-pr${tab}https://gitlab.example.com/g/gl-files/-/merge_requests/14"
+check "FILES gitlab (pushed-pr) = git diff --name-only base...HEAD" \
+    "$(fblock "$outglfi")" "gl-files${tab}mod_gl-files.py"
+check "FILES gitlab: gh never called" "$(wc -l < "$T/nogh.log" | tr -d ' ')" 0
 
 mk_watch_repo_gitlab gl-fail
 outglf="$(run_watch_gl gl-fail GL_LOG="$T/gl.log" GL_MR_URL='https://gitlab.example.com/g/gl-fail/-/merge_requests/12' \
@@ -693,6 +721,33 @@ check "push-conflict leaves the repo clean (no rebase in progress)" \
 check "push-conflict keeps the local commit (HEAD advanced past init)" \
     "$(git -C "$T/pw-conflict" log --oneline | wc -l | tr -d ' ')" 2
 
+# Non poussés : aucun bloc FILES (commit-nopush, push-conflict).
+check "commit-nopush: no === FILES block" \
+    "$(printf '%s' "$out_pwrf" | grep -c '^=== FILES')" 0
+check "push-conflict: no === FILES block" \
+    "$(printf '%s' "$out_pwc" | grep -c '^=== FILES')" 0
+
+# ── Bloc FILES, `pushed-nopr` sur feature branch (`--no-pr`) : git diff base...HEAD ──
+mk_watch_repo quebec
+printf 'notes\n' > "$T/quebec/NOTES.md"
+out_q="$(run_pw quebec)"
+check "quebec: state pushed-nopr" "$(rline "$out_q")" "quebec${tab}pushed-nopr${tab}-"
+check "FILES quebec (pushed-nopr) = git diff --name-only base...HEAD" \
+    "$(fblock "$out_q")" "$(printf 'quebec\tNOTES.md\nquebec\tmod_quebec.py')"
+
+# ── Bloc FILES, `pushed-prfailed` : `gh pr create` ne rend aucune URL → git diff base...HEAD ──
+failbin="$T/failbin"; mkdir -p "$failbin"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$failbin/gh"
+chmod +x "$failbin/gh"
+mk_watch_repo romeo
+plan_r="$("$SCRIPT" plan --root "$T" --repo romeo 2>&1)"
+fp_r="$(printf '%s' "$plan_r" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: romeo\n' "$fp_r" > "$T/m_romeo.tsv"
+out_r="$(PATH="$failbin:$PATH" "$SCRIPT" apply --root "$T" --repo romeo --messages "$T/m_romeo.tsv" --no-watch-ci 2>&1)"
+check "romeo: state pushed-prfailed" "$(rline "$out_r")" "romeo${tab}pushed-prfailed${tab}-"
+check "FILES romeo (pushed-prfailed) = git diff --name-only base...HEAD" \
+    "$(fblock "$out_r")" "romeo${tab}mod_romeo.py"
+
 # ── Garde du skill `commit` : `--no-pr` force watch off — pas de bloc
 # `=== CI` vide même sans `--no-watch-ci` (le skill `commit` appelle toujours `--no-pr`).
 mk_watch_repo papa
@@ -777,6 +832,38 @@ chmod +x "$hookbin/prek"
 check "prek runs inside the scanned repo, not the caller's directory" \
     "$(head -1 "$HROOT/prek_cwd" 2>/dev/null)" "$(cd "$HROOT/hotel" && pwd -P)"
 rm -rf "$HROOT"
+
+# ── Bloc FILES : `gh pr diff` échoue sur un remote GitHub → repli sur git diff base...HEAD ──
+# `pr create` rend une URL (état pushed-pr), `pr diff` sort en erreur sans rien écrire.
+sierrabin="$T/sierrabin"; mkdir -p "$sierrabin"
+cat > "$sierrabin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr view")   exit 1 ;;
+  "pr create") echo "https://github.com/x/sierra/pull/3" ;;
+  "pr diff")   exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "$sierrabin/gh"
+mk_watch_repo sierra
+plan_s="$("$SCRIPT" plan --root "$T" --repo sierra 2>&1)"
+fp_s="$(printf '%s' "$plan_s" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: sierra\n' "$fp_s" > "$T/m_sierra.tsv"
+out_s="$(PATH="$sierrabin:$PATH" "$SCRIPT" apply --root "$T" --repo sierra --messages "$T/m_sierra.tsv" --no-watch-ci 2>&1)"
+check "sierra: state pushed-pr despite a failing gh pr diff" "$(rline "$out_s")" \
+    "sierra${tab}pushed-pr${tab}https://github.com/x/sierra/pull/3"
+check "FILES sierra (gh pr diff fails) = git diff --name-only base...HEAD" \
+    "$(fblock "$out_s")" "sierra${tab}mod_sierra.py"
+
+# ── Bloc FILES : un chemin avec espaces et accent sort tel quel (pas de guillemets git) ──
+mk_watch_repo tango
+mkdir -p "$T/tango/dir with space"
+printf 'x\n' > "$T/tango/dir with space/é.txt"
+out_t="$(run_pw tango)"
+check "tango: state pushed-nopr" "$(rline "$out_t")" "tango${tab}pushed-nopr${tab}-"
+check "FILES tango = raw path with spaces and accent" \
+    "$(fblock "$out_t")" "$(printf 'tango\tdir with space/é.txt\ntango\tmod_tango.py')"
 
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"

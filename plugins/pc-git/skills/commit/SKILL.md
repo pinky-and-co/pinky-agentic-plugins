@@ -81,6 +81,8 @@ Reproduce the script's `=== RESULTS` block verbatim (one `<repo>\t<state>\t-` li
 `--no-pr` so `pr_url` is always `-`), keeping `commit-nopush` distinct from `failed` — the first
 means the commit is there, the second that nothing was committed. Derive no state not in the block. Do not re-check the repos afterwards with a shell loop — the block is the check.
 
+When a repo reached `pushed-nopr`, the script also prints a `=== FILES` … `=== END FILES` block (`<repo>\t<path>` per published file). Relay it verbatim too: an unexpected path means a stray file went out.
+
 ## Step 2 — Commit
 
 1. `git -C <repo> status`, `git -C <repo> diff HEAD`, `git -C <repo> log --oneline -5`.
