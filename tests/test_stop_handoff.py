@@ -886,5 +886,37 @@ class TestCardCLI(unittest.TestCase):
             self.assertEqual(r.stdout, "")
 
 
+class TestCardEffortCli(unittest.TestCase):
+    """`stop_handoff.py --card-effort <card>` prints the card's `effort:` or nothing."""
+
+    SCRIPT = Path(str(sh.__file__))
+
+    def _effort(self, frontmatter: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            card = Path(tmp) / "c.md"
+            card.write_text(f"---\n{frontmatter}---\n# c\n", encoding="utf-8")
+            r = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--card-effort", str(card)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(r.returncode, 0)
+        return r.stdout.strip()
+
+    def test_prints_a_plain_value(self):
+        self.assertEqual(self._effort("effort: low\n"), "low")
+
+    def test_strips_quotes_and_an_inline_comment(self):
+        self.assertEqual(self._effort('effort: "high"\n'), "high")
+        self.assertEqual(self._effort("effort: low  # cheap\n"), "low")
+
+    def test_prints_nothing_when_absent_or_null(self):
+        self.assertEqual(self._effort("model: sonnet\n"), "")
+        self.assertEqual(self._effort("effort: null\n"), "")
+        self.assertEqual(self._effort("effort:\n"), "")
+        self.assertEqual(self._effort("effort: # none\n"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

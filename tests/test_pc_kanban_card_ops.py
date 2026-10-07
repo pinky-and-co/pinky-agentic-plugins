@@ -65,6 +65,30 @@ def test_select_refuses_a_card_without_model(tmp_path: Path) -> None:
     assert card.exists()
 
 
+def test_select_refuses_an_effort_outside_the_list(tmp_path: Path) -> None:
+    card = _card(
+        tmp_path,
+        "1-todo",
+        head="model: sonnet\neffort: auto\nrequirements: [PKG-0001-01]\n",
+    )
+    result = _run(tmp_path, "select", "demo")
+    assert result.returncode == 1
+    assert "effort: auto" in result.stderr
+    assert "low, medium, high, xhigh, max" in result.stderr
+    assert card.exists()
+
+
+def test_select_accepts_a_valid_or_absent_effort(tmp_path: Path) -> None:
+    _card(
+        tmp_path,
+        "1-todo",
+        head="model: sonnet\neffort: xhigh\nrequirements: [PKG-0001-01]\n",
+    )
+    assert _run(tmp_path, "select", "demo").returncode == 0
+    _card(tmp_path, "1-todo", name="bare")
+    assert _run(tmp_path, "select", "bare").returncode == 0
+
+
 def test_select_refuses_a_blocked_card(tmp_path: Path) -> None:
     card = _card(
         tmp_path,

@@ -637,6 +637,15 @@ def main() -> int:
             print(model)
         return 0
 
+    if sys.argv[1:2] == ["--card-effort"]:
+        fm = parse_frontmatter(Path(sys.argv[2]).read_text(encoding="utf-8")) or {}
+        effort = fm.get("effort")
+        if isinstance(effort, str):
+            effort = effort.split("#", 1)[0].strip()
+            if effort:
+                print(effort)
+        return 0
+
     if "--list-chantiers" in sys.argv[1:]:
         full = "--full" in sys.argv[1:]
         if not full:

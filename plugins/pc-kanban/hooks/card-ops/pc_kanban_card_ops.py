@@ -32,6 +32,7 @@ COLUMNS = {
 }
 OPEN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress")
 MODELS = ("haiku", "sonnet", "opus", "fable")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 EMPTY = ("", "null", "~")
 ID_RE = re.compile(r"\b[A-Z]+-\d{4}-\d+\b")
 
@@ -217,6 +218,11 @@ def selection_problems(
     if field(head, "model") not in MODELS:
         problems.append(
             f"no valid `model:` ({', '.join(MODELS)}) — mandatory from selected on"
+        )
+    effort = field(head, "effort")
+    if effort not in EMPTY and effort not in EFFORTS:
+        problems.append(
+            f"`effort: {effort}` is not one of {', '.join(EFFORTS)} — or omit it"
         )
     if not re.search(r"(?m)^## Done when", text):
         problems.append("no `## Done when` section — set at selection")

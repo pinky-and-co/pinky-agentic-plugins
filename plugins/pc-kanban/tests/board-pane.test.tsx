@@ -169,6 +169,13 @@ describe('board pane helpers', () => {
     expect(cardSegments({ ...c, story: null }, [c])[3]?.press).toBeUndefined()
   })
 
+  test('the badge shows the effort after the model, and nothing when the card carries none', () => {
+    const withEffort: any = card('a', '1-todo', { model: 'opus', effort: 'low' })
+    const without: any = card('b', '1-todo', { model: 'opus' })
+    expect(cardSegments(withEffort, [withEffort]).map(g => g.text).slice(2, 4)).toEqual(['🟧 opus', 'effort low'])
+    expect(cardSegments(without, [without]).map(g => g.text).some(t => t.startsWith('effort'))).toBe(false)
+  })
+
   test('the action row marks the main verb of each column and greys the ones that do not apply', () => {
     const states = (column: string) => cardActions(card('x', column) as any, false).map(a => `${a.key}:${a.state}`)
     expect(states('0-ideas')).toEqual(['edit:main', 'select:off', 'archive:off', 'drop:normal'])
