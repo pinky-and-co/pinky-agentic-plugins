@@ -918,5 +918,58 @@ class TestCardEffortCli(unittest.TestCase):
         self.assertEqual(self._effort("effort: # none\n"), "")
 
 
+class TestCardMockupCli(unittest.TestCase):
+    """`--card-mockup` prints the card's `mockup:`, `--card-mockup-fidelity` one `axe=niveau` per line."""
+
+    SCRIPT = Path(str(sh.__file__))
+
+    def _read(self, mode: str, frontmatter: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            card = Path(tmp) / "c.md"
+            card.write_text(f"---\n{frontmatter}---\n# c\n", encoding="utf-8")
+            r = subprocess.run(
+                [sys.executable, str(self.SCRIPT), mode, str(card)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(r.returncode, 0)
+        return r.stdout
+
+    def test_mockup_prints_the_path_without_comment_or_quotes(self):
+        self.assertEqual(
+            self._read("--card-mockup", "mockup: /a/b.zip\n"), "/a/b.zip\n"
+        )
+        self.assertEqual(self._read("--card-mockup", 'mockup: "~/m"  # poc\n'), "~/m\n")
+
+    def test_mockup_prints_nothing_when_absent_or_null(self):
+        self.assertEqual(self._read("--card-mockup", "model: sonnet\n"), "")
+        for empty in ("null", "~", "null # later", '"null"', "# nothing"):
+            self.assertEqual(self._read("--card-mockup", f"mockup: {empty}\n"), "")
+
+    def test_fidelity_prints_one_element_per_line(self):
+        self.assertEqual(
+            self._read(
+                "--card-mockup-fidelity",
+                "mockup_fidelity: [layout=strict, design=free]\n",
+            ),
+            "layout=strict\ndesign=free\n",
+        )
+
+    def test_fidelity_survives_an_inline_comment(self):
+        self.assertEqual(
+            self._read(
+                "--card-mockup-fidelity", "mockup_fidelity: [layout=strict]  # x\n"
+            ),
+            "layout=strict\n",
+        )
+
+    def test_fidelity_prints_nothing_when_absent_or_empty(self):
+        self.assertEqual(self._read("--card-mockup-fidelity", "model: sonnet\n"), "")
+        self.assertEqual(
+            self._read("--card-mockup-fidelity", "mockup_fidelity: []\n"), ""
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

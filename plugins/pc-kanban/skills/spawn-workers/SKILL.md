@@ -80,9 +80,12 @@ the repo (`matching_plugin_ids`; each enable bounded, tried once, a failure logg
 - **Outside any multiplexer** → prints `cd <path> && <the claude line>` for the user to run, and
   spawns nothing.
 
+The mockup brief and the `.zip` unpacking (card `mockup:`) exist on the default path only; `--cmux`
+reads no mockup and unpacks nothing.
+
 `--dry-run` only affects `--cmux`: it previews the command line(s) and skips the project-scope
-plugin enable. The default path already does nothing but print, so `--dry-run` has nothing to add
-there.
+plugin enable. The default path prints, and unpacks a `.zip` mockup into its sibling folder — also
+under `--dry-run` — so `--dry-run` has nothing else to add there.
 
 ## Multi-repo cards — sequential by convention
 

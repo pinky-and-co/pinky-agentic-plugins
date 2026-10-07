@@ -24,6 +24,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -449,7 +450,9 @@ class _Result:
         self.stderr = stderr
 
 
-class TestMain(unittest.TestCase):
+class _MainHarness:
+    """setUp/tearDown and helpers shared by every test class that drives `sw.main`."""
+
     def setUp(self):
         self.card_path = (
             "/home/me/ws/_KANBAN/CHANTIER0099-demo/2-selected-for-dev/my-card.md"
@@ -507,6 +510,8 @@ class TestMain(unittest.TestCase):
             rc = sw.main(list(args))
         return rc, out.getvalue(), err.getvalue()
 
+
+class TestMain(_MainHarness, unittest.TestCase):
     def test_dry_run_prints_shlex_joined_spawn_command_per_repo_and_spawns_nothing(
         self,
     ):
@@ -693,6 +698,294 @@ class TestMain(unittest.TestCase):
         )
         self.assertIn("--effort max", out)
         self.assertNotIn("--effort low", out)
+
+
+_CARD = Path("/ws/repo/_KANBAN/c.md")
+_LEGEND = (
+    "  - strict: reproduce identically; if that cannot be met, say so in the report "
+    "instead of deviating silently\n"
+    "  - guided: follow the intent, justify every deviation in the report\n"
+    "  - free: the mockup is only an inspiration"
+)
+
+
+class TestFidelityLevels(unittest.TestCase):
+    def test_an_absent_axis_is_guided(self):
+        self.assertEqual(
+            sw.fidelity_levels([]),
+            {
+                "layout": "guided",
+                "design": "guided",
+                "content": "guided",
+                "behavior": "guided",
+            },
+        )
+
+    def test_declared_axes_override_the_default_in_axis_order(self):
+        self.assertEqual(
+            sw.fidelity_levels(["design=free", "layout=strict"]),
+            {
+                "layout": "strict",
+                "design": "free",
+                "content": "guided",
+                "behavior": "guided",
+            },
+        )
+
+    def test_spaces_around_the_equals_sign_are_ignored(self):
+        self.assertEqual(sw.fidelity_levels(["layout = strict"])["layout"], "strict")
+
+    def test_an_unknown_axis_or_level_aborts_naming_the_values(self):
+        with self.assertRaises(SystemExit) as cm:
+            sw.fidelity_levels(["color=strict"])
+        self.assertIn("layout", str(cm.exception))
+        with self.assertRaises(SystemExit) as cm:
+            sw.fidelity_levels(["layout=exact"])
+        self.assertIn("strict", str(cm.exception))
+
+
+class TestMockupBlock(unittest.TestCase):
+    def test_whole_block_pinned_with_a_partial_fidelity_list(self):
+        levels = sw.fidelity_levels(["layout=strict", "design=free"])
+        self.assertEqual(
+            sw.generated_card_block(
+                _CARD, "org/repo", mockup=Path("/m/poc.html"), levels=levels
+            ),
+            "Card to work:\n"
+            f"- Card: {_CARD}\n"
+            "- Repo: org/repo\n"
+            "- Mockup (the rendering spec — read it in full before writing any code): "
+            "/m/poc.html\n"
+            "- Mockup fidelity per axis: layout=strict, design=free, content=guided, "
+            "behavior=guided\n"
+            f"{_LEGEND}\n"
+            "- Mockup report: hand back a table `mockup element | implementation | status` "
+            "(status: done | deviation | missing) covering the strict and guided axes "
+            "(layout, content, behavior); for a guided axis, add the justified deviation.",
+        )
+
+    def test_a_card_with_a_mockup_and_no_list_has_four_guided_axes(self):
+        block = sw.generated_card_block(
+            _CARD, "org/repo", mockup=Path("/m"), levels=sw.fidelity_levels([])
+        )
+        self.assertEqual(
+            block,
+            "Card to work:\n"
+            f"- Card: {_CARD}\n"
+            "- Repo: org/repo\n"
+            "- Mockup (the rendering spec — read it in full before writing any code): /m\n"
+            "- Mockup fidelity per axis: layout=guided, design=guided, content=guided, "
+            "behavior=guided\n"
+            f"{_LEGEND}\n"
+            "- Mockup report: hand back a table `mockup element | implementation | status` "
+            "(status: done | deviation | missing) covering the strict and guided axes "
+            "(layout, design, content, behavior); for a guided axis, add the justified "
+            "deviation.",
+        )
+
+    def test_all_free_asks_for_no_table(self):
+        levels = {a: "free" for a in sw.AXES}
+        block = sw.generated_card_block(
+            _CARD, "org/repo", mockup=Path("/m"), levels=levels
+        )
+        self.assertNotIn("Mockup report", block)
+        self.assertIn("layout=free, design=free, content=free, behavior=free", block)
+
+    def test_no_mockup_leaves_the_block_unchanged(self):
+        self.assertEqual(
+            sw.generated_card_block(_CARD, "org/repo", "x", ["  row"]),
+            f"Card to work:\n- Card: {_CARD}\n- Repo: org/repo\n"
+            "- Judgment call to resolve: x\n"
+            "- Requirements cited by the card, defined in other cards (full rows):\n"
+            "  row",
+        )
+
+    def test_the_mockup_block_follows_arbitrage_and_cited_rows(self):
+        block = sw.generated_card_block(
+            _CARD,
+            "org/repo",
+            "x",
+            ["  row"],
+            mockup=Path("/m"),
+            levels=sw.fidelity_levels([]),
+        )
+        self.assertLess(block.index("  row"), block.index("- Mockup ("))
+
+
+def _zip(path: Path, entries: dict[str, str]) -> None:
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, body in entries.items():
+            zf.writestr(name, body)
+
+
+class TestPrepareMockup(unittest.TestCase):
+    def test_a_plain_path_is_returned_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            html = Path(tmp) / "poc.html"
+            html.write_text("x")
+            self.assertEqual(sw.prepare_mockup(html), html)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["poc.html"])
+
+    def test_a_zip_is_extracted_into_its_sibling_folder_then_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = Path(tmp) / "poc.zip"
+            _zip(zpath, {"index.html": "v1", "css/a.css": "a"})
+            target = sw.prepare_mockup(zpath)
+            self.assertEqual(target, Path(tmp) / "poc")
+            self.assertEqual((target / "index.html").read_text(), "v1")
+            self.assertEqual((target / "css" / "a.css").read_text(), "a")
+            _zip(zpath, {"index.html": "v2"})
+            (target / "marker").write_text("kept")
+            self.assertEqual(sw.prepare_mockup(zpath), target)
+            self.assertEqual((target / "index.html").read_text(), "v1")
+            self.assertEqual((target / "marker").read_text(), "kept")
+
+    def test_an_entry_leaving_the_target_is_refused_and_nothing_is_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "work"
+            root.mkdir()
+            zpath = root / "evil.zip"
+            _zip(zpath, {"ok.txt": "fine", "../x": "escaped"})
+            with self.assertRaises(SystemExit) as cm:
+                sw.prepare_mockup(zpath)
+            self.assertIn("../x", str(cm.exception))
+            self.assertEqual([p.name for p in root.iterdir()], ["evil.zip"])
+
+    def test_an_uppercase_zip_suffix_is_extracted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = Path(tmp) / "poc.ZIP"
+            _zip(zpath, {"index.html": "x"})
+            target = sw.prepare_mockup(zpath)
+            self.assertEqual(target, Path(tmp) / "poc")
+            self.assertTrue((target / "index.html").is_file())
+
+    def test_a_failed_extraction_leaves_nothing_behind(self):
+        def half_extract(self_, path=None, members=None, pwd=None):
+            Path(path).mkdir(parents=True, exist_ok=True)
+            (Path(path) / "partial").write_text("cut")
+            raise OSError("disk full")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = Path(tmp) / "poc.zip"
+            _zip(zpath, {"index.html": "x"})
+            with mock.patch.object(sw.zipfile.ZipFile, "extractall", half_extract):
+                with self.assertRaises(OSError):
+                    sw.prepare_mockup(zpath)
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["poc.zip"])
+
+    def test_a_sibling_that_is_a_file_aborts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = Path(tmp) / "poc.zip"
+            _zip(zpath, {"index.html": "x"})
+            (Path(tmp) / "poc").write_text("a file")
+            with self.assertRaises(SystemExit) as cm:
+                sw.prepare_mockup(zpath)
+            self.assertIn("not a directory", str(cm.exception))
+
+    def test_a_file_that_is_not_a_zip_aborts_in_one_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zpath = Path(tmp) / "poc.zip"
+            zpath.write_text("not an archive")
+            with self.assertRaises(SystemExit) as cm:
+                sw.prepare_mockup(zpath)
+            self.assertIn("not a valid zip", str(cm.exception))
+            self.assertNotIn("\n", str(cm.exception))
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["poc.zip"])
+
+    def test_an_absolute_entry_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "work"
+            root.mkdir()
+            outside = Path(tmp) / "abs.txt"
+            zpath = root / "evil.zip"
+            _zip(zpath, {str(outside): "escaped"})
+            with self.assertRaises(SystemExit):
+                sw.prepare_mockup(zpath)
+            self.assertFalse(outside.exists())
+            self.assertEqual([p.name for p in root.iterdir()], ["evil.zip"])
+
+
+class TestMainMockup(_MainHarness, unittest.TestCase):
+    """Same harness as `TestMain`; the card now declares a mockup."""
+
+    def setUp(self):
+        super().setUp()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_default_prints_the_mockup_brief_for_every_repo(self):
+        html = Path(self._tmp.name) / "poc.html"
+        html.write_text("x")
+        self.hook_stdout["--card-mockup"] = f"{html}\n"
+        self.hook_stdout["--card-mockup-fidelity"] = "layout=strict\ndesign=free\n"
+        _, out, _ = self._run("0099", "my-card")
+        for repo in ("one", "two"):
+            block = sw.generated_card_block(
+                Path(self.card_path),
+                f"org/{repo}",
+                mockup=html,
+                levels=sw.fidelity_levels(["layout=strict", "design=free"]),
+            )
+            self.assertIn(block, out)
+
+    def test_a_zip_mockup_is_extracted_and_the_brief_names_the_folder(self):
+        zpath = Path(self._tmp.name) / "poc.zip"
+        _zip(zpath, {"index.html": "x"})
+        self.hook_stdout["--card-mockup"] = f"{zpath}\n"
+        _, out, _ = self._run("0099", "my-card", "org/one")
+        folder = Path(self._tmp.name) / "poc"
+        self.assertTrue((folder / "index.html").is_file())
+        self.assertIn(f": {folder}\n", out)
+
+    def test_a_tilde_path_is_expanded(self):
+        with mock.patch.dict(os.environ, {"HOME": self._tmp.name}):
+            (Path(self._tmp.name) / "m").mkdir()
+            self.hook_stdout["--card-mockup"] = "~/m\n"
+            _, out, _ = self._run("0099", "my-card", "org/one")
+        self.assertIn(f": {self._tmp.name}/m\n", out)
+
+    def test_a_missing_mockup_aborts(self):
+        self.hook_stdout["--card-mockup"] = f"{self._tmp.name}/absent\n"
+        with self.assertRaises(SystemExit) as cm:
+            self._run("0099", "my-card")
+        self.assertIn("absent", str(cm.exception))
+
+    def test_cmux_dry_run_is_unchanged_by_a_declared_mockup(self):
+        _, without, _ = self._run("--cmux", "--dry-run", "0099", "my-card")
+        zpath = Path(self._tmp.name) / "poc.zip"
+        _zip(zpath, {"index.html": "x"})
+        self.hook_stdout["--card-mockup"] = f"{zpath}\n"
+        _, with_mockup, _ = self._run("--cmux", "--dry-run", "0099", "my-card")
+        self.assertEqual(with_mockup, without)
+        self.assertFalse((Path(self._tmp.name) / "poc").exists())
+
+    def test_a_card_without_a_mockup_prints_no_mockup_line(self):
+        _, out, _ = self._run("0099", "my-card")
+        self.assertNotIn("Mockup", out)
+
+
+class TestRealReaderFeedsFidelityLevels(unittest.TestCase):
+    """The real `stop_handoff.py` CLI (not the faked `_hook`) feeding the script, per card shape."""
+
+    def _read(self, frontmatter: str) -> tuple[str, dict[str, str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            card = Path(tmp) / "c.md"
+            card.write_text(f"---\n{frontmatter}---\n# c\n", encoding="utf-8")
+            mockup = sw._hook("--card-mockup", str(card), allow_empty=True)
+            items = sw._hook("--card-mockup-fidelity", str(card), allow_empty=True)
+        return mockup, sw.fidelity_levels(items.splitlines())
+
+    def test_spaces_around_the_equals_sign_reach_the_levels(self):
+        _, levels = self._read("mockup: /m\nmockup_fidelity: [layout = strict]\n")
+        self.assertEqual(levels["layout"], "strict")
+
+    def test_an_unbracketed_list_is_not_read(self):
+        _, levels = self._read("mockup: /m\nmockup_fidelity: layout=strict\n")
+        self.assertEqual(levels, sw.fidelity_levels([]))
+
+    def test_a_null_with_a_comment_is_no_mockup(self):
+        mockup, _ = self._read("mockup: null # none yet\n")
+        self.assertEqual(mockup, "")
 
 
 if __name__ == "__main__":

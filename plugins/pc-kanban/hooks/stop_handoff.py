@@ -646,6 +646,31 @@ def main() -> int:
                 print(effort)
         return 0
 
+    if sys.argv[1:2] == ["--card-mockup"]:
+        fm = parse_frontmatter(Path(sys.argv[2]).read_text(encoding="utf-8")) or {}
+        mockup = fm.get("mockup")
+        if isinstance(mockup, str):
+            mockup = mockup.split("#", 1)[0].strip().strip("\"'")
+            if mockup not in ("", "null", "~"):
+                print(mockup)
+        return 0
+
+    if sys.argv[1:2] == ["--card-mockup-fidelity"]:
+        fm = parse_frontmatter(Path(sys.argv[2]).read_text(encoding="utf-8")) or {}
+        value = fm.get("mockup_fidelity")
+        items: list[str] = []
+        if isinstance(value, list):
+            items = [str(v) for v in value]
+        elif isinstance(
+            value, str
+        ):  # an inline comment after `]` leaves the raw string
+            raw = value.split("#", 1)[0].strip()
+            if raw.startswith("[") and raw.endswith("]"):
+                items = [v.strip() for v in raw[1:-1].split(",") if v.strip()]
+        for item in items:
+            print(item)
+        return 0
+
     if "--list-chantiers" in sys.argv[1:]:
         full = "--full" in sys.argv[1:]
         if not full:
