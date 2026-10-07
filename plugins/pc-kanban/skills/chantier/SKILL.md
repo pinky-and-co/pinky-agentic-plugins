@@ -98,6 +98,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 7. **Resolve role, then take the card, if one is being taken** (already in `3-in-progress/` → resume
   directly; else the highest-`priority:` card of `2-selected-for-dev/` (step 4's pick) → move it
   into `3-in-progress/`, set its `date` to today):
+  A card selected during this session (after a grill or a `select`) is taken here, in place — this
+  skill is already loaded, so never relaunch it; only the `/reload-plugins` case below asks for a new turn.
    - **Role.**
     ```bash
     git -C "${CLAUDE_PROJECT_DIR}" rev-parse --show-toplevel
