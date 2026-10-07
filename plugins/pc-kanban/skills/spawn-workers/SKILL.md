@@ -1,7 +1,7 @@
 ---
 name: spawn-workers
 description: From the orchestrator session, hand a selected card to a `card-worker` Agent call per repo of its `repos:` — a generated prompt, not a cmux session on /pc-kanban:chantier. `--cmux` keeps the session path for a repo whose environment doesn't reduce to commands. Use when a selected card must be handed to its repos' workers; for a multi-repo card, pass the single next repo slug.
-argument-hint: "<chantier-id> <card-slug> [repo-slug...] [--dry-run] [--cmux] [--model <tier>] [--arbitrage <text>]"
+argument-hint: "<chantier-id> <card-slug> [repo-slug...] [--dry-run] [--cmux] [--model <tier>] [--effort <level>] [--arbitrage <text>]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py:*), Read, Agent
 model: haiku
 ---
@@ -17,11 +17,11 @@ the target repo's own test location, retyped from memory instead of read off dis
 ## Default path — an `Agent` call per repo
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py" <chantier-id> <card-slug> [repo-slug...] [--model <tier>] [--arbitrage <text>]
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py" <chantier-id> <card-slug> [repo-slug...] [--model <tier>] [--effort <level>] [--arbitrage <text>]
 ```
 
 1. Finds `<card-slug>.md` in `CHANTIER<chantier-id>-*` across every mounted board, and reads its
-   `repos:` and `model:` — all via `stop_handoff.py`'s CLI, no `pinky` CLI anywhere.
+   `repos:`, `model:` and optional `effort:` — all via `stop_handoff.py`'s CLI, no `pinky` CLI anywhere.
 2. Resolves each `org/repo` slug to its local clone (`chantier/scripts/resolve_repos.sh`, bounded
    `.git` scan; 0 or >1 clones for a slug → reported, never guessed). The scan root is the board's
    own workspace root (`_KANBAN`'s parent) — derived, not configured.
@@ -29,11 +29,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
    ```
    === worker: <repo>-<slug> ===
    model: <tier>
+   effort: <level>        (only when the card or `--effort` sets one)
    --- prompt ---
    <the two-block prompt>
    ```
    `<tier>` is `--model` when given, else the card's own `model:` frontmatter (`effective_model`) —
-   the caller's judgment on how much the card is already briefed, never a new card field. The
+   the caller's judgment on how much the card is already briefed. `effort:` is `--effort` when
+   given, else the card's own `effort:` (`low|medium|high|xhigh|max`); no line when neither is set. The
    prompt (`build_worker_prompt`) is two blocks:
    - **fixed** — this repo's own conventions (`repo_conventions_block`), probed from disk/PATH:
      where its Python tests live, its test command, its gate command, and the standing worker
@@ -46,8 +48,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
 4. **This script never calls the `Agent` tool — only the calling session can.** For each block of
    printed output, invoke:
    ```
-   Agent(subagent_type: "card-worker", model: <the printed tier>, prompt: <the printed prompt>)
+   Agent(subagent_type: "card-worker", model: <the printed tier>, effort: <the printed level>, prompt: <the printed prompt>)
    ```
+   Pass `effort:` exactly as printed; when no `effort:` line is printed, omit the parameter
+   altogether — the worker then inherits the session's effort.
    one call per repo. `card-worker`'s own agent definition (`agents/card-worker.md`) carries the
    role invariants (one card, no board file, no column move, hand-back format); the printed prompt
    carries the task and the repo facts. No `skills:` preload — the worker shells the repo's own
@@ -61,12 +65,13 @@ Pass `--cmux` for that repo; nothing here decides it automatically, because the 
 repo's own environment, not the card's size:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py" --cmux <chantier-id> <card-slug> [repo-slug...]
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py" --cmux <chantier-id> <card-slug> [repo-slug...] [--effort <level>]
 ```
 
-This is the previous default, unchanged: builds `claude --name "<repo>-<slug>" --model <tier>
---advisor <one tier up> "/pc-kanban:chantier <id> <slug>"` (tier verbatim, its `[1m]` long-context
-variant where one exists; `--advisor` one tier up, absent for `opus`/`fable`), enables — at project
+This is the session path: builds `claude --name "<repo>-<slug>" --model <tier>
+--advisor <one tier up> [--effort <level>] "/pc-kanban:chantier <id> <slug>"` (tier verbatim, its `[1m]` long-context
+variant where one exists; `--advisor` one tier up, absent for `opus`/`fable`; `--effort` only when
+the card or `--effort` sets one), enables — at project
 scope, before opening the worker — every installed project-scoped plugin whose `projectPath` covers
 the repo (`matching_plugin_ids`; each enable bounded, tried once, a failure logged and skipped), then:
 

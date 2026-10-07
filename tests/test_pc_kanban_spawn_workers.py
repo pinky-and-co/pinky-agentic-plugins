@@ -125,6 +125,32 @@ class TestBuildClaudeCommand(unittest.TestCase):
         )
 
 
+class TestEffortInClaudeCommand(unittest.TestCase):
+    def test_effort_is_added_before_the_boot_prompt(self):
+        self.assertEqual(
+            sw.build_claude_command("x-y", "0009", "y", "opus", "low"),
+            'claude --name x-y --model "opus[1m]" --effort low '
+            '"/pc-kanban:chantier 0009 y"',
+        )
+
+    def test_spawn_command_and_manual_line_carry_it(self):
+        argv = sw.build_spawn_command("cmux", _BOOTSTRAP, "0025", "s", "opus", "max")
+        self.assertIn("--effort max", argv[-1])
+        self.assertIn(
+            "--effort max", sw.build_manual_line(_BOOTSTRAP, "0025", "s", "opus", "max")
+        )
+
+    def test_no_effort_no_flag(self):
+        self.assertNotIn("--effort", sw.build_claude_command("x", "0009", "y", "opus"))
+
+
+class TestEffectiveEffort(unittest.TestCase):
+    def test_override_wins_then_card_then_nothing(self):
+        self.assertEqual(sw.effective_effort("low", "high"), "high")
+        self.assertEqual(sw.effective_effort("low", None), "low")
+        self.assertEqual(sw.effective_effort("", None), "")
+
+
 class TestBuildSpawnCommand(unittest.TestCase):
     def test_cmux_argv_is_pinned_whole(self):
         self.assertEqual(
@@ -628,6 +654,45 @@ class TestMain(unittest.TestCase):
             "--arbitrage", "pick a branch name", "0099", "my-card", "org/one"
         )
         self.assertIn("pick a branch name", out)
+
+    def test_default_prints_the_card_effort(self):
+        self.hook_stdout["--card-effort"] = "low\n"
+        _, out, _ = self._run("0099", "my-card", "org/one")
+        self.assertIn("model: opus\neffort: low\n--- prompt ---", out)
+
+    def test_default_prints_no_effort_line_without_one(self):
+        _, out, _ = self._run("0099", "my-card", "org/one")
+        self.assertNotIn("effort:", out)
+
+    def test_effort_flag_overrides_the_card(self):
+        self.hook_stdout["--card-effort"] = "low\n"
+        _, out, _ = self._run("--effort", "high", "0099", "my-card", "org/one")
+        self.assertIn("effort: high", out)
+        self.assertNotIn("effort: low", out)
+
+    def test_invalid_effort_flag_aborts_naming_the_values(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._run("--effort", "auto", "0099", "my-card")
+        self.assertIn("'auto'", str(cm.exception))
+        self.assertIn("xhigh", str(cm.exception))
+
+    def test_invalid_card_effort_aborts(self):
+        self.hook_stdout["--card-effort"] = "auto\n"
+        with self.assertRaises(SystemExit):
+            self._run("0099", "my-card")
+
+    def test_cmux_command_carries_the_effort(self):
+        self.hook_stdout["--card-effort"] = "low\n"
+        _, out, _ = self._run("--cmux", "--dry-run", "0099", "my-card", "org/one")
+        self.assertIn('--model "opus[1m]" --effort low "/pc-kanban', out)
+
+    def test_cmux_effort_flag_overrides_the_card(self):
+        self.hook_stdout["--card-effort"] = "low\n"
+        _, out, _ = self._run(
+            "--cmux", "--dry-run", "--effort", "max", "0099", "my-card", "org/one"
+        )
+        self.assertIn("--effort max", out)
+        self.assertNotIn("--effort low", out)
 
 
 if __name__ == "__main__":

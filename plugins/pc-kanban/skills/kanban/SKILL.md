@@ -76,6 +76,7 @@ date: YYYY-MM-DD       # meaning is implied by the column folder — see table b
 priority: 1-5          # 1 (low) to 5 (urgent); omitted = 3
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
 model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
+effort: low | medium | high | xhigh | max   # optional — how hard the worker reasons; absent = inherit the session
 sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
 requirements: []          # requirement ids this card traces to, e.g. [<id>, …]; [] = none
 blocked_by: <card-slug> | null         # a hard dependency, never a mere ordering preference
@@ -114,6 +115,11 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   nothing to keep in sync. Mandatory from `selected` onward; missing on a selected card → propose
   one and say why, never guess silently. A heterogeneous card tiers its bulk on `model:` and
   overrides outlier checklist items inline (`- [ ] (opus) arbitrate the placement`).
+
+- **`effort`** — optional, the reasoning effort a worker is asked for: `low`, `medium`, `high`,
+  `xhigh` or `max` (no `auto`). Absent = nothing imposed, the worker inherits the session's.
+  `select` refuses any other value. `spawn-workers` passes it to the `Agent` call (and
+  `claude --effort` on `--cmux`); `--effort` overrides it at call time.
 
 - **`repos`** — the repo-scope a session needs for this card, as `org/repo` slugs derived from each
   repo's `git remote get-url origin` — never a bare directory name. A name collides across orgs (see

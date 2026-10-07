@@ -534,11 +534,12 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '') : []
 }
 
-// The badge line of an open card: column, priority, tier, chantier, date, repos, sert, requirements, blocker.
+// The badge line of an open card: column, priority, tier, effort, chantier, date, repos, sert, requirements, blocker.
 export function cardSegments(card: BoardCard, cards: readonly BoardCard[]): Seg[] {
   const fm = card.frontmatter
   const mark = priorityMark(card.priority)
   const model = typeof fm.model === 'string' ? fm.model : '?'
+  const effort = typeof fm.effort === 'string' && fm.effort !== '' ? fm.effort : null
   const chantier = `[${card.chantier_id ?? '----'}]`
   const date = typeof fm.date === 'string' && fm.date !== '' ? fm.date : null
   const sert = typeof fm.sert === 'string' && fm.sert !== '' ? fm.sert : null
@@ -548,6 +549,7 @@ export function cardSegments(card: BoardCard, cards: readonly BoardCard[]): Seg[
     { text: card.column },
     { text: `${mark.glyph} P${card.priority}`, color: mark.color, bold: true },
     { text: `${tierMark(fm.model)} ${model}` },
+    ...(effort === null ? [] : [{ text: `effort ${effort}` }]),
     card.story === null ? { text: chantier } : { text: chantier, press: { t: 'story' } as Intent },
     ...(date === null ? [] : [{ text: `${DATE_WORD[card.column] ?? 'on'} ${date}`, dimColor: true }]),
     ...strings(card.repos).map(r => ({ text: r })),

@@ -27,8 +27,12 @@ and skips the plugin enable).
 
 Python 3.11+, stdlib only.
 
-Usage: pc_kanban_spawn_workers.py [--dry-run] [--cmux] [--model <tier>] [--arbitrage <text>]
-                                   <chantier-id> <card-slug> [<repo-slug>...]
+`--effort <level>` overrides the card's optional `effort:` (`low`, `medium`, `high`, `xhigh`,
+`max`); the default path prints `effort: <level>` only when one is set, and `--cmux` adds
+`claude --effort <level>`.
+
+Usage: pc_kanban_spawn_workers.py [--dry-run] [--cmux] [--model <tier>] [--effort <level>]
+                                   [--arbitrage <text>] <chantier-id> <card-slug> [<repo-slug>...]
 """
 
 from __future__ import annotations
@@ -59,7 +63,7 @@ from pc_kanban_requirement_rows import (  # noqa: E402
 
 _USAGE = (
     "Usage: pc_kanban_spawn_workers.py [--dry-run] [--cmux] [--model <tier>] "
-    "[--arbitrage <text>] <chantier-id> <card-slug> [<repo-slug>...]"
+    "[--effort <level>] [--arbitrage <text>] <chantier-id> <card-slug> [<repo-slug>...]"
 )
 
 # The worker's own role invariants live in the `card-worker` agent definition, not here — this is
@@ -82,6 +86,7 @@ _MODEL_ARG = {
     "opus": "opus[1m]",
     "fable": "fable[1m]",
 }
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # advisor = one model tier above the card's model; `opus` and `fable` are already the ceiling.
 _ADVISOR_ABOVE = {"haiku": "sonnet", "sonnet": "opus"}
 
@@ -416,6 +421,19 @@ def effective_model(card_model: str, requested: str | None) -> str:
     return requested or card_model
 
 
+def effective_effort(card_effort: str, requested: str | None) -> str:
+    """The effort level for a worker: the call's `--effort`, else the card's own `effort:`.
+
+    Args:
+        card_effort: the card's `effort:` value, or "".
+        requested: the level passed to this call (`--effort`), or None.
+
+    Returns:
+        `requested` when given (truthy), else `card_effort`; "" means nothing is imposed.
+    """
+    return requested or card_effort
+
+
 def _extract_valued_flag(argv: list[str], flag: str) -> tuple[str | None, list[str]]:
     """Pull `flag <value>` out of `argv`.
 
@@ -439,7 +457,7 @@ def _extract_valued_flag(argv: list[str], flag: str) -> tuple[str | None, list[s
 
 
 def build_claude_command(
-    name: str, chantier_id: str, slug: str, card_model: str
+    name: str, chantier_id: str, slug: str, card_model: str, effort: str = ""
 ) -> str:
     """The `claude` invocation a worker session boots with, as one shell string.
 
@@ -449,10 +467,11 @@ def build_claude_command(
         slug: the card filename without ".md".
         card_model: the card's `model:` alias, or "" — `--model` / `--advisor` are derived
             from it (`model_arg`, `advisor_for`), not passed as-is.
+        effort: the effective effort level, or "" — then no `--effort` is passed.
 
     Returns:
-        One POSIX shell string — for a sonnet card:
-        claude --name pinky-bootstrap-fix --model "sonnet[1m]" --advisor "opus" "/pc-kanban:chantier <id> <slug>"
+        One POSIX shell string — for a sonnet card with effort `low`:
+        claude --name pinky-bootstrap-fix --model "sonnet[1m]" --advisor "opus" --effort low "/pc-kanban:chantier <id> <slug>"
     """
     parts = ["claude", "--name", shlex.quote(name)]
     model = model_arg(card_model)
@@ -461,12 +480,19 @@ def build_claude_command(
     advisor = advisor_for(card_model)
     if advisor:
         parts += ["--advisor", f'"{advisor}"']
+    if effort:
+        parts += ["--effort", shlex.quote(effort)]
     parts.append(f'"/pc-kanban:chantier {chantier_id} {slug}"')
     return " ".join(parts)
 
 
 def build_spawn_command(
-    mux: str, target: SpawnTarget, chantier_id: str, slug: str, card_model: str
+    mux: str,
+    target: SpawnTarget,
+    chantier_id: str,
+    slug: str,
+    card_model: str,
+    effort: str = "",
 ) -> list[str]:
     """Build the `<mux> new-workspace` argv for one repo of a card.
 
@@ -476,18 +502,19 @@ def build_spawn_command(
         chantier_id: the four-digit chantier number.
         slug: the card filename without ".md".
         card_model: the card's `model:` alias.
+        effort: the effective effort level, or "".
 
     Returns:
         The full argv list, ready for subprocess.run without a shell. The workspace name is
         left to the multiplexer, which adopts the `claude --name` value.
     """
     name = f"{target.slug.split('/')[-1]}-{slug}"
-    inner = build_claude_command(name, chantier_id, slug, card_model)
+    inner = build_claude_command(name, chantier_id, slug, card_model, effort)
     return [mux, "new-workspace", "--cwd", str(target.path), "--command", inner]
 
 
 def build_manual_line(
-    target: SpawnTarget, chantier_id: str, slug: str, card_model: str
+    target: SpawnTarget, chantier_id: str, slug: str, card_model: str, effort: str = ""
 ) -> str:
     """The `cd <path> && claude ...` line a user runs when no multiplexer is available.
 
@@ -496,13 +523,14 @@ def build_manual_line(
         chantier_id: the four-digit chantier number.
         slug: the card filename without ".md".
         card_model: the card's `model:` alias.
+        effort: the effective effort level, or "".
 
     Returns:
         One shell line — the repo path (shell-quoted), then `&&`, then the build_claude_command
         string.
     """
     name = f"{target.slug.split('/')[-1]}-{slug}"
-    claude = build_claude_command(name, chantier_id, slug, card_model)
+    claude = build_claude_command(name, chantier_id, slug, card_model, effort)
     return f"cd {shlex.quote(str(target.path))} && {claude}"
 
 
@@ -575,12 +603,14 @@ def main(argv: list[str]) -> int:
     Raises:
         SystemExit: the id/slug pair is malformed, the card is missing or ambiguous, a repo
             slug is not one the card declares, resolve_repos.sh failed, the card declares no
-            repos at all, or `--model`/`--arbitrage` is present with no value.
+            repos at all, or `--model`/`--effort`/`--arbitrage` is present with no
+            value, or an effort is not one of `EFFORTS`.
     """
     dry_run = "--dry-run" in argv
     use_cmux = "--cmux" in argv
     argv = [a for a in argv if a not in ("--dry-run", "--cmux")]
     model_override, argv = _extract_valued_flag(argv, "--model")
+    effort_override, argv = _extract_valued_flag(argv, "--effort")
     arbitrage, argv = _extract_valued_flag(argv, "--arbitrage")
     positional = argv
     if len(positional) < 2:
@@ -613,6 +643,18 @@ def main(argv: list[str]) -> int:
             f"spawn-workers: --model {model_override!r} — not one of {sorted(_MODEL_ARG)}"
         )
 
+    if effort_override and effort_override not in EFFORTS:
+        raise SystemExit(
+            f"spawn-workers: --effort {effort_override!r} — not one of {list(EFFORTS)}"
+        )
+    card_effort = _hook("--card-effort", str(card_path), allow_empty=True)
+    if card_effort and card_effort not in EFFORTS:
+        raise SystemExit(
+            f"spawn-workers: card '{slug}' has effort: {card_effort!r} — "
+            f"not one of {list(EFFORTS)}"
+        )
+    effort = effective_effort(card_effort, effort_override)
+
     slugs = select_repos(declared, wanted)
     targets = resolve_paths(board_workspace_root(card_path), slugs)
 
@@ -626,13 +668,15 @@ def main(argv: list[str]) -> int:
             for target in targets:
                 if not dry_run:
                     _report_enabled(target, enable_project_plugins(target.path))
-                print(build_manual_line(target, chantier_id, slug, card_model))
+                print(build_manual_line(target, chantier_id, slug, card_model, effort))
             return 0
 
         for target in targets:
             if not dry_run:
                 _report_enabled(target, enable_project_plugins(target.path))
-            command = build_spawn_command(mux, target, chantier_id, slug, card_model)
+            command = build_spawn_command(
+                mux, target, chantier_id, slug, card_model, effort
+            )
             if dry_run:
                 print(shlex.join(command))
                 continue
@@ -640,15 +684,17 @@ def main(argv: list[str]) -> int:
             print(f"spawned {target.slug.split('/')[-1]}-{slug} → {target.path}")
         return 0
 
-    # Default: print each repo's worker prompt + resolved tier. The caller invokes
-    # `Agent(subagent_type: "card-worker", model: <tier>, prompt: <printed text>)` itself — this
-    # script never calls the Agent tool, only the session running it can.
+    # Default: print each repo's worker prompt + resolved tier. The caller passes them to
+    # `Agent(subagent_type: "card-worker", model: <tier>, effort: <level>, prompt: <text>)`
+    # (`effort` only when printed); this script never calls the Agent tool itself.
     tier = effective_model(card_model, model_override)
     for target in targets:
         prompt = build_worker_prompt(card_path, target.path, target.slug, arbitrage)
         name = f"{target.slug.split('/')[-1]}-{slug}"
         print(f"=== worker: {name} ===")
         print(f"model: {tier}")
+        if effort:
+            print(f"effort: {effort}")
         print("--- prompt ---")
         print(prompt)
     return 0
