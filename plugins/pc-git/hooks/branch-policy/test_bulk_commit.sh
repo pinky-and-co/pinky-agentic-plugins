@@ -833,5 +833,37 @@ check "prek runs inside the scanned repo, not the caller's directory" \
     "$(head -1 "$HROOT/prek_cwd" 2>/dev/null)" "$(cd "$HROOT/hotel" && pwd -P)"
 rm -rf "$HROOT"
 
+# ── Bloc FILES : `gh pr diff` échoue sur un remote GitHub → repli sur git diff base...HEAD ──
+# `pr create` rend une URL (état pushed-pr), `pr diff` sort en erreur sans rien écrire.
+sierrabin="$T/sierrabin"; mkdir -p "$sierrabin"
+cat > "$sierrabin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr view")   exit 1 ;;
+  "pr create") echo "https://github.com/x/sierra/pull/3" ;;
+  "pr diff")   exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "$sierrabin/gh"
+mk_watch_repo sierra
+plan_s="$("$SCRIPT" plan --root "$T" --repo sierra 2>&1)"
+fp_s="$(printf '%s' "$plan_s" | grep -o 'GROUP [a-f0-9]\{12\}' | head -1 | cut -d' ' -f2)"
+printf '%s\t✨ feat: sierra\n' "$fp_s" > "$T/m_sierra.tsv"
+out_s="$(PATH="$sierrabin:$PATH" "$SCRIPT" apply --root "$T" --repo sierra --messages "$T/m_sierra.tsv" --no-watch-ci 2>&1)"
+check "sierra: state pushed-pr despite a failing gh pr diff" "$(rline "$out_s")" \
+    "sierra${tab}pushed-pr${tab}https://github.com/x/sierra/pull/3"
+check "FILES sierra (gh pr diff fails) = git diff --name-only base...HEAD" \
+    "$(fblock "$out_s")" "sierra${tab}mod_sierra.py"
+
+# ── Bloc FILES : un chemin avec espaces et accent sort tel quel (pas de guillemets git) ──
+mk_watch_repo tango
+mkdir -p "$T/tango/dir with space"
+printf 'x\n' > "$T/tango/dir with space/é.txt"
+out_t="$(run_pw tango)"
+check "tango: state pushed-nopr" "$(rline "$out_t")" "tango${tab}pushed-nopr${tab}-"
+check "FILES tango = raw path with spaces and accent" \
+    "$(fblock "$out_t")" "$(printf 'tango\tdir with space/é.txt\ntango\tmod_tango.py')"
+
 [ "$fail" -eq 0 ] && echo "OK" || echo "ÉCHEC"
 exit "$fail"
