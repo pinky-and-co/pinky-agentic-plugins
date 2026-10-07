@@ -12,7 +12,7 @@
 > Paths in the "Where it lands" / "Status" columns below are **pinky-workspace paths** — the scrub
 > card maps each migrated source to its plugin home (e.g. `core/rules/base/minimal-code.md` →
 > `pinky-bootstrap/agentic-harness/rules/pc-core/minimal-code.md`; the 4 council skills →
-> `pc-core:council`; `read-documents` rule → `pc-core:document-to-md`; `yt` skill → `pc-kanban:yt`).
+> `pc-core:council`; `read-documents` rule → `pc-read:document-to-md`; `yt` skill → `pc-kanban:yt`).
 >
 > **Rule of thumb — append a row whenever you take from an external source**, classified by *how used*:
 > - **inspiration** (concept/format/pattern, no code copied) → courtesy credit, no license obligation.
@@ -61,7 +61,7 @@
 
   | Source | Verdict | Home |
   |---|---|---|
-  | markitdown (MIT) | NOTICE — optional runtime dep | `pinky-agentic-plugins` NOTICE — `pc-core:document-to-md` |
+  | markitdown (MIT) | NOTICE — optional runtime dep | `pinky-agentic-plugins` NOTICE — `pc-read:document-to-md` |
   | yt-dlp (Unlicense) | NOTICE — courtesy (public domain) | `pinky-agentic-plugins` NOTICE — `pc-kanban:yt` |
   | RTK (Apache-2.0) | NOTICE — optional runtime dep | `pinky-agentic-plugins` NOTICE — plugin `pc-rtk` |
   | Snowflake docs (adapted) | NOTICE — transformative adaptation | `pinky-agentic-plugins` NOTICE — `pc-snow` skills, `metadata.source` per file |

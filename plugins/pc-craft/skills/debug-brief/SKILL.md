@@ -72,7 +72,7 @@ Resolve inputs in order:
    README tagline.
 1. Read each `--code` file in full.
 1. Read `--spec` in full if given. If its extension is `.docx` / `.pptx` / `.xlsx` / `.pdf` /
-   `.html` / `.htm`, invoke the `pc-core:document-to-md` skill on it first and read that Markdown
+   `.html` / `.htm`, invoke the `pc-read:document-to-md` skill on it first and read that Markdown
    instead — the assembled brief is a static block pasted into an external model, which never sees
    this conversion rule.
 

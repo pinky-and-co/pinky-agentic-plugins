@@ -1,0 +1,10 @@
+{
+  "name": "pc-read",
+  "version": "0.1.0",
+  "description": "Cheaper reads of heavy local documents: converts a .pdf, .docx, .pptx, .xlsx or .html to Markdown (document-to-md), and a band above the prompt to convert, read as-is or deny a native Read of one.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "skills": ["./skills"],
+  "types": "./types/index.d.ts"
+}

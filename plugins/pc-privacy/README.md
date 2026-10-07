@@ -93,8 +93,10 @@ runs the same detection as `anonymize_detect`.
   `pii:ok` anywhere in the message to send it anyway (it also lifts the block for a message that
   merely quotes an `@path`). Only the person can type it — the model does not write the prompt. A file
   attached through a UI upload rather than typed as `@path` is still out of reach.
-- Alongside `read_cost.py` (also `ask` on `Read` for heavy formats) both hooks answer
-  independently on the same event; neither overrides the other.
+- Alongside the costly-read hook of `pc-read` (also `ask` on `Read` for heavy formats) the hooks answer
+  independently on the same event; neither hook overrides the other. The mods are not independent:
+  an `allow` in one band lifts the `ask` of the whole call, the other hook's included, whenever that
+  hook's own mod did not hold the read (it stepped aside, or could not answer).
 
 ### Read band
 
@@ -116,7 +118,12 @@ loads cold, so the call gets 55 s) and never judges by itself. When nobody answe
 minute, when the verdict cannot be read, when a settings rule or the engine decides the read, or
 when the session draws on neither a terminal nor the desktop app (`claude -p`, the VS Code
 extension alone), nothing is held and the guard's `ask` applies. A mention `@file` in a prompt is
-not held: its block stays.
+not held: its block stays. The mod publishes the plugin folder in the shared state (key `root`) at
+session start, so `pc-read` steps aside for a file this guard flags, and also when this guard is
+published but fails to answer. `pc-read` waits for `pii_guard.py --verdict` before drawing its band
+for a costly format: a `.xlsx` or `.html` costs one more scan per `Read`, while a real PDF or Office
+binary is skipped by the guard's format detection. That wait still needs a working `uv`: on a cold
+first run, or without `uv`, `pc-read` shows no band and the native dialog applies.
 
 The mod is TypeScript, which the repo's gates do not run. Check it with
 `claude plugin validate plugins/pc-privacy`, `claude plugin test plugins/pc-privacy` and

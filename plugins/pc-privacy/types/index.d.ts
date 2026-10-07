@@ -11,6 +11,10 @@ export type HeldRead = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'pc-privacy': { held: HeldRead | null }
+    'pc-privacy': {
+      held: HeldRead | null
+      // Le dossier du plugin, pour qu'un autre plugin lance `pii_guard.py` sans deviner où il vit.
+      root: string
+    }
   }
 }
