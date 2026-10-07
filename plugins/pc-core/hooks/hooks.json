@@ -1,5 +1,5 @@
 {
-  "description": "Injects per-repo resolved policies (language, branch) before every write, asks before a costly native Read, denies reading secret-shaped content, surfaces the just-edited file's own checker findings, reinforces a custom output style every turn — see inject_policies.py, read_cost.py, privacy_egress.py, post_edit_lint.py, structure_guard.py, style_reminder.py",
+  "description": "Injects per-repo resolved policies (language, branch) before every write, asks before a costly native Read, surfaces the just-edited file's own checker findings, reinforces a custom output style every turn — see inject_policies.py, read_cost.py, post_edit_lint.py, structure_guard.py, style_reminder.py",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -29,16 +29,6 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/read_cost.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Read|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/privacy_egress.py\"",
             "timeout": 10
           }
         ]

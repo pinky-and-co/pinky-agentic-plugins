@@ -401,3 +401,103 @@ def test_a_dataset_outside_the_excluded_scope_still_asks(tmp_path, monkeypatch, 
     assert pii_guard.run_hook() == 0
     decision = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
     assert decision["permissionDecision"] == "ask"
+
+
+# ── helpers for the band mod (`hooks/pii-hold`) ───────────────────────────────
+
+
+def _one_finding(monkeypatch) -> None:
+    monkeypatch.setattr(
+        anonymize,
+        "detect_findings",
+        lambda files, **kw: [
+            anonymize.Finding("clients.csv", "contact", "detected EMAIL_ADDRESS (3/3)")
+        ],
+    )
+
+
+def test_verdict_names_the_columns_and_offers_the_copy(tmp_path, monkeypatch):
+    data = _csv(tmp_path / "clients.csv", [{"contact": "a@example.fr", "note": "x"}])
+    _one_finding(monkeypatch)
+    assert pii_guard.verdict(_read_event(data), anonymize) == {
+        "flagged": True,
+        "kind": "pii",
+        "path": str(data),
+        "columns": ["contact"],
+        "anonymize": True,
+    }
+
+
+def test_verdict_of_a_clean_file_or_another_tool_is_not_flagged(tmp_path, monkeypatch):
+    data = _csv(tmp_path / "c.csv", [{"contact": "a", "note": "x"}])
+    monkeypatch.setattr(anonymize, "detect_findings", lambda files, **kw: [])
+    assert pii_guard.verdict(_read_event(data), anonymize) == {"flagged": False}
+    assert pii_guard.verdict({"tool_name": "Bash"}, anonymize) == {"flagged": False}
+
+
+def test_verdict_of_an_oversize_file_offers_no_copy(tmp_path, monkeypatch):
+    data = _csv(tmp_path / "big.csv", [{"contact": "a@example.fr", "note": "x"}])
+    monkeypatch.setattr(pii_guard, "MAX_BYTES", 1)
+    assert pii_guard.verdict(_read_event(data), anonymize) == {
+        "flagged": True,
+        "kind": "oversize",
+        "path": str(data),
+        "columns": [],
+        "anonymize": False,
+    }
+
+
+def test_verdict_of_an_anonymized_copy_offers_no_second_copy(tmp_path, monkeypatch):
+    data = _csv(
+        tmp_path / "clients.anon.csv", [{"contact": "a@example.fr", "note": "x"}]
+    )
+    _one_finding(monkeypatch)
+    assert pii_guard.verdict(_read_event(data), anonymize)["anonymize"] is False
+
+
+def test_make_copy_masks_the_flagged_columns_and_leaves_the_original(
+    tmp_path, monkeypatch
+):
+    data = _csv(tmp_path / "clients.csv", [{"contact": "a@example.fr", "note": "x"}])
+    original = data.read_text(encoding="utf-8")
+    _one_finding(monkeypatch)
+    copy = pii_guard.make_copy(data, anonymize)
+    assert copy == str(tmp_path / "clients.anon.csv")
+    assert data.read_text(encoding="utf-8") == original
+    rows = list(csv.DictReader(Path(copy).open(encoding="utf-8")))
+    assert rows[0]["note"] == "x"
+    assert rows[0]["contact"].startswith("CONTACT_")
+
+
+def test_make_copy_without_a_finding_writes_nothing(tmp_path, monkeypatch):
+    data = _csv(tmp_path / "c.csv", [{"contact": "a", "note": "x"}])
+    monkeypatch.setattr(anonymize, "detect_findings", lambda files, **kw: [])
+    assert pii_guard.make_copy(data, anonymize) is None
+    assert list(tmp_path.glob("*.anon.*")) == []
+
+
+def test_main_verdict_mode_prints_json(tmp_path, monkeypatch, capsys):
+    data = _csv(tmp_path / "clients.csv", [{"contact": "a@example.fr", "note": "x"}])
+    _one_finding(monkeypatch)
+    _feed_event(monkeypatch, _read_event(data))
+    assert pii_guard.main(["--verdict"]) == 0
+    assert json.loads(capsys.readouterr().out)["columns"] == ["contact"]
+
+
+def test_main_anonymize_mode_prints_the_copy_path(tmp_path, monkeypatch, capsys):
+    data = _csv(tmp_path / "clients.csv", [{"contact": "a@example.fr", "note": "x"}])
+    _one_finding(monkeypatch)
+    assert pii_guard.main(["--anonymize", str(data)]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "copy": str(tmp_path / "clients.anon.csv")
+    }
+
+
+def test_main_modes_exit_one_when_nothing_can_be_answered(
+    tmp_path, monkeypatch, capsys
+):
+    data = _csv(tmp_path / "c.csv", [{"contact": "a", "note": "x"}])
+    monkeypatch.setattr(anonymize, "detect_findings", lambda files, **kw: [])
+    assert pii_guard.main(["--anonymize", str(data)]) == 1
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
+    assert pii_guard.main(["--verdict"]) == 1

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/hooks/secret_patterns.py — run with:
+"""Tests for plugins/pc-secrets/hooks/secret_patterns.py — run with:
 python3 -m unittest discover tests
 """
 
@@ -7,7 +7,9 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
+sys.path.insert(
+    0, str(Path(__file__).parent.parent / "plugins" / "pc-secrets" / "hooks")
+)
 
 import secret_patterns as sp
 

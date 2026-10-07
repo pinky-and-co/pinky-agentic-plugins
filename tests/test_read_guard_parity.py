@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parity of the two read guards' exclusion predicates.
 
-`privacy_egress` (pc-core) and `pii_guard` (pc-privacy) each carry their own `_is_excluded` —
+`privacy_egress` (pc-secrets) and `pii_guard` (pc-privacy) each carry their own `_is_excluded` —
 the plugins stay import-independent — so nothing structural keeps the two copies in step. This
 test is that check: on a fixed, deliberately varied set of paths, one guard must never exclude
 what the other scans. Each case also pins the expected verdict, so a drift in both guards at
@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
+sys.path.insert(
+    0, str(Path(__file__).parent.parent / "plugins" / "pc-secrets" / "hooks")
+)
 sys.path.insert(
     0, str(Path(__file__).parent.parent / "plugins" / "pc-privacy" / "hooks")
 )

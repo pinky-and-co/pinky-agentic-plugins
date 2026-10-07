@@ -96,6 +96,32 @@ runs the same detection as `anonymize_detect`.
 - Alongside `read_cost.py` (also `ask` on `Read` for heavy formats) both hooks answer
   independently on the same event; neither overrides the other.
 
+### Read band
+
+For a `Read` the guard flags, a mod (`hooks/pii-hold/register.tsx`, written for the Claude Code
+mods API, early access, measured on 2.1.288) holds the call and draws a framed band above the
+prompt: `⚠︎ Personal data`, the file name and the sensitive columns, then one button per outcome (the first press wins):
+
+- `⎘ anonymize` (`1`) writes the anonymized copy (`pii_guard.py --anonymize`, the same detection and
+  masking as `anonymize_detect` then `anonymize_apply`) and reads that copy instead of the original;
+  Claude is told it reads a copy. When no copy can be made the read is refused, never silently
+  redirected to the original. Not offered for an oversize file or for a file that is already a
+  `.anon` copy.
+- `✔︎ allow read` (`2`) reads the file as it is, with no second dialog — the guard's `ask` is lifted
+  for that exact call and path only.
+- `✘ deny` (`0`) refuses the `Read`; Claude asks what to do and can propose `anonymize_apply`.
+
+The guard stays the source of the verdict: the mod asks `pii_guard.py --verdict` (the analysis
+loads cold, so the call gets 55 s) and never judges by itself. When nobody answers within one
+minute, when the verdict cannot be read, when a settings rule or the engine decides the read, or
+when the session draws on neither a terminal nor the desktop app (`claude -p`, the VS Code
+extension alone), nothing is held and the guard's `ask` applies. A mention `@file` in a prompt is
+not held: its block stays.
+
+The mod is TypeScript, which the repo's gates do not run. Check it with
+`claude plugin validate plugins/pc-privacy`, `claude plugin test plugins/pc-privacy` and
+`tsc -p plugins/pc-privacy`.
+
 ## Optional: decision-model gate
 
 With a decision model served locally, the Read guard first asks it one question about a bounded
