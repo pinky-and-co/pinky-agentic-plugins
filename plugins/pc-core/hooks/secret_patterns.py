@@ -15,9 +15,20 @@ from __future__ import annotations
 
 import re
 
-# Un match keyword=value dont la valeur est une lecture d'environnement, pas un littéral — exclu des
-# deux natures "* = value" ci-dessous via un negative lookahead juste après le `[:=]`.
+# Un match keyword=valeur dont la valeur est une lecture d'environnement, pas un littéral — exclu
+# des deux natures "* = value" ci-dessous via un negative lookahead devant la valeur.
 _ENV_READ = r"os\.environ|os\.getenv\(|process\.env\.|System\.getenv\("
+
+# Branche valeur des deux natures « * = value » : après un `=` la valeur est un littéral quelconque
+# (`password=…,` garde son comportement) ; après un `:` un type nu de signature (`token: str`)
+# n'est pas un secret — l'annotation est franchie pour juger le littéral qui la suit.
+_VALUE = (
+    r"(?:[^\S\n]*=[^\S\n]*"
+    rf"(?!(?:{_ENV_READ}))\S+"
+    r"|[^\S\n]*:[^\S\n]*"
+    rf"(?!\w[\w.\[\]]*\s*[,)])(?:\w[\w.\[\]]*\s*=\s*)?(?!(?:{_ENV_READ}))\S+"
+    r")"
+)
 
 # Each entry is (kind, pattern). The `kind` is the human reason a caller surfaces alongside a line
 # number, so a reader hitting a false positive knows WHICH shape matched, not just where.
@@ -25,8 +36,7 @@ _SECRET_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = [
     (
         "secret keyword = value",
         re.compile(
-            r"(?i)\b(?:password|passwd|secret|token|api[_-]?key|bearer)\b[^\S\n]*[:=][^\S\n]*"
-            rf"(?!(?:{_ENV_READ}))\S+"
+            r"(?i)\b(?:password|passwd|secret|token|api[_-]?key|bearer)\b" + _VALUE
         ),
     ),
     (
@@ -52,8 +62,8 @@ _SECRET_PATTERNS: list[tuple[str, "re.Pattern[str]"]] = [
     (
         "credential keyword = value",
         re.compile(
-            r"(?i)\b(?:aws_secret_access_key|client_secret|private_key|access_token|auth_token|refresh_token|api_secret)[^\S\n]*[:=][^\S\n]*"
-            rf"(?!(?:{_ENV_READ}))\S+"
+            r"(?i)\b(?:aws_secret_access_key|client_secret|private_key|access_token|auth_token|refresh_token|api_secret)"
+            + _VALUE
         ),
     ),
 ]

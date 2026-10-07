@@ -18,11 +18,18 @@ secret hooks, so a deliberately-allowlisted fixture is not blocked.
 Path-level protection (``.env``, ``~/.ssh``, ``~/.aws``) belongs to a repo's own
 ``permissions.deny`` baseline; this hook is the *content* level — real creds inside an otherwise
 allowed file.
+
+The agent's own scope is never scanned, whatever its content: a target under the resolved config
+dir (``CLAUDE_CONFIG_DIR``, else ``~/.claude/``) or carrying a ``.claude`` directory component —
+memory notes included — is skipped before any content check, on both channels (``Read``, a
+read-like ``Bash`` command). Blocking the agent on its own journal and settings is all friction,
+no protection, and the repeated false positives end up getting the guard disabled.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -135,6 +142,25 @@ def bash_read_targets(command: str) -> list[Path]:
     return targets[:MAX_BASH_TARGETS]
 
 
+def _is_excluded(path: Path) -> bool:
+    """True for the agent's own scope, never scanned: a path with a ``.claude`` directory
+    component, or under the resolved config dir (``CLAUDE_CONFIG_DIR``, else ``~/.claude/``) —
+    which mechanically covers the default ``projects/<project>/memory`` silo. Lexical only (no
+    filesystem call), so it stays the cheapest check in ``decide``.
+
+    Args:
+        path: The candidate target, as it reached the hook.
+
+    Returns:
+        True when the guard must skip this target on every channel.
+    """
+    expanded = path.expanduser()
+    if ".claude" in expanded.parts:
+        return True
+    config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+    return expanded.is_relative_to(config_dir)
+
+
 def decide(event: dict) -> dict | None:
     """Deny a Read — or a read-like Bash command — whose target file contains sensitive data.
 
@@ -149,6 +175,8 @@ def decide(event: dict) -> dict | None:
     else:
         return None
     for path in targets:
+        if _is_excluded(path):
+            continue  # the agent's own notes/config — never scanned
         if is_vetted(path):
             continue  # cleared the commit gate — never re-block the repo's own files
         hits = secret_lines(path)

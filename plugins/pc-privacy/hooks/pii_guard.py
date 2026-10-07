@@ -25,6 +25,12 @@ config files (yml/toml/ini/env, a single JSON object, key:value-shaped text) and
 images, docx...) are skipped without ever loading the NLP model — this hook runs on every `Read`,
 so the cheap path has to stay cheap.
 
+The agent's own scope is never scanned, whatever its content: a path under the resolved config
+dir (``CLAUDE_CONFIG_DIR``, else ``~/.claude/``) or carrying a ``.claude`` directory component —
+memory notes included — is skipped on both channels (a `Read` target and an ``@file`` prompt
+mention). Blocking the agent on its own journal and settings is all friction, no protection, and
+the repeated false positives end up getting the guard disabled.
+
 Fail-open by design (same rule as `read_cost.py`): a guard's own bug must never block a tool call.
 The flip side is that a broken guard is silent, so ``pii_guard.py --check`` exists — run it after
 install and after any dependency change.
@@ -107,11 +113,35 @@ def _gate_verdict(path: Path, fmt: str, anonymize) -> str | None:
         return None
 
 
+def _is_excluded(path: Path) -> bool:
+    """True for the agent's own scope, never scanned: a path with a ``.claude`` directory
+    component, or under the resolved config dir — ``CLAUDE_CONFIG_DIR``, else ``~/.claude/``,
+    which mechanically covers the default ``projects/<project>/memory`` silo. Lexical only (no
+    filesystem call), so it stays cheaper than any format detection.
+
+    Duplicated in ``privacy_egress.py`` (pc-core) rather than shared, so the plugins stay
+    import-independent; ``tests/test_read_guard_parity.py`` keeps the two copies in step.
+
+    Args:
+        path: The candidate target, as it reached the hook.
+
+    Returns:
+        True when the file must not reach the scan.
+    """
+    expanded = path.expanduser()
+    if ".claude" in expanded.parts:
+        return True
+    config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+    return expanded.is_relative_to(config_dir)
+
+
 def _scan(path: Path, anonymize) -> tuple[str, str] | None:
     """Classify and scan one file: ``("oversize" | "pii", message)``, or None when nothing to flag.
 
     The message carries column names and entity types only — never a sampled value.
     """
+    if _is_excluded(path):
+        return None  # the agent's own notes/config — never scanned
     if not path.is_file():
         return None  # let Read produce its own "no such file" error
     size = path.stat().st_size

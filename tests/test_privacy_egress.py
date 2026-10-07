@@ -8,11 +8,13 @@ non-Read/non-Bash tool returns no decision; a line opting out with `# pragma: al
 is not treated as a leak; a missing/unreadable file never raises and never blocks.
 """
 
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
 
@@ -192,6 +194,42 @@ class TestDecideBash(unittest.TestCase):
             f = Path(tmp) / "dump.txt"
             f.write_text(f"{SECRET_LINE}\n", encoding="utf-8")
             self.assertIsNone(pe.decide(_bash_event(f"ls -la '{f}'")))
+
+
+class TestAgentOwnScope(unittest.TestCase):
+    """The agent's own notes and config — the resolved config dir, any `.claude` folder — are
+    never scanned: blocking the agent on its own journal is all friction, no protection. The
+    criterion is the folder, not the access channel (Read and read-like Bash alike)."""
+
+    def test_read_and_bash_cat_under_a_claude_component_yield_no_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "repo" / ".claude" / "settings.json"
+            f.parent.mkdir(parents=True)
+            f.write_text(f"{SECRET_LINE}\n", encoding="utf-8")
+            self.assertIsNone(pe.decide(_read_event(f)))
+            self.assertIsNone(pe.decide(_bash_event(f"cat '{f}'")))
+
+    def test_read_and_bash_cat_under_the_config_dir_yield_no_decision(self):
+        # Le silo mémoire par défaut vit sous le config dir — couvert mécaniquement.
+        with tempfile.TemporaryDirectory() as tmp:
+            note = Path(tmp) / "silo" / "projects" / "demo" / "memory" / "note.md"
+            note.parent.mkdir(parents=True)
+            note.write_text(f"{SECRET_LINE}\n", encoding="utf-8")
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "silo")}):
+                self.assertIsNone(pe.decide(_read_event(note)))
+                self.assertIsNone(pe.decide(_bash_event(f"cat '{note}'")))
+
+    def test_a_plain_file_outside_the_excluded_scope_is_still_denied(self):
+        # Contraste : même arbre, hors du périmètre exclu — le garde garde son comportement.
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "creds.txt"
+            f.write_text(f"{SECRET_LINE}\n", encoding="utf-8")
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "silo")}):
+                decision = pe.decide(_read_event(f))
+            self.assertIsNotNone(decision)
+            self.assertEqual(
+                decision["hookSpecificOutput"]["permissionDecision"], "deny"
+            )
 
 
 class TestMainEndToEnd(unittest.TestCase):

@@ -323,3 +323,81 @@ def test_a_long_text_file_asks_not_fully_analyzed(tmp_path, monkeypatch, capsys)
     assert decision["permissionDecision"] == "ask"
     assert "NOT fully analyzed" in decision["permissionDecisionReason"]
     assert "20" in decision["permissionDecisionReason"]
+
+
+def _memory_csv(monkeypatch, path: Path) -> Path:
+    """Write a PII-bearing CSV and make any scan attempt fail the test.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
+        path: Where to write the CSV (its parent directory must exist).
+
+    Returns:
+        The path of the written CSV.
+    """
+    data = _csv(path, [{"contact": "jean.dupont@example.fr", "note": "x"}] * 3)
+    monkeypatch.setattr(
+        anonymize,
+        "detect_findings",
+        lambda files, **kw: pytest.fail("the agent's own scope must not be scanned"),
+    )
+    return data
+
+
+def test_read_of_a_claude_folder_yields_no_decision_and_no_scan(
+    tmp_path, monkeypatch, capsys
+):
+    """A `.claude` folder is the agent's own config/notes: a `Read` of a PII-bearing file
+    inside it produces no decision and never reaches the scan."""
+    (tmp_path / ".claude").mkdir()
+    data = _memory_csv(monkeypatch, tmp_path / ".claude" / "clients.csv")
+    _feed_event(monkeypatch, _read_event(data))
+    assert pii_guard.run_hook() == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_read_under_the_config_dir_yields_no_decision_and_no_scan(
+    tmp_path, monkeypatch, capsys
+):
+    """The resolved config dir (`CLAUDE_CONFIG_DIR`) is excluded wherever it points — the
+    default `projects/<project>/memory` silo is under it mechanically."""
+    silo = tmp_path / "silo" / "projects" / "demo" / "memory"
+    silo.mkdir(parents=True)
+    data = _memory_csv(monkeypatch, silo / "note.csv")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "silo"))
+    _feed_event(monkeypatch, _read_event(data))
+    assert pii_guard.run_hook() == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_prompt_at_mention_of_the_agent_own_scope_is_never_scanned(
+    tmp_path, monkeypatch, capsys
+):
+    """The same exclusion on the `@file` prompt channel — the criterion is the folder, not
+    the access channel."""
+    (tmp_path / ".claude").mkdir()
+    data = _memory_csv(monkeypatch, tmp_path / ".claude" / "clients.csv")
+    _feed_event(monkeypatch, _prompt_event(f"lis @{data}", tmp_path))
+    assert pii_guard.run_hook() == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_a_dataset_outside_the_excluded_scope_still_asks(tmp_path, monkeypatch, capsys):
+    """Contrast: with `CLAUDE_CONFIG_DIR` pointing at a silo, a PII-bearing file outside it
+    still gets the ask decision."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "silo"))
+    monkeypatch.setattr(
+        anonymize,
+        "detect_findings",
+        lambda files, **kw: [
+            anonymize.Finding("clients.csv", "contact", "detected EMAIL_ADDRESS (3/3)")
+        ],
+    )
+    data = _csv(
+        tmp_path / "clients.csv",
+        [{"contact": "jean.dupont@example.fr", "note": "x"}] * 3,
+    )
+    _feed_event(monkeypatch, _read_event(data))
+    assert pii_guard.run_hook() == 0
+    decision = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "ask"
