@@ -43,6 +43,12 @@ class TestKanbanProactivityHook(unittest.TestCase):
         self.assertEqual(a.stdout, b.stdout)
         self.assertLess(len(a.stdout), 10_000)
 
+    def test_rule_states_the_card_slug_limit(self):
+        self.assertIn("at most 30 characters", _RULE.read_text(encoding="utf-8"))
+
+    def test_rule_says_to_take_a_card_in_place_when_the_skill_is_loaded(self):
+        self.assertIn("in place when already loaded", _RULE.read_text(encoding="utf-8"))
+
     def test_missing_rule_file_exits_zero_silently(self):
         with tempfile.TemporaryDirectory() as tmp:
             copy = Path(tmp) / _SCRIPT.name
