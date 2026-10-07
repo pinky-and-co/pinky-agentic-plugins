@@ -529,6 +529,7 @@ pinky-agentic-plugins/
 │   ├── test_quota.py
 │   ├── test_quota_hook.py
 │   ├── test_read_cost.py
+│   ├── test_read_guard_parity.py
 │   ├── test_reconcile.py
 │   ├── test_reconcile_oracle.py
 │   ├── test_repo_path_flag.py
