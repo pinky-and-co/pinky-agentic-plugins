@@ -78,7 +78,7 @@ When an edit seems ignored, check what actually loaded it before refreshing anyt
     concern folder nested inside `hooks/` (`hooks/branch-policy/`), referenced from `hooks.json`
     and any skill body via `${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/<file>`.
   - `hooks/` directly (not nested) is reserved for what's genuinely automatic-only, with zero
-    skill caller (`inject_policies.py`, `read_cost.py`) — plus `policy_lib.py`, the one library
+    skill caller (`inject_policies.py`, `style_reminder.py`) — plus `policy_lib.py`, the one library
     both `hooks/` directly and `hooks/branch-policy/` import, kept neutral because it belongs to
     neither concern alone.
   - **Agents never bundle their own script.** Verified against the 8 `agents/`-carrying plugins of

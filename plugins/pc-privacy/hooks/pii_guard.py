@@ -35,7 +35,7 @@ The same script also answers the band mod (``hooks/pii-hold``): ``--verdict`` pr
 judgement of a ``Read`` event as JSON, ``--anonymize <path>`` writes the anonymized copy and prints
 its path. The guard stays the one source of the verdict; the mod only presents it.
 
-Fail-open by design (same rule as `read_cost.py`): a guard's own bug must never block a tool call.
+Fail-open by design: a guard's own bug must never block a tool call.
 The flip side is that a broken guard is silent, so ``pii_guard.py --check`` exists — run it after
 install and after any dependency change.
 

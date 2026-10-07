@@ -2,7 +2,7 @@ pinky-and-co plugins — Third-Party Notices
 
 Third-party content and dependencies carrying a license obligation, used by the plugins in
 this marketplace (pc-core, pc-git, pc-kanban, pc-snow, pc-craft, pc-privacy, pc-pypi,
-pc-statusline, pc-rtk). Courtesy-only inspirations (concept/pattern reuse, no obligation) are in
+pc-statusline, pc-rtk, pc-read). Courtesy-only inspirations (concept/pattern reuse, no obligation) are in
 CREDITS. Full running ledger + verification trail: ATTRIBUTIONS.md.
 
 ================================================================================
@@ -11,7 +11,7 @@ OPTIONAL RUNTIME DEPENDENCIES  (called if present, never bundled)
 
 markitdown (Microsoft)
   License: MIT
-  Used by: skill `pc-core:document-to-md` — convert-then-read for office/HTML documents.
+  Used by: skill `pc-read:document-to-md` — convert-then-read for office/HTML documents.
   https://github.com/microsoft/markitdown
 
 yt-dlp

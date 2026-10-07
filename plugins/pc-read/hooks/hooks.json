@@ -1,0 +1,20 @@
+{
+  "description": "Asks before a native Read of an expensive format (.pdf, .html, .xlsx, .docx, .pptx) — see read_cost.py. A mod (read-cost-hold/register.tsx) holds the Read in a band above the prompt with one button per outcome — convert to Markdown (only when markitdown is installed), read as-is, or deny; an unanswered hold falls back to the hook's ask.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/read_cost.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "modules": [
+    "./read-cost-hold/register.tsx"
+  ]
+}

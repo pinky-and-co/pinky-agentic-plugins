@@ -142,5 +142,5 @@ Don't stop at the summary — a `/yt` that doesn't render a verdict hasn't done 
 
 ## Notes
 
-- Cross-link: `pc-core:document-to-md` (same convert-then-read / token economy spirit, different
+- Cross-link: `pc-read:document-to-md` (same convert-then-read / token economy spirit, different
   format).

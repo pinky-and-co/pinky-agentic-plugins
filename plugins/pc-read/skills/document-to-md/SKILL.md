@@ -2,7 +2,7 @@
 name: document-to-md
 description: Read a heavy or binary local document — .docx, .pptx, .xlsx, .html, or a text-only .pdf — by converting it to Markdown first. Use whenever the user points at such a file on disk. Not for remote URLs, and not for spreadsheets that hold data rather than prose.
 argument-hint: "<path-to-document>"
-allowed-tools: Bash(command -v markitdown:*), Bash(markitdown:*), Read
+allowed-tools: Bash(command -v markitdown:*), Bash(mktemp:*), Bash(markitdown:*), Read
 ---
 
 # Read a document by converting it first
@@ -30,10 +30,12 @@ dataset produces a wall of tokens that answers nothing.
 command -v markitdown
 ```
 
-**Present** → convert to a scratch path, then `Read` the Markdown:
+**Present** → make a fresh private folder (a path derived from the file name alone would collide
+for two files sharing a name in different folders), convert into it, then `Read` the Markdown:
 
 ```
-markitdown <file> > /tmp/<name>.md
+mktemp -d
+markitdown <file> -o <folder printed above>/<name>.md
 ```
 
 **Absent** → do not install it. Fall back to `Read` on the original: it handles PDFs natively, and

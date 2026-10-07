@@ -12,6 +12,7 @@
     "pc-rtk@pinky-agentic-plugins": true,
     "pc-memory@pinky-agentic-plugins": true,
     "pc-bash-guard@pinky-agentic-plugins": true,
-    "pc-secrets@pinky-agentic-plugins": true
+    "pc-secrets@pinky-agentic-plugins": true,
+    "pc-read@pinky-agentic-plugins": true
   }
 }

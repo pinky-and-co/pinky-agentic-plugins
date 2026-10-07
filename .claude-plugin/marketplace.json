@@ -9,7 +9,7 @@
     {
       "name": "pc-core",
       "source": "./plugins/pc-core",
-      "description": "Generic workspace mechanics: convention replay (apply-pattern), document-to-md, review guidelines, the reviewer agent, and session-hygiene hooks (policy injection, privacy egress, read-cost warning, post-edit lint, output-style reminder)."
+      "description": "Generic workspace mechanics: convention replay (apply-pattern), review guidelines, the reviewer agent, and session-hygiene hooks (policy injection, privacy egress, post-edit lint, output-style reminder)."
     },
     {
       "name": "pc-autodiscovery",
@@ -80,6 +80,11 @@
       "name": "pc-secrets",
       "source": "./plugins/pc-secrets",
       "description": "Keeps secret-shaped content out of the cloud model — denies a Read, or a read-like Bash command, whose file carries a secret, and offers a band above the prompt to add a pragma, delegate the read to a local model, or refuse."
+    },
+    {
+      "name": "pc-read",
+      "source": "./plugins/pc-read",
+      "description": "Cheaper reads of heavy local documents — the document-to-md skill converts a .pdf, .docx, .pptx, .xlsx or .html to Markdown, and a band above the prompt offers to convert, read as-is or refuse a native Read of one. Needs markitdown for the conversion."
     },
     {
       "name": "pc-memory",

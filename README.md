@@ -28,13 +28,14 @@ branch, branch strategy) are read from that repo's own `.claude/settings.pinky.j
 
 | Plugin | What it ships |
 |--------|----------------|
-| [`pc-core`](plugins/pc-core/) | Session hygiene hooks (per-repo language/branch policies, costly-read and secret-read guards, post-edit lint, keychain secrets), the `reviewer` agent, skills `apply-pattern`, `council`, `document-to-md`, `review-guidelines`, and the `offline`/`adversarial`/`panel` model MCP tools |
+| [`pc-core`](plugins/pc-core/) | Session hygiene hooks (per-repo language/branch policies, post-edit lint, keychain secrets), the `reviewer` agent, skills `apply-pattern`, `council`, `review-guidelines`, and the `offline`/`adversarial`/`panel` model MCP tools |
 | [`pc-git`](plugins/pc-git/) | Gitmoji commit workflow (`commit`, `commit-and-pr`, `commit-convention`), `branch-workflow`, `clean-gone` (also run at session start), and hooks guarding permanent branches and overlapping PRs |
 | [`pc-kanban`](plugins/pc-kanban/) | File-based kanban mechanics — chantiers and cards (`kanban`, `chantier`, `grill`, `init`, `spawn-workers`, `yt`), the `card-worker` agent, permission guards (`careful`/`freeze`/`deny`/`guard`), card-discipline and handoff hooks |
 | [`pc-autodiscovery`](plugins/pc-autodiscovery/) | Always-on activation of the project-scoped plugins matching where the session sits, and a gate on the next tool call while a user-only slash command is pending |
 | [`pc-craft`](plugins/pc-craft/) | Engineering conventions: `code-conventions`, `debug-brief`, `fastapi`, `improve` |
 | [`pc-delegate`](plugins/pc-delegate/) | `export`/`reintegrate`: hand kanban cards and code to an agent working outside Claude Code, then bring its results back safely |
 | [`pc-privacy`](plugins/pc-privacy/) | Deterministic PII pseudonymization (Presidio + French NLP) as MCP tools, plus an optional local decision-model gate on Read |
+| [`pc-read`](plugins/pc-read/) | Costly-read guard and `document-to-md`: a native `Read` of a `.pdf`, `.html`, `.xlsx`, `.docx` or `.pptx` asks first, and a band above the prompt offers to convert it to Markdown, read it as-is or refuse. Install it for the guard — `pc-core` does not carry it |
 | [`pc-memory`](plugins/pc-memory/) | Memory recall at session start: the user sees a tree of the directory levels with their notes, old notes (at least N days old) and last review date, then a reminder to run `reconcile` when a review is due, the model gets the parent levels' indexes only, capped and marked as data; asks the user before any write into a memory directory; counts per note the sessions that read it; the `reconcile` skill reviews the notes with the user and applies the approved plan |
 | [`pc-pypi`](plugins/pc-pypi/) | `dev-prerelease`: cut a dev pre-release of a PyPI library, stopping before the publishing tag |
 | [`pc-rtk`](plugins/pc-rtk/) | RTK output filtering: a hook rewrites Bash commands to their filtered `rtk` form before they run, and the `gain` skill shows the token savings |
@@ -104,7 +105,6 @@ pinky-agentic-plugins/
 │   │   │   ├── load_secrets.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
-│   │   │   ├── read_cost.py
 │   │   │   ├── structure_guard.py
 │   │   │   └── style_reminder.py
 │   │   ├── mcp/
@@ -123,8 +123,6 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── type-generic.md
 │   │   │   │   │   ├── type-pitch.md
 │   │   │   │   │   └── type-tech.md
-│   │   │   │   └── SKILL.md
-│   │   │   ├── document-to-md/
 │   │   │   │   └── SKILL.md
 │   │   │   └── review-guidelines/
 │   │   │       └── SKILL.md
@@ -413,6 +411,21 @@ pinky-agentic-plugins/
 │   │           ├── scripts/
 │   │           │   └── reconcile.py
 │   │           └── SKILL.md
+│   ├── pc-read/
+│   │   ├── hooks/
+│   │   │   ├── read-cost-hold/
+│   │   │   │   └── register.tsx
+│   │   │   ├── hooks.json
+│   │   │   └── read_cost.py
+│   │   ├── skills/
+│   │   │   └── document-to-md/
+│   │   │       └── SKILL.md
+│   │   ├── tests/
+│   │   │   └── read-cost-hold.test.tsx
+│   │   ├── types/
+│   │   │   └── index.d.ts
+│   │   ├── README.md
+│   │   └── tsconfig.json
 │   ├── pc-rtk/
 │   │   ├── hooks/
 │   │   │   ├── hooks.json

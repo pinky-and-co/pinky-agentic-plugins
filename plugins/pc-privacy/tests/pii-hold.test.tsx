@@ -48,6 +48,19 @@ const read = (id: string, file_path = PATH) => ({ tool: 'Read', tool_use_id: id,
 const check = ($: any, id: string, file_path: string): any => $.tool.check({ tool: 'Read', input: { file_path }, tool_use_id: id } as any)
 
 describe('pc-privacy read band', () => {
+  test('publishes its folder for the other plugins at session start', async ($, on) => {
+    const written: any[] = []
+    on('state.set', ($: any, e: any, next: any) => {
+      if (e.plugin !== 'pc-privacy' || e.key !== 'root') return next(e)
+      written.push(e)
+      return { value: { isSet: true, version: 1 } }
+    })
+    on('session.start', (_$: any, e: any) => ({ cwd: e.cwd })) // the engine beneath: nothing else to start
+    await $.session.start({ cwd: '/repo' } as any)
+    expect(written.map(w => [w.plugin, w.key])).toEqual([['pc-privacy', 'root']])
+    expect(written[0].value).toMatch(/\/pc-privacy$/)
+  })
+
   test('shows the file and the sensitive columns, and holds the read until the person answers', async ($, on) => {
     const ran: string[] = []
     engine(on, ran, [])

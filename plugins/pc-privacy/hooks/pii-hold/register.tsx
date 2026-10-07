@@ -25,6 +25,9 @@ const MARKS = {
 // `ask` de la garde et le dialogue natif. Exporté pour que les tests le raccourcissent.
 export const holdLimits = { ms: 60_000 }
 
+// Publié au démarrage de la session : les autres plugins lisent ce dossier (`$.state.get`) pour interroger la garde.
+const root = { plugin: 'pc-privacy', key: 'root' } as const
+
 // Tenu par l'hôte : le dessin se rafraîchit quand une lecture est retenue ou relâchée.
 const held = atom({ plugin: 'pc-privacy', key: 'held' } as const, null as HeldRead | null)
 
@@ -130,6 +133,15 @@ async function hold($: EngineInterface, one: HeldRead, signal: AbortSignal): Pro
 }
 
 export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    try {
+      await $.state.set(root, $.plugin.root)
+    } catch {
+      // sans le dossier publié, les autres plugins n'écartent pas leur propre bande : rien de plus à faire
+    }
+    return next(e)
+  })
+
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
     if (typeof e.file_path !== 'string') return next(e)
     // La bande (`AbovePrompt`) ne se dessine que dans le terminal et le desktop : ailleurs (`claude -p`, VS Code seul),
