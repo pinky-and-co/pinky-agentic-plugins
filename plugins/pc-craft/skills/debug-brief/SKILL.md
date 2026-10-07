@@ -1,46 +1,41 @@
 ---
 name: debug-brief
-argument-hint: "<behavior discrepancy> --code <src…> --data <file…> [--spec <path>] [--columns c1,c2] [--salt s] [--send [model]]"
-description: "Assemble a self-contained debug brief — a human-reported behavior discrepancy confronted against the code, an optional spec, and a coherently anonymized sample of the real data — so a model can reason about root cause without ever seeing real customer/business data. Output is one text block to paste into an external model, or send through the panel MCP tool. Use when someone reports 'X does the wrong thing' and wants a rigorous bug/not-a-bug qualification before touching the code."
+argument-hint: "<behavior discrepancy> --code <src…> --data <file…> [--spec <path>] [--send [model]]"
+description: "Assemble a self-contained debug brief — a human-reported behavior discrepancy confronted against the code, an optional spec, and a sample of the real data — so a model can reason about root cause. Output is one text block to paste into an external model, or send through the panel MCP tool. Use when someone reports 'X does the wrong thing' and wants a rigorous bug/not-a-bug qualification before touching the code."
 user-invocable: true
 allowed-tools: Read, Bash(find:*), Bash(rtk find:*), Bash(ls:*), Bash(rtk ls:*), Skill
 metadata:
   source: original
-  updated: 2026-08-28
+  updated: 2026-10-07
 ---
 
 # Debug Brief
 
 Assemble a self-contained debug brief. The brief confronts a **human-reported behavior discrepancy**
-against the code, an optional spec, and a **coherently anonymized** sample of the dataset the bug
-was reported against — so a model can reason about root cause without ever seeing real
-customer/business data. The output is a single text block: no commentary, no preamble.
+against the code, an optional spec, and a sample of the dataset the bug was reported against — so a
+model can reason about root cause. The output is a single text block: no commentary, no preamble.
 
 The point of the skill is the **qualify-first discipline** — is this actually a defect, or
-intended/documented behavior the reporter isn't aware of? — and the **hard data boundary**: real
-values are pseudonymized by a deterministic tool *before* any model sees them.
+intended/documented behavior the reporter isn't aware of?
 
 ## Preflight
 
-1. **`pc-privacy` reachable?** This skill masks the dataset through the `anonymize_detect` /
-   `anonymize_apply` MCP tools (`pc-privacy` server) — a declared `dependencies` entry of `pc-craft`,
-   so a normal install resolves it. If the tools are not in your tool list, the dependency did not
-   resolve: stop and tell the user to reinstall `pc-craft` (or install `pc-privacy` directly) and
-   run its one-time spaCy model download. Do **not** fall back to reading the raw file or to a
-   hand-rolled masking pass.
-2. **`--send` requested but `panel` unreachable or empty?** The `panel` MCP tool (`pc-core-models`
-   server) runs the brief through one non-Claude pool model (sonnet/opus-tier entries only). If
-   `--send` was passed and `panel` is missing from your tool list, or it returns `BLOCKED` (no
-   eligible pool entry), produce the brief block instead and say the send step was skipped.
+**`--send` requested but `panel` unreachable or empty?** The `panel` MCP tool (`pc-core-models`
+server) runs the brief through one non-Claude pool model (sonnet/opus-tier entries only). If
+`--send` was passed and `panel` is missing from your tool list, or it returns `BLOCKED` (no
+eligible pool entry), produce the brief block instead and say the send step was skipped.
 
-## Hard invariant — never read the raw dataset
+## Data boundary — the guard decides
 
-**You (the assembling agent) must never `Read()` a raw `--data` file.** Only the `anonymize_*` MCP
-tools — deterministic, no LLM — touch real values. You read only the generated `*.anon.*` output.
-This is the whole point: anonymization happens strictly *before* any model (local or cloud) sees the
-data, coherently (the same real value produces the same pseudonym everywhere it appears, across
-every file passed to one `anonymize_apply` call — preserving joins for debugging) and
-deterministically (no inconsistent masking an LLM rewrite could introduce).
+Read each `--data` file like any other file. Personal data is the business of the privacy guard, not
+of this skill: when `pc-privacy` is installed, it intercepts a `Read` of a file holding personal data
+and offers to anonymize it into a `<name>.anon.<ext>` copy, allow the read, or refuse it. Anonymizing
+is the person's choice.
+
+- The person anonymized: read the `*.anon.*` copy, not the original.
+- The person allowed the read: use the file as read.
+- The person refused: ask what to do instead. Never work around a refusal (a copy, `cat`, another
+  path).
 
 ## Arguments
 
@@ -51,9 +46,7 @@ containing it), plus:
 |---|---|
 | `--code <path...>` | One or more source files implicated in the bug (required) |
 | `--spec <path>` | Optional spec / ADR / ticket describing the *expected* behavior |
-| `--data <path...>` | One or more CSV/JSON/Parquet/XML files to anonymize and include (required) |
-| `--columns <col1,col2,...>` | Pre-confirmed PII columns to mask — skips the detect/confirm loop (the flag *is* the confirmation) |
-| `--salt <salt>` | Pin the anonymization salt — reuse across sessions on the same dataset to keep pseudonyms stable and joinable |
+| `--data <path...>` | One or more CSV/JSON/Parquet/XML files to include as the data sample (required) |
 | `--send [model]` | After assembling, run the brief through the `panel` MCP tool (one non-Claude pool model) instead of only outputting it. `[model]` optionally names a pool entry |
 
 **Known gap**: `--data` accepts local files only, not a live Snowflake table/query. If the data
@@ -72,28 +65,13 @@ Resolve inputs in order:
    README tagline.
 1. Read each `--code` file in full.
 1. Read `--spec` in full if given.
+1. Read each `--data` file, under the data boundary above.
 
-## Step 2 — Detect PII columns
+## Step 2 — Deliver
 
-Call the `anonymize_detect` MCP tool (`pc-privacy` server) on the `--data` files — never read them
-yourself.
-
-- **`--columns` given**: show the detect report as an FYI audit trail, then go straight to Step 3
-  with the given columns.
-- **`--columns` not given**: show the detect report to the user and ask *"Confirm this column list
-  for masking, or provide corrections?"* Wait for an explicit answer. If detect flags nothing,
-  **still ask** — an empty report does not mean the dataset is clean; say so.
-
-## Step 3 — Anonymize
-
-Call the `anonymize_apply` MCP tool with the confirmed column list (and `--salt` if given). It
-writes `<name>.anon.<ext>` next to each original and returns the salt used — record that salt in the
-brief's DATA section so a later run on the same dataset stays joinable. Read **only** the
-`*.anon.*` files from here on.
-
-## Step 4 — Deliver
-
-**If `--send [model]` is present:** call the `panel` MCP tool with a single task —
+**If `--send [model]` is present:** first, if any DATA file was read as the original rather than as
+a `*.anon.*` copy, say so and ask for confirmation — the brief leaves the machine. Then call the
+`panel` MCP tool with a single task —
 `tasks=["Follow the ROLE / GUIDELINES / OUTPUT FORMAT instructions embedded in the brief below.\n\n"
 + <the full brief block>]` — and `models=["<model>"]` if `[model]` names a pool entry, else omit
 `models`. The brief goes inline in the task; there is no file parameter. Show the answer verbatim,
@@ -130,22 +108,23 @@ the SUGGESTED FIX.
 
 ---
 
-## DATA (anonymized sample)
+## DATA (sample)
 
-<for each *.anon.* file: a filename header, then full content — if a file exceeds ~200 rows, include
-the first 100 + a note "(truncated — N rows total, ask for a specific range if needed)">
+<for each --data file as read (the `*.anon.*` copy when the person anonymized it): a filename header,
+then full content — if a file exceeds ~200 rows, include the first 100 + a note "(truncated — N rows
+total, ask for a specific range if needed)">
 
-Anonymized columns: <list, from Step 2/3>. Salt: <from Step 3>. Untouched columns carry the actual
-debugging signal (dates, amounts, statuses, non-identifying IDs) — treat them as ground truth.
+Anonymized: <yes or no, per file>. Untouched columns carry the actual debugging signal (dates,
+amounts, statuses, non-identifying IDs) — treat them as ground truth.
 
 ---
 
 ## ROLE
 
 You are a senior engineer debugging a reported behavior discrepancy. You have the code, optionally a
-spec of the *intended* behavior, and an anonymized sample of the real data the bug was reported
-against. Reason from evidence in the data + code — do not invent behavior neither shows. **Qualify
-first**: is this actually a defect, or intended/documented behavior the reporter isn't aware of?
+spec of the *intended* behavior, and a sample of the data the bug was reported against. Reason from
+evidence in the data + code — do not invent behavior neither shows. **Qualify first**: is this
+actually a defect, or intended/documented behavior the reporter isn't aware of?
 
 ---
 
@@ -157,9 +136,8 @@ first**: is this actually a defect, or intended/documented behavior the reporter
   label it as such.
 - **Distinguish confirmed from hypothesis.** If the material doesn't prove the mechanism, say what
   additional data or logs would confirm or rule it out — do not fill the gap with invented behavior.
-- **The anonymized values are opaque tokens, not noise.** Two rows sharing the same `EMAIL_xxxx`
-  token are the same real customer — use that for cross-row reasoning exactly as you would the real
-  value.
+- **Anonymized values are opaque tokens, not noise.** Two rows sharing the same `EMAIL_xxxx` token
+  are the same real customer — use that for cross-row reasoning exactly as you would the real value.
 - Do not comment on code style, formatting, or naming unless it is the mechanism of the discrepancy.
 
 ---
