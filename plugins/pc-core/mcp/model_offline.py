@@ -24,6 +24,11 @@ itself, not on a cheap upfront ping — a separate pre-call would load the model
 contention this runtime exists to avoid. `failure_hint()` classifies the real call's failure after
 the fact instead: a human-readable hint, never an exception that propagates.
 
+The `pi` call carries ~4k tokens of agent scaffolding whatever the task, whose KV cache needs
+~3 GB; on an 18 GB machine the server must be started as
+`mlx-serve serve --host 127.0.0.1 --kv-quant 4 --os-reserve-gib 0` for that to fit (measured:
+the default budget refuses the request, and unloading the resident decision model changes nothing).
+
 ``--max-tokens`` / ``PINKY_LOCAL_MAX_TOKENS`` only scales this script's own subprocess timeout
 budget for a task expected to run long — `pi` itself exposes no generation-length flag to cap.
 
@@ -142,7 +147,9 @@ def failure_hint(exc: Exception, model: str, timeout: int) -> FailureHint:
         combined = f"{exc.stdout or ''}\n{exc.stderr or ''}"
         if is_out_of_memory(combined):
             return FailureHint(
-                2, f"MLX-SERVE out of memory ({model}). Free RAM and retry."
+                2,
+                f"MLX-SERVE out of memory ({model}). Start the server with "
+                "--kv-quant 4 --os-reserve-gib 0; if already set, shrink the --file inputs.",
             )
         return FailureHint(
             2, f"MLX-SERVE call failed (exit {exc.returncode}); check it's running."

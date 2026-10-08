@@ -118,7 +118,11 @@ class TestFailureHint(unittest.TestCase):
         )
         code, hint = mo.failure_hint(exc, "m", 900)
         self.assertEqual(code, 2)
-        self.assertIn("out of memory", hint)
+        self.assertEqual(
+            hint,
+            "MLX-SERVE out of memory (m). Start the server with "
+            "--kv-quant 4 --os-reserve-gib 0; if already set, shrink the --file inputs.",
+        )  # oracle complet : la chaîne fixe EST l'invariant du module (zéro égress)
         self.assertNotIn(
             "out_of_memory", hint
         )  # jamais le corps brut de pi dans le hint
