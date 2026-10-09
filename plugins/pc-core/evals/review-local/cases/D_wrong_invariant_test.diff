@@ -1,0 +1,16 @@
+diff --git a/tests/test_model_adversarial.py b/tests/test_model_adversarial.py
+--- a/tests/test_model_adversarial.py
++++ b/tests/test_model_adversarial.py
+@@ -120,8 +120,12 @@ class TestSelectForAdversarial(unittest.TestCase):
++    # NV_GLM, NV_FLASH, NV_KIMI: provider "nvidia"; VC_A, VC_B: "vercel-ai-gateway"; RQ_A: "requesty"
+     def test_never_two_entries_of_one_provider_back_to_back(self):
+         pool = [NV_GLM, NV_FLASH, NV_KIMI, VC_A, VC_B, RQ_A]
+-        self.assertEqual(
+-            ma.select_for_adversarial(pool),
+-            [NV_GLM, VC_A, RQ_A, NV_FLASH, VC_B, NV_KIMI],
+-        )
++        for seed in range(20):
++            result = ma.select_for_adversarial(pool, rng=random.Random(seed))
++            providers = [e["provider"] for e in result]
++            self.assertCountEqual(result, pool)
++            self.assertTrue(all(a != b for a, b in zip(providers, providers[1:])))

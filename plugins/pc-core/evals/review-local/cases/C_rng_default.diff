@@ -1,0 +1,45 @@
+diff --git a/plugins/pc-core/mcp/model_adversarial.py b/plugins/pc-core/mcp/model_adversarial.py
+--- a/plugins/pc-core/mcp/model_adversarial.py
++++ b/plugins/pc-core/mcp/model_adversarial.py
+@@ -64,6 +64,7 @@ import concurrent.futures
+ import itertools
+ import os
++import random
+ import re
+ import stat
+ import subprocess
+@@ -166,7 +166,9 @@ def selection_rank(tier: str) -> int:
+ def spread_providers(
+-    entries: list[dict[str, Any]], key: Callable[[dict[str, Any]], Any]
++    entries: list[dict[str, Any]],
++    key: Callable[[dict[str, Any]], Any],
++    rng: random.Random | None = None,
+ ) -> list[dict[str, Any]]:
+     spread: list[dict[str, Any]] = []
+     for _, group in itertools.groupby(sorted(entries, key=key), key=key):
+         by_provider: dict[str, deque[dict[str, Any]]] = {}
+-        for e in sorted(group, key=lambda e: -e.get("priority", 0)):
++        ties = list(group)
++        if rng is not None:
++            rng.shuffle(ties)
++        for e in sorted(ties, key=lambda e: -e.get("priority", 0)):
+             by_provider.setdefault(e["provider"], deque()).append(e)
+@@ -190,12 +200,15 @@ def select_for_adversarial(
+-    pool: list[dict[str, Any]], floor_tier: str = "sonnet"
++    pool: list[dict[str, Any]],
++    floor_tier: str = "sonnet",
++    rng: random.Random | None = None,
+ ) -> list[dict[str, Any]]:
+     candidates = [
+         e for e in pool
+         if e["kind"] != "offline"
+         and selection_rank(e["capacity_tier"]) >= selection_rank(floor_tier)
+     ]
+     return spread_providers(
+         candidates,
+         key=lambda e: (
+             0 if e.get("local", False) else 1,
+             0 if e["provider"] != "openrouter" else 1,
+         ),
++        rng=rng or random.Random(),
+     )

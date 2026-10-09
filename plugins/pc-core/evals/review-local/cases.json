@@ -1,0 +1,53 @@
+[
+ {
+  "id": "A",
+  "file": "A_prefix_close_cards.diff",
+  "clean": false,
+  "intent": "New script close_cards.py: after an external agent's work is reintegrated, record the repo on each covered kanban card and print which cards can be archived. The card slugs come from a file written by an UNTRUSTED external agent.",
+  "defects": {
+   "path_traversal": "traversal|\\.\\./|unsanitiz|unvalidat|not validated|sanitiz|arbitrary (file|path)|outside",
+   "empty_repos_archives": "empty|no `?repos|missing .*repos|block[- ]style|fail[s]? open|vacuous|all\\(\\[\\]\\)|not missing"
+  }
+ },
+ {
+  "id": "B",
+  "file": "B_weakened_order_test.diff",
+  "clean": false,
+  "intent": "Make two existing tests robust to a deliberate random tie-break that was added to select_for_adversarial (the draw is only between entries of equal priority and within the same locality/direct-or-aggregator group).",
+  "defects": {
+   "lost_order_oracle": "no longer (check|assert|verif)|loses|lost|weaker|weaken|order(ing)? (is )?(no longer|not)|assertCountEqual|aggregator|MISTRAL.*first|direct.*before"
+  }
+ },
+ {
+  "id": "C",
+  "file": "C_rng_default.diff",
+  "clean": false,
+  "intent": "Add a random tie-break between equal-priority candidates to select_for_adversarial so the challenger model varies from one review to the next. spread_providers is shared with select_for_delegation, which must stay deterministic.",
+  "defects": {
+   "nondeterministic_default": "non-?determin|flaky|existing tests|every call|default (is )?random|breaks .*tests|always (random|shuffle)|`?rng or|truth|falsy|is not None"
+  }
+ },
+ {
+  "id": "D",
+  "file": "D_wrong_invariant_test.diff",
+  "clean": false,
+  "intent": "Rewrite an existing test so it holds under a random tie-break: no two entries of one provider back to back while another provider still has entries.",
+  "defects": {
+   "unsatisfiable_tail": "unavoidabl|cannot|can't|impossible|tail|last|end of|three .*nvidia|3 .*nvidia|pigeon|fail[s]? for|some seed|not always|remaining provider|only .*left"
+  }
+ },
+ {
+  "id": "E",
+  "file": "E_clean_close_cards.diff",
+  "clean": true,
+  "intent": "New script close_cards.py: after an external agent's work is reintegrated, record the repo on each covered kanban card and print which cards can be archived. Slugs come from a file written by an untrusted external agent.",
+  "defects": {}
+ },
+ {
+  "id": "F",
+  "file": "F_clean_spread_providers.diff",
+  "clean": true,
+  "intent": "Add an optional rng to select_for_adversarial so equal-priority candidates are drawn at random for a served review; the callers (CLI main and the MCP tool) pass a fresh random.Random(); without rng the order stays the pool order, and select_for_delegation is untouched.",
+  "defects": {}
+ }
+]

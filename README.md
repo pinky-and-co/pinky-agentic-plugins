@@ -98,6 +98,20 @@ pinky-agentic-plugins/
 │   ├── pc-core/
 │   │   ├── agents/
 │   │   │   └── reviewer.md
+│   │   ├── evals/
+│   │   │   └── review-local/
+│   │   │       ├── cases/
+│   │   │       │   ├── A_prefix_close_cards.diff
+│   │   │       │   ├── B_weakened_order_test.diff
+│   │   │       │   ├── C_rng_default.diff
+│   │   │       │   ├── D_wrong_invariant_test.diff
+│   │   │       │   ├── E_clean_close_cards.diff
+│   │   │       │   └── F_clean_spread_providers.diff
+│   │   │       ├── cases.json
+│   │   │       ├── methodology.md
+│   │   │       ├── probe_methodology.py
+│   │   │       ├── run.py
+│   │   │       └── standalone.py
 │   │   ├── hooks/
 │   │   │   ├── hooks.json
 │   │   │   ├── inject_policies.py
