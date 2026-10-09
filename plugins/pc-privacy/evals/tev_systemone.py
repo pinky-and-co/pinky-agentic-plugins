@@ -3,18 +3,21 @@
 # requires-python = ">=3.12"
 # dependencies = ["presidio-analyzer", "presidio-anonymizer", "openpyxl", "fr-core-news-md @ https://github.com/explosion/spacy-models/releases/download/fr_core_news_md-3.8.0/fr_core_news_md-3.8.0-py3-none-any.whl"]
 # ///
-"""Compare the `pii_guard` block decision with Ollama's System One decision models.
+"""Compare the `pii_guard` block decision with oMLX System One decision models.
 
     uv run --script tev_systemone.py FILE[:block|:pass] [...] [--models M ...] [--rules] [--threshold P]
 
-Same files and labels as `tev_compare.py`, but through Ollama's `POST /v1/systemone` (Ollama 0.35+):
-the file digest goes in `state` as a JSON object and the question is a boolean (`noul`) one whose
-`instructions` are the question, optionally followed by the guard's own rules. The server builds the
-prompt the models were trained on, and returns a probability (1 = yes, the file holds personal
-data) instead of a letter. A file is blocked when that probability reaches `--threshold`.
+Same files and labels as `tev_compare.py`, but through oMLX `POST /v1/systemone`: the file
+state goes in `state` as a JSON object and the question is a boolean (`noul`) one whose
+`instructions` are the question, optionally followed by the guard's own rules. The server
+builds the prompt the models were trained on, and returns a probability (1 = yes, the file
+holds personal data) instead of a letter. A file is blocked when that probability reaches
+`--threshold`.
 
-The file name is never sent. Prints file names, labels, probabilities and timings only; the
-sampled values go to the local Ollama server, on this machine.
+The server address comes from `ONE_DECISION_URL` (default `http://127.0.0.1:11234`), on a
+loopback host only, like the gate itself. The file name is never sent. Prints file names,
+labels, probabilities and timings only; the sampled values go to the local oMLX server, on
+this machine.
 """
 
 from __future__ import annotations
@@ -22,12 +25,17 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import os
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
-import tev_compare
-from tev_compare import (
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE.parent / "hooks"))
+import tev_compare  # noqa: E402
+import decision_gate  # noqa: E402
+from tev_compare import (  # noqa: E402
     QUESTION,
     RULES,
     TEXT_LINES,
@@ -36,50 +44,72 @@ from tev_compare import (
     anonymize,
 )
 
-# Marge sous la limite de 2050 tokens du serveur : noms de colonnes et valeurs cassent en tokens
-# courts (~3 caractères), et les instructions avec règles en prennent environ 150.
-STATE_BUDGET_CHARS = 4000
-OLLAMA_HOST = "localhost"
-OLLAMA_PORT = 11434
-DEFAULT_MODELS = ("tev1:0.8b", "tev1", "nimble")
+DEFAULT_MODELS = ("APUS-OpenJev-v1-4B-MLX-4bit", "APUS-OpenJev-v1-4B-MLX-8bit")
 
 
-def _call(path: str, payload: dict | None = None) -> dict:
-    """GET (no payload) or POST (JSON payload) against the local Ollama server.
+def _base() -> urllib.parse.SplitResult | None:
+    """The oMLX base URL, as a loopback http(s) split or None when it is not one.
+
+    Returns:
+        The parsed base URL from `ONE_DECISION_URL` or the default, or None when the host is
+        not loopback.
+    """
+    raw = os.environ.get(decision_gate.URL_ENV) or decision_gate.DEFAULT_URL
+    try:
+        parts = urllib.parse.urlsplit(raw)
+    except ValueError:
+        return None
+    if not decision_gate._is_loopback(raw):
+        return None
+    return parts
+
+
+def _call(
+    parts: urllib.parse.SplitResult, path: str, payload: dict | None = None
+) -> dict:
+    """GET (no payload) or POST (JSON payload) against the oMLX server.
 
     Args:
+        parts: The parsed base URL.
         path: URL path, starting with a slash.
         payload: JSON body for a POST; None for a GET.
 
     Returns:
         The decoded JSON response.
     """
-    conn = http.client.HTTPConnection(OLLAMA_HOST, OLLAMA_PORT, timeout=300)
+    connection: http.client.HTTPConnection
+    if parts.scheme == "https":
+        connection = http.client.HTTPSConnection(
+            parts.hostname or "", parts.port or 443, timeout=300
+        )
+    else:
+        connection = http.client.HTTPConnection(
+            parts.hostname or "", parts.port or 80, timeout=300
+        )
     try:
-        conn.request(
+        connection.request(
             "GET" if payload is None else "POST",
             path,
             body=None if payload is None else json.dumps(payload),
             headers={"Content-Type": "application/json"},
         )
-        return json.load(conn.getresponse())
+        return json.load(connection.getresponse())
     finally:
-        conn.close()
+        connection.close()
 
 
 def _state(path: Path, fmt: str) -> tuple[dict, str]:
     """The `state` sent to the model: format, column names and a few sampled values.
 
-    The server rejects a prompt over 2050 tokens and never truncates it, so a wide file is
-    thinned: columns are kept at a regular interval, not the first ones, because a hook cannot know
-    where the information sits.
+    Every column is sent, without thinning: the gate never thins either, and the models'
+    window fits a full digest.
 
     Args:
         path: The file.
         fmt: Its format, as decided by `anonymize.detect_format`.
 
     Returns:
-        The JSON-serializable state, and a coverage note ("34/116 columns").
+        The JSON-serializable state, and a coverage note ("34/34 columns").
     """
     if fmt == "text":
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()[
@@ -89,28 +119,23 @@ def _state(path: Path, fmt: str) -> tuple[dict, str]:
             "format": fmt,
             "lines": [x[:VALUE_MAX_CHARS] for x in lines],
         }, f"{len(lines)} lines"
-    samples = {
+    columns = {
         name: [v[:VALUE_MAX_CHARS] for v in values[:VALUES_PER_COLUMN]]
         for name, values in anonymize._column_samples(path, fmt).items()
     }
-    names = list(samples)
-    step = 1
-    while (
-        sum(len(n) + sum(map(len, samples[n])) for n in names[::step])
-        > STATE_BUDGET_CHARS
-    ):
-        step += 1
-    columns = {n: samples[n] for n in names[::step]}
-    return {"format": fmt, "columns": columns}, f"{len(columns)}/{len(names)} columns"
+    return {"format": fmt, "columns": columns}, f"{len(columns)}/{len(columns)} columns"
 
 
-def _ask(model: str, state: dict, rules: bool) -> float:
+def _ask(
+    model: str, state: dict, rules: bool, parts: urllib.parse.SplitResult
+) -> float:
     """Ask the boolean question about one file.
 
     Args:
-        model: An Ollama model name serving System One.
+        model: An oMLX model id serving System One.
         state: The file `state`.
         rules: Append the guard's own rules to the instructions.
+        parts: The parsed base URL.
 
     Returns:
         The probability that the file holds personal data that must be anonymized.
@@ -120,11 +145,13 @@ def _ask(model: str, state: dict, rules: bool) -> float:
     """
     instructions = f"{QUESTION} {RULES}" if rules else QUESTION
     answer = _call(
+        parts,
         "/v1/systemone",
         {
             "model": model,
             "state": state,
             "questions": {"pii": {"type": "noul", "instructions": instructions}},
+            "truncate": False,
         },
     )
     if "answers" not in answer:
@@ -133,21 +160,25 @@ def _ask(model: str, state: dict, rules: bool) -> float:
 
 
 def _run_model(
-    model: str, states: dict[Path, dict], rules: bool
+    model: str,
+    states: dict[Path, dict],
+    rules: bool,
+    parts: urllib.parse.SplitResult,
 ) -> tuple[dict[Path, float], float]:
     """Ask one model about every file, a first warm-up call excluded from the timing.
 
     Args:
-        model: An Ollama model name serving System One.
+        model: An oMLX model id serving System One.
         states: File -> state.
         rules: Append the guard's own rules to the instructions.
+        parts: The parsed base URL.
 
     Returns:
         (file -> probability) and the mean ms per file.
     """
-    _ask(model, next(iter(states.values())), rules)
+    _ask(model, next(iter(states.values())), rules, parts)
     t0 = time.perf_counter()
-    probs = {path: _ask(model, state, rules) for path, state in states.items()}
+    probs = {path: _ask(model, state, rules, parts) for path, state in states.items()}
     return probs, (time.perf_counter() - t0) * 1000 / len(states)
 
 
@@ -155,7 +186,7 @@ def main() -> int:
     """Judge each file with the guard and with every System One model, then print the comparison.
 
     Returns:
-        0 on success, 2 when Ollama, a file or a model is unusable.
+        0 on success, 2 when oMLX, a file or a model is unusable.
     """
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("files", nargs="+")
@@ -166,14 +197,22 @@ def main() -> int:
     parser.add_argument("--threshold", type=float, default=0.5)
     args = parser.parse_args()
 
-    try:
-        installed = {m["name"] for m in _call("/api/tags")["models"]}
-    except OSError as e:
-        print(f"Ollama is not reachable on {OLLAMA_HOST}:{OLLAMA_PORT}: {e}")
+    parts = _base()
+    if parts is None:
+        print(
+            f"{os.environ.get(decision_gate.URL_ENV) or decision_gate.DEFAULT_URL} is not "
+            "a loopback http(s) URL: the eval sends file values, it only talks to a local "
+            "server"
+        )
         return 2
-    models = [m for m in args.models if m in installed or f"{m}:latest" in installed]
+    try:
+        installed = {m["id"] for m in _call(parts, "/v1/models")["data"]}
+    except (OSError, KeyError, ValueError) as e:
+        print(f"oMLX is not reachable on {parts.hostname}:{parts.port or 80}: {e}")
+        return 2
+    models = [m for m in args.models if m in installed]
     for m in set(args.models) - set(models):
-        print(f"skipped {m}: not pulled")
+        print(f"skipped {m}: not served")
     cases = [tev_compare._parse_case(a) for a in args.files]
     formats = {c.path: anonymize.detect_format(c.path) for c in cases}
     cases = [c for c in cases if formats[c.path] not in anonymize._SKIP_FORMATS]
@@ -190,7 +229,7 @@ def main() -> int:
     for model in models:
         for rules in (False, True) if args.rules else (False,):
             key = model + ("+rules" if rules else "")
-            probs[key], ms = _run_model(model, states, rules)
+            probs[key], ms = _run_model(model, states, rules, parts)
             verdicts[key] = {
                 p: "block" if v >= args.threshold else "pass"
                 for p, v in probs[key].items()

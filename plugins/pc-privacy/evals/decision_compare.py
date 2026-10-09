@@ -7,8 +7,8 @@
 
     uv run --script decision_compare.py FILE[:block|:pass] [...]
 
-Needs a running local mlx-serve with `ONE_DECISION_MODEL` set (and `ONE_DECISION_URL` when it is
-not on the default port): it calls the real gate. Per file it prints the label, the Presidio-only
+Needs a running local MLX server exposing `/v1/systemone` (oMLX), with `ONE_DECISION_MODEL` set
+(and `ONE_DECISION_URL` when it is not on the default port): it calls the real gate. Per file it prints the label, the Presidio-only
 decision, the gate's probability of personal data (or `unavailable`) and the decision of the guard
 with the gate active, then the false alarms and misses of each.
 
@@ -133,7 +133,7 @@ def main() -> int:
     }
     principal = {c.path: _decision(c.path) for c in cases}
 
-    print(f"{'file':<48} {'label':<6} {'presidio':<9} {'P(A)':<12} tev-principal")
+    print(f"{'file':<48} {'label':<6} {'presidio':<9} {'P(pii)':<12} model-principal")
     for c in cases:
         p = probabilities[c.path]
         shown = "unavailable" if p is None else f"{p:.3f}"
@@ -144,7 +144,7 @@ def main() -> int:
     if any(c.expect for c in cases):
         print()
         print(f"presidio alone: {_errors(presidio, cases)}")
-        print(f"tev-principal: {_errors(principal, cases)}")
+        print(f"model-principal: {_errors(principal, cases)}")
     return 0
 
 

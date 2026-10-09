@@ -81,7 +81,7 @@ VALUES_PER_COLUMN = 3
 VALUE_MAX_CHARS = 60
 MAX_STATE_CHARS = 16000
 TEXT_LINES = 40
-DEFAULT_MODELS_DIR = Path.home() / ".mlx-serve" / "models" / "SirSahOl"
+DEFAULT_MODELS_DIR = Path.home() / ".omlx" / "models" / "SirSahOl"
 QUANT_ORDER = ("4bit", "8bit", "16bit")
 
 
