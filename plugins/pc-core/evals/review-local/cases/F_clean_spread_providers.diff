@@ -1,0 +1,50 @@
+diff --git a/plugins/pc-core/mcp/model_adversarial.py b/plugins/pc-core/mcp/model_adversarial.py
+index ab3e3d2..1402533 100644
+--- a/plugins/pc-core/mcp/model_adversarial.py
++++ b/plugins/pc-core/mcp/model_adversarial.py
+@@ -47,3 +47,6 @@ Each entry:
+-    priority       optional integer, default 0, higher first: orders the providers inside each round
+-                   of the selection's provider alternation — a generous provider opens every round
+-                   without stacking its entries. Never outranks locality, cost or tier.
++    priority       optional integer, default 0, higher first: a strict order between levels, orders
++                   the providers inside each round of the selection's provider alternation — a
++                   generous provider opens every round without stacking its entries. Never outranks
++                   locality, cost or tier. Between entries of the same level, `adversarial` draws
++                   at random (which entry opens a provider's queue, which provider opens a round);
++                   delegation keeps pool order.
+@@ -66,0 +70 @@ import os
++import random
+@@ -167 +171,3 @@ def spread_providers(
+-    entries: list[dict[str, Any]], key: Callable[[dict[str, Any]], Any]
++    entries: list[dict[str, Any]],
++    key: Callable[[dict[str, Any]], Any],
++    rng: random.Random | None = None,
+@@ -176,3 +182,4 @@ def spread_providers(
+-    aggregator priority. Within a group, entries are taken in descending `priority` (pool order
+-    between equals): the provider holding the highest one opens each round, and a provider's own
+-    entries come out highest `priority` first.
++    aggregator priority. Within a group, entries are taken in descending `priority`: the provider
++    holding the highest one opens each round, and a provider's own entries come out highest
++    `priority` first. Between equal `priority` the order is pool order, or drawn with `rng` when
++    one is given (which entry opens a provider's queue, which provider opens a round).
+@@ -183 +190,4 @@ def spread_providers(
+-        for e in sorted(group, key=lambda e: -e.get("priority", 0)):
++        ties = list(group)
++        if rng is not None:
++            rng.shuffle(ties)
++        for e in sorted(ties, key=lambda e: -e.get("priority", 0)):
+@@ -193 +203,3 @@ def select_for_adversarial(
+-    pool: list[dict[str, Any]], floor_tier: str = "sonnet"
++    pool: list[dict[str, Any]],
++    floor_tier: str = "sonnet",
++    rng: random.Random | None = None,
+@@ -198 +210,3 @@ def select_for_adversarial(
+-    it goes first), providers alternating inside each of those groups (`spread_providers`).
++    it goes first), providers alternating inside each of those groups (`spread_providers`),
++    entries of equal `priority` drawn with `rng` when one is given (pool order otherwise; the callers
++    that serve a review pass a fresh `random.Random()`).
+@@ -211,0 +226 @@ def select_for_adversarial(
++        rng=rng,
+@@ -1077 +1092 @@ def main(argv: list[str] | None = None) -> int:
+-        entries = select_for_adversarial(load_pool())
++        entries = select_for_adversarial(load_pool(), rng=random.Random())

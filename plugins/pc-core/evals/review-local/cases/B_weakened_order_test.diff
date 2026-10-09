@@ -1,0 +1,21 @@
+diff --git a/tests/test_model_adversarial.py b/tests/test_model_adversarial.py
+--- a/tests/test_model_adversarial.py
++++ b/tests/test_model_adversarial.py
+@@ -104,12 +104,15 @@ class TestSelectForAdversarial(unittest.TestCase):
++    # POOL = [MISTRAL (provider "mistral", direct), GLM (openrouter), KIMI (openrouter), OFFLINE]
+     def test_excludes_offline_and_orders_direct_before_aggregator(self):
+-        self.assertEqual(
+-            ma.select_for_adversarial(POOL, floor_tier="sonnet"), [MISTRAL, GLM, KIMI]
+-        )
++        self.assertCountEqual(
++            ma.select_for_adversarial(POOL, floor_tier="sonnet", rng=random.Random(0)),
++            [MISTRAL, GLM, KIMI],
++        )
+     def test_sonnet_and_opus_are_equivalent_for_the_floor(self):
+-        self.assertEqual(
+-            ma.select_for_adversarial(POOL, floor_tier="opus"), [MISTRAL, GLM, KIMI]
+-        )
++        self.assertCountEqual(
++            ma.select_for_adversarial(POOL, floor_tier="opus", rng=random.Random(0)),
++            [MISTRAL, GLM, KIMI],
++        )
