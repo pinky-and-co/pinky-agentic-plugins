@@ -1,8 +1,0 @@
-{
-  "name": "pc-decision",
-  "version": "0.1.0",
-  "description": "Shared decision-model brick — an MCP client of a local mlx-serve that picks one lettered option and returns its probabilities. Loads no model, runs no daemon.",
-  "author": {
-    "name": "Pinky & Co"
-  }
-}
