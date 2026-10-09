@@ -164,7 +164,8 @@ pinky-agentic-plugins/
 │   │       │   └── SKILL.md
 │   │       └── reintegrate/
 │   │           ├── scripts/
-│   │           │   └── apply_reintegrate.py
+│   │           │   ├── apply_reintegrate.py
+│   │           │   └── close_cards.py
 │   │           └── SKILL.md
 │   ├── pc-git/
 │   │   ├── evals/
@@ -510,6 +511,7 @@ pinky-agentic-plugins/
 │   ├── test_card_discipline.py
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
+│   ├── test_close_cards.py
 │   ├── test_commit_trailer.py
 │   ├── test_dangerous_bash_ask.py
 │   ├── test_detect_findings.py

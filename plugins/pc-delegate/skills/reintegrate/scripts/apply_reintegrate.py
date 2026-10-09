@@ -22,6 +22,9 @@ Every applied `.py` file is classified `comments-only` vs `code-changed` by AST 
 (docstrings masked). A brand-new file has no "old" version to compare against, so it always
 classifies `code-changed`.
 
+A top-level `EXPORTED_CARDS.txt` is reserved too: never applied, read by `read_manifest` to
+determine the cards the return covers.
+
 A top-level `REPORT.md` in the source (no directory prefix — `sub/REPORT.md` is an ordinary repo
 file) is reserved: never applied into the repo, always pulled out and either written as a new
 `_AGENT_LOG` entry (when `--agent-log-dir` is given) or printed in full so a human can act on it —
@@ -48,6 +51,7 @@ from pathlib import Path
 
 _DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _REPORT_ENTRY = "REPORT.md"
+_MANIFEST_ENTRY = "EXPORTED_CARDS.txt"
 
 
 def _is_report_entry(entry_name: str) -> bool:
@@ -57,6 +61,15 @@ def _is_report_entry(entry_name: str) -> bool:
     if normalized.startswith("./"):
         normalized = normalized[2:]
     return normalized == _REPORT_ENTRY
+
+
+def _is_manifest_entry(entry_name: str) -> bool:
+    """True for a top-level `EXPORTED_CARDS.txt` only — the exported-slugs file is read by
+    `read_manifest`, never applied into the repo."""
+    normalized = entry_name.replace("\\", "/")
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized == _MANIFEST_ENTRY
 
 
 def _report_log_name(*, card_ids: list[str], repo: Path, today: str) -> str:
@@ -179,6 +192,17 @@ def source_entries(source: Path) -> Iterator[tuple[str, bytes]]:
                 yield info.filename, zf.read(info)
 
 
+def read_manifest(source: Path) -> list[str] | None:
+    """The card slugs listed in *source*'s top-level `EXPORTED_CARDS.txt` (one per line, blank
+    lines ignored), or None when the source carries no such file. Same result whether *source*
+    is a zip or an already-extracted directory."""
+    for entry_name, content in source_entries(source):
+        if _is_manifest_entry(entry_name):
+            lines = content.decode("utf-8", errors="replace").splitlines()
+            return [line.strip() for line in lines if line.strip()]
+    return None
+
+
 @dataclass(frozen=True)
 class Outcome:
     path: str
@@ -209,6 +233,8 @@ def apply_source(
     for entry_name, content in source_entries(source):
         if _is_report_entry(entry_name):
             report_content = content.decode("utf-8", errors="replace")
+            continue
+        if _is_manifest_entry(entry_name):
             continue
         target_path = resolve_within_repo(repo_resolved, entry_name)
         if target_path is None:
@@ -315,7 +341,7 @@ def apply_source(
         print(
             "\nNothing committed. Next: run the target repo's lint/type-check/test/pre-commit loop "
             "(mechanical fixes auto-applied, anything touching logic or security stops for review), "
-            "then hand off to the `commit` skill (pc-git) — never an automatic commit/push/PR."
+            "then review the diff and close the cards (reintegrate SKILL.md, Step 3)."
         )
     if report_content is not None:
         if dry_run:

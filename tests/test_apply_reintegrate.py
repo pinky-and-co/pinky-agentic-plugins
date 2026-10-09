@@ -430,3 +430,37 @@ class TestReportMd:
         archive = _zip_of(tmp_path, "r16.zip", {"brand_new.py": "x = 1\n"})
         ar.apply_source(archive, repo, dry_run=False, agent_log_dir=log_dir)
         assert not log_dir.exists()
+
+
+class TestReadManifest:
+    """`EXPORTED_CARDS.txt` at the source root names the covered cards — same answer for a zip and
+    for the same content already extracted into a directory; never applied into the repo."""
+
+    ENTRIES = {"EXPORTED_CARDS.txt": "card-a\n\ncard-b\n", "brand_new.py": "x = 1\n"}
+
+    def test_zip_source(self, tmp_path: Path) -> None:
+        archive = _zip_of(tmp_path, "m1.zip", self.ENTRIES)
+        assert ar.read_manifest(archive) == ["card-a", "card-b"]
+
+    def test_directory_source(self, tmp_path: Path) -> None:
+        src = tmp_path / "extracted"
+        src.mkdir()
+        for name, content in self.ENTRIES.items():
+            (src / name).write_text(content)
+        assert ar.read_manifest(src) == ["card-a", "card-b"]
+
+    def test_absent_file_is_none(self, tmp_path: Path) -> None:
+        archive = _zip_of(tmp_path, "m2.zip", {"brand_new.py": "x = 1\n"})
+        assert ar.read_manifest(archive) is None
+
+    def test_nested_file_is_not_the_manifest(self, tmp_path: Path) -> None:
+        archive = _zip_of(tmp_path, "m3.zip", {"sub/EXPORTED_CARDS.txt": "card-a\n"})
+        assert ar.read_manifest(archive) is None
+
+    def test_manifest_is_never_applied_into_the_repo(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        archive = _zip_of(tmp_path, "m4.zip", self.ENTRIES)
+        ar.apply_source(archive, repo, dry_run=False)
+        assert not (repo / "EXPORTED_CARDS.txt").exists()
+        assert (repo / "brand_new.py").exists()

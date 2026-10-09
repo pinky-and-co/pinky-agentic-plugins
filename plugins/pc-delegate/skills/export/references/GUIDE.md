@@ -12,6 +12,10 @@ exactly inside the archive (e.g. `src/pkg/module.py`, `docs/adr/0004-x.md`) — 
 archive is how your changes get placed back, there is no separate manifest to fill in. A brand-new
 file is fine; do not invent a placeholder for it elsewhere.
 
+Also include, at the root of the archive, the `EXPORTED_CARDS.txt` file you received, returned
+exactly as it is — never edited, never renamed. It lists the cards this session covered, and the
+reintegration reads it to know which ones to close.
+
 Also include a `REPORT.md` at the root of the archive (not nested under any path) — what you did,
 any judgment call you made and why, anything you found but left alone because it was out of scope,
 and any caveat a reviewer should know before trusting the change. This is read by a human, not

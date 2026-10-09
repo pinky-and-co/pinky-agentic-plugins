@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Decide which exported cards a reintegration covers and which of them can be archived.
+
+Two subcommands:
+
+    close_cards.py covered <source> --chantier PATH --repo-slug ORG/REPO
+        Print the slugs listed in the source's `EXPORTED_CARDS.txt` (zip or directory). Without
+        that file, print the `exported:` cards of `3-in-progress` that list ORG/REPO in `repos:`
+        and exit 3 — the caller asks which of them the return covers.
+
+    close_cards.py mark --chantier PATH --repo-slug ORG/REPO --card SLUG [--card SLUG ...]
+        Add ORG/REPO to each card's frontmatter `reintegrated: [...]`, then print one line per
+        card: `archive <slug>` when every repo of its `repos:` is reintegrated, otherwise
+        `keep <slug> missing: <repo>, ...`. A card it cannot safely touch prints
+        `skip <slug>: <reason>` and is left as is.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+import apply_reintegrate
+
+_IN_PROGRESS = "3-in-progress"
+_SAFE_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _frontmatter(lines: list[str]) -> tuple[int, int] | None:
+    """Index of the opening and closing `---` of the frontmatter block, or None."""
+    if not lines or lines[0].strip() != "---":
+        return None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return 0, i
+    return None
+
+
+def read_list_field(content: str, field: str) -> list[str]:
+    """The items of the frontmatter line `field: [a, b]` — empty when the field is absent."""
+    lines = content.splitlines()
+    bounds = _frontmatter(lines)
+    if bounds is None:
+        return []
+    for line in lines[bounds[0] + 1 : bounds[1]]:
+        match = re.fullmatch(rf"{re.escape(field)}:\s*\[(.*)\]\s*", line)
+        if match:
+            return [item.strip() for item in match.group(1).split(",") if item.strip()]
+    return []
+
+
+def has_field(content: str, field: str) -> bool:
+    """True when the frontmatter carries a `field:` line."""
+    lines = content.splitlines()
+    bounds = _frontmatter(lines)
+    return bounds is not None and any(
+        line.startswith(f"{field}:") for line in lines[bounds[0] + 1 : bounds[1]]
+    )
+
+
+def set_list_field(content: str, field: str, items: list[str]) -> str:
+    """*content* with the frontmatter line `field: [items]` set, replacing an existing one or
+    appended before the closing `---`. The body is untouched."""
+    lines = content.splitlines(keepends=True)
+    bounds = _frontmatter([line.rstrip("\n") for line in lines])
+    if bounds is None:
+        raise ValueError("card has no closed frontmatter block")
+    start, end = bounds
+    kept = [line for line in lines[start + 1 : end] if not line.startswith(f"{field}:")]
+    kept.append(f"{field}: [{', '.join(items)}]\n")
+    return "".join([lines[start], *kept, *lines[end:]])
+
+
+def exported_candidates(chantier: Path, repo_slug: str) -> list[str]:
+    """Slugs of the `exported:` cards in `3-in-progress` whose `repos:` lists *repo_slug*."""
+    found: list[str] = []
+    for card in sorted((chantier / _IN_PROGRESS).glob("*.md")):
+        text = card.read_text(encoding="utf-8")
+        if has_field(text, "exported") and repo_slug in read_list_field(text, "repos"):
+            found.append(card.stem)
+    return found
+
+
+@dataclass(frozen=True)
+class Closure:
+    """Whether a card can be archived, the repos of its `repos:` still missing, and — when the
+    card was left untouched — why."""
+
+    archivable: bool
+    missing: list[str]
+    skipped: str = ""
+
+
+def mark_reintegrated(chantier: Path, repo_slug: str, slug: str) -> Closure:
+    """Record *repo_slug* in the `reintegrated:` field of card *slug*. Returns a `Closure`:
+    archivable when every repo of the card's `repos:` is reintegrated. A slug that is not a plain
+    file stem, a card absent from `3-in-progress`, an unreadable `repos:` or a repo the card does
+    not list leave the card untouched and set `skipped`."""
+    if not _SAFE_SLUG.fullmatch(slug):
+        return Closure(False, [], "invalid slug")
+    card = chantier / _IN_PROGRESS / f"{slug}.md"
+    if not card.is_file():
+        return Closure(False, [], "not in 3-in-progress")
+    text = card.read_text(encoding="utf-8")
+    repos = read_list_field(text, "repos")
+    if not repos:
+        return Closure(False, [], "no inline repos: list")
+    if repo_slug not in repos:
+        return Closure(False, [], "repo not in repos:")
+    done = read_list_field(text, "reintegrated")
+    if repo_slug not in done:
+        done.append(repo_slug)
+        text = set_list_field(text, "reintegrated", done)
+        card.write_text(text, encoding="utf-8")
+    missing = [r for r in repos if r not in done]
+    return Closure(not missing, missing)
+
+
+def main() -> int:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    covered = sub.add_parser("covered")
+    covered.add_argument("source", type=Path)
+    mark = sub.add_parser("mark")
+    mark.add_argument("--card", action="append", required=True, dest="cards")
+    for p in (covered, mark):
+        p.add_argument("--chantier", type=Path, required=True)
+        p.add_argument("--repo-slug", required=True)
+    args = parser.parse_args()
+
+    if args.command == "covered":
+        slugs = apply_reintegrate.read_manifest(args.source)
+        if slugs is not None:
+            print("\n".join(slugs))
+            return 0
+        print("no EXPORTED_CARDS.txt in the source — exported cards of this repo:")
+        print("\n".join(exported_candidates(args.chantier, args.repo_slug)))
+        return 3
+
+    for slug in args.cards:
+        closure = mark_reintegrated(args.chantier, args.repo_slug, slug)
+        if closure.skipped:
+            print(f"skip {slug}: {closure.skipped}")
+        elif closure.archivable:
+            print(f"archive {slug}")
+        else:
+            print(f"keep {slug} missing: {', '.join(closure.missing)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
