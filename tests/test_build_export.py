@@ -330,6 +330,20 @@ class TestBuildZip:
         assert "_AGENT_LOG/note.md" in names
         assert "AGENTS.md" in names
 
+    def test_zip_root_carries_the_exported_slugs_file(self, tmp_path: Path) -> None:
+        out = tmp_path / "export.zip"
+        be.build_zip(
+            out,
+            cards={"card-a.md": "a\n", "card-b.md": "b\n"},
+            chantier_tree="",
+            agent_log={},
+            guide_content=None,
+            repo=None,
+            repo_paths=[],
+        )
+        with zipfile.ZipFile(out) as zf:
+            assert zf.read(be.EXPORTED_CARDS_FILE).decode() == "card-a\ncard-b\n"
+
     def test_card_content_local_paths_are_redacted(self, tmp_path: Path) -> None:
         out = tmp_path / "export.zip"
         be.build_zip(
@@ -390,6 +404,8 @@ class TestSuggestedPrompt:
             "When you're done, give me back a zip containing:\n"
             "- only the files you created or modified, paths preserved exactly as in the archive "
             "you received (not under repo/)\n"
+            "- the EXPORTED_CARDS.txt file from the archive you received, at the root of the zip, "
+            "returned exactly as it is\n"
             "- a REPORT.md at the root of the zip: what you did, any scope decisions you made, any "
             "bug/issue you found but left alone because it was out of scope, and anything a human "
             "reviewer should know before trusting the change.\n"
@@ -464,6 +480,11 @@ class TestGuideHooksCarveOut:
             in normalized
         )
         assert "pytest" not in text
+
+    def test_asks_for_the_slugs_file_back_untouched(self) -> None:
+        text = " ".join(self.GUIDE_PATH.read_text(encoding="utf-8").split())
+        assert "EXPORTED_CARDS.txt" in text
+        assert "returned exactly as it is" in text
 
     def test_does_not_promise_the_full_suite_runs_here(self) -> None:
         text = self.GUIDE_PATH.read_text(encoding="utf-8")

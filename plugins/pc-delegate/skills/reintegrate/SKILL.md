@@ -1,8 +1,8 @@
 ---
 name: reintegrate
-description: "Reintegrate the results an external agent (Cortex/Snowsight, claude.ai web, any agent working outside Claude Code) produced — a zip or directory of the files it created or modified. Applies safely (new files OK, a locally-diverged file is refused not overwritten), classifies each Python file comments-only vs code-changed, runs the target repo's own verify loop, then hands off to `commit` — never an automatic commit/push/PR. Use when the user says 'réintègre ce zip', 'intègre le retour de …', or hands you a directory of externally-produced files to bring back into a repo."
+description: "Reintegrate the results an external agent (Cortex/Snowsight, claude.ai web, any agent working outside Claude Code) produced — a zip or directory of the files it created or modified. Applies safely (new files OK, a locally-diverged file is refused not overwritten), classifies each Python file comments-only vs code-changed, runs the target repo's own verify loop, then has the diff reviewed, opens the PR through `commit-and-pr` and archives the cards the return covers. Use when the user says 'réintègre ce zip', 'intègre le retour de …', or hands you a directory of externally-produced files to bring back into a repo."
 argument-hint: "<zip-or-directory> --repo <path> [--agent-log-dir <path>] [--card <id> ...]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/apply_reintegrate.py:*), Bash(git status:*), Bash(git -C * status*), Bash(rtk git -C * status*), Bash(rtk git status:*), Bash(git diff:*), Bash(git -C * diff*), Bash(rtk git -C * diff*), Bash(rtk git diff:*), Bash(ruff check:*), Bash(rtk ruff check:*), Bash(ruff format:*), Bash(rtk ruff format:*), Bash(mypy:*), Bash(rtk mypy:*), Bash(pytest:*), Bash(rtk pytest:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(rtk pre-commit run:*), Read, Skill
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/apply_reintegrate.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/close_cards.py:*), Bash(git status:*), Bash(git -C * status*), Bash(rtk git -C * status*), Bash(rtk git status:*), Bash(git diff:*), Bash(git -C * diff*), Bash(rtk git -C * diff*), Bash(rtk git diff:*), Bash(ruff check:*), Bash(rtk ruff check:*), Bash(ruff format:*), Bash(rtk ruff format:*), Bash(mypy:*), Bash(rtk mypy:*), Bash(pytest:*), Bash(rtk pytest:*), Bash(prek run:*), Bash(pre-commit run:*), Bash(rtk pre-commit run:*), Read, Skill, Agent
 ---
 
 # Reintegrate — reintegrate an external agent's results
@@ -47,8 +47,37 @@ declares). Two different reactions, never blur them:
 A file classified `code-changed` in Step 1 is exactly the set to read closely here — a
 `comments-only` file changed nothing the verify loop would ever flag.
 
-## Step 3 — Hand off
+## Step 3 — Review, ship, close
 
-Delegate to the `commit` skill (`pc-git`) for the actual commit. Never commit, push, or open a PR
-from inside this skill — that stays an explicit, separate user-visible step, same discipline as
-every other skill in this workspace.
+**Covered cards.** The return carries `EXPORTED_CARDS.txt` at its root (zip or directory), one card
+slug per line — it is never applied into the repo.
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/close_cards.py" covered <source> \
+  --chantier <chantier-dir> --repo-slug <org/repo>
+```
+
+Exit 0 prints the covered slugs. Exit 3 means the file is absent: the output lists this repo's
+`exported:` cards in `3-in-progress` — ask the user which of them the return covers.
+
+**Review.** Once the verify loop is green, spawn `Agent(reviewer)` (pc-core) on the diff. Skip it
+only when every change is mechanical (formatting, import order, comments-only files). A KO verdict:
+fix, then review again — at most 2 re-reviews, then stop and report to the user. When the review is
+OK, check the `reviewed (<method>)` box of each covered card; when the review was skipped as
+mechanical, check it as `reviewed (n/a — mechanical)`.
+
+**Ship.** Run `commit-and-pr` (pc-git), never before the box is checked.
+
+**Close.** After the PR exists, record the repo on each covered card and read the verdict:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/close_cards.py" mark \
+  --chantier <chantier-dir> --repo-slug <org/repo> --card <slug> [--card <slug> ...]
+```
+
+`mark` writes `reintegrated: [org/repo]` in the card's frontmatter. For each `archive <slug>` line,
+run `move-card archive <slug>` (pc-kanban). A `keep <slug> missing: ...` line means other repos of a
+multi-repo card have not returned: the card stays in `3-in-progress`, and the report names the
+missing repos. A `skip <slug>: <reason>` line means the card was left untouched (unsafe slug, not in
+`3-in-progress`, no inline `repos:` list, or the repo is not one the card lists): report it, never
+archive it.

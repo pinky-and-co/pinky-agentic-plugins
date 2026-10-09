@@ -34,6 +34,8 @@ _COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress", "4-done"
 
 _AGENT_LOG_WINDOW_DAYS = 60
 
+EXPORTED_CARDS_FILE = "EXPORTED_CARDS.txt"
+
 
 class ExportError(Exception):
     pass
@@ -186,7 +188,7 @@ def _resolve_repo_files(
 
 def suggested_prompt(card_ids: list[str]) -> str:
     """A ready-to-paste message for the external agent's chat — the deliverable-format contract
-    (zip layout, `REPORT.md`) is identical on every export, so it is generated here once instead
+    (zip layout, `REPORT.md`, `EXPORTED_CARDS.txt`) is identical on every export, so it is generated here once instead
     of retyped by hand each time; the task itself is not restated — `AGENTS.md` already tells the
     agent to read `cards/<id>.md` for it. English, unconditionally — a public plugin never
     hardcodes a chat language; a caller who wants another one translates this before pasting it."""
@@ -202,10 +204,19 @@ def suggested_prompt(card_ids: list[str]) -> str:
         "When you're done, give me back a zip containing:\n"
         "- only the files you created or modified, paths preserved exactly as in the archive "
         "you received (not under repo/)\n"
+        f"- the {EXPORTED_CARDS_FILE} file from the archive you received, at the root of the zip, "
+        "returned exactly as it is\n"
         "- a REPORT.md at the root of the zip: what you did, any scope decisions you made, any "
         "bug/issue you found but left alone because it was out of scope, and anything a human "
         "reviewer should know before trusting the change.\n"
     )
+
+
+def exported_cards_manifest(card_files: Sequence[str]) -> str:
+    """The `EXPORTED_CARDS.txt` content: one card slug per line (the `.md` suffix of each entry
+    in *card_files* dropped), in the order given. The external agent returns it untouched so the
+    reintegration knows which cards the zip covers."""
+    return "".join(f"{Path(name).stem}\n" for name in card_files)
 
 
 def build_zip(
@@ -225,6 +236,7 @@ def build_zip(
         for name, content in cards.items():
             zf.writestr(f"cards/{name}", secrets_filter.redact_local_paths(content))
         zf.writestr("CHANTIER_TREE.txt", chantier_tree)
+        zf.writestr(EXPORTED_CARDS_FILE, exported_cards_manifest(list(cards)))
         for name, content in agent_log.items():
             zf.writestr(name, content)
         if guide_content is not None:
