@@ -208,7 +208,8 @@ def select_for_adversarial(
     count the same), direct before aggregator (an aggregator is API-usage-only, never the plan held
     directly with the provider — for a model reachable both ways, direct is at least as good, so
     it goes first), providers alternating inside each of those groups (`spread_providers`),
-    entries of equal `priority` drawn with `rng` (a fresh `random.Random()` by default).
+    entries of equal `priority` drawn with `rng` when one is given (pool order otherwise; the callers
+    that serve a review pass a fresh `random.Random()`).
     """
     candidates = [
         e
@@ -222,7 +223,7 @@ def select_for_adversarial(
             0 if e.get("local", False) else 1,
             0 if e["provider"] != "openrouter" else 1,
         ),
-        rng=rng if rng is not None else random.Random(),
+        rng=rng,
     )
 
 
@@ -1088,7 +1089,7 @@ def main(argv: list[str] | None = None) -> int:
     if override:
         entries = [{**_DEFAULT_POOL[0], "model": override, "name": override}]
     else:
-        entries = select_for_adversarial(load_pool())
+        entries = select_for_adversarial(load_pool(), rng=random.Random())
 
     if not entries:
         print(

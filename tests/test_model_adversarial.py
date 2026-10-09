@@ -105,11 +105,9 @@ RQ_A = _entry("requesty-a", "requesty")
 
 class TestSelectForAdversarial(unittest.TestCase):
     def test_excludes_offline_and_orders_direct_before_aggregator(self):
-        result = ma.select_for_adversarial(
-            POOL, floor_tier="sonnet", rng=random.Random(0)
+        self.assertEqual(
+            ma.select_for_adversarial(POOL, floor_tier="sonnet"), [MISTRAL, GLM, KIMI]
         )
-        self.assertEqual(result[0], MISTRAL)
-        self.assertCountEqual(result[1:], [GLM, KIMI])
 
     def test_floor_excludes_haiku_entries(self):
         self.assertEqual(
@@ -118,29 +116,21 @@ class TestSelectForAdversarial(unittest.TestCase):
         )
 
     def test_sonnet_and_opus_are_equivalent_for_the_floor(self):
-        result = ma.select_for_adversarial(
-            POOL, floor_tier="opus", rng=random.Random(0)
+        self.assertEqual(
+            ma.select_for_adversarial(POOL, floor_tier="opus"), [MISTRAL, GLM, KIMI]
         )
-        self.assertEqual(result[0], MISTRAL)
-        self.assertCountEqual(result[1:], [GLM, KIMI])
 
     def test_never_two_entries_of_one_provider_back_to_back(self):
         pool = [NV_GLM, NV_FLASH, NV_KIMI, VC_A, VC_B, RQ_A]
-        for seed in range(20):
-            result = ma.select_for_adversarial(pool, rng=random.Random(seed))
-            self.assertCountEqual(result, pool)
-            providers = [e["provider"] for e in result]
-            self.assertEqual(len(set(providers[:3])), 3)
-            # seul le fournisseur restant en fin de liste peut se répéter (positions 4 et 5)
-            self.assertTrue(all(providers[i] != providers[i + 1] for i in range(4)))
+        self.assertEqual(
+            ma.select_for_adversarial(pool),
+            [NV_GLM, VC_A, RQ_A, NV_FLASH, VC_B, NV_KIMI],
+        )
 
     def test_spreading_never_promotes_an_aggregator_over_a_direct_provider(self):
         openrouter = _entry("or-a", "openrouter")
         pool = [openrouter, NV_GLM, NV_KIMI]
-        for seed in range(20):
-            result = ma.select_for_adversarial(pool, rng=random.Random(seed))
-            self.assertEqual(result[-1], openrouter)
-            self.assertCountEqual(result[:2], [NV_GLM, NV_KIMI])
+        self.assertEqual(ma.select_for_adversarial(pool), [NV_GLM, NV_KIMI, openrouter])
 
     def test_empty_pool_yields_empty_list(self):
         self.assertEqual(ma.select_for_adversarial([]), [])
@@ -162,15 +152,10 @@ class TestProviderPriority(unittest.TestCase):
         ol_a = _entry("ollama-a", "ollama-cloud", priority=1)
         ol_b = _entry("ollama-b", "ollama-cloud", priority=1)
         pool = [NV_GLM, NV_KIMI, VC_A, ol_a, ol_b]
-        for seed in range(20):
-            result = ma.select_for_adversarial(pool, rng=random.Random(seed))
-            self.assertCountEqual(result, pool)
-            self.assertIn(result[0], [ol_a, ol_b])
-            self.assertEqual(result[3], ol_b if result[0] == ol_a else ol_a)
-            self.assertCountEqual(
-                [e["provider"] for e in result[1:3]], ["nvidia", "vercel-ai-gateway"]
-            )
-            self.assertEqual(result[4]["provider"], "nvidia")
+        self.assertEqual(
+            ma.select_for_adversarial(pool),
+            [ol_a, NV_GLM, VC_A, ol_b, NV_KIMI],
+        )
 
     def test_delegation_honours_priority_too(self):
         ol_a = _entry("ollama-a", "ollama-cloud", priority=1)
@@ -1264,7 +1249,7 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
 
     seen: dict[str, list] = {}
 
-    def fake_select_for_adversarial(pool, floor_tier="sonnet"):
+    def fake_select_for_adversarial(pool, floor_tier="sonnet", rng=None):
         seen["adversarial"] = pool
         return [MISTRAL]
 
@@ -1429,6 +1414,61 @@ def test_adversarial_tool_forwards_the_diff_scope(monkeypatch):
     server.adversarial(task="review", base="main", scope="staged")
 
     assert seen["scope"] == "staged"
+
+
+def test_select_for_adversarial_without_rng_keeps_pool_order():
+    """The selection itself is deterministic; the draw comes from the caller's rng."""
+    ol_a = _entry("ollama-a", "ollama-cloud", priority=1)
+    ol_b = _entry("ollama-b", "ollama-cloud", priority=1)
+    assert ma.select_for_adversarial([ol_b, ol_a]) == [ol_b, ol_a]
+
+
+def test_adversarial_cli_draws_with_a_fresh_rng(monkeypatch):
+    """`main` hands `select_for_adversarial` a `random.Random`, so a served review varies."""
+    seen: dict[str, object] = {}
+
+    def spy(pool, floor_tier="sonnet", rng=None):
+        seen["rng"] = rng
+        return [MISTRAL]
+
+    monkeypatch.setattr(ma, "select_for_adversarial", spy)
+    monkeypatch.setattr(ma, "load_pool", lambda: [MISTRAL])
+    monkeypatch.setattr(
+        ma,
+        "run_pool",
+        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+            entries[0], "ok"
+        ),
+    )
+    assert ma.main(["--task", "review this"]) == 0
+    assert isinstance(seen["rng"], random.Random)
+
+
+def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
+    """The MCP `adversarial` tool hands `select_for_adversarial` a `random.Random`."""
+    pytest.importorskip("mcp")
+    sys.path.insert(
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+    )
+    import pc_core_server
+
+    seen: dict[str, object] = {}
+
+    def spy(pool, floor_tier="sonnet", rng=None):
+        seen["rng"] = rng
+        return [MISTRAL]
+
+    monkeypatch.setattr(pc_core_server.model_adversarial, "select_for_adversarial", spy)
+    monkeypatch.setattr(
+        pc_core_server.model_adversarial,
+        "run_pool",
+        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+            entries[0], "ok"
+        ),
+    )
+    out = pc_core_server.adversarial(task="review this")
+    assert out.startswith("[answered by ")
+    assert isinstance(seen["rng"], random.Random)
 
 
 if __name__ == "__main__":
