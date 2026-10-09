@@ -150,11 +150,6 @@ pinky-agentic-plugins/
 │   │   ├── themes/
 │   │   │   └── lisible.json
 │   │   └── README.md
-│   ├── pc-decision/
-│   │   ├── mcp/
-│   │   │   ├── decision_client.py
-│   │   │   └── pc_decision_server.py
-│   │   └── README.md
 │   ├── pc-delegate/
 │   │   ├── mcp/
 │   │   │   ├── pc_delegate_server.py
@@ -499,6 +494,7 @@ pinky-agentic-plugins/
 │   └── hooks/
 ├── tests/
 │   ├── conftest.py
+│   ├── fake_local_server.py
 │   ├── smoke_model_pool.py
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_agent_log_writer.py
@@ -516,7 +512,6 @@ pinky-agentic-plugins/
 │   ├── test_clear_pending_queue.py
 │   ├── test_commit_trailer.py
 │   ├── test_dangerous_bash_ask.py
-│   ├── test_decision_client.py
 │   ├── test_detect_findings.py
 │   ├── test_detect_format.py
 │   ├── test_direct_command_hooks.py

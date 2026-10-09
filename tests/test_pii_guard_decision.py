@@ -27,15 +27,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-privacy" /
 sys.path.insert(
     0, str(Path(__file__).parent.parent / "plugins" / "pc-privacy" / "hooks")
 )
-sys.path.insert(
-    0, str(Path(__file__).parent.parent / "plugins" / "pc-decision" / "mcp")
-)
-
 import anonymize
-import decision_client
 import decision_gate
 import pii_guard
-from test_decision_client import (
+from fake_local_server import (
     LOOPBACK_URLS,
     MALFORMED_STATUS_LINE,
     NON_LOOPBACK_URLS,
@@ -795,8 +790,7 @@ def test_a_server_that_never_replies_is_unavailable_within_the_timeout(
 
 
 @pytest.mark.parametrize("url", NON_LOOPBACK_URLS + LOOPBACK_URLS)
-def test_the_gate_and_the_client_agree_on_which_urls_are_loopback(url: str) -> None:
-    assert decision_gate._is_loopback(url) == decision_client._is_loopback(url)
+def test_the_gate_accepts_exactly_the_loopback_urls(url: str) -> None:
     assert decision_gate._is_loopback(url) == (url in LOOPBACK_URLS)
 
 
