@@ -9,6 +9,7 @@ fixture isolating `run_pool`'s debug log (`_isolate_pool_log`) never applies, an
 
 import json
 import os
+import random
 import subprocess
 import sys
 import tempfile
@@ -104,9 +105,11 @@ RQ_A = _entry("requesty-a", "requesty")
 
 class TestSelectForAdversarial(unittest.TestCase):
     def test_excludes_offline_and_orders_direct_before_aggregator(self):
-        self.assertEqual(
-            ma.select_for_adversarial(POOL, floor_tier="sonnet"), [MISTRAL, GLM, KIMI]
+        result = ma.select_for_adversarial(
+            POOL, floor_tier="sonnet", rng=random.Random(0)
         )
+        self.assertEqual(result[0], MISTRAL)
+        self.assertCountEqual(result[1:], [GLM, KIMI])
 
     def test_floor_excludes_haiku_entries(self):
         self.assertEqual(
@@ -115,21 +118,29 @@ class TestSelectForAdversarial(unittest.TestCase):
         )
 
     def test_sonnet_and_opus_are_equivalent_for_the_floor(self):
-        self.assertEqual(
-            ma.select_for_adversarial(POOL, floor_tier="opus"), [MISTRAL, GLM, KIMI]
+        result = ma.select_for_adversarial(
+            POOL, floor_tier="opus", rng=random.Random(0)
         )
+        self.assertEqual(result[0], MISTRAL)
+        self.assertCountEqual(result[1:], [GLM, KIMI])
 
     def test_never_two_entries_of_one_provider_back_to_back(self):
         pool = [NV_GLM, NV_FLASH, NV_KIMI, VC_A, VC_B, RQ_A]
-        self.assertEqual(
-            ma.select_for_adversarial(pool),
-            [NV_GLM, VC_A, RQ_A, NV_FLASH, VC_B, NV_KIMI],
-        )
+        for seed in range(20):
+            result = ma.select_for_adversarial(pool, rng=random.Random(seed))
+            self.assertCountEqual(result, pool)
+            providers = [e["provider"] for e in result]
+            self.assertEqual(len(set(providers[:3])), 3)
+            # seul le fournisseur restant en fin de liste peut se répéter (positions 4 et 5)
+            self.assertTrue(all(providers[i] != providers[i + 1] for i in range(4)))
 
     def test_spreading_never_promotes_an_aggregator_over_a_direct_provider(self):
         openrouter = _entry("or-a", "openrouter")
         pool = [openrouter, NV_GLM, NV_KIMI]
-        self.assertEqual(ma.select_for_adversarial(pool), [NV_GLM, NV_KIMI, openrouter])
+        for seed in range(20):
+            result = ma.select_for_adversarial(pool, rng=random.Random(seed))
+            self.assertEqual(result[-1], openrouter)
+            self.assertCountEqual(result[:2], [NV_GLM, NV_KIMI])
 
     def test_empty_pool_yields_empty_list(self):
         self.assertEqual(ma.select_for_adversarial([]), [])
@@ -151,10 +162,15 @@ class TestProviderPriority(unittest.TestCase):
         ol_a = _entry("ollama-a", "ollama-cloud", priority=1)
         ol_b = _entry("ollama-b", "ollama-cloud", priority=1)
         pool = [NV_GLM, NV_KIMI, VC_A, ol_a, ol_b]
-        self.assertEqual(
-            ma.select_for_adversarial(pool),
-            [ol_a, NV_GLM, VC_A, ol_b, NV_KIMI],
-        )
+        for seed in range(20):
+            result = ma.select_for_adversarial(pool, rng=random.Random(seed))
+            self.assertCountEqual(result, pool)
+            self.assertIn(result[0], [ol_a, ol_b])
+            self.assertEqual(result[3], ol_b if result[0] == ol_a else ol_a)
+            self.assertCountEqual(
+                [e["provider"] for e in result[1:3]], ["nvidia", "vercel-ai-gateway"]
+            )
+            self.assertEqual(result[4]["provider"], "nvidia")
 
     def test_delegation_honours_priority_too(self):
         ol_a = _entry("ollama-a", "ollama-cloud", priority=1)
@@ -169,6 +185,48 @@ class TestProviderPriority(unittest.TestCase):
         pool = [paid_ollama, NV_GLM]
         self.assertEqual(
             ma.select_for_delegation(pool, task_tier="sonnet"), [NV_GLM, paid_ollama]
+        )
+
+
+class TestAdversarialRandomTie(unittest.TestCase):
+    """Between entries of the same `priority` the adversarial order is drawn; `priority` stays a
+    strict order between levels. Each draw uses its own seeded rng so the test is reproducible."""
+
+    @staticmethod
+    def _heads(pool, draws=40):
+        return [
+            ma.select_for_adversarial(pool, rng=random.Random(seed))[0]["name"]
+            for seed in range(draws)
+        ]
+
+    def test_equal_priority_entries_of_one_provider_vary_their_head(self):
+        pool = [
+            _entry("ol-a", "ollama-cloud", priority=1),
+            _entry("ol-b", "ollama-cloud", priority=1),
+            _entry("ol-c", "ollama-cloud", priority=1),
+        ]
+        self.assertEqual(set(self._heads(pool)), {"ol-a", "ol-b", "ol-c"})
+
+    def test_a_higher_priority_entry_opens_every_draw(self):
+        pool = [
+            _entry("ol-a", "ollama-cloud", priority=1),
+            _entry("ol-b", "ollama-cloud", priority=1),
+            _entry("ol-top", "ollama-cloud", priority=2),
+        ]
+        self.assertEqual(set(self._heads(pool)), {"ol-top"})
+
+    def test_providers_with_equal_top_priority_swap_the_opening_slot(self):
+        pool = [NV_GLM, NV_KIMI, VC_A]
+        providers = {
+            ma.select_for_adversarial(pool, rng=random.Random(seed))[0]["provider"]
+            for seed in range(40)
+        }
+        self.assertEqual(providers, {"nvidia", "vercel-ai-gateway"})
+
+    def test_without_rng_spread_providers_keeps_pool_order(self):
+        pool = [NV_GLM, NV_KIMI, VC_A]
+        self.assertEqual(
+            ma.spread_providers(pool, key=lambda e: 0), [NV_GLM, VC_A, NV_KIMI]
         )
 
 
