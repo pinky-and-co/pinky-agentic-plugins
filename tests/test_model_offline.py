@@ -20,7 +20,7 @@ import model_offline as mo  # noqa: E402
 
 class TestResolveModel(unittest.TestCase):
     def test_default_is_mlx_id(self):
-        self.assertEqual(mo.DEFAULT_MODEL, "mlx-community/Ornith-1.5-9B-MLX-6bit")
+        self.assertEqual(mo.DEFAULT_MODEL, "ornith-ai/Ornith-1.5-9B-MLX-6bit")
 
     def test_cli_overrides_env_and_default(self):
         with unittest.mock.patch.dict(

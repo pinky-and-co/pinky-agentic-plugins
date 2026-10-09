@@ -16,7 +16,7 @@ Runtime: a local MLX server (oMLX on ``127.0.0.1:11234``) via the `pi` CLI
 (``subprocess.run(["pi", "-p", "--model", "mlx/<id>", ...])``) — the same `kind: "cli"` shape
 `model_adversarial.py`'s pool already uses for local models, resolved against the `mlx` provider
 declared in `~/.pi/agent/models.json` (this script depends on that declaration, never duplicates it).
-Default model ``mlx-community/Ornith-1.5-9B-MLX-6bit`` (bench: 5/7 oracle lines vs 1/7 for gemma-4-12b). ``--thinking off`` is mandatory — a thinking pass drowns a small
+Default model ``ornith-ai/Ornith-1.5-9B-MLX-6bit`` (bench: 5/7 oracle lines vs 1/7 for gemma-4-12b). ``--thinking off`` is mandatory — a thinking pass drowns a small
 local model into an empty answer. Override with ``--model`` / ``PINKY_LOCAL_MODEL``.
 
 MLX-SERVE's own preflight (a `503` body containing `out_of_memory`) fires on the generation request
@@ -52,7 +52,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-DEFAULT_MODEL = "mlx-community/Ornith-1.5-9B-MLX-6bit"
+DEFAULT_MODEL = "ornith-ai/Ornith-1.5-9B-MLX-6bit"
 PROVIDER = "mlx"
 DEFAULT_TOKEN_BUDGET = 3000
 
