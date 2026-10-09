@@ -18,6 +18,7 @@ install step for the plugin installer beyond having `uv`.
 
 from __future__ import annotations
 
+import random
 import subprocess
 import sys
 import time
@@ -148,7 +149,7 @@ def adversarial(
         )
     else:
         entries = model_adversarial.select_for_adversarial(
-            model_adversarial.load_pool()
+            model_adversarial.load_pool(), rng=random.Random()
         )
     if not entries:
         return "[adversarial] BLOCKED — no candidate model in the pool."

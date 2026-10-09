@@ -44,9 +44,12 @@ Each entry:
     timeout        optional wall-clock seconds for the whole `pi` run of this entry (tool loop
                    included), overriding the caller's default — a backstop against a run that never
                    ends; `pi` bounds each request itself
-    priority       optional integer, default 0, higher first: orders the providers inside each round
-                   of the selection's provider alternation — a generous provider opens every round
-                   without stacking its entries. Never outranks locality, cost or tier.
+    priority       optional integer, default 0, higher first: a strict order between levels, orders
+                   the providers inside each round of the selection's provider alternation — a
+                   generous provider opens every round without stacking its entries. Never outranks
+                   locality, cost or tier. Between entries of the same level, `adversarial` draws
+                   at random (which entry opens a provider's queue, which provider opens a round);
+                   delegation keeps pool order.
     thinking       optional pi thinking level (`off`, `low`, `medium`, …); absent → pi's own default.
                    `off` for a small local model, which a thinking pass drowns into an empty answer
 
@@ -64,6 +67,7 @@ import argparse
 import concurrent.futures
 import itertools
 import os
+import random
 import re
 import stat
 import subprocess
@@ -164,7 +168,9 @@ def selection_rank(tier: str) -> int:
 
 
 def spread_providers(
-    entries: list[dict[str, Any]], key: Callable[[dict[str, Any]], Any]
+    entries: list[dict[str, Any]],
+    key: Callable[[dict[str, Any]], Any],
+    rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
     """`entries` sorted by `key`, each group of equal `key` then taken round-robin across
     providers — never two entries of one provider back to back while another provider still has
@@ -173,14 +179,18 @@ def spread_providers(
     A provider that is down or slow (NVIDIA NIM: 9–47s for a one-line reply) fails all its
     entries alike; consecutive ones burn a full timeout each before any other provider is tried.
     `key` decides which group comes first, so spreading never reorders across locality, cost or
-    aggregator priority. Within a group, entries are taken in descending `priority` (pool order
-    between equals): the provider holding the highest one opens each round, and a provider's own
-    entries come out highest `priority` first.
+    aggregator priority. Within a group, entries are taken in descending `priority`: the provider
+    holding the highest one opens each round, and a provider's own entries come out highest
+    `priority` first. Between equal `priority` the order is pool order, or drawn with `rng` when
+    one is given (which entry opens a provider's queue, which provider opens a round).
     """
     spread: list[dict[str, Any]] = []
     for _, group in itertools.groupby(sorted(entries, key=key), key=key):
         by_provider: dict[str, deque[dict[str, Any]]] = {}
-        for e in sorted(group, key=lambda e: -e.get("priority", 0)):
+        ties = list(group)
+        if rng is not None:
+            rng.shuffle(ties)
+        for e in sorted(ties, key=lambda e: -e.get("priority", 0)):
             by_provider.setdefault(e["provider"], deque()).append(e)
         queues = list(by_provider.values())
         while queues:
@@ -190,12 +200,16 @@ def spread_providers(
 
 
 def select_for_adversarial(
-    pool: list[dict[str, Any]], floor_tier: str = "sonnet"
+    pool: list[dict[str, Any]],
+    floor_tier: str = "sonnet",
+    rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
     """Candidates for `adversarial`: never offline, at/above the capacity floor (sonnet and opus
     count the same), direct before aggregator (an aggregator is API-usage-only, never the plan held
     directly with the provider — for a model reachable both ways, direct is at least as good, so
-    it goes first), providers alternating inside each of those groups (`spread_providers`).
+    it goes first), providers alternating inside each of those groups (`spread_providers`),
+    entries of equal `priority` drawn with `rng` when one is given (pool order otherwise; the callers
+    that serve a review pass a fresh `random.Random()`).
     """
     candidates = [
         e
@@ -209,6 +223,7 @@ def select_for_adversarial(
             0 if e.get("local", False) else 1,
             0 if e["provider"] != "openrouter" else 1,
         ),
+        rng=rng,
     )
 
 
@@ -1074,7 +1089,7 @@ def main(argv: list[str] | None = None) -> int:
     if override:
         entries = [{**_DEFAULT_POOL[0], "model": override, "name": override}]
     else:
-        entries = select_for_adversarial(load_pool())
+        entries = select_for_adversarial(load_pool(), rng=random.Random())
 
     if not entries:
         print(

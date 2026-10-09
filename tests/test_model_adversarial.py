@@ -9,6 +9,7 @@ fixture isolating `run_pool`'s debug log (`_isolate_pool_log`) never applies, an
 
 import json
 import os
+import random
 import subprocess
 import sys
 import tempfile
@@ -169,6 +170,48 @@ class TestProviderPriority(unittest.TestCase):
         pool = [paid_ollama, NV_GLM]
         self.assertEqual(
             ma.select_for_delegation(pool, task_tier="sonnet"), [NV_GLM, paid_ollama]
+        )
+
+
+class TestAdversarialRandomTie(unittest.TestCase):
+    """Between entries of the same `priority` the adversarial order is drawn; `priority` stays a
+    strict order between levels. Each draw uses its own seeded rng so the test is reproducible."""
+
+    @staticmethod
+    def _heads(pool, draws=40):
+        return [
+            ma.select_for_adversarial(pool, rng=random.Random(seed))[0]["name"]
+            for seed in range(draws)
+        ]
+
+    def test_equal_priority_entries_of_one_provider_vary_their_head(self):
+        pool = [
+            _entry("ol-a", "ollama-cloud", priority=1),
+            _entry("ol-b", "ollama-cloud", priority=1),
+            _entry("ol-c", "ollama-cloud", priority=1),
+        ]
+        self.assertEqual(set(self._heads(pool)), {"ol-a", "ol-b", "ol-c"})
+
+    def test_a_higher_priority_entry_opens_every_draw(self):
+        pool = [
+            _entry("ol-a", "ollama-cloud", priority=1),
+            _entry("ol-b", "ollama-cloud", priority=1),
+            _entry("ol-top", "ollama-cloud", priority=2),
+        ]
+        self.assertEqual(set(self._heads(pool)), {"ol-top"})
+
+    def test_providers_with_equal_top_priority_swap_the_opening_slot(self):
+        pool = [NV_GLM, NV_KIMI, VC_A]
+        providers = {
+            ma.select_for_adversarial(pool, rng=random.Random(seed))[0]["provider"]
+            for seed in range(40)
+        }
+        self.assertEqual(providers, {"nvidia", "vercel-ai-gateway"})
+
+    def test_without_rng_spread_providers_keeps_pool_order(self):
+        pool = [NV_GLM, NV_KIMI, VC_A]
+        self.assertEqual(
+            ma.spread_providers(pool, key=lambda e: 0), [NV_GLM, VC_A, NV_KIMI]
         )
 
 
@@ -1206,7 +1249,7 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
 
     seen: dict[str, list] = {}
 
-    def fake_select_for_adversarial(pool, floor_tier="sonnet"):
+    def fake_select_for_adversarial(pool, floor_tier="sonnet", rng=None):
         seen["adversarial"] = pool
         return [MISTRAL]
 
@@ -1371,6 +1414,61 @@ def test_adversarial_tool_forwards_the_diff_scope(monkeypatch):
     server.adversarial(task="review", base="main", scope="staged")
 
     assert seen["scope"] == "staged"
+
+
+def test_select_for_adversarial_without_rng_keeps_pool_order():
+    """The selection itself is deterministic; the draw comes from the caller's rng."""
+    ol_a = _entry("ollama-a", "ollama-cloud", priority=1)
+    ol_b = _entry("ollama-b", "ollama-cloud", priority=1)
+    assert ma.select_for_adversarial([ol_b, ol_a]) == [ol_b, ol_a]
+
+
+def test_adversarial_cli_draws_with_a_fresh_rng(monkeypatch):
+    """`main` hands `select_for_adversarial` a `random.Random`, so a served review varies."""
+    seen: dict[str, object] = {}
+
+    def spy(pool, floor_tier="sonnet", rng=None):
+        seen["rng"] = rng
+        return [MISTRAL]
+
+    monkeypatch.setattr(ma, "select_for_adversarial", spy)
+    monkeypatch.setattr(ma, "load_pool", lambda: [MISTRAL])
+    monkeypatch.setattr(
+        ma,
+        "run_pool",
+        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+            entries[0], "ok"
+        ),
+    )
+    assert ma.main(["--task", "review this"]) == 0
+    assert isinstance(seen["rng"], random.Random)
+
+
+def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
+    """The MCP `adversarial` tool hands `select_for_adversarial` a `random.Random`."""
+    pytest.importorskip("mcp")
+    sys.path.insert(
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+    )
+    import pc_core_server
+
+    seen: dict[str, object] = {}
+
+    def spy(pool, floor_tier="sonnet", rng=None):
+        seen["rng"] = rng
+        return [MISTRAL]
+
+    monkeypatch.setattr(pc_core_server.model_adversarial, "select_for_adversarial", spy)
+    monkeypatch.setattr(
+        pc_core_server.model_adversarial,
+        "run_pool",
+        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+            entries[0], "ok"
+        ),
+    )
+    out = pc_core_server.adversarial(task="review this")
+    assert out.startswith("[answered by ")
+    assert isinstance(seen["rng"], random.Random)
 
 
 if __name__ == "__main__":
