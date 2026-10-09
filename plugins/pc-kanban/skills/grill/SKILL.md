@@ -156,6 +156,7 @@ and rewrite what fails. The failures are predictable — these are the ones that
 | "must never fail" | unreachable absolute | the cases actually covered, listed |
 | "use <named technology> to …" in a stated need | a solution imposed where the need was asked | the need; the technology is a decision, recorded in prose |
 | the same idea stated in two rows | duplicate — invisible until the set is sorted | one row, cited twice |
+| "existing tests pass unchanged", "no caller changes" | a claim about code nobody read — a goal built on it can never be met | read the code first; write the claim only if it holds, marked measured |
 
 Sort the set by family and read it once end to end before writing: duplicates and contradictions are
 visible in a sorted set and invisible in the order they were thought of.

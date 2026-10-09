@@ -189,7 +189,7 @@ class FinishingCardRenameCase(unittest.TestCase):
 
     def setUp(self):
         text = FINISHING.read_text()
-        start = text.index("### Naming the session, once the proposal is out")
+        start = text.index("### Naming the session, at the end of the session only")
         self.section = text[start : text.index("### Relaying a multi-repo card")]
 
     def test_queues_rename_surfaced(self):
@@ -200,6 +200,9 @@ class FinishingCardRenameCase(unittest.TestCase):
     def test_covers_every_naming_case_for_any_session(self):
         for needle in (
             "Any session, worker or orchestrator",
+            "Never per card",
+            "`≥40` %",
+            "The user ends the session",
             "One card closed",
             "same `sert` root",
             "+N",
@@ -210,3 +213,24 @@ class FinishingCardRenameCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+KANBAN_PROACTIVITY = (
+    Path(__file__).parent.parent
+    / "plugins"
+    / "pc-kanban"
+    / "hooks"
+    / "kanban-proactivity"
+    / "kanban-proactivity.md"
+)
+
+
+class SessionEndRenameCase(unittest.TestCase):
+    """The user ending the session triggers the /rename proposal."""
+
+    def test_both_files_carry_the_instruction(self):
+        self.assertIn("The user ends the session", FINISHING.read_text())
+        self.assertIn(
+            "When the user ends the session,\n  propose the `/rename`",
+            KANBAN_PROACTIVITY.read_text(),
+        )

@@ -7,7 +7,8 @@
 
 The slug is the card's filename without `.md`. It is resolved across the kanban boards in the
 columns the verb accepts; zero or several matches is an error, never a guess. `archive` and `drop`
-delegate to the `chantier` skill's `archive_card.sh` / `drop_card.sh`; `select` moves the card from
+move the card to `_ARCHIVE/` and print the closing sequence (open cards, next-card candidates,
+session recommendation); `select` moves the card from
 `1-todo/` to `2-selected-for-dev/` once it meets the selection conditions (`selection_problems`).
 
 Without `--board`, the boards are those `stop_handoff.py --list-kanbans` reports. Python 3.12+,
@@ -17,6 +18,7 @@ stdlib only.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -24,7 +26,11 @@ from datetime import date
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-CHANTIER_SCRIPTS = PLUGIN_ROOT / "skills" / "chantier" / "scripts"
+sys.path.insert(0, str(PLUGIN_ROOT / "skills" / "kanban" / "scripts"))
+import next_card_recommendation as ncr  # noqa: E402
+import open_cards_brief as ob  # noqa: E402
+
+SESSION_THRESHOLD_PCT = 40
 COLUMNS = {
     "archive": ("4-done", "3-in-progress"),
     "drop": ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress"),
@@ -331,25 +337,220 @@ def select(card: Path, boards: list[Path], force: bool = False) -> int:
     return 0
 
 
-def run_script(script: str, *args: str) -> int:
-    """Run one of the `chantier` skill's bash scripts and relay its output.
+def _seed_nav(dest_dir: Path) -> None:
+    """Create an archive folder with its `.nav.yml` (newest first) when missing.
 
     Args:
-        script: The script filename.
-        *args: Its arguments.
+        dest_dir: The archive folder.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    nav = dest_dir / ".nav.yml"
+    if not nav.is_file():
+        nav.write_text("sort:\n  direction: desc\n  by: filename\n", encoding="utf-8")
+        print(f"seeded {nav.parent}/.nav.yml")
+
+
+def _archive_destination(card: Path, kind: str) -> Path | None:
+    """Pick the dated archive path of a card, seeding its folder; refuse an existing entry.
+
+    Args:
+        card: The card to move.
+        kind: `done` or `dropped`.
 
     Returns:
-        The script's exit status.
+        The destination path; None (error printed) when it already exists.
     """
-    done = subprocess.run(
-        ["bash", str(CHANTIER_SCRIPTS / script), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    sys.stdout.write(done.stdout)
-    sys.stderr.write(done.stderr)
-    return done.returncode
+    chantier = card.parent.parent
+    dest_dir = chantier.parent / "_ARCHIVE" / f"{chantier.name.split('-', 1)[0]}-{kind}"
+    _seed_nav(dest_dir)
+    dest = dest_dir / f"{date.today().isoformat()}_{card.name}"
+    if dest.exists():
+        print(f"refusing to overwrite existing archive entry: {dest}", file=sys.stderr)
+        return None
+    return dest
+
+
+def archive(card: Path, boards: list[Path]) -> int:
+    """Archive a done card, or a reviewed one straight from `3-in-progress/`.
+
+    Args:
+        card: The card in `4-done/` or `3-in-progress/`.
+        boards: The board roots.
+
+    Returns:
+        The exit status; 1 when the reviewed box is unchecked or the target exists.
+    """
+    if card.parent.name == "3-in-progress" and "- [x] reviewed (" not in card.read_text(
+        encoding="utf-8"
+    ):
+        print(
+            f"card in 3-in-progress/ has no checked reviewed box: {card}\n"
+            "close it via 4-done, or check the reviewed box first (finishing-a-card.md)",
+            file=sys.stderr,
+        )
+        return 1
+    dest = _archive_destination(card, "done")
+    if dest is None:
+        return 1
+    chantier = card.parent.parent
+    card.rename(dest)
+    print(f"archived -> {dest}")
+    print(closing_sequence(chantier, dest, boards, current_signals()))
+    return 0
+
+
+def drop(card: Path, reason: str, boards: list[Path]) -> int:
+    """Drop a card confirmed obsolete, appending the reason to it.
+
+    Args:
+        card: The card in an open column.
+        reason: Why it is dropped.
+        boards: The board roots.
+
+    Returns:
+        The exit status; 1 when the reason is empty or the target exists.
+    """
+    if not reason.strip():
+        print("a reason is required", file=sys.stderr)
+        return 1
+    dest = _archive_destination(card, "dropped")
+    if dest is None:
+        return 1
+    chantier = card.parent.parent
+    card.rename(
+        dest
+    )  # move first: a failed append leaves an archive without reason, never a mutated open card
+    with dest.open("a", encoding="utf-8") as out:
+        out.write(f"\n## Dropped ({date.today().isoformat()})\n\n{reason}\n")
+    print(f"dropped -> {dest}")
+    print(closing_sequence(chantier, dest, boards, current_signals()))
+    return 0
+
+
+def priority(head: list[str]) -> int:
+    """Read a card's `priority:` (1-5).
+
+    Args:
+        head: The frontmatter lines.
+
+    Returns:
+        The priority; 3 when omitted or not a number.
+    """
+    value = field(head, "priority")
+    return int(value) if value.isdigit() else 3
+
+
+def candidates(chantier: Path, boards: list[Path]) -> list[tuple[Path, str]]:
+    """List the `1-todo/` cards worth proposing next, each with its note.
+
+    Args:
+        chantier: The chantier directory.
+        boards: The board roots.
+
+    Returns:
+        `(card, note)` pairs without the cards whose blocker is still open, by `priority`
+        descending then `date:` ascending; a card without `date:` is malformed, noted and last,
+        and a card whose blocker was dropped is noted (`select` refuses it until the obsolescence
+        check).
+    """
+    keyed = []
+    for card in sorted((chantier / "1-todo").glob("*.md")):
+        head = frontmatter(card.read_text(encoding="utf-8", errors="ignore"))
+        blocker = field(head, "blocked_by")
+        state = blocker_state(blocker, boards) if blocker not in EMPTY else "done"
+        if state == "open":
+            continue
+        notes = []
+        if state == "dropped":
+            notes.append("blocker dropped — obsolescence check first")
+        day = field(head, "date")
+        if not day:
+            notes.append("no date: — malformed")
+        keyed.append(((not day, -priority(head), day), card, "; ".join(notes)))
+    return [(card, note) for _, card, note in sorted(keyed, key=lambda k: k[0])]
+
+
+def current_signals() -> dict:
+    """Read the session's context-window and rate-limit signals.
+
+    Returns:
+        A dict with `context_window_pct` (int or None) and `rate_limit` (dict or None).
+    """
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    return {
+        "context_window_pct": ncr.context_window_pct(session_id, os.getcwd()),
+        "rate_limit": ncr.evaluate_rate_limit(session_id),
+    }
+
+
+def recommendation(signals: dict, threshold: int = SESSION_THRESHOLD_PCT) -> str:
+    """Turn the session signals into the session-vs-spawn line.
+
+    Args:
+        signals: What `current_signals` returns.
+        threshold: The context percentage from which a new session is advised.
+
+    Returns:
+        A pause line when a rate-limit window is triggered, else a continue or new-session line
+        from the context percentage; "" when the context is unknown.
+    """
+    for window, info in (signals.get("rate_limit") or {}).items():
+        if info.get("triggered"):
+            return (
+                f"Reco: wait for the {window} reset (resets_at {info['resets_at']}, "
+                f"{info['used_percentage']}% used) before starting another card."
+            )
+    pct = signals.get("context_window_pct")
+    if pct is None:
+        return ""
+    if pct >= threshold:
+        return f"Reco: start a new session for the next card (context at {pct}%)."
+    return f"Reco: continue in this session (context at {pct}%)."
+
+
+def closing_sequence(
+    chantier: Path,
+    closed: Path,
+    boards: list[Path],
+    signals: dict,
+    threshold: int = SESSION_THRESHOLD_PCT,
+) -> str:
+    """Build the closing sequence printed after an archive or a drop.
+
+    Args:
+        chantier: The closed card's chantier directory.
+        closed: The closed card, now in `_ARCHIVE/`.
+        boards: The board roots.
+        signals: What `current_signals` returns.
+        threshold: The context percentage from which a new session is advised.
+
+    Returns:
+        The obsolescence step, the next-card candidates, the recommendation, and the `/rename`
+        step only when the context is at `threshold` or more.
+    """
+    briefs = ob.render_open_cards(ob.open_cards(chantier))
+    lines = [
+        "",
+        "Closing sequence (finishing-a-card.md):",
+        f"1. Obsolescence — open cards of {chantier.name}:",
+        briefs or "  (none open)",
+        f"   Then write `- [x] obsolescence (none | <slug>, ...)` on {closed}.",
+        "2. Next card — candidates from 1-todo/ (priority desc, then date asc):",
+    ]
+    found = candidates(chantier, boards)
+    lines += [
+        f"   - {c.stem}" + (f" ({note})" if note else "") for c, note in found
+    ] or ["   nothing to propose"]
+    reco = recommendation(signals, threshold)
+    pct = signals.get("context_window_pct")
+    if reco:
+        lines.append(f"3. {reco}")
+    if pct is not None and pct >= threshold:
+        lines.append(
+            f"4. End of session: propose `/rename <slug>` (context at {pct}%, "
+            "see finishing-a-card.md § Naming the session)."
+        )
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -377,8 +578,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.verb == "select":
         return select(card, boards, args.force)
     if args.verb == "archive":
-        return run_script("archive_card.sh", str(card))
-    return run_script("drop_card.sh", str(card), " ".join(args.reason))
+        return archive(card, boards)
+    return drop(card, " ".join(args.reason), boards)
 
 
 if __name__ == "__main__":

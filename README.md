@@ -306,8 +306,6 @@ pinky-agentic-plugins/
 │   │   │   ├── chantier/
 │   │   │   │   ├── scripts/
 │   │   │   │   │   ├── activate_plugins_for_repos.py
-│   │   │   │   │   ├── archive_card.sh
-│   │   │   │   │   ├── drop_card.sh
 │   │   │   │   │   ├── pc_kanban_pending_user_action.py
 │   │   │   │   │   ├── pc_kanban_plugin_scope_lib.py
 │   │   │   │   │   ├── resolve_repos.sh
@@ -517,7 +515,6 @@ pinky-agentic-plugins/
 │   ├── test_anonymize.py
 │   ├── test_apply_anonymization.py
 │   ├── test_apply_reintegrate.py
-│   ├── test_archive_card_sh.py
 │   ├── test_board_pane_data.py
 │   ├── test_branch_guard.py
 │   ├── test_build_export.py
@@ -531,7 +528,6 @@ pinky-agentic-plugins/
 │   ├── test_detect_findings.py
 │   ├── test_detect_format.py
 │   ├── test_direct_command_hooks.py
-│   ├── test_drop_card_sh.py
 │   ├── test_guard.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py

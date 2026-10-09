@@ -2,7 +2,7 @@
 name: chantier
 description: Resume a chantier — load its story, cards and in-progress handoff from the kanban boards visible to this session, then report state and take the next card. Use when the user says "resume chantier NNNN", "reprends le chantier", or names a chantier id/slug.
 argument-hint: "<chantier-id-or-slug-substring> [free-text instruction]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(ls:*), Bash(rtk ls:*), Bash(find:*), Bash(rtk find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/drop_card.sh:*), Bash(mv:*), Read, Edit, AskUserQuestion
+allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(ls:*), Bash(rtk ls:*), Bash(find:*), Bash(rtk find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py:*), Bash(mv:*), Read, Edit, AskUserQuestion
 ---
 
 # Chantier
@@ -69,9 +69,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     durable decision (a rejected alternative written nowhere else) as an ADR candidate — never a
     fold into the story. Once the user has settled the ADR candidates, archive via:
 ```bash
-    bash "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/archive_card.sh" <card-path>
+    python3 "${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py" archive <card-slug>
 ```
-    A reviewed card with no ADR candidate may skip `4-done/` entirely — the script archives
+    A reviewed card with no ADR candidate may skip `4-done/` entirely — the command archives
     straight from `3-in-progress/` (it refuses an unchecked `reviewed` box, the one net
     `--list-unreviewed-done` cannot see past).
 6. **Resolve `model:`, then pick the next move.**
@@ -227,6 +227,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     tool`.
     Anti-cheat: the named action must be precise, nameable, and necessary — never a vague "I'm
     stuck", and never an action the agent could have run itself instead of yielding.
+    **Waiver clause.** Append a second OR branch: `… OR a clause of this condition was shown false
+    by construction, the evidence quoted in the transcript, and the user, asked through
+    `AskUserQuestion`, waived that clause or amended it — the amended clause then holding`.
+    `/goal clear` is never an exit to propose: the evaluator reads it as abandoning the goal, not
+    meeting it, and re-fires the hook on every yield. A user decision under an active goal goes
+    through `AskUserQuestion` — the turn stays open, the Stop hook does not fire — never as a prose
+    question, and never alongside an option the agent could execute itself.
     Once `<condition>` is fully resolved (clauses included), queue this bullet's own `goal` key —
     the last tool call of the turn (single-quote the message, escaping any literal `'` inside it as
     `'\''`):
@@ -244,6 +251,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   delegates real code changes to `Agent(subagent_type: "pc-kanban:card-worker")` and then reviews,
   fixes findings, and closes the loop — it does not write the implementation in its own turn,
   except for the single-mechanical-fix carve-out that section names.
+  A worker hand-back, a review report or a test run that disproves a premise of the goal's
+  `<condition>` stops the loop right there: ask the user through `AskUserQuestion` — waive the
+  clause, amend it, or rework — before any further step, never once the card is closed.
+  A review finding or a failing test goes back to the same `card-worker` (`SendMessage`), never
+  fixed in the session's own turn — the single-mechanical-fix carve-out aside.
 
 ## Rules
 

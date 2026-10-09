@@ -11,7 +11,7 @@ Referenced from `SKILL.md`. Read this when taking a card in, or before declaring
 - Proposing the next card, once the card is done
 - Flagging cards the closed card just made obsolete
 - Recommending session vs spawn, next to the proposal
-- Naming the session, once the proposal is out
+- Naming the session, at the end of the session only
 - Touching a repo the card does not list
 - Relaying a multi-repo card
 - Abandoning a multi-repo card
@@ -187,7 +187,7 @@ Name each candidate plainly ("`<slug>` looks superseded by what was just done �
 `mv`/drop without an explicit OK, same rule as the next-card proposal. On OK, drop it:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/drop_card.sh" <card-path> <reason...>
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py" drop <card-slug> <reason...>
 ```
 
 Lands the card in `_ARCHIVE/CHANTIER{NNNN}-dropped/`, never `-done/` (that name presupposes
@@ -222,10 +222,11 @@ the candidate card's `repos:`/`sert` against the current session's own:
    step 2 entirely. Do not recommend "continue in session" when the account is about to get cut
    off regardless of context headroom.
 2. **Otherwise, context-window + proximity.** `context_window_pct` (`null` → omit the line
-   entirely, nothing to base it on) against the `<50` / `≥50` band gives the default recommendation
-   (continue / spawn a fresh session); a candidate sharing `repos:` or `sert` with the current
-   session modulates the wording toward "continue" but never flips a `≥50` verdict to the
-   opposite — this stays a recommendation, never a gate (the `kanban-proactivity` rule).
+   entirely, nothing to base it on) against the `<40` / `≥40` band gives the default recommendation
+   (continue / spawn a fresh session). The command prints that default line; when relaying it, the
+   agent may add the nuance that a candidate sharing `repos:` or `sert` with the current session
+   leans toward "continue", but never flips a `≥40` verdict to the opposite — this stays a
+   recommendation, never a gate (the `kanban-proactivity` rule).
 
 ```
 → Proposition : <card-slug>
@@ -240,12 +241,18 @@ the candidate card's `repos:`/`sert` against the current session's own:
 Purely consultative end to end: this step never `mv`s the card, never spawns a session, never
 forces a pause — the same human decision as the proposal itself.
 
-### Naming the session, once the proposal is out
+### Naming the session, at the end of the session only
 
-**Any session, worker or orchestrator.** A session working a `sert`-linked group takes several cards
-in turn, so the name is set here, each time a card closes, never at card-take (a rename at each take
-would overwrite the group's identity with the latest card). It comes from the cards **this session**
-has closed so far, read from its own recent turn history:
+Never per card, and not when the context is unknown (`context_window_pct` is `null`). `/rename` is
+proposed only when the session ends, in one of two cases:
+
+- **A closing at `≥40` % context** — `archive` and `drop` print the step themselves at that
+  threshold.
+- **The user ends the session** (says they stop, or asks for a handoff) — propose it then,
+  whatever the context.
+
+**Any session, worker or orchestrator.** The name comes from the cards **this session** has closed,
+read from its own recent turn history:
 
 - **One card closed** → `/rename <that card's slug>`.
 - **Several, all serving the same `sert` root** → `/rename <root's slug>`.
