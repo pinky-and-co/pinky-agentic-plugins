@@ -131,33 +131,35 @@ The mod is TypeScript, which the repo's gates do not run. Check it with
 
 ## Optional: decision-model gate
 
-With a decision model served locally, the Read guard first asks it one question about a bounded
-digest of the file: personal data as the guard's rules define it, yes or no. A probability below 0.5 (a model "pass") ends the guard
+With a decision model served locally, the Read guard first asks it one typed question about the
+file's state (format, column names, first values): personal data as the guard's rules define it,
+yes or no, with a probability. A probability below 0.5 (a model "pass") ends the guard
 there: Presidio does not run and the file goes through; 0.5 or more still runs Presidio for the column listing and adds
 one line saying the model also judged the file personal. A file whose name contains `.anon.` never
 goes to the model.
 
 | Variable | Effect |
 |---|---|
-| `ONE_DECISION_MODEL` | The mlx-serve model id. Unset: the gate is off |
+| `ONE_DECISION_MODEL` | The local server's decision-model id (e.g. `APUS-OpenJev-v1-4B-MLX-8bit`). Unset: the gate is off |
 | `ONE_DECISION_URL` | Server address, default `http://127.0.0.1:11234`. Only `127.0.0.1`, `localhost` and `::1` are accepted |
 
-- **Silent fallback.** Variable unset, server unreachable, any HTTP error, or a digest the server
+- **Silent fallback.** Variable unset, server unreachable, any HTTP error, or a state the server
   refuses because it does not fit its context window: the gate is skipped with no message and
   Presidio decides alone, exactly as without the gate. The server is probed with a short TCP
   connection before the digest is built, and after a connection failure or a timeout the gate
   stays off for the rest of that hook run, so a down server adds neither a second parse of a
   large file nor a timeout per `@file`.
-- **You start the server.** The hook starts no process. Run `mlx-serve` yourself and keep the model
-  loaded: a cold start costs seconds on every `Read`.
-- **Values stay local.** The digest sent to the model holds the format, the column names and up to
-  three sampled values per column, each cut at 60 characters, never the file name. A text file
-  sends its first 10 lines, cut the same way. Newlines and other control characters in the content
-  become spaces. It goes to a loopback address only.
-- **Bind loopback.** `mlx-serve` listens on all interfaces by default: start it with
-  `--host 127.0.0.1` so the model is not reachable from the network.
-- **Bounded digest.** The digest lists every column, never a sample of columns, so a wide file can
-  exceed the server's window and fall back to Presidio.
+- **You start the server.** The hook starts no process. Run your local MLX server (oMLX, System
+  One decision models) yourself and keep the model loaded: a cold start costs seconds on every
+  `Read`.
+- **Values stay local.** The state sent to the model holds the format, the column names and up to
+  three values per column, each cut at 60 characters, never the file name. A text file sends its
+  first 10 lines, cut the same way. Newlines and other control characters in the content become
+  spaces. It goes to a loopback address only.
+- **Bind loopback.** oMLX binds `127.0.0.1` by default; keep it that way so the model is not
+  reachable from the network.
+- **Full coverage.** The state lists every column, never a sample of columns; a wide file whose
+  state exceeds the server's window is refused (HTTP 413) and falls back to Presidio.
 - **A pass stops the guard.** A text file longer than `PII_GUARD_MAX_TEXT_LINES` lines that the
   model passes is not scanned further, and the notice about lines not analyzed is not emitted.
 

@@ -10,10 +10,10 @@ the `pc-privacy` MCP server) — no second deterministic detector. The decision 
 never ``deny``: the person sees which columns look sensitive and chooses. Reading as-is, refusing,
 or refusing and running `anonymize_apply` afterwards are all their call; the hook only interrupts.
 
-When ``ONE_DECISION_MODEL`` names a model served locally, ``decision_gate`` judges a bounded digest
+When ``ONE_DECISION_MODEL`` names a model served locally, ``decision_gate`` judges the file's state
 of the file first: a ``pass`` ends the scan without Presidio, a ``block`` adds one line to the
 Presidio report.
-Unset, unreachable, or refusing the digest, the gate is skipped with no message and Presidio
+Unset, unreachable, or refusing the state, the gate is skipped with no message and Presidio
 decides alone.
 
 The same script also runs on ``UserPromptSubmit``: an ``@file`` typed in a prompt is inlined by

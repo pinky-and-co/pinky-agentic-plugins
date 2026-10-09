@@ -12,12 +12,12 @@ content either, only the status line.
 Dual-use: this module is both a standalone CLI (below) and an importable library for
 `mcp/pc_core_server.py`, which calls its functions directly rather than shelling out to a subprocess.
 
-Runtime: MLX-SERVE via the `pi` CLI (`subprocess.run(["pi", "-p", "--model", "mlx/<id>", ...])`) —
-the same `kind: "cli"` shape `model_adversarial.py`'s pool already uses for local models, resolved
-against the `mlx` provider declared in `~/.pi/agent/models.json` (this script depends on that
-declaration, never duplicates it). Default model ``mlx-community/gemma-4-12b-it-4bit``.
-``--thinking off`` is mandatory — a thinking pass drowns a small local model into an empty answer.
-Override with ``--model`` / ``PINKY_LOCAL_MODEL``.
+Runtime: a local MLX server (oMLX on ``127.0.0.1:11234``) via the `pi` CLI
+(``subprocess.run(["pi", "-p", "--model", "mlx/<id>", ...])``) — the same `kind: "cli"` shape
+`model_adversarial.py`'s pool already uses for local models, resolved against the `mlx` provider
+declared in `~/.pi/agent/models.json` (this script depends on that declaration, never duplicates it).
+Default model ``ornith-ai/Ornith-1.5-9B-MLX-6bit`` (bench: 5/7 oracle lines vs 1/7 for gemma-4-12b). ``--thinking off`` is mandatory — a thinking pass drowns a small
+local model into an empty answer. Override with ``--model`` / ``PINKY_LOCAL_MODEL``.
 
 MLX-SERVE's own preflight (a `503` body containing `out_of_memory`) fires on the generation request
 itself, not on a cheap upfront ping — a separate pre-call would load the model twice, the exact RAM
@@ -25,9 +25,7 @@ contention this runtime exists to avoid. `failure_hint()` classifies the real ca
 the fact instead: a human-readable hint, never an exception that propagates.
 
 The `pi` call carries ~4k tokens of agent scaffolding whatever the task, whose KV cache needs
-~3 GB; on an 18 GB machine the server must be started as
-`mlx-serve serve --host 127.0.0.1 --kv-quant 4 --os-reserve-gib 0` for that to fit (measured:
-the default budget refuses the request, and unloading the resident decision model changes nothing).
+~3 GB; oMLX's default memory guard serves it on an 18 GB machine (measured: cold call under 30 s) — a refused call surfaces as BLOCKED through `failure_hint()`.
 
 ``--max-tokens`` / ``PINKY_LOCAL_MAX_TOKENS`` only scales this script's own subprocess timeout
 budget for a task expected to run long — `pi` itself exposes no generation-length flag to cap.
@@ -54,7 +52,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-DEFAULT_MODEL = "mlx-community/gemma-4-12b-it-4bit"
+DEFAULT_MODEL = "ornith-ai/Ornith-1.5-9B-MLX-6bit"
 PROVIDER = "mlx"
 DEFAULT_TOKEN_BUDGET = 3000
 
@@ -148,11 +146,12 @@ def failure_hint(exc: Exception, model: str, timeout: int) -> FailureHint:
         if is_out_of_memory(combined):
             return FailureHint(
                 2,
-                f"MLX-SERVE out of memory ({model}). Start the server with "
-                "--kv-quant 4 --os-reserve-gib 0; if already set, shrink the --file inputs.",
+                f"local MLX server out of memory ({model}); "
+                "shrink the --file inputs or free RAM on the server.",
             )
         return FailureHint(
-            2, f"MLX-SERVE call failed (exit {exc.returncode}); check it's running."
+            2,
+            f"local MLX server call failed (exit {exc.returncode}); check it's running.",
         )
     if isinstance(exc, subprocess.TimeoutExpired):
         return FailureHint(1, f"MLX-SERVE call timed out after {timeout}s.")

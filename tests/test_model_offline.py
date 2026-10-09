@@ -20,7 +20,7 @@ import model_offline as mo  # noqa: E402
 
 class TestResolveModel(unittest.TestCase):
     def test_default_is_mlx_id(self):
-        self.assertEqual(mo.DEFAULT_MODEL, "mlx-community/gemma-4-12b-it-4bit")
+        self.assertEqual(mo.DEFAULT_MODEL, "ornith-ai/Ornith-1.5-9B-MLX-6bit")
 
     def test_cli_overrides_env_and_default(self):
         with unittest.mock.patch.dict(
@@ -120,8 +120,8 @@ class TestFailureHint(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(
             hint,
-            "MLX-SERVE out of memory (m). Start the server with "
-            "--kv-quant 4 --os-reserve-gib 0; if already set, shrink the --file inputs.",
+            "local MLX server out of memory (m); "
+            "shrink the --file inputs or free RAM on the server.",
         )  # oracle complet : la chaîne fixe EST l'invariant du module (zéro égress)
         self.assertNotIn(
             "out_of_memory", hint
