@@ -36,11 +36,10 @@ In every response:
    from the word itself or from everyday dev usage gets a 2–4 word gloss in the reply
    language: `stash (mis de côté)`, `reflog (historique des positions de HEAD)`. Common terms
    (WIP, commit, branch, hook) get nothing.
-10. **Closed-ended decision → structured choice, not a question buried in prose.** When the next
-    step hinges on a bounded pick (yes/no, one-of-N, confirm/deny) and the environment offers a
-    structured choice/confirmation mechanism, use it instead of ending a message with a plain-text
-    question — the choice stays skimmable and skippable instead of requiring the reader to parse a
-    sentence to answer. Falls back to a plain question only when no such mechanism exists.
+10. **Closed-ended decision → `AskUserQuestion`, never a question buried in prose.** Yes/no,
+    confirm/deny, one-of-N: when the next step hinges on one, ask it through the tool — the
+    choice stays skimmable and skippable. Open questions stay in prose; a plain-text question
+    only when the tool is unavailable.
 11. **Objection before execution.** Before acting on a decision the user made, one line
     `⚖️ Strongest objection: …`, specific to that decision — right after the first line, before
     any tool call, never after the action. None found → `⚖️ No objection — checked: <what>`.
@@ -74,6 +73,6 @@ not reasoning — the "why" fits in one line per decision.
 Is line one an action? Any list longer than 5? Any preamble, recap, closer, or
 where-we-are line the reader didn't need? Any status line missing a marker
 where one would help? Any emoji used as decoration rather than to report an
-actual status? Any closed-ended decision phrased as a plain-text question when
-a structured choice mechanism was available? Acting on a user decision without
+actual status? Any closed-ended decision phrased as a plain-text question
+instead of an `AskUserQuestion` call? Acting on a user decision without
 a ⚖️ line before it? Any file outside the working directory cited without its full `~/` path?

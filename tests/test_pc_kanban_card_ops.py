@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
+import os
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 SCRIPT = (
@@ -15,6 +18,11 @@ SCRIPT = (
     / "pc_kanban_card_ops.py"
 )
 
+
+_spec = importlib.util.spec_from_file_location("card_ops", SCRIPT)
+assert _spec and _spec.loader
+card_ops = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(card_ops)
 
 DEFINER = "# D\n\n## Requirements\n\n| Id | P | E | C |\n|---|---|---|---|\n| PKG-0001-01 | MUST | x | y |\n"
 
@@ -391,3 +399,219 @@ def test_select_accepts_a_directory_as_mockup(tmp_path: Path) -> None:
     folder.mkdir()
     _card(tmp_path, "1-todo", head=_mockup_head(f"mockup: {folder}\n"))
     assert _run(tmp_path, "select", "demo").returncode == 0
+
+
+# --- archive / drop behaviour (ported from the former shell scripts) -------------------------
+
+
+def _reviewed(board: Path, column: str, reviewed: bool) -> Path:
+    card = _card(board, column)
+    if reviewed:
+        card.write_text(
+            card.read_text() + "\n- [x] reviewed (n/a — mechanical)\n", encoding="utf-8"
+        )
+    return card
+
+
+def test_archive_from_3_in_progress_when_reviewed(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    _reviewed(board, "3-in-progress", True)
+    result = _run(board, "archive", "demo")
+    assert result.returncode == 0, result.stderr
+    assert list((board / "_ARCHIVE" / "CHANTIER0001-done").glob("*_demo.md"))
+
+
+def test_archive_refuses_3_in_progress_without_reviewed_box(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    card = _reviewed(board, "3-in-progress", False)
+    result = _run(board, "archive", "demo")
+    assert result.returncode == 1
+    assert card.is_file()
+    assert "reviewed" in result.stderr
+
+
+def test_archive_refuses_an_open_column(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    card = _card(board, "1-todo")
+    assert _run(board, "archive", "demo").returncode != 0
+    assert card.is_file()
+
+
+def test_archive_seeds_nav_yml_and_dates_the_entry(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    _card(board, "4-done")
+    result = _run(board, "archive", "demo")
+    folder = board / "_ARCHIVE" / "CHANTIER0001-done"
+    assert (
+        folder / ".nav.yml"
+    ).read_text() == "sort:\n  direction: desc\n  by: filename\n"
+    assert result.stdout.splitlines()[0] == f"seeded {folder}/.nav.yml"
+    assert (
+        f"archived -> {folder / (date.today().isoformat() + '_demo.md')}"
+        in result.stdout.splitlines()
+    )
+
+
+def test_archive_refuses_to_overwrite_an_entry(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    card = _card(board, "4-done")
+    folder = board / "_ARCHIVE" / "CHANTIER0001-done"
+    folder.mkdir(parents=True)
+    (folder / f"{date.today().isoformat()}_demo.md").write_text(
+        "here", encoding="utf-8"
+    )
+    result = _run(board, "archive", "demo")
+    assert result.returncode == 1
+    assert "refusing to overwrite" in result.stderr
+    assert card.is_file()
+
+
+def test_drop_refuses_a_4_done_card(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    card = _card(board, "4-done")
+    assert _run(board, "drop", "demo", "why").returncode != 0
+    assert card.is_file()
+
+
+def test_drop_refuses_an_empty_reason(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    card = _card(board, "1-todo")
+    result = _run(board, "drop", "demo", "")
+    assert result.returncode == 1
+    assert "a reason is required" in result.stderr
+    assert card.is_file()
+
+
+def test_drop_appends_the_reason_and_leaves_story_untouched(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    card = _card(board, "1-todo")
+    story = card.parent.parent / "story.md"
+    story.write_bytes(b"| PKG-0099-1 | MUST | x | y |\n")
+    assert _run(board, "drop", "demo", "bar").returncode == 0
+    dropped = next((board / "_ARCHIVE" / "CHANTIER0001-dropped").glob("*_demo.md"))
+    assert dropped.read_text().endswith(
+        f"\n## Dropped ({date.today().isoformat()})\n\nbar\n"
+    )
+    assert story.read_bytes() == b"| PKG-0099-1 | MUST | x | y |\n"
+
+
+# --- closing sequence (printed after archive and drop) -----------------------------------------------------
+
+
+def _todo(board: Path, name: str, head: str, goal: str = "Goal of it.") -> Path:
+    card = board / "CHANTIER0001-x" / "1-todo" / f"{name}.md"
+    card.parent.mkdir(parents=True, exist_ok=True)
+    card.write_text(f"---\n{head}---\n# T {name}\n\n{goal}\n", encoding="utf-8")
+    return card
+
+
+def _sequence(board: Path, signals: dict) -> str:
+    return card_ops.closing_sequence(
+        board / "CHANTIER0001-x", Path("_ARCHIVE/x.md"), [board], signals
+    )
+
+
+def test_sequence_lists_open_cards_with_goal_and_obsolescence_reminder(
+    tmp_path: Path,
+) -> None:
+    board = tmp_path / "_KANBAN"
+    _todo(board, "other", "date: 2026-01-01\n", "Why this exists.")
+    out = _sequence(board, {"context_window_pct": None, "rate_limit": None})
+    assert "1-todo/other.md — T other\n    Why this exists." in out
+    assert "`- [x] obsolescence (none | <slug>, ...)`" in out
+
+
+def test_sequence_orders_candidates_and_skips_blocked_ones(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    _todo(board, "old-p3", "date: 2026-01-01\n")
+    _todo(board, "new-p3", "date: 2026-02-01\n")
+    _todo(board, "p5", "date: 2026-03-01\npriority: 5\n")
+    _todo(board, "blocked", "date: 2026-01-01\npriority: 5\nblocked_by: nope\n")
+    _todo(board, "unblocked", "date: 2026-04-01\npriority: 1\nblocked_by: base\n")
+    done = board / "_ARCHIVE" / "CHANTIER0001-done" / "2026-01-02_base.md"
+    done.parent.mkdir(parents=True)
+    done.write_text("x", encoding="utf-8")
+    out = _sequence(board, {"context_window_pct": None, "rate_limit": None})
+    picked = [line.strip()[2:] for line in out.splitlines() if line.startswith("   - ")]
+    assert picked == ["p5", "old-p3", "new-p3", "unblocked"]
+
+
+def test_sequence_says_nothing_to_propose_on_an_empty_board(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    (board / "CHANTIER0001-x").mkdir(parents=True)
+    out = _sequence(board, {"context_window_pct": None, "rate_limit": None})
+    assert "   nothing to propose" in out
+    assert "(none open)" in out
+
+
+def test_recommendation_on_both_sides_of_40() -> None:
+    assert card_ops.recommendation({"context_window_pct": 39, "rate_limit": None}) == (
+        "Reco: continue in this session (context at 39%)."
+    )
+    assert card_ops.recommendation({"context_window_pct": 40, "rate_limit": None}) == (
+        "Reco: start a new session for the next card (context at 40%)."
+    )
+    assert (
+        card_ops.recommendation({"context_window_pct": None, "rate_limit": None}) == ""
+    )
+
+
+def test_recommendation_pauses_on_a_triggered_rate_limit() -> None:
+    limit = {"five_hour": {"triggered": True, "resets_at": 99, "used_percentage": 96}}
+    assert card_ops.recommendation({"context_window_pct": 10, "rate_limit": limit}) == (
+        "Reco: wait for the five_hour reset (resets_at 99, 96% used) before starting another card."
+    )
+
+
+def test_rename_step_only_from_40(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    (board / "CHANTIER0001-x").mkdir(parents=True)
+    for pct, expected in ((39, False), (40, True), (75, True), (None, False)):
+        out = _sequence(board, {"context_window_pct": pct, "rate_limit": None})
+        assert ("/rename" in out) is expected, pct
+
+
+def test_archive_cli_prints_the_sequence_after_the_unchanged_first_line(
+    tmp_path: Path,
+) -> None:
+    board = tmp_path / "_KANBAN"
+    _card(board, "4-done")
+    lines = _run(board, "archive", "demo").stdout.splitlines()
+    assert [line for line in lines if line.startswith("archived -> ")]
+    assert "Closing sequence (finishing-a-card.md):" in lines
+
+
+def test_candidate_with_a_dropped_blocker_is_kept_and_annotated(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    _todo(board, "heir", "date: 2026-01-01\nblocked_by: gone\n")
+    dropped = board / "_ARCHIVE" / "CHANTIER0001-dropped" / "2026-01-02_gone.md"
+    dropped.parent.mkdir(parents=True)
+    dropped.write_text("x", encoding="utf-8")
+    out = _sequence(board, {"context_window_pct": None, "rate_limit": None})
+    assert "   - heir (blocker dropped — obsolescence check first)" in out.splitlines()
+
+
+def test_candidate_without_date_is_flagged_and_sorted_last(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    _todo(board, "nodate", "priority: 5\n")
+    _todo(board, "dated", "date: 2026-01-01\npriority: 1\n")
+    out = _sequence(board, {"context_window_pct": None, "rate_limit": None})
+    picked = [line for line in out.splitlines() if line.startswith("   - ")]
+    assert picked == ["   - dated", "   - nodate (no date: — malformed)"]
+
+
+def test_cli_without_a_session_id_prints_no_recommendation(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    _card(board, "4-done")
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"}
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--board", str(board), "archive", "demo"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Closing sequence (finishing-a-card.md):" in result.stdout
+    assert "Reco:" not in result.stdout
+    assert "/rename" not in result.stdout
