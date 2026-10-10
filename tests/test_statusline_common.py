@@ -201,6 +201,31 @@ def test_dump_debug_payload_moves_a_repeated_payload_to_the_end(
     assert stored == [{"n": 2}, {"n": 1}]
 
 
+def test_dump_debug_payload_ignores_the_elapsed_duration_counters(
+    tmp_path, debug_session
+):
+    base = {"model": {"display_name": "Sonnet"}, "cost": {"total_cost_usd": 1.0}}
+
+    def at(ms, extra=None):
+        cost = {
+            **base["cost"],
+            "total_duration_ms": ms,
+            "total_api_duration_ms": ms // 2,
+        }
+        return {**base, "cost": cost, **(extra or {})}
+
+    renders = (
+        at(1000),
+        at(3000),
+        at(5000, {"effort": "high"}),
+        at(7000, {"effort": "high"}),
+    )
+    for payload in renders:
+        c.dump_debug_payload(payload, "s1", "statusline")
+    stored = json.loads(_debug_file(tmp_path).read_text(encoding="utf-8"))
+    assert stored == [at(1000), at(5000, {"effort": "high"})]
+
+
 def test_dump_debug_payload_writes_a_file_meant_to_be_read_by_a_person(
     tmp_path, debug_session
 ):

@@ -199,6 +199,22 @@ def process_flags(session_id: str) -> ProcessFlags:
 # --- debug dump — the last payloads a status-line script received ------------------------------
 
 
+_DEBUG_ELAPSED = (("cost", "total_duration_ms"), ("cost", "total_api_duration_ms"))
+
+
+def _debug_state(payload: object) -> object:
+    """`payload` without the duration counters that grow on every render, so two renders of
+    one unchanged state compare equal."""
+    if not isinstance(payload, dict):
+        return payload
+    state = dict(payload)
+    for outer, inner in _DEBUG_ELAPSED:
+        block = state.get(outer)
+        if isinstance(block, dict) and inner in block:
+            state[outer] = {k: v for k, v in block.items() if k != inner}
+    return state
+
+
 def dump_debug_payload(payload: object, session_id: object, name: str) -> None:
     """Keep `payload` in `~/.claude/debug/<session_id>__pc-statusline__<name>.json` while the
     session is in debug mode; write nothing otherwise.
@@ -208,9 +224,10 @@ def dump_debug_payload(payload: object, session_id: object, name: str) -> None:
     writes once debug is on, a `/debug` typed mid-session included. The file is tested at every
     render, so the dump starts at the render after it appears.
 
-    The dump is a JSON array of the last `_DEBUG_KEEP` distinct payloads, oldest first, and is
-    rewritten only when `payload` differs from the last one stored. Every error is swallowed: a
-    status line renders whatever happens to its debug file."""
+    The dump is a JSON array of the last `_DEBUG_KEEP` distinct states, oldest first, each as the
+    first payload received in that state, and is rewritten only when the state differs from the
+    last one stored — the elapsed-duration counters (`_DEBUG_ELAPSED`) are not part of the state.
+    Every error is swallowed: a status line renders whatever happens to its debug file."""
     try:
         if not (isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)):
             return
@@ -225,9 +242,12 @@ def dump_debug_payload(payload: object, session_id: object, name: str) -> None:
             stored = []
         if not isinstance(stored, list):
             stored = []
-        if stored and stored[-1] == payload:
+        state = _debug_state(payload)
+        if stored and _debug_state(stored[-1]) == state:
             return
-        kept = [item for item in stored if item != payload][-(_DEBUG_KEEP - 1) :]
+        kept = [item for item in stored if _debug_state(item) != state][
+            -(_DEBUG_KEEP - 1) :
+        ]
         path.parent.mkdir(parents=True, exist_ok=True)
         write_json_atomic(str(path), [*kept, payload], readable=True)
     except Exception:
