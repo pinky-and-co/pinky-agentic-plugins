@@ -27,9 +27,9 @@ code.
   the review is narrowed, a `task` stating the intent and what to attack, and `stack` only when
   the change is in that stack. The tool diffs the repository of the session's project directory
   and names it in its answer.
-  - No `tools` by default: the diff is in the prompt, and a model given tools explores for
-    minutes, turn after turn. Pass `tools: ["read", "grep"]` only when the verdict needs files
-    beyond the diff.
+  - Pass `tools: ["read", "grep"]` on every call: without them the model cannot open a file, and
+    answers a check that needs one (callers, references, packaging) with a tool call written as
+    text, which is no review.
   - The tool already applies the review methodology and the stack checklist: do not load them
     yourself.
   - `nothing to review`, or a repository that is not the one you read: check `git status` and

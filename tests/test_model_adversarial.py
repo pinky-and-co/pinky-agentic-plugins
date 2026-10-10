@@ -634,6 +634,41 @@ class TestRunPoolRequeue(unittest.TestCase):
         self.assertIsNone(result.entry)
         self.assertEqual(result.result, "mistral-medium-3.5: empty answer")
 
+    def test_answer_ending_on_a_closing_tool_call_tag_falls_through_to_the_next_entry(
+        self,
+    ):
+        # Un modèle sans outils écrit son appel d'outil en texte : ce n'est pas un avis.
+        for tail in ("</function>", "</tool_call>", "</function>\n  \n"):
+            with self.subTest(tail=tail):
+                answers = [f"<function=read>\n<parameter=path>a.py{tail}", "answer"]
+                with unittest.mock.patch.object(
+                    ma, "call_cli", side_effect=answers
+                ) as call:
+                    result = ma.run_pool([MISTRAL, GLM], "p")
+                self.assertEqual(call.call_count, 2)
+                self.assertEqual(result, ma.PoolResult(GLM, "answer"))
+
+    def test_tool_call_text_takes_the_empty_answer_path_requeue_then_drop(self):
+        text = "<function=grep>\n<parameter=pattern>x</parameter>\n</function>"
+        with unittest.mock.patch.object(
+            ma, "call_cli", side_effect=[text, text]
+        ) as call:
+            result = ma.run_pool([MISTRAL], "p")
+        self.assertEqual(call.call_count, 2)
+        self.assertIsNone(result.entry)
+
+    def test_tool_call_markup_quoted_mid_text_with_prose_after_is_an_answer(self):
+        review = (
+            "The server parses <tool_call>read a.py</tool_call> blocks out of the text; "
+            "that regex never matches nested tags.\nVerdict: approved."
+        )
+        with unittest.mock.patch.object(
+            ma, "call_cli", side_effect=[review, "second"]
+        ) as call:
+            result = ma.run_pool([MISTRAL, GLM], "p")
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(result, ma.PoolResult(MISTRAL, review))
+
     def test_requeue_order_is_end_of_queue_not_in_place(self):
         # Deux entrées toujours vides : la file doit suivre A, B, A, B — jamais en place (A, A,
         # B, B) — avant de s'épuiser au bout de 2*N tentatives.

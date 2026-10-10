@@ -106,6 +106,10 @@ _OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
 _ORGANIZATION_LIMIT_RE = re.compile(r"\borgani[sz]ation reached\b", re.IGNORECASE)
 _TIMEOUT_RE = re.compile(r"\btimed out\b")
+# Une réponse qui finit sur une balise fermante d'appel d'outil est un appel écrit en texte par un
+# modèle sans outils, jamais un avis. Une balise citée au milieu d'un avis, suivie de prose, ne
+# correspond pas : l'ancre est la fin du texte.
+_TOOL_CALL_TAIL_RE = re.compile(r"</(?:function|tool_call)>\s*\Z")
 
 
 class PoolResult(NamedTuple):
@@ -813,7 +817,7 @@ def run_pool(
     timeout: int = RUN_TIMEOUT,
     tools: list[str] | None = None,
 ) -> PoolResult:
-    """Try each queued entry in order, first non-empty success wins.
+    """Try each queued entry in order, first real answer wins.
 
     Returns (entry, answer) on success, or (None, last_error) once the queue is exhausted. A
     `kind: "offline"` entry is never dispatched here — it must go through the separate `offline`
@@ -824,7 +828,8 @@ def run_pool(
     to serve for the rest of this run: the entry is dropped for good, never requeued. A 402 or an
     organization-wide 429 (`is_provider_wide_limit`) is the provider's own, so its other queued
     entries are skipped too; a 429 naming one model skips only that entry. An empty
-    answer or a timeout `pi` itself reports (`is_timeout`) is transient: the entry is appended to
+    answer, an answer ending on a closing tool-call tag (a call written as text by a model that
+    had no tools) or a timeout `pi` itself reports (`is_timeout`) is transient: the entry is appended to
     the end of the remaining queue once; a second such failure from the same entry drops it for
     good — at most `2 * len(entries)` attempts, never an infinite loop. `timeout` is the wall
     clock of the whole `pi` run, tool loop included — `pi` bounds each request itself
@@ -947,12 +952,17 @@ def run_pool(
                 "elapsed": f"{time.monotonic() - started:.1f}s",
                 "answer_chars": len(answer.strip()),
             }
-            if answer.strip():
+            if not answer.strip():
+                last_error = f"{entry['name']}: empty answer"
+                log_pool_event(entry["name"], "empty answer", **answered)
+                requeue_once(idx)
+            elif _TOOL_CALL_TAIL_RE.search(answer):
+                last_error = f"{entry['name']}: tool call text instead of an answer"
+                log_pool_event(entry["name"], "tool call text", **answered)
+                requeue_once(idx)
+            else:
                 log_pool_event(entry["name"], "answered", **answered)
                 return PoolResult(entry, answer)
-            last_error = f"{entry['name']}: empty answer"
-            log_pool_event(entry["name"], "empty answer", **answered)
-            requeue_once(idx)
     log_pool_event("(pool)", "exhausted")
     return PoolResult(None, last_error)
 
