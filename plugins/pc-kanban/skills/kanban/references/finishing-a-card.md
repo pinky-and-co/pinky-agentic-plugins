@@ -68,10 +68,11 @@ mechanical check, in this order:
    reviewer.md`), the single entry point: the caller never calls the `adversarial` MCP tool
    itself. Hand it the branch the work forked from (`main`) and the card's intent; it reads the
    change in a fresh context that never saw the generating session's rationalizations, then
-   decides by itself between `adversarial` (a non-Claude pool model, tier routed from the diff,
-   stack checklist included — the real change of perspective) and reviewing the diff itself
-   under the `review-guidelines` skill. It opens its report with `Method: adversarial (<model>)`
-   or `Method: reviewer`.
+   calls `adversarial` (a non-Claude pool model of `sonnet` tier or above, stack checklist
+   included — the real change of perspective) whenever there is a diff, and reviews by itself under
+   the `review-guidelines` skill only a claim with no diff, or after `adversarial` answered
+   `BLOCKED` or `ERROR`. It opens its report with `Method: adversarial (<model>)` or
+   `Method: reviewer (<model>)`, the model that answered either way.
 
    When the card declares `mockup:`, the hand-off also carries the mockup path (the unpacked
    folder for a `.zip`, the sibling `<zip name>/`) and the card's `mockup_fidelity` levels, an axis
@@ -83,12 +84,11 @@ mechanical check, in this order:
    that it is degraded** (same model, same context) rather than presenting it as equivalent to (1).
 
 Whatever this session then tells the user about the review opens with the report's `Method:` line,
-relayed verbatim before any findings — the label in its full `provider/model · 🟦🟪🟧 tier` form,
-completed from the report's `[answered by …]` line when the first line carries the model name
-alone. It is the only trace of *how* the verdict was reached, and a summary that drops it presents
-a pool-model challenge and a solo same-model read as the same review. When the review involved an `adversarial` call that returned nothing (unfinished response,
-cut off mid-answer, pool exhausted), say so explicitly: the verdict then rests on the reviewer
-alone.
+relayed verbatim before any findings — naming who answered in the full
+`provider/model · 🟦🟪🟧 tier` form, and stating why `adversarial` did not answer when the
+`Method:` is `reviewer` on a change that has a diff. It is the only trace of *how* the verdict
+was reached, and a summary that drops it presents a pool-model challenge and a solo same-model
+read as the same review.
 
 ### The review belongs in the `/goal` condition, not in an after-the-fact hope
 
@@ -98,9 +98,10 @@ review goes **into the `/goal` condition itself**, set when the card is taken (`
 step 7): the harness-native Stop-hook then holds the card open until the transcript shows the
 review ran. Phrase it as a transcript-verifiable state, never a promise — e.g. append to the
 `## Done when`-derived condition `… and the final diff has been reviewed by `Agent(reviewer)`,
-findings addressed, the report's `Method:` line relayed verbatim to the user (an `adversarial`
-call that returned nothing stated as such — verdict on the reviewer alone), and the `- [x]
-reviewed (<method>)` box checked on the card`
+findings addressed, the report's `Method:` line relayed verbatim to the user, naming who answered
+in the full `provider/model · 🟦🟪🟧 tier` form, the report states why `adversarial` did not answer
+when its `Method:` is `reviewer` on a change that has a diff, and the `- [x] reviewed (<method>)`
+box checked on the card`
 — naming the checkbox so satisfying the goal and stamping the box are one action.
 
 The judgment/mechanical call is made at intake, before the diff exists — so **when it is unclear,

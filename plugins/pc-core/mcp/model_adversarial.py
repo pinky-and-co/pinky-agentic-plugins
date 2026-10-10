@@ -260,7 +260,7 @@ _TIER_ORDER = ("opus", "sonnet", "haiku")
 
 
 def select_for_delegation_with_fallback(
-    pool: list[dict[str, Any]], tier: str
+    pool: list[dict[str, Any]], tier: str, floor_tier: str = "haiku"
 ) -> list[dict[str, Any]]:
     """`select_for_delegation` at `tier`, degrading one tier at a time when the pool has
     nothing at or above it — a diff routed to `opus` (`review_complexity.tier_for`) must not
@@ -269,9 +269,13 @@ def select_for_delegation_with_fallback(
 
     Restricted to `kind: "cli"` at every tier tried — the one kind callable through this pool
     path, `offline` going through the separate `offline` tool instead.
+
+    `floor_tier` is the lowest tier ever tried: a `tier` below it is raised to it, and the
+    degradation stops there.
     """
-    start = _TIER_ORDER.index(tier) if tier in _TIER_ORDER else 0
-    for fallback_tier in _TIER_ORDER[start:]:
+    floor = _TIER_ORDER.index(floor_tier)
+    start = min(_TIER_ORDER.index(tier) if tier in _TIER_ORDER else 0, floor)
+    for fallback_tier in _TIER_ORDER[start : floor + 1]:
         candidates = [
             e for e in select_for_delegation(pool, fallback_tier) if e["kind"] == "cli"
         ]
