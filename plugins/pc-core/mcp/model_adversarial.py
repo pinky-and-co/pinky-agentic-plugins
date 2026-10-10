@@ -712,6 +712,8 @@ def _join_all(threads: list[threading.Thread], seconds: float) -> None:
         thread.join(max(0.0, deadline - time.perf_counter()))
 
 
+# `str.split()` on purpose: it collapses U+2028/U+2029/U+0085 too, and `failure_detail` reads the
+# last line through `splitlines()`. The viewer's `_squash` is a different, ASCII-only rule.
 def _squash(text: str) -> str:
     """`text` on one line: every run of whitespace, newlines included, becomes one space."""
     return " ".join(text.split())

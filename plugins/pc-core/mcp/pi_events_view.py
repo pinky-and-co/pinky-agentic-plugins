@@ -21,6 +21,7 @@ import json
 import re
 import sys
 import time
+import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -28,16 +29,32 @@ from typing import Any
 IDLE_TIMEOUT = 1800.0
 _POLL_SECONDS = 0.2
 _ARG_CHARS = 60
-# C0/C1 controls except newline and tab, plus the Unicode characters that reorder or hide text
-# (bidi marks and isolates, zero-width, LS/PS, word joiners, BOM): none of them from a model's
-# text or a tool's arguments may reach the terminal as itself.
-_CONTROL_RE = re.compile(
-    r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e"
-    r"\u2060-\u2064\u2066-\u2069\ufeff]"
-)
+# Unicode categories that hide or reorder text (controls, format characters, line and paragraph
+# separators); `_is_hidden` adds the blocks and marks that carry no category of their own.
+_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 # ASCII whitespace only: `str.split()` would also swallow U+2028/U+2029 and U+0085, which must
-# reach `_CONTROL_RE` to be replaced.
+# reach `_plain` to be replaced.
 _ASCII_SPACE_RE = re.compile(r"[ \t\n\r\f\v]+")
+
+
+def _is_hidden(char: str) -> bool:
+    """Whether `char` could hide or reorder text on a terminal: a control (ESC included), a format
+    or separator character, the whole U+2060-U+206F block (unassigned points included), the
+    combining grapheme joiner and the variation selectors. Newline and tab are not.
+    """
+    if char in "\n\t":
+        return False
+    return (
+        unicodedata.category(char) in _HIDDEN_CATEGORIES
+        or "\u2060" <= char <= "\u206f"
+        or char == "\u034f"
+        or "\ufe00" <= char <= "\ufe0f"
+    )
+
+
+def _plain(text: str) -> str:
+    """`text` with every hidden character replaced by `?`."""
+    return "".join("?" if _is_hidden(char) else char for char in text)
 
 
 def _squash(text: str) -> str:
@@ -81,7 +98,7 @@ class EventRenderer:
         self.finished = False
 
     def feed(self, record: dict[str, Any]) -> str:
-        """The text to print for one event, control characters replaced by `?`.
+        """The text to print for one event, hidden characters replaced by `?`.
 
         Args:
             record: one decoded line of the events file.
@@ -89,7 +106,7 @@ class EventRenderer:
         Returns:
             The text — possibly empty, possibly a fragment without its newline (a text delta).
         """
-        return _CONTROL_RE.sub("?", self._render(record))
+        return _plain(self._render(record))
 
     def _render(self, record: dict[str, Any]) -> str:
         """The text for one event, before control characters are replaced."""

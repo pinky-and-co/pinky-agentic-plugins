@@ -263,7 +263,7 @@ class TestReviewPoint(unittest.TestCase):
     @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_full_command_is_constructed_through_review_point(self, mock_run):
         # Oracle sur la ligne de commande réelle construite par review_point → run_pool,
-        # pas seulement sur le verdict — la card exige explicitement -p, -t read et --model <provider>/<id>.
+        # pas seulement sur le verdict — la card exige explicitement --mode json, -t read et --model <provider>/<id>.
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="STATUS: OK\nJUSTIFICATION: fine.", stderr="", returncode=0
         )

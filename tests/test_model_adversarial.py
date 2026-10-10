@@ -2639,6 +2639,63 @@ class TestPiEventsView:
             "[  1.5s] error 429 ??? ?end\n"
         )
 
+    @pytest.mark.parametrize(
+        "family",
+        [
+            pytest.param([0x00AD], id="soft-hyphen"),
+            pytest.param([0x034F], id="combining-grapheme-joiner"),
+            pytest.param([0x061C], id="arabic-letter-mark"),
+            pytest.param([0x180E], id="mongolian-vowel-separator"),
+            pytest.param(range(0x200B, 0x2010), id="zero-width-and-marks"),
+            pytest.param(range(0x2028, 0x202F), id="separators-and-bidi-embeddings"),
+            pytest.param(range(0x2060, 0x2070), id="word-joiner-block"),
+            pytest.param(range(0xFE00, 0xFE10), id="variation-selectors"),
+            pytest.param([0xFEFF], id="byte-order-mark"),
+            pytest.param(range(0xFFF9, 0xFFFC), id="interlinear-annotation"),
+            pytest.param([0xE0001], id="language-tag"),
+            pytest.param(range(0xE0020, 0xE0080), id="tag-characters"),
+            pytest.param(
+                [
+                    c
+                    for c in range(0x00, 0xA0)
+                    if c not in (0x0A, 0x09) and not 0x20 <= c < 0x7F
+                ],
+                id="c0-del-c1",
+            ),
+        ],
+    )
+    def test_every_hidden_character_family_is_replaced(self, family):
+        text = "".join("a" + chr(c) for c in family)
+        record = {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_delta", "delta": text},
+        }
+
+        shown = pev.EventRenderer(lambda: 0.0).feed(record)
+
+        assert shown == "[  0.0s] text: " + "a?" * len(family)
+
+    def test_the_viewer_keeps_newline_tab_and_visible_text(self):
+        record = {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_delta", "delta": "a\tb\nc\u00e9"},
+        }
+
+        shown = pev.EventRenderer(lambda: 0.0).feed(record)
+
+        assert shown == "[  0.0s] text: a\tb\nc\u00e9"
+
+    def test_squashed_fields_replace_nel_and_paragraph_separator_and_keep_nbsp(self):
+        record = {
+            "type": "tool_execution_start",
+            "toolName": "bash",
+            "args": {"command": "a\x85b\u2029c\u00a0d  e\r\nf"},
+        }
+
+        shown = pev.EventRenderer(lambda: 0.0).feed(record)
+
+        assert shown == "[  0.0s] tool bash(command=a?b?c\u00a0d e f)\n"
+
     def test_a_character_split_across_two_reads_is_decoded_exactly(self, tmp_path):
         path = tmp_path / "events.jsonl"
         delta = {
