@@ -13,7 +13,8 @@ every other pinky setting (``policy_lib.load_policies`` — repo → parent dire
 seeded from ``CLAUDE_PROJECT_DIR`` (already present in this MCP server's own environment). No file
 anywhere in the chain → a single built-in ``nvidia/z-ai/glm-5.3`` entry.
 
-Every remote call goes through ``pi`` (``call_cli``): ``pi -p --model <provider>/<model>``. Provider
+Every remote call goes through ``pi`` (``call_cli``): ``pi --mode json --model <provider>/<model>``,
+whose JSONL events are read as they arrive. Provider
 endpoints live in pi's registry (built-in, or a custom provider in ``~/.pi/agent/models.json``).
 Keys come from the ``keys`` array of ``settings.pinky.json`` — the same ``macos_keychain`` entries
 ``load_secrets`` declares — resolved on demand and handed to each pi call as environment variables
@@ -66,18 +67,24 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import itertools
+import json
 import os
 import random
 import re
+import shlex
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from subprocess import Popen
+from typing import Any, Literal, NamedTuple, TextIO
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 import load_secrets  # noqa: E402
@@ -670,39 +677,224 @@ def secret_env() -> dict[str, str]:
     return load_secrets.resolve_env(load_secrets.load_keys(project_dir))
 
 
+_EVENTS_VIEWER = Path(__file__).with_name("pi_events_view.py")
+_PANE_TIMEOUT = 10.0
+_PIPE_DRAIN_SECONDS = 5.0
+
+
+def _kill_session(proc: Popen[str]) -> None:
+    """SIGKILL `pi` and, on POSIX where it runs in its own session (`start_new_session`), every
+    process it started — a tool's child holding its pipes goes with it.
+
+    Args:
+        proc: the `pi` process.
+    """
+    # Pas de `killpg` hors POSIX : `proc.kill()` reste atteint dans tous les cas. Jamais un pid
+    # <= 0 : `killpg(0, ...)` signalerait notre propre groupe.
+    killpg = getattr(os, "killpg", None)
+    if killpg is not None and proc.pid > 0:
+        try:
+            killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    proc.kill()
+
+
+def _join_all(threads: list[threading.Thread], seconds: float) -> None:
+    """Wait for `threads` for at most `seconds` in all, not per thread.
+
+    Args:
+        threads: the threads to wait for.
+        seconds: the one deadline they share.
+    """
+    deadline = time.perf_counter() + seconds
+    for thread in threads:
+        thread.join(max(0.0, deadline - time.perf_counter()))
+
+
+def _squash(text: str) -> str:
+    """`text` on one line: every run of whitespace, newlines included, becomes one space."""
+    return " ".join(text.split())
+
+
+def _emit_event(events: TextIO | None, record: dict[str, Any]) -> None:
+    """Best-effort: append `record` as one JSON line to the run's events file, if there is one.
+
+    Args:
+        events: the file `pi_events_view.py` follows, or None.
+        record: the object to write.
+    """
+    if events is None:
+        return
+    try:
+        events.write(json.dumps(record, separators=(",", ":")) + "\n")
+        events.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def _emit_result(
+    events: TextIO | None, entry: dict[str, Any], attempt: int, outcome: str
+) -> None:
+    """Best-effort: tell the events file how one attempt ended.
+
+    Args:
+        events: the file `pi_events_view.py` follows, or None.
+        entry: the pool entry that was tried.
+        attempt: its attempt number (1 or 2).
+        outcome: a short reason: `answered`, `empty answer`, `rate limited`, `timeout`, ...
+    """
+    _emit_event(
+        events,
+        {
+            "type": "pool_result",
+            "entry": entry["name"],
+            "attempt": attempt,
+            "outcome": outcome,
+        },
+    )
+
+
+def _tee_line(events: TextIO | None, line: str) -> None:
+    """Best-effort: copy one raw line of `pi`'s output into the run's events file.
+
+    A line without its newline (`pi` killed mid-write) gets one, so whatever is written next — the
+    next attempt's marker — starts a line of its own.
+    """
+    if events is None:
+        return
+    try:
+        events.write(line if line.endswith("\n") else line + "\n")
+        events.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def _pump_stdout(stream: TextIO, sink: list[str], events: TextIO | None) -> None:
+    """Collect `pi`'s stdout line by line as it arrives, copying each line to the events file.
+
+    Args:
+        stream: the process's stdout.
+        sink: where the lines are collected.
+        events: the events file, or None.
+    """
+    for line in stream:
+        sink.append(line)
+        _tee_line(events, line)
+
+
+def _pump_stderr(stream: TextIO, sink: list[str]) -> None:
+    """Collect `pi`'s stderr whole (read concurrently so a full pipe never stalls the process).
+
+    Args:
+        stream: the process's stderr.
+        sink: where the text is collected.
+    """
+    sink.append(stream.read())
+
+
+def _read_events(lines: list[str]) -> tuple[dict[str, Any] | None, list[str]]:
+    """What `pi --mode json` printed, reduced to what `call_cli` needs.
+
+    Args:
+        lines: the raw stdout lines of one run.
+
+    Returns:
+        The last assistant `message_end` message (None when there is none), and the lines that are
+        not events at all — an error a provider wrote straight to stdout.
+    """
+    last: dict[str, Any] | None = None
+    stray: list[str] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            record = None
+        if not isinstance(record, dict) or "type" not in record:
+            stray.append(line.rstrip("\n"))
+            continue
+        message = record.get("message")
+        if (
+            record["type"] == "message_end"
+            and isinstance(message, dict)
+            and message.get("role") == "assistant"
+        ):
+            last = message
+    return last, stray
+
+
+def open_events_split(events_path: Path) -> None:
+    """Best-effort: open a cmux split to the right, without taking focus, that follows an events file.
+
+    The split runs the viewer under this server's own interpreter and only reads the file this
+    process writes: it never runs `pi`, whose provider keys live in this process alone. A missing
+    or failing `cmux`, or one that does not return within `_PANE_TIMEOUT`, changes nothing for the
+    caller; cmux's own output is captured so it never reaches this process's stdout, the MCP
+    server's JSON-RPC channel.
+
+    Args:
+        events_path: the file the viewer follows.
+    """
+    command = shlex.join([sys.executable, str(_EVENTS_VIEWER), str(events_path)])
+    try:
+        subprocess.run(
+            ["cmux", "new-split", "right", "--command", command, "--focus", "false"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=_PANE_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def call_cli(
     entry: dict[str, Any],
     prompt: str,
     timeout: int,
     tools: list[str] | None = None,
     env: dict[str, str] | None = None,
+    events: TextIO | None = None,
 ) -> str:
-    """One `pi -p` call for a `kind: "cli"` entry; its stdout is the answer.
+    """One `pi --mode json` call for a `kind: "cli"` entry; the answer is its last assistant message.
+
+    `pi` prints one JSON event per line and exits 0 even when the provider failed, so the outcome
+    is read from the events: a run whose last assistant message ended on `stopReason: error` is a
+    failure. An error that `pi` retried and got past is not — a later message answers.
 
     Args:
         entry: the pool entry — `provider` and `model` form pi's `--model`.
         prompt: sent as the positional argument after `--`, so a prompt opening with `---` is
             never read as an option.
-        timeout: seconds before `subprocess.TimeoutExpired`.
+        timeout: seconds before `subprocess.TimeoutExpired`; the process is killed.
         tools: pi tool names to allow (`-t read,grep`); None or empty means `--no-tools`.
         env: variables layered over this process's environment for pi — the provider keys.
             None reads them with `secret_env`; a caller making several calls passes them once.
+        events: a text file each raw event line is copied to as it arrives, for the pane that
+            follows the run; None copies nothing.
 
     Returns:
-        The model's answer, as pi printed it.
+        The text blocks of the last assistant message; empty when the run produced none.
 
     Raises:
         ValueError: the entry is not `kind: "cli"`.
-        subprocess.CalledProcessError: pi exited non-zero (stdout/stderr carry the reason).
+        CalledProcessError: pi exited non-zero, or its last assistant message is an
+            error. `stderr` carries pi's own stderr then the provider's error as its last line
+            (`failure_detail` reads it); `output` carries only stdout lines that are not events.
         subprocess.TimeoutExpired: no answer within `timeout`.
         OSError: `pi` is not installed or not executable.
+        BaseException: an interrupt (`KeyboardInterrupt`, `SystemExit`) while waiting — pi's
+            session is killed first, then it is re-raised.
     """
     if entry.get("kind") != "cli":
         raise ValueError(_not_callable(entry))
     tool_args = ["-t", ",".join(tools)] if tools else ["--no-tools"]
     cmd = [
         "pi",
-        "-p",
+        "--mode",
+        "json",
         "--model",
         cli_model_id(entry),
         *tool_args,
@@ -712,15 +904,75 @@ def call_cli(
     ]
     # stdin fermé : pi lit l'entrée standard quand il en hérite une, et celle du serveur MCP est
     # le canal JSON-RPC — l'appel resterait bloqué jusqu'au timeout.
-    return subprocess.run(
+    proc = Popen(
         cmd,
         stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         env={**os.environ, **(secret_env() if env is None else env)},
-        capture_output=True,
         text=True,
-        timeout=timeout,
-        check=True,
-    ).stdout
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=True,
+    )
+    if proc.stdout is None or proc.stderr is None:
+        raise OSError("pi started without its output pipes")
+    out_lines: list[str] = []
+    err_chunks: list[str] = []
+    pumps = [
+        threading.Thread(
+            target=_pump_stdout, args=(proc.stdout, out_lines, events), daemon=True
+        ),
+        threading.Thread(
+            target=_pump_stderr, args=(proc.stderr, err_chunks), daemon=True
+        ),
+    ]
+    for pump in pumps:
+        pump.start()
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except BaseException:
+        # Aussi KeyboardInterrupt, SystemExit : `start_new_session` a détaché pi du groupe du
+        # terminal, un Ctrl-C ne l'atteindrait jamais.
+        _kill_session(proc)
+        proc.wait()
+        raise
+    finally:
+        _join_all(pumps, _PIPE_DRAIN_SECONDS)
+    message, stray = _read_events(out_lines)
+    # `aborted` comme `error` : le mode texte de pi sort en 1 pour les deux, le mode JSON en 0.
+    failed_message = message is not None and message.get("stopReason") in (
+        "error",
+        "aborted",
+    )
+    stderr_text = "".join(err_chunks).strip()
+    # Sortie 0 sans aucun message, mais du texte : pi a dit quelque chose, ce n'est pas une
+    # réponse vide.
+    said_something = message is None and bool(stray or stderr_text)
+    if returncode != 0 or failed_message or said_something:
+        # L'erreur du fournisseur en dernière ligne : `failure_detail` lit la dernière ligne
+        # non vide, et le flux d'événements lui-même n'est pas du texte d'erreur.
+        detail = [stderr_text]
+        if failed_message and message is not None:
+            fallback = (
+                "Request aborted"
+                if message.get("stopReason") == "aborted"
+                else "pi ended on an error"
+            )
+            detail.append(_squash(str(message.get("errorMessage") or fallback)))
+        raise subprocess.CalledProcessError(
+            returncode or 1,
+            cmd,
+            output="\n".join(stray),
+            stderr="\n".join(d for d in detail if d),
+        )
+    if message is None:
+        return ""
+    return "".join(
+        str(block.get("text", ""))
+        for block in message.get("content") or []
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
 
 
 def failure_detail(exc: subprocess.CalledProcessError) -> str:
@@ -809,6 +1061,7 @@ def call_context(
 
 
 _LOGGED_ERROR_CHARS = 200
+_RESULT_DETAIL_CHARS = 100
 
 
 def run_pool(
@@ -816,6 +1069,7 @@ def run_pool(
     prompt: str,
     timeout: int = RUN_TIMEOUT,
     tools: list[str] | None = None,
+    watch: bool = False,
 ) -> PoolResult:
     """Try each queued entry in order, first real answer wins.
 
@@ -842,7 +1096,49 @@ def run_pool(
 
     Every call, its outcome and the pool's own start and exhaustion are logged through
     `log_pool_event` with the call's context (`call_context`) and its duration, best-effort.
+
+    `watch` (opt-in, off by default: `panel`, `pool_check` and the CLI never open a split): under
+    cmux (`CMUX_SURFACE_ID` set), one split to the right follows the whole run — every attempt of
+    every entry, the retries of a transient failure included — through a private events file this
+    process writes (`pi_events_view.py` reads it; the split never runs `pi`). Opening it is best
+    effort and never changes the result.
+
+    Args:
+        entries: the candidates, in the order to try them.
+        prompt: the text sent to each.
+        timeout: the default wall clock per entry, overridden by an entry's own `timeout`.
+        tools: pi tool names the model may use; None or empty means none.
+        watch: open the cmux split described above.
+
+    Returns:
+        The entry that answered and its text, or None and the last error.
     """
+    if not (watch and os.environ.get("CMUX_SURFACE_ID")):
+        return _run_pool(entries, prompt, timeout, tools, None)
+    try:
+        # Dossier privé (0700) : le fichier porte le prompt, souvent un diff.
+        events_path = (
+            Path(tempfile.mkdtemp(prefix="pinky-adversarial-")) / "events.jsonl"
+        )
+        feed = events_path.open("a", encoding="utf-8")
+    except OSError:
+        return _run_pool(entries, prompt, timeout, tools, None)
+    try:
+        open_events_split(events_path)
+        return _run_pool(entries, prompt, timeout, tools, feed)
+    finally:
+        _emit_event(feed, {"type": "pool_end"})
+        feed.close()
+
+
+def _run_pool(
+    entries: list[dict[str, Any]],
+    prompt: str,
+    timeout: int,
+    tools: list[str] | None,
+    events: TextIO | None,
+) -> PoolResult:
+    """`run_pool`'s queue, with a marker line before each attempt in `events` when there is one."""
     last_error: str | None = None
     env = secret_env()
     queue: deque[int] = deque(range(len(entries)))
@@ -889,7 +1185,15 @@ def run_pool(
         context = call_context(entry, prompt, call_timeout, tools, attempts[idx])
         started = time.monotonic()
         try:
-            answer = call_cli(entry, prompt, call_timeout, tools, env)
+            _emit_event(
+                events,
+                {
+                    "type": "pool_attempt",
+                    "entry": entry["name"],
+                    "attempt": attempts[idx],
+                },
+            )
+            answer = call_cli(entry, prompt, call_timeout, tools, env, events)
         except subprocess.CalledProcessError as e:
             # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
             # stdout pendant que stderr porte autre chose.
@@ -907,6 +1211,13 @@ def run_pool(
                 # Signal définitif : évalué avant `is_timeout` pour qu'un message qui porte les
                 # deux marqueurs à la fois (ex. un 429 dont le corps mentionne aussi un timeout
                 # amont) reste jamais-requeue plutôt que transitoire.
+                if is_rate_limited(combined):
+                    why = "rate limited"
+                elif is_out_of_memory(combined):
+                    why = "out of memory"
+                else:
+                    why = "insufficient credit"
+                _emit_result(events, entry, attempts[idx], why)
                 last_error = f"{entry['name']}: {combined.strip()}"
                 if is_provider_wide_limit(failure_detail(e)):
                     # Solde ou limite d'organisation : ses autres entrées échoueraient pareil.
@@ -919,15 +1230,23 @@ def run_pool(
                 )
                 continue
             if is_timeout(combined):
+                _emit_result(events, entry, attempts[idx], "timeout")
                 last_error = f"{entry['name']}: {combined.strip()}"
                 log_pool_event(entry["name"], "timeout", **seen)
                 requeue_once(idx)
                 continue
+            _emit_result(
+                events,
+                entry,
+                attempts[idx],
+                f"failed: {failure_detail(e)[:_RESULT_DETAIL_CHARS]}",
+            )
             log_pool_event(entry["name"], "critical failure", **seen)
             return PoolResult(
                 None, f"{entry['name']} critical failure: {combined.strip()}"
             )
         except subprocess.TimeoutExpired as e:
+            _emit_result(events, entry, attempts[idx], "timeout")
             last_error = f"{entry['name']}: {e}"
             log_pool_event(
                 entry["name"],
@@ -937,6 +1256,9 @@ def run_pool(
             )
             continue
         except OSError as e:
+            _emit_result(
+                events, entry, attempts[idx], f"failed: {str(e)[:_RESULT_DETAIL_CHARS]}"
+            )
             last_error = f"{entry['name']}: {e}"
             log_pool_event(
                 entry["name"],
@@ -953,14 +1275,17 @@ def run_pool(
                 "answer_chars": len(answer.strip()),
             }
             if not answer.strip():
+                _emit_result(events, entry, attempts[idx], "empty answer")
                 last_error = f"{entry['name']}: empty answer"
                 log_pool_event(entry["name"], "empty answer", **answered)
                 requeue_once(idx)
             elif _TOOL_CALL_TAIL_RE.search(answer):
+                _emit_result(events, entry, attempts[idx], "tool call text")
                 last_error = f"{entry['name']}: tool call text instead of an answer"
                 log_pool_event(entry["name"], "tool call text", **answered)
                 requeue_once(idx)
             else:
+                _emit_result(events, entry, attempts[idx], "answered")
                 log_pool_event(entry["name"], "answered", **answered)
                 return PoolResult(entry, answer)
     log_pool_event("(pool)", "exhausted")

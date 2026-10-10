@@ -126,6 +126,7 @@ pinky-agentic-plugins/
 │   │   │   ├── model_offline.py
 │   │   │   ├── model_panel.py
 │   │   │   ├── pc_core_server.py
+│   │   │   ├── pi_events_view.py
 │   │   │   └── review_complexity.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
@@ -508,6 +509,7 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── conftest.py
 │   ├── fake_local_server.py
+│   ├── pi_fakes.py
 │   ├── smoke_model_pool.py
 │   ├── test_activate_plugins_for_repos.py
 │   ├── test_agent_log_writer.py

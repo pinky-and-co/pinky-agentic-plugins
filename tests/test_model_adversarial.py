@@ -7,12 +7,18 @@ fixture isolating `run_pool`'s debug log (`_isolate_pool_log`) never applies, an
 `~/.claude/debug/` file gets written under the developer's own session id.
 """
 
+import io
 import json
 import os
 import random
+import re
+import shlex
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 import unittest.mock
@@ -24,6 +30,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
 
 import model_adversarial as ma
+import pi_events_view as pev
+from pi_fakes import PiPopen, pi_events
 
 MISTRAL = {
     "name": "mistral-medium-3.5",
@@ -582,7 +590,9 @@ class TestRunPoolRequeue(unittest.TestCase):
 
     def test_empty_answer_then_success_on_requeue(self):
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[self._empty(), self._ok("answer")]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[self._empty(), self._ok("answer")],
         ) as run:
             result = ma.run_pool([MISTRAL], "p")
         self.assertEqual(run.call_count, 2)
@@ -591,7 +601,8 @@ class TestRunPoolRequeue(unittest.TestCase):
     def test_run_wall_clock_is_a_backstop_never_requeued(self):
         # Le chrono global coupe une boucle d'outils : la rejouer referait toute l'exploration.
         with unittest.mock.patch(
-            "subprocess.run",
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
             side_effect=[subprocess.TimeoutExpired("pi", 900), self._ok("answer")],
         ) as run:
             result = ma.run_pool([MISTRAL], "p")
@@ -604,7 +615,8 @@ class TestRunPoolRequeue(unittest.TestCase):
 
     def test_run_wall_clock_falls_through_to_the_next_entry(self):
         with unittest.mock.patch(
-            "subprocess.run",
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
             side_effect=[subprocess.TimeoutExpired("pi", 900), self._ok("answer")],
         ) as run:
             result = ma.run_pool([MISTRAL, GLM], "p")
@@ -612,14 +624,18 @@ class TestRunPoolRequeue(unittest.TestCase):
         self.assertEqual(result, ma.PoolResult(GLM, "answer"))
 
     def test_the_default_backstop_is_900_seconds(self):
-        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
+        ) as run:
             ma.run_pool([MISTRAL], "p")
-        self.assertEqual(run.call_args.kwargs["timeout"], 900)
+        self.assertEqual(run.wait_timeouts, [900])
 
     def test_timeout_marker_in_a_process_error_is_transient_too(self):
         timeout_error = subprocess.CalledProcessError(1, "pi", "", "504 timed out")
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[timeout_error, self._ok("answer")]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[timeout_error, self._ok("answer")],
         ) as run:
             result = ma.run_pool([MISTRAL], "p")
         self.assertEqual(run.call_count, 2)
@@ -627,7 +643,9 @@ class TestRunPoolRequeue(unittest.TestCase):
 
     def test_second_failure_after_requeue_drops_the_entry_for_good(self):
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[self._empty(), self._empty()]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[self._empty(), self._empty()],
         ) as run:
             result = ma.run_pool([MISTRAL], "p")
         self.assertEqual(run.call_count, 2)
@@ -673,11 +691,13 @@ class TestRunPoolRequeue(unittest.TestCase):
         # Deux entrées toujours vides : la file doit suivre A, B, A, B — jamais en place (A, A,
         # B, B) — avant de s'épuiser au bout de 2*N tentatives.
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[self._empty()] * 4
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[self._empty()] * 4,
         ) as run:
             result = ma.run_pool([MISTRAL, GLM], "p")
         self.assertEqual(
-            [call.args[0][3] for call in run.call_args_list],
+            [call.args[0][4] for call in run.call_args_list],
             [
                 "mistral/mistral-medium-3.5",
                 "openrouter/z-ai/glm-5-2",
@@ -690,7 +710,9 @@ class TestRunPoolRequeue(unittest.TestCase):
     def test_rate_limited_entry_is_never_requeued(self):
         rate_limited = subprocess.CalledProcessError(1, "pi", "", "429 too many")
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[rate_limited, rate_limited]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[rate_limited, rate_limited],
         ) as run:
             result = ma.run_pool([MISTRAL, GLM], "p")
         self.assertEqual(run.call_count, 2)
@@ -698,14 +720,20 @@ class TestRunPoolRequeue(unittest.TestCase):
 
     def test_out_of_memory_entry_is_never_requeued(self):
         oom = subprocess.CalledProcessError(1, "pi", "", "503 out_of_memory")
-        with unittest.mock.patch("subprocess.run", side_effect=[oom, oom]) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, side_effect=[oom, oom]
+        ) as run:
             result = ma.run_pool([MISTRAL, GLM], "p")
         self.assertEqual(run.call_count, 2)
         self.assertIsNone(result.entry)
 
     def test_insufficient_credit_entry_is_never_requeued(self):
         credit = subprocess.CalledProcessError(1, "pi", "", "402 payment required")
-        with unittest.mock.patch("subprocess.run", side_effect=[credit, credit]) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[credit, credit],
+        ) as run:
             result = ma.run_pool([MISTRAL, GLM], "p")
         self.assertEqual(run.call_count, 2)
         self.assertIsNone(result.entry)
@@ -718,7 +746,9 @@ class TestRunPoolRequeue(unittest.TestCase):
         )
         rate_limited = subprocess.CalledProcessError(1, "pi", "", "429 too many")
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[ambiguous, rate_limited]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[ambiguous, rate_limited],
         ) as run:
             result = ma.run_pool([MISTRAL, GLM], "p")
         self.assertEqual(run.call_count, 2)
@@ -743,7 +773,9 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             "`org_1` on tokens per minute (TPM): Limit 8000, Used 5700, Requested 6209.",
         )
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[groq, self._ok()]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[groq, self._ok()],
         ) as run:
             result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p")
         self.assertEqual(run.call_count, 2)
@@ -758,7 +790,9 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             'concurrent requests."}',
         )
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[org, self._ok()]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[org, self._ok()],
         ) as run:
             result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p")
         self.assertEqual(run.call_count, 2)
@@ -772,7 +806,9 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             "read 402 lines\n429: Rate limit reached for model `m` on tokens per minute",
         )
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[noisy, self._ok()]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[noisy, self._ok()],
         ) as run:
             result = ma.run_pool([NV_GLM, NV_KIMI], "p")
         self.assertEqual(run.call_count, 2)
@@ -780,7 +816,9 @@ class TestRunPoolProviderLimit(unittest.TestCase):
 
     def test_the_skipped_entry_keeps_the_real_error_as_the_last_one(self):
         credit = subprocess.CalledProcessError(1, "pi", "", "402 payment required")
-        with unittest.mock.patch("subprocess.run", side_effect=[credit]):
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, side_effect=[credit]
+        ):
             result = ma.run_pool([NV_GLM, NV_KIMI], "p")
         self.assertIsNone(result.entry)
         self.assertEqual(result.result, "nvidia-glm: 402 payment required")
@@ -788,7 +826,9 @@ class TestRunPoolProviderLimit(unittest.TestCase):
     def test_insufficient_credit_drops_the_provider_too(self):
         credit = subprocess.CalledProcessError(1, "pi", "", "402 payment required")
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[credit, self._ok()]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[credit, self._ok()],
         ) as run:
             result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p")
         self.assertEqual(run.call_count, 2)
@@ -796,7 +836,8 @@ class TestRunPoolProviderLimit(unittest.TestCase):
 
     def test_timeout_keeps_the_same_providers_other_entries(self):
         with unittest.mock.patch(
-            "subprocess.run",
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
             side_effect=[subprocess.TimeoutExpired("pi", 1), self._ok()],
         ) as run:
             result = ma.run_pool([NV_GLM, NV_KIMI], "p")
@@ -806,7 +847,9 @@ class TestRunPoolProviderLimit(unittest.TestCase):
     def test_out_of_memory_keeps_the_same_providers_other_entries(self):
         oom = subprocess.CalledProcessError(1, "pi", "", "503 out_of_memory")
         with unittest.mock.patch(
-            "subprocess.run", side_effect=[oom, self._ok()]
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[oom, self._ok()],
         ) as run:
             result = ma.run_pool([NV_GLM, NV_KIMI], "p")
         self.assertEqual(run.call_count, 2)
@@ -895,7 +938,9 @@ def test_transient_failure_with_a_broken_log_path_still_returns_success(
     (debug_dir / "standalone_mcp__pc-core__model-pool.txt").mkdir()
     empty = subprocess.CompletedProcess([], 0, "   ", "")
     ok = subprocess.CompletedProcess([], 0, "answer", "")
-    with unittest.mock.patch("subprocess.run", side_effect=[empty, ok]) as run:
+    with unittest.mock.patch(
+        "model_adversarial.Popen", new_callable=PiPopen, side_effect=[empty, ok]
+    ) as run:
         result = ma.run_pool([MISTRAL], "p")
     assert run.call_count == 2
     assert result == ma.PoolResult(MISTRAL, "answer")
@@ -907,7 +952,9 @@ def test_pool_exhaustion_logs_every_failure_and_the_final_event(tmp_path, monkey
     monkeypatch.setattr(ma, "datetime", _FixedDatetime)
     monkeypatch.setattr(ma.time, "monotonic", lambda: 0.0)
     empty = subprocess.CompletedProcess([], 0, "", "")
-    with unittest.mock.patch("subprocess.run", side_effect=[empty, empty]):
+    with unittest.mock.patch(
+        "model_adversarial.Popen", new_callable=PiPopen, side_effect=[empty, empty]
+    ):
         ma.run_pool([MISTRAL], "p")
     log_path = tmp_path / ".claude" / "debug" / "sess1_mcp__pc-core__model-pool.txt"
     call = (
@@ -928,7 +975,9 @@ def test_a_successful_call_is_logged_with_its_size_and_duration(tmp_path, monkey
     monkeypatch.setattr(ma, "datetime", _FixedDatetime)
     monkeypatch.setattr(ma.time, "monotonic", iter([10.0, 12.5]).__next__)
     ok = subprocess.CompletedProcess([], 0, "answer", "")
-    with unittest.mock.patch("subprocess.run", return_value=ok):
+    with unittest.mock.patch(
+        "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
+    ):
         ma.run_pool([MISTRAL], "prompt", tools=["read", "grep"])
     log_path = tmp_path / ".claude" / "debug" / "sess2_mcp__pc-core__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
@@ -945,7 +994,9 @@ def test_an_os_error_is_logged_with_its_message(tmp_path, monkeypatch):
     monkeypatch.setattr(ma, "datetime", _FixedDatetime)
     monkeypatch.setattr(ma.time, "monotonic", lambda: 0.0)
     too_big = OSError(7, "Argument list too long: 'pi'")
-    with unittest.mock.patch("subprocess.run", side_effect=[too_big]):
+    with unittest.mock.patch(
+        "model_adversarial.Popen", new_callable=PiPopen, side_effect=[too_big]
+    ):
         ma.run_pool([MISTRAL], "p")
     log_path = tmp_path / ".claude" / "debug" / "sess4_mcp__pc-core__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
@@ -965,7 +1016,9 @@ def test_a_provider_error_is_logged_with_the_provider_own_line(tmp_path, monkeyp
     rate_limited = subprocess.CalledProcessError(
         1, "pi", "", "warming up\n429 too many requests"
     )
-    with unittest.mock.patch("subprocess.run", side_effect=[rate_limited]):
+    with unittest.mock.patch(
+        "model_adversarial.Popen", new_callable=PiPopen, side_effect=[rate_limited]
+    ):
         ma.run_pool([MISTRAL], "p")
     log_path = tmp_path / ".claude" / "debug" / "sess3_mcp__pc-core__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
@@ -983,12 +1036,15 @@ class TestCallCli(unittest.TestCase):
         return subprocess.CompletedProcess([], 0, "answer\n", "")
 
     def test_default_argv_has_no_tools_and_closes_stdin(self):
-        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
+        ) as run:
             self.assertEqual(ma.call_cli(MISTRAL, "p", 30), "answer\n")
         run.assert_called_once_with(
             [
                 "pi",
-                "-p",
+                "--mode",
+                "json",
                 "--model",
                 "mistral/mistral-medium-3.5",
                 "--no-tools",
@@ -996,30 +1052,40 @@ class TestCallCli(unittest.TestCase):
                 "p",
             ],
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=unittest.mock.ANY,
-            capture_output=True,
             text=True,
-            timeout=30,
-            check=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
         )
 
     def test_entry_thinking_is_passed_before_the_prompt(self):
-        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
+        ) as run:
             ma.call_cli({**MISTRAL, "thinking": "off"}, "p", 30)
         self.assertEqual(run.call_args[0][0][-4:], ["--thinking", "off", "--", "p"])
 
     def test_no_entry_thinking_sends_no_thinking_flag(self):
-        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
+        ) as run:
             ma.call_cli(MISTRAL, "p", 30)
         self.assertNotIn("--thinking", run.call_args[0][0])
 
     def test_tools_become_a_comma_separated_allowlist(self):
-        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
+        ) as run:
             ma.call_cli(MISTRAL, "p", 30, ["read", "grep"])
-        self.assertEqual(run.call_args[0][0][4:6], ["-t", "read,grep"])
+        self.assertEqual(run.call_args[0][0][5:7], ["-t", "read,grep"])
 
     def test_given_env_is_layered_over_the_process_env(self):
-        with unittest.mock.patch("subprocess.run", return_value=self._ok()) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
+        ) as run:
             ma.call_cli(MISTRAL, "p", 30, env={"PINKY_TEST_VAR": "layered"})
         env = run.call_args.kwargs["env"]
         self.assertEqual(env["PINKY_TEST_VAR"], "layered")
@@ -1028,7 +1094,9 @@ class TestCallCli(unittest.TestCase):
     def test_without_env_it_reads_secret_env(self):
         with (
             unittest.mock.patch.object(ma, "secret_env", return_value={"K": "v"}),
-            unittest.mock.patch("subprocess.run", return_value=self._ok()) as run,
+            unittest.mock.patch(
+                "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
+            ) as run,
         ):
             ma.call_cli(MISTRAL, "p", 30)
         self.assertEqual(run.call_args.kwargs["env"]["K"], "v")
@@ -1047,7 +1115,9 @@ class TestSecretsAreReadOncePerRun(unittest.TestCase):
                 ma, "secret_env", return_value={"K": "v"}
             ) as secrets,
             unittest.mock.patch(
-                "subprocess.run", side_effect=[rate_limited, ok]
+                "model_adversarial.Popen",
+                new_callable=PiPopen,
+                side_effect=[rate_limited, ok],
             ) as run,
         ):
             ma.run_pool([MISTRAL, GLM], "p")
@@ -1058,7 +1128,9 @@ class TestSecretsAreReadOncePerRun(unittest.TestCase):
         ok = subprocess.CompletedProcess([], 0, "OK", "")
         with (
             unittest.mock.patch.object(ma, "secret_env", return_value={}) as secrets,
-            unittest.mock.patch("subprocess.run", return_value=ok),
+            unittest.mock.patch(
+                "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
+            ),
         ):
             ma.check_pool([MISTRAL, GLM], timeout=5)
         self.assertEqual(secrets.call_count, 1)
@@ -1074,16 +1146,20 @@ class TestEntryTimeout(unittest.TestCase):
     def test_run_pool_gives_each_entry_its_own_timeout(self):
         ok = subprocess.CompletedProcess([], 0, "answer", "")
         slow = {**GLM, "timeout": 300}
-        with unittest.mock.patch("subprocess.run", return_value=ok) as run:
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
+        ) as run:
             ma.run_pool([slow], "p", timeout=180)
-        self.assertEqual(run.call_args.kwargs["timeout"], 300)
+        self.assertEqual(run.wait_timeouts, [300])
 
     def test_check_pool_waits_the_entry_timeout(self):
         with unittest.mock.patch(
-            "subprocess.run", side_effect=subprocess.TimeoutExpired("pi", 300)
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=subprocess.TimeoutExpired("pi", 300),
         ) as run:
             (result,) = ma.check_pool([{**GLM, "timeout": 300}], timeout=60)
-        self.assertEqual(run.call_args.kwargs["timeout"], 300)
+        self.assertEqual(run.wait_timeouts[0], 300)
         self.assertEqual(result.detail, "no answer within 300s")
 
 
@@ -1131,11 +1207,13 @@ def test_check_pool_cli_checks_only_the_filtered_entries(monkeypatch, capsys):
 class TestCheckPool(unittest.TestCase):
     def test_one_result_per_entry_offline_skipped(self):
         def fake_run(cmd, **kw):
-            if cmd[3] == "openrouter/z-ai/glm-5-2":
+            if cmd[4] == "openrouter/z-ai/glm-5-2":
                 raise subprocess.CalledProcessError(1, cmd, "", "401 unauthorized\n")
             return subprocess.CompletedProcess(cmd, 0, "OK\n", "")
 
-        with unittest.mock.patch("subprocess.run", side_effect=fake_run):
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, side_effect=fake_run
+        ):
             results = ma.check_pool([MISTRAL, GLM, OFFLINE], timeout=5)
 
         self.assertEqual(
@@ -1149,7 +1227,9 @@ class TestCheckPool(unittest.TestCase):
 
     def test_timeout_is_a_failure(self):
         with unittest.mock.patch(
-            "subprocess.run", side_effect=subprocess.TimeoutExpired("pi", 5)
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=subprocess.TimeoutExpired("pi", 5),
         ):
             (result,) = ma.check_pool([MISTRAL], timeout=5)
         self.assertEqual(
@@ -1263,7 +1343,7 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
 
     captured: dict[str, str] = {}
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
         captured["prompt"] = prompt
         return ma.PoolResult(entries[0], "ok")
 
@@ -1306,7 +1386,7 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
     monkeypatch.setattr(
         pc_core_server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
             entries[0], "ok"
         ),
     )
@@ -1327,7 +1407,7 @@ def test_adversarial_tool_reports_pool_exhaustion_without_raising(monkeypatch):
     monkeypatch.setattr(
         pc_core_server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
             None, "everything failed"
         ),
     )
@@ -1372,7 +1452,7 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_and_routes_its_tie
         server.model_adversarial, "select_for_delegation_with_fallback", fake_select
     )
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
         seen["prompt"] = prompt
         return ma.PoolResult(entries[0], "ok")
 
@@ -1405,7 +1485,7 @@ def test_adversarial_tool_never_routes_a_small_diff_below_the_sonnet_floor(
         server.model_adversarial, "load_pool", lambda: [free_haiku, free_sonnet]
     )
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
         seen["entries"] = entries
         return ma.PoolResult(entries[0], "ok")
 
@@ -1494,7 +1574,7 @@ def test_adversarial_tool_header_names_the_provider_model_and_tier(monkeypatch):
     monkeypatch.setattr(
         server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
             entry, "verdict"
         ),
     )
@@ -1540,7 +1620,7 @@ def test_adversarial_cli_draws_with_a_fresh_rng(monkeypatch):
     monkeypatch.setattr(
         ma,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
             entries[0], "ok"
         ),
     )
@@ -1566,7 +1646,7 @@ def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
     monkeypatch.setattr(
         pc_core_server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None: ma.PoolResult(
+        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
             entries[0], "ok"
         ),
     )
@@ -1592,7 +1672,7 @@ def _heads_served_for_a_diff(monkeypatch, tmp_path, pool, calls=20):
     )
     monkeypatch.setattr(server.model_adversarial, "load_pool", lambda: pool)
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
         heads.append(entries[0]["name"])
         return ma.PoolResult(entries[0], "ok")
 
@@ -1638,7 +1718,7 @@ def _entries_served_for_model(monkeypatch, pool, model):
     )
     monkeypatch.setattr(server.model_adversarial, "load_pool", lambda: pool)
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
         seen["entries"] = entries
         return ma.PoolResult(entries[0], "ok")
 
@@ -1676,6 +1756,953 @@ def test_adversarial_tool_model_naming_no_pool_entry_is_a_model_id_at_the_defaul
     assert [(e["provider"], e["model"]) for e in entries] == [
         ("nvidia", "z-ai/glm-5.3-flash")
     ]
+
+
+def _fake_binary(directory, name, body):
+    """An executable `name` in `directory`: a POSIX shell script running `body`."""
+    path = directory / name
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+
+
+def _marker(entry, attempt):
+    """The line `run_pool` writes into the events file before an attempt."""
+    return (
+        json.dumps(
+            {"type": "pool_attempt", "entry": entry, "attempt": attempt},
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+
+
+def _result(entry, attempt, outcome):
+    """The line `run_pool` writes into the events file after an attempt."""
+    record = {
+        "type": "pool_result",
+        "entry": entry,
+        "attempt": attempt,
+        "outcome": outcome,
+    }
+    return json.dumps(record, separators=(",", ":")) + "\n"
+
+
+_POOL_END = '{"type":"pool_end"}\n'
+
+_PI_SCRIPT = """\
+d="{dir}"
+n=$(($(/bin/cat "$d/count" 2>/dev/null || echo 0) + 1))
+echo $n > "$d/count"
+printf '%s\\n' "$@" > "$d/argv.$n"
+/bin/cat "$d/out.$n" 2>/dev/null
+/bin/cat "$d/err.$n" >&2 2>/dev/null
+[ -e "$d/hang.$n" ] && exec /bin/sleep 30
+exit $(/bin/cat "$d/rc.$n" 2>/dev/null || echo 0)"""
+
+
+class TestPoolRun:
+    """`run_pool` against fake `pi` and `cmux` executables first on `PATH`: `call_cli`, its
+    reading of the event stream and the pane's launch all run for real."""
+
+    @pytest.fixture
+    def bins(self, tmp_path, monkeypatch):
+        """A `PATH` of one directory holding a `pi` that records its arguments and prints the
+        `out.<n>` / `err.<n>` files of its n-th call, then exits with `rc.<n>`."""
+        directory = tmp_path / "bin"
+        directory.mkdir()
+        _fake_binary(directory, "pi", _PI_SCRIPT.format(dir=tmp_path))
+        monkeypatch.setenv("PATH", str(directory))
+        return directory
+
+    def _pi_prints(self, tmp_path, *outputs, errors=(), codes=()):
+        """What the n-th `pi` call prints on stdout, on stderr, and its exit status."""
+        for n, text in enumerate(outputs, start=1):
+            (tmp_path / f"out.{n}").write_text(text)
+        for n, text in enumerate(errors, start=1):
+            (tmp_path / f"err.{n}").write_text(text)
+        for n, code in enumerate(codes, start=1):
+            (tmp_path / f"rc.{n}").write_text(str(code))
+
+    def _pi_calls(self, tmp_path):
+        path = tmp_path / "count"
+        return int(path.read_text()) if path.exists() else 0
+
+    def _cmux_argv(self, tmp_path):
+        """The arguments the fake `cmux` recorded, one per line; None if it never ran."""
+        path = tmp_path / "cmux.argv"
+        return path.read_text().splitlines() if path.exists() else None
+
+    def _recording_cmux(self, bins, tmp_path):
+        # `>>` : a second launch would add lines, so equality proves a single one.
+        _fake_binary(bins, "cmux", f'printf "%s\\n" "$@" >> "{tmp_path}/cmux.argv"')
+
+    # --- the split (one per run, to the right, following every attempt) -------------------
+
+    def test_a_run_with_a_requeue_opens_one_split_that_follows_every_attempt(
+        self, bins, tmp_path, monkeypatch
+    ):
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        self._pi_prints(tmp_path, pi_events(""), pi_events(""), pi_events("answer"))
+
+        result = ma.run_pool([MISTRAL, GLM], "p", watch=True)
+
+        argv = self._cmux_argv(tmp_path)
+        events_path = Path(shlex.split(argv[3])[2])
+        viewer = Path(ma.__file__).with_name("pi_events_view.py")
+        assert result == ma.PoolResult(MISTRAL, "answer")
+        assert argv == [
+            "new-split",
+            "right",
+            "--command",
+            shlex.join([sys.executable, str(viewer), str(events_path)]),
+            "--focus",
+            "false",
+        ]
+        assert self._pi_calls(tmp_path) == 3
+        assert events_path.read_text() == (
+            _marker("mistral-medium-3.5", 1)
+            + pi_events("")
+            + _result("mistral-medium-3.5", 1, "empty answer")
+            + _marker("glm-5-2", 1)
+            + pi_events("")
+            + _result("glm-5-2", 1, "empty answer")
+            + _marker("mistral-medium-3.5", 2)
+            + pi_events("answer")
+            + _result("mistral-medium-3.5", 2, "answered")
+            + _POOL_END
+        )
+        assert stat.S_IMODE(events_path.parent.stat().st_mode) == 0o700
+
+    def test_each_run_gets_its_own_private_events_file(
+        self, bins, tmp_path, monkeypatch
+    ):
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        self._pi_prints(tmp_path, pi_events("answer"), pi_events("answer"))
+
+        ma.run_pool([MISTRAL], "p", watch=True)
+        ma.run_pool([MISTRAL], "p", watch=True)
+
+        launches = self._cmux_argv(tmp_path)
+        assert len(launches) == 12
+        assert launches[3] != launches[9]
+
+    def test_outside_cmux_no_split_and_the_same_result(self, bins, tmp_path):
+        self._recording_cmux(bins, tmp_path)
+        self._pi_prints(tmp_path, pi_events("answer"))
+
+        result = ma.run_pool([MISTRAL], "p", watch=True)
+
+        assert result == ma.PoolResult(MISTRAL, "answer")
+        assert self._cmux_argv(tmp_path) is None
+
+    # --- a failing split never changes the result -----------------------------------------
+
+    @pytest.mark.parametrize(
+        "cmux_body",
+        ["exit 1", None, "exec /bin/sleep 30"],
+        ids=["fails", "absent", "hangs"],
+    )
+    def test_a_split_that_cannot_open_leaves_the_result_unchanged_and_bounded(
+        self, bins, tmp_path, monkeypatch, cmux_body
+    ):
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        monkeypatch.setattr(ma, "_PANE_TIMEOUT", 0.3)
+        if cmux_body is not None:
+            _fake_binary(bins, "cmux", cmux_body)
+        self._pi_prints(tmp_path, pi_events("answer"))
+
+        started = time.monotonic()
+        result = ma.run_pool([MISTRAL], "p", watch=True)
+
+        assert result == ma.PoolResult(MISTRAL, "answer")
+        assert time.monotonic() - started < 5
+
+    def test_cmux_output_never_reaches_this_process_stdout(
+        self, bins, tmp_path, monkeypatch, capfd
+    ):
+        # The MCP server's stdout is its JSON-RPC channel.
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        _fake_binary(bins, "cmux", "echo noise; echo noise >&2")
+        self._pi_prints(tmp_path, pi_events("answer"))
+
+        ma.run_pool([MISTRAL], "p", watch=True)
+
+        assert capfd.readouterr() == ("", "")
+
+    # --- only run_pool, and only when asked, opens a split --------------------------------
+
+    def test_a_run_that_does_not_ask_never_opens_a_split(
+        self, bins, tmp_path, monkeypatch
+    ):
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        self._pi_prints(tmp_path, pi_events("answer"))
+
+        assert ma.run_pool([MISTRAL], "p") == ma.PoolResult(MISTRAL, "answer")
+        assert self._cmux_argv(tmp_path) is None
+
+    def test_check_pool_panel_and_cli_never_open_a_split(
+        self, bins, tmp_path, monkeypatch
+    ):
+        import model_panel
+
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        self._pi_prints(tmp_path, *[pi_events("OK")] * 8)
+        pool = [_entry(f"entry-{i}", "nvidia") for i in range(3)]
+
+        checks = ma.check_pool(pool)
+        panel = model_panel.run_panel(pool[:2], ["t1", "t2"])
+        monkeypatch.setattr(ma, "load_pool", lambda: [MISTRAL])
+        status = ma.main(["--task", "t"])
+
+        assert [c.status for c in checks] == ["ok", "ok", "ok"]
+        assert panel is not None
+        assert status == 0
+        assert self._cmux_argv(tmp_path) is None
+
+    # --- the outcome is read from the events ----------------------------------------------
+
+    def test_call_cli_runs_pi_in_json_mode_and_returns_the_last_message_text(
+        self, bins, tmp_path
+    ):
+        events = (
+            json.dumps({"type": "agent_start"})
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "toolUse",
+                        "content": [{"type": "text", "text": "first turn"}],
+                    },
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "stopReason": "stop",
+                        "content": [
+                            {"type": "thinking", "thinking": "hm"},
+                            {"type": "text", "text": "verdict: "},
+                            {"type": "text", "text": "no finding"},
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        self._pi_prints(tmp_path, events)
+        copy = io.StringIO()
+
+        answer = ma.call_cli(MISTRAL, "p", 10, ["read"], env={}, events=copy)
+
+        assert answer == "verdict: no finding"
+        assert (tmp_path / "argv.1").read_text().splitlines() == [
+            "--mode",
+            "json",
+            "--model",
+            "mistral/mistral-medium-3.5",
+            "-t",
+            "read",
+            "--",
+            "p",
+        ]
+        assert copy.getvalue() == events
+
+    def test_a_final_429_falls_over_to_the_next_entry(self, bins, tmp_path):
+        self._pi_prints(
+            tmp_path,
+            pi_events("", "error", '429 {"message":"rate limited"}\n'),
+            pi_events("second"),
+        )
+
+        result = ma.run_pool([MISTRAL, GLM], "p")
+
+        assert result == ma.PoolResult(GLM, "second")
+        assert self._pi_calls(tmp_path) == 2
+
+    def test_a_429_that_pi_retried_past_is_a_success(self, bins, tmp_path):
+        failed = json.loads(pi_events("", "error", "429 slow down").splitlines()[2])
+        answered = json.loads(pi_events("final").splitlines()[2])
+        stream = "".join(
+            json.dumps(e) + "\n"
+            for e in (
+                failed,
+                {"type": "auto_retry_start", "attempt": 1, "errorMessage": "429"},
+                {"type": "auto_retry_end", "success": True, "attempt": 2},
+                answered,
+                {"type": "agent_settled", "aborted": False},
+            )
+        )
+        self._pi_prints(tmp_path, stream)
+
+        assert ma.run_pool([MISTRAL, GLM], "p") == ma.PoolResult(MISTRAL, "final")
+        assert self._pi_calls(tmp_path) == 1
+
+    def test_an_unrecognised_error_stops_the_pool_with_the_providers_line_last(
+        self, bins, tmp_path
+    ):
+        self._pi_prints(
+            tmp_path,
+            pi_events("", "error", "401 invalid api key\n"),
+            pi_events("never asked"),
+            errors=["warning: models.json is slow\n"],
+        )
+
+        result = ma.run_pool([MISTRAL, GLM], "p")
+
+        assert result == ma.PoolResult(
+            None,
+            "mistral-medium-3.5 critical failure: warning: models.json is slow\n"
+            "401 invalid api key",
+        )
+        assert self._pi_calls(tmp_path) == 1
+
+    def test_a_crash_with_a_plain_stdout_line_carries_that_line(self, bins, tmp_path):
+        self._pi_prints(tmp_path, "boom, not json\n", codes=[2])
+
+        result = ma.run_pool([MISTRAL], "p")
+
+        assert result == ma.PoolResult(
+            None, "mistral-medium-3.5 critical failure: boom, not json"
+        )
+
+    def test_a_429_in_the_streamed_text_is_not_a_rate_limit(self, bins, tmp_path):
+        # The event stream is not error text: a review that mentions "429" or "timed out" must
+        # not turn another failure into a fall-over.
+        stream = pi_events("the code handles 429 and timed out").replace(
+            '"stopReason": "stop"', '"stopReason": "error"'
+        )
+        self._pi_prints(tmp_path, stream)
+
+        result = ma.run_pool([MISTRAL, GLM], "p")
+
+        assert result == ma.PoolResult(
+            None, "mistral-medium-3.5 critical failure: pi ended on an error"
+        )
+        assert self._pi_calls(tmp_path) == 1
+
+    def test_an_aborted_run_is_a_failure_with_a_fallback_detail(self, bins, tmp_path):
+        # pi's JSON mode exits 0 on an abort; its text mode exits 1 with "Request aborted".
+        self._pi_prints(tmp_path, pi_events("", "aborted"))
+
+        result = ma.run_pool([MISTRAL, GLM], "p")
+
+        assert result == ma.PoolResult(
+            None, "mistral-medium-3.5 critical failure: Request aborted"
+        )
+        assert self._pi_calls(tmp_path) == 1
+
+    def test_an_aborted_run_reports_its_own_error_message(self, bins, tmp_path):
+        self._pi_prints(
+            tmp_path, pi_events("partial", "aborted", "Operation aborted by user")
+        )
+
+        result = ma.run_pool([MISTRAL], "p")
+
+        assert result == ma.PoolResult(
+            None, "mistral-medium-3.5 critical failure: Operation aborted by user"
+        )
+
+    def test_a_line_cut_by_the_kill_does_not_swallow_the_next_marker(
+        self, bins, tmp_path, monkeypatch
+    ):
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        cut = '{"type":"message_upd'
+        self._pi_prints(tmp_path, cut, pi_events("answer"))
+        (tmp_path / "hang.1").write_text("")
+
+        result = ma.run_pool([MISTRAL, GLM], "p", timeout=1, watch=True)
+
+        events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
+        assert result == ma.PoolResult(GLM, "answer")
+        assert events_path.read_text() == (
+            _marker("mistral-medium-3.5", 1)
+            + cut
+            + "\n"
+            + _result("mistral-medium-3.5", 1, "timeout")
+            + _marker("glm-5-2", 1)
+            + pi_events("answer")
+            + _result("glm-5-2", 1, "answered")
+            + _POOL_END
+        )
+
+    def test_pool_end_is_written_even_when_an_attempt_raises(
+        self, bins, tmp_path, monkeypatch
+    ):
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        monkeypatch.setattr(
+            ma, "call_cli", unittest.mock.Mock(side_effect=RuntimeError("boom"))
+        )
+
+        with pytest.raises(RuntimeError, match="boom"):
+            ma.run_pool([MISTRAL], "p", watch=True)
+
+        events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
+        assert events_path.read_text() == _marker("mistral-medium-3.5", 1) + _POOL_END
+        assert stat.S_IMODE(events_path.parent.stat().st_mode) == 0o700
+
+    def test_the_pane_is_told_how_each_attempt_ended(self, bins, tmp_path, monkeypatch):
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        text_call = "<function=read>\n<parameter=path>a.py</parameter>\n</function>"
+        self._pi_prints(
+            tmp_path,
+            pi_events("", "error", "429 slow down"),
+            pi_events(text_call),
+            pi_events(""),
+            pi_events("answer"),
+        )
+
+        result = ma.run_pool([MISTRAL, GLM, KIMI], "p", watch=True)
+
+        events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
+        assert result == ma.PoolResult(GLM, "answer")
+        assert events_path.read_text() == (
+            _marker("mistral-medium-3.5", 1)
+            + pi_events("", "error", "429 slow down")
+            + _result("mistral-medium-3.5", 1, "rate limited")
+            + _marker("glm-5-2", 1)
+            + pi_events(text_call)
+            + _result("glm-5-2", 1, "tool call text")
+            + _marker("kimi-k2.6", 1)
+            + pi_events("")
+            + _result("kimi-k2.6", 1, "empty answer")
+            + _marker("glm-5-2", 2)
+            + pi_events("answer")
+            + _result("glm-5-2", 2, "answered")
+            + _POOL_END
+        )
+
+    def test_the_pane_is_told_the_provider_line_of_a_failure(
+        self, bins, tmp_path, monkeypatch
+    ):
+        self._recording_cmux(bins, tmp_path)
+        monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
+        self._pi_prints(tmp_path, pi_events("", "error", "401 invalid api key"))
+
+        ma.run_pool([MISTRAL], "p", watch=True)
+
+        events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
+        assert events_path.read_text() == (
+            _marker("mistral-medium-3.5", 1)
+            + pi_events("", "error", "401 invalid api key")
+            + _result("mistral-medium-3.5", 1, "failed: 401 invalid api key")
+            + _POOL_END
+        )
+
+    def test_exit_0_without_any_message_but_with_output_is_a_failure(
+        self, bins, tmp_path
+    ):
+        self._pi_prints(tmp_path, "usage: pi [options]\n")
+
+        result = ma.run_pool([MISTRAL, GLM], "p")
+
+        assert result == ma.PoolResult(
+            None, "mistral-medium-3.5 critical failure: usage: pi [options]"
+        )
+
+    def test_exit_0_without_any_message_but_with_stderr_is_a_failure(
+        self, bins, tmp_path
+    ):
+        self._pi_prints(tmp_path, "", errors=["no models configured\n"])
+
+        result = ma.run_pool([MISTRAL, GLM], "p")
+
+        assert result == ma.PoolResult(
+            None, "mistral-medium-3.5 critical failure: no models configured"
+        )
+
+    def test_exit_0_with_nothing_at_all_is_an_empty_answer_requeued_once(
+        self, bins, tmp_path
+    ):
+        self._pi_prints(tmp_path, "", "")
+
+        result = ma.run_pool([MISTRAL], "p")
+
+        assert result == ma.PoolResult(None, "mistral-medium-3.5: empty answer")
+        assert self._pi_calls(tmp_path) == 2
+
+    def test_a_child_that_pi_left_holding_the_pipes_is_killed_with_it(
+        self, bins, tmp_path
+    ):
+        # A tool-spawned process inherits pi's pipes: killing pi alone would leave the pool
+        # waiting on them.
+        _fake_binary(
+            bins,
+            "pi",
+            f'/bin/sleep 30 &\necho $! > "{tmp_path}/child.pid"\nexec /bin/sleep 30',
+        )
+
+        started = time.monotonic()
+        try:
+            with pytest.raises(subprocess.TimeoutExpired):
+                ma.call_cli(MISTRAL, "p", 1, env={})
+            elapsed = time.monotonic() - started
+            child = int((tmp_path / "child.pid").read_text())
+            for _ in range(20):
+                try:
+                    os.kill(child, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(child, signal.SIGKILL)
+                pytest.fail("the child of pi is still running")
+        finally:
+            pid_file = tmp_path / "child.pid"
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except (ProcessLookupError, ValueError):
+                    pass
+
+        assert elapsed < 4
+
+    def test_a_large_stream_on_both_pipes_at_once_completes(self, bins, tmp_path):
+        script = tmp_path / "big.py"
+        script.write_text(
+            "import json, sys, threading\n"
+            "def err():\n"
+            "    for i in range(2000):\n"
+            "        sys.stderr.write('warning %d ' % i + 'x' * 90 + '\\n')\n"
+            "        sys.stderr.flush()\n"
+            "t = threading.Thread(target=err)\n"
+            "t.start()\n"
+            "delta = {'type': 'message_update', 'assistantMessageEvent':\n"
+            "         {'type': 'text_delta', 'contentIndex': 0, 'delta': 'y' * 90}}\n"
+            "for i in range(2000):\n"
+            "    sys.stdout.write(json.dumps(delta) + '\\n')\n"
+            "    sys.stdout.flush()\n"
+            "end = {'type': 'message_end', 'message': {'role': 'assistant',\n"
+            "       'stopReason': 'stop', 'content': [{'type': 'text', 'text': 'big answer'}]}}\n"
+            "sys.stdout.write(json.dumps(end) + '\\n')\n"
+            "t.join()\n"
+        )
+        _fake_binary(bins, "pi", f'exec "{sys.executable}" "{script}"')
+        copy = io.StringIO()
+
+        started = time.monotonic()
+        answer = ma.call_cli(MISTRAL, "p", 60, env={}, events=copy)
+
+        assert answer == "big answer"
+        assert len(copy.getvalue().splitlines()) == 2001
+        assert time.monotonic() - started < 30
+
+    def _recording_popen(self, interrupt=False):
+        """A `Popen` that records `kill()` and, when `interrupt`, raises `KeyboardInterrupt`
+        from the timed `wait` — the process behind it is real."""
+        kills = []
+
+        class RecordingPopen(subprocess.Popen):
+            def kill(self):
+                kills.append(self.pid)
+                super().kill()
+
+            def wait(self, timeout=None):
+                if interrupt and timeout is not None:
+                    raise KeyboardInterrupt
+                return super().wait(timeout)
+
+        return RecordingPopen, kills
+
+    def test_a_timeout_still_kills_where_there_is_no_process_groups(
+        self, bins, monkeypatch
+    ):
+        # Windows has no `os.killpg`: the plain `kill()` must still be reached.
+        _fake_binary(bins, "pi", "exec /bin/sleep 30")
+        monkeypatch.delattr(os, "killpg")
+        popen, kills = self._recording_popen()
+        monkeypatch.setattr(ma, "Popen", popen)
+
+        started = time.monotonic()
+        with pytest.raises(subprocess.TimeoutExpired):
+            ma.call_cli(MISTRAL, "p", 1, env={})
+
+        assert len(kills) == 1
+        assert time.monotonic() - started < 10
+
+    def test_an_interrupt_while_waiting_kills_the_detached_session(
+        self, bins, monkeypatch
+    ):
+        # `start_new_session` detached pi from the terminal's group: Ctrl-C never reaches it.
+        _fake_binary(bins, "pi", "exec /bin/sleep 30")
+        popen, kills = self._recording_popen(interrupt=True)
+        monkeypatch.setattr(ma, "Popen", popen)
+
+        with pytest.raises(KeyboardInterrupt):
+            ma.call_cli(MISTRAL, "p", 60, env={})
+
+        assert len(kills) == 1
+        for _ in range(20):
+            try:
+                os.kill(kills[0], 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(kills[0], signal.SIGKILL)
+            pytest.fail("pi is still running after the interrupt")
+
+    def test_a_run_past_its_timeout_is_killed(self, bins, tmp_path):
+        _fake_binary(bins, "pi", "exec /bin/sleep 30")
+
+        started = time.monotonic()
+        with pytest.raises(subprocess.TimeoutExpired):
+            ma.call_cli(MISTRAL, "p", 1, env={})
+
+        assert time.monotonic() - started < 10
+
+
+class TestFakePiProcess:
+    def test_a_canned_timeout_is_raised_once_and_the_process_is_reaped_after_kill(self):
+        from pi_fakes import FakePiProcess
+
+        waits = []
+        proc = FakePiProcess("", "", 0, subprocess.TimeoutExpired("pi", 5), waits)
+
+        with pytest.raises(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        proc.kill()
+
+        assert proc.wait() == 0
+        assert waits == [5, None]
+
+
+class TestAdversarialToolWatches:
+    def test_the_adversarial_tool_asks_for_the_split(self, monkeypatch):
+        server = _server()
+        seen = {}
+
+        def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
+            seen["watch"] = watch
+            return ma.PoolResult(entries[0], "ok")
+
+        monkeypatch.setattr(server.model_adversarial, "load_pool", lambda: [MISTRAL])
+        monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
+
+        server.adversarial(task="review")
+
+        assert seen == {"watch": True}
+
+
+# --- the viewer ------------------------------------------------------------------------
+
+_EVENTS = [
+    {"type": "session", "id": "66e1b811-6b2d-460e-b3c3-eee7d057a75a"},
+    {"type": "pool_attempt", "entry": "nvidia-glm", "attempt": 1},
+    {"type": "agent_start"},
+    {
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "thinking_start", "contentIndex": 0},
+    },
+    {
+        "type": "tool_execution_start",
+        "toolName": "read",
+        "args": {
+            "path": "setup/plugin_reconcile.py",
+            "offset": 280,
+            "pattern": "a" * 70,
+        },
+    },
+    {
+        "type": "tool_execution_end",
+        "toolName": "read",
+        "isError": False,
+        "durationMs": 12,
+    },
+    {
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "stopReason": "error",
+            "errorMessage": '429 {"message":"rate\nlimited"}\n',
+            "content": [],
+        },
+    },
+    {
+        "type": "auto_retry_start",
+        "attempt": 1,
+        "maxAttempts": 3,
+        "delayMs": 2000,
+        "errorMessage": "429 rate limited",
+    },
+    {"type": "auto_retry_end", "success": True, "attempt": 2},
+    {
+        "type": "message_update",
+        "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 0,
+            "delta": "No ",
+        },
+    },
+    {
+        "type": "message_update",
+        "assistantMessageEvent": {
+            "type": "text_delta",
+            "contentIndex": 0,
+            "delta": "finding.",
+        },
+    },
+    {
+        "type": "message_update",
+        "assistantMessageEvent": {
+            "type": "text_end",
+            "contentIndex": 0,
+            "content": "No finding.",
+        },
+    },
+    {
+        "type": "message_end",
+        "message": {"role": "assistant", "stopReason": "stop", "content": []},
+    },
+    {"type": "tool_execution_end", "toolName": "grep", "isError": True},
+    {"type": "agent_settled", "aborted": False},
+    {"type": "pool_result", "entry": "nvidia-glm", "attempt": 1, "outcome": "answered"},
+    {"type": "pool_end"},
+]
+
+_RENDERED = (
+    "[  0.5s] == nvidia-glm (attempt 1) ==\n"
+    "[  1.5s] thinking\n"
+    "[  2.0s] tool read(path=setup/plugin_reconcile.py, offset=280, pattern="
+    + "a"
+    * 57
+    + "...)\n"
+    "[  2.5s]   <- read ok 12 ms\n"
+    '[  3.0s] error 429 {"message":"rate limited"}\n'
+    "[  3.5s] retry 1/3 in 2000 ms: 429 rate limited\n"
+    "[  4.0s] retry succeeded (attempt 2)\n"
+    "[  4.5s] text: No finding.\n"
+    "[  6.5s]   <- grep error ? ms\n"
+    "[  7.0s] settled\n"
+    "[  7.5s] -> nvidia-glm attempt 1: answered\n"
+    "[  8.0s] pool end\n"
+)
+
+
+def _events_text(records):
+    """An events file's text: one JSON object per line, with a broken line in the middle."""
+    lines = [json.dumps(r) for r in records]
+    lines.insert(3, '{"type": "message_upd')
+    return "\n".join(lines) + "\n"
+
+
+def _view(path, *args):
+    """Run the viewer script as a split would."""
+    return subprocess.run(
+        [sys.executable, "-I", str(Path(pev.__file__)), str(path), *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+class TestPiEventsView:
+    """The split shows one readable line per event, with the time since it started."""
+
+    def test_renderer_output_is_pinned_whole(self):
+        ticks = iter(i * 0.5 for i in range(len(_EVENTS)))
+        renderer = pev.EventRenderer(lambda: next(ticks))
+
+        shown = "".join(renderer.feed(record) for record in _EVENTS)
+
+        assert shown == _RENDERED
+        assert renderer.finished
+
+    def test_the_script_renders_a_file_and_exits_on_pool_end(self, tmp_path):
+        path = tmp_path / "events.jsonl"
+        path.write_text(_events_text(_EVENTS))
+
+        done = _view(path)
+
+        assert done.returncode == 0
+        assert done.stderr == ""
+        # The script's clock is real: compare the text without its time stamps.
+        assert re.sub(r"\[ *\d+\.\ds\]", "[T]", done.stdout) == re.sub(
+            r"\[ *\d+\.\ds\]", "[T]", _RENDERED
+        )
+
+    def test_it_follows_the_file_as_it_grows_and_reads_a_half_written_line_whole(
+        self, tmp_path
+    ):
+        path = tmp_path / "events.jsonl"
+        lines = [json.dumps(r) + "\n" for r in _EVENTS]
+        path.write_text(lines[0] + lines[1])
+        viewer = subprocess.Popen(
+            [sys.executable, "-I", str(Path(pev.__file__)), str(path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            time.sleep(0.6)
+            with path.open("a") as f:
+                f.write("".join(lines[2:6]) + lines[6][:15])
+                f.flush()
+                time.sleep(0.6)
+                f.write(lines[6][15:] + "".join(lines[7:]))
+            stdout, stderr = viewer.communicate(timeout=30)
+        finally:
+            viewer.kill()
+
+        assert (viewer.returncode, stderr) == (0, "")
+        assert re.sub(r"\[ *\d+\.\ds\]", "[T]", stdout) == re.sub(
+            r"\[ *\d+\.\ds\]", "[T]", _RENDERED
+        )
+
+    def test_control_characters_of_event_strings_never_reach_the_terminal(self):
+        records = [
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "text_delta",
+                    "delta": "a\x1b[2Jb\x9bc\nd",
+                },
+            },
+            {"type": "message_update", "assistantMessageEvent": {"type": "text_end"}},
+            {
+                "type": "tool_execution_start",
+                "toolName": "bash",
+                "args": {"command": "echo \x1b]0;pwn\x07"},
+            },
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "stopReason": "error",
+                    "errorMessage": "429 \x1b[31mred\x1b[0m\r",
+                },
+            },
+            {
+                "type": "pool_result",
+                "entry": "e\x1b",
+                "attempt": 1,
+                "outcome": "failed: \x1b[31mred\x07",
+            },
+        ]
+        ticks = iter(i * 0.5 for i in range(len(records)))
+        renderer = pev.EventRenderer(lambda: next(ticks))
+
+        shown = "".join(renderer.feed(record) for record in records)
+
+        assert shown == (
+            "[  0.0s] text: a?[2Jb?c\nd\n"
+            "[  1.0s] tool bash(command=echo ?]0;pwn?)\n"
+            "[  1.5s] error 429 ?[31mred?[0m\n"
+            "[  2.0s] -> e? attempt 1: failed: ?[31mred?\n"
+        )
+        assert "\x1b" not in shown
+
+    def test_text_reordering_and_invisible_characters_are_replaced_too(self):
+        records = [
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "text_delta",
+                    "delta": "a\u202eb\u200bc\u2028d\u061ce\ufeff",
+                },
+            },
+            {"type": "message_update", "assistantMessageEvent": {"type": "text_end"}},
+            {
+                "type": "tool_execution_start",
+                "toolName": "bash",
+                "args": {"command": "x\u202ey\u200bz\u2028w\u2066v\u2069"},
+            },
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "stopReason": "error",
+                    "errorMessage": "429 \u202e\u200b\u2028 \u2060end",
+                },
+            },
+        ]
+        ticks = iter(i * 0.5 for i in range(len(records)))
+        renderer = pev.EventRenderer(lambda: next(ticks))
+
+        shown = "".join(renderer.feed(record) for record in records)
+
+        assert shown == (
+            "[  0.0s] text: a?b?c?d?e?\n"
+            "[  1.0s] tool bash(command=x?y?z?w?v?)\n"
+            "[  1.5s] error 429 ??? ?end\n"
+        )
+
+    def test_a_character_split_across_two_reads_is_decoded_exactly(self, tmp_path):
+        path = tmp_path / "events.jsonl"
+        delta = {
+            "type": "message_update",
+            "assistantMessageEvent": {
+                "type": "text_delta",
+                "contentIndex": 0,
+                "delta": "caf\u00e9 \u65e5\u672c",
+            },
+        }
+        raw = (json.dumps(delta, ensure_ascii=False) + "\n").encode("utf-8")
+        cut = raw.index("\u65e5".encode("utf-8")) + 1  # inside the 3-byte character
+        path.write_bytes(raw[:cut])
+        viewer = subprocess.Popen(
+            [
+                sys.executable,
+                "-I",
+                str(Path(pev.__file__)),
+                str(path),
+                "--idle-timeout",
+                "3",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            time.sleep(0.8)
+            with path.open("ab") as f:
+                f.write(raw[cut:])
+            stdout, stderr = viewer.communicate(timeout=30)
+        finally:
+            viewer.kill()
+
+        assert (viewer.returncode, stderr) == (0, "")
+        assert (
+            re.sub(r"\[ *\d+\.\ds\]", "[T]", stdout)
+            == "[T] text: caf\u00e9 \u65e5\u672c"
+        )
+
+    def test_a_run_that_goes_quiet_ends_the_viewer_after_the_idle_timeout(
+        self, tmp_path
+    ):
+        path = tmp_path / "events.jsonl"
+        path.write_text(json.dumps(_EVENTS[1]) + "\n")
+
+        done = _view(path, "--idle-timeout", "0.5")
+
+        assert done.returncode == 0
+        assert re.sub(r"\[ *\d+\.\ds\]", "[T]", done.stdout) == (
+            "[T] == nvidia-glm (attempt 1) ==\n"
+        )
+
+    def test_a_file_that_never_appears_is_said_and_fails(self, tmp_path):
+        path = tmp_path / "events.jsonl"
+
+        done = _view(path, "--idle-timeout", "0.5")
+
+        assert (done.returncode, done.stdout, done.stderr) == (
+            1,
+            "",
+            f"no events file {path} within 0.5s\n",
+        )
 
 
 if __name__ == "__main__":
