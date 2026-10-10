@@ -15,6 +15,7 @@ layouts.
 
 import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ from pathlib import Path
 HOOKS = Path(__file__).parent.parent / "plugins" / "pc-statusline" / "scripts"
 sys.path.insert(0, str(HOOKS))
 
+import _common  # noqa: E402
 import statusline as sl  # noqa: E402
 
 
@@ -278,10 +280,13 @@ def _no_live_proxy(monkeypatch):
 @_pytest.fixture(autouse=True)
 def _no_live_process_table(monkeypatch, tmp_path):
     """Keep the advisor probe off the machine running the suite: `ps` answers nothing (so the
-    process ancestry never reaches the `claude` hosting this session) and the per-session advisor
-    cache lands in `tmp_path` instead of the shared temp dir."""
-    monkeypatch.setattr(sl, "_ps", lambda *_args: "")
+    process ancestry never reaches the `claude` hosting this session), the per-session caches land
+    in `tmp_path` instead of the shared temp dir, `HOME` (hence `~/.claude/debug`) is
+    `tmp_path/home`, and the environment of the suite's own session never reaches the advisor."""
+    monkeypatch.setattr(_common, "_ps", lambda *_args: "")
     monkeypatch.setattr(sl.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("CLAUDE_CODE_DISABLE_ADVISOR_TOOL", raising=False)
 
 
 def test_headroom_stats_net_is_savings_minus_cache_busts(monkeypatch):
@@ -488,7 +493,11 @@ def test_main_never_crashes_on_adversarial_json_shapes(tmp_path):
             text=True,
             encoding="utf-8",
             timeout=10,
-            env={**os.environ, "TMPDIR": str(tmp_path)},
+            env={
+                **os.environ,
+                "TMPDIR": str(tmp_path),
+                "HOME": str(tmp_path / "home"),
+            },
         )
         assert result.returncode == 0, (
             f"statusline.py exited {result.returncode} on input {raw!r}\n{result.stderr}"
@@ -836,7 +845,7 @@ def _run_main(payload, base_url, tmp_path):
     import json
     import os
 
-    env = {**os.environ, "TMPDIR": str(tmp_path)}
+    env = {**os.environ, "TMPDIR": str(tmp_path), "HOME": str(tmp_path / "home")}
     env.pop("ANTHROPIC_BASE_URL", None)
     if base_url:
         env["ANTHROPIC_BASE_URL"] = base_url
@@ -1312,44 +1321,6 @@ def test_build_lines_falls_back_to_cwd_for_the_repo_when_there_is_no_project_dir
 # --- advisor detection — the `--advisor` value of the `claude` process, never its command line -
 
 
-def test_is_claude_matches_the_binary_not_a_process_citing_it():
-    assert sl._is_claude("claude --session-id s1")
-    assert sl._is_claude("/usr/local/bin/claude --session-id s1")
-    assert not sl._is_claude("vim claude.py")
-    assert not sl._is_claude("node claude")
-    assert not sl._is_claude("")
-
-
-def test_claude_args_by_session_matches_the_claude_process_carrying_the_id(
-    monkeypatch,
-):
-    table = (
-        "/bin/zsh -l\n"
-        "grep --session-id s1\n"
-        "claude --session-id s1 --advisor opus\n"
-        "claude --session-id=s2\n"
-    )
-    monkeypatch.setattr(sl, "_ps", lambda *_args: table)
-    assert sl._claude_args_by_session("s1") == "claude --session-id s1 --advisor opus"
-    assert sl._claude_args_by_session("s2") == "claude --session-id=s2"
-    assert sl._claude_args_by_session("s3") is None
-
-
-def test_claude_args_by_ancestry_walks_up_to_the_claude_process(monkeypatch):
-    parents = {"300": "200 -zsh", "200": "100 claude --advisor sonnet"}
-    monkeypatch.setattr(sl.os, "getppid", lambda: 300)
-    monkeypatch.setattr(sl, "_ps", lambda *args: parents.get(args[-1], ""))
-    assert sl._claude_args_by_ancestry() == "claude --advisor sonnet"
-
-
-def test_claude_args_by_ancestry_stops_at_init_and_on_a_missing_process(monkeypatch):
-    monkeypatch.setattr(sl.os, "getppid", lambda: 300)
-    monkeypatch.setattr(sl, "_ps", lambda *args: "1 -zsh" if args[-1] == "300" else "")
-    assert sl._claude_args_by_ancestry() is None
-    monkeypatch.setattr(sl, "_ps", lambda *_args: "")
-    assert sl._claude_args_by_ancestry() is None
-
-
 def test_get_advisor_model_reads_the_per_session_cache_without_running_ps(
     tmp_path, monkeypatch
 ):
@@ -1359,15 +1330,16 @@ def test_get_advisor_model_reads_the_per_session_cache_without_running_ps(
     (tmp_path / "statusline-advisor-s1.json").write_text(
         json.dumps({"advisor": "haiku"}), encoding="utf-8"
     )
-    monkeypatch.setattr(sl, "_ps", _ps_must_not_run)
+    monkeypatch.setattr(_common, "_ps", _ps_must_not_run)
     assert sl._get_advisor_model("s1") == "haiku"
+    assert _common.process_flags("s1") == _common.ProcessFlags("haiku", False)
 
 
 def test_get_advisor_model_does_not_cache_a_failed_ps(tmp_path, monkeypatch):
     def _failing_ps(*_args):
         raise subprocess.SubprocessError("ps failed")
 
-    monkeypatch.setattr(sl, "_ps", _failing_ps)
+    monkeypatch.setattr(_common, "_ps", _failing_ps)
     assert sl._get_advisor_model("s1") is None
     assert list(tmp_path.iterdir()) == []
 
@@ -1380,10 +1352,15 @@ def test_get_advisor_model_does_not_cache_a_failed_ps(tmp_path, monkeypatch):
 def test_get_advisor_model_reads_both_flag_spellings(
     tmp_path, monkeypatch, flag, expected
 ):
-    monkeypatch.setattr(sl, "_ps", lambda *_args: f"claude --session-id s1 {flag}\n")
+    monkeypatch.setattr(
+        _common, "_ps", lambda *_args: f"claude --session-id s1 {flag}\n"
+    )
     assert sl._get_advisor_model("s1") == expected
     cache = tmp_path / "statusline-advisor-s1.json"
-    assert json.loads(cache.read_text(encoding="utf-8")) == {"advisor": expected}
+    assert json.loads(cache.read_text(encoding="utf-8")) == {
+        "advisor": expected,
+        "debug": False,
+    }
 
 
 _CANARY = "sk-test-" + "123"
@@ -1407,7 +1384,7 @@ def test_main_persists_and_prints_only_the_advisor_value_never_the_command_line(
 ):
     """The process command line can carry secrets (an API key in the environment string, a token
     in a flag): only the `--advisor` value may reach the cache file or the rendered line."""
-    monkeypatch.setattr(sl, "_ps", lambda *args: ps_table(args))
+    monkeypatch.setattr(_common, "_ps", lambda *args: ps_table(args))
     out = _render_through_main(
         monkeypatch, capsys, {**_RICH_PAYLOAD, "session_id": "sess-adv"}, 160
     )
@@ -1418,4 +1395,338 @@ def test_main_persists_and_prints_only_the_advisor_value_never_the_command_line(
     for path in written:
         assert _CANARY not in path.read_text(encoding="utf-8")
     cache = tmp_path / "statusline-advisor-sess-adv.json"
-    assert json.loads(cache.read_text(encoding="utf-8")) == {"advisor": "opus"}
+    assert json.loads(cache.read_text(encoding="utf-8")) == {
+        "advisor": "opus",
+        "debug": False,
+    }
+
+
+# --- advisor read from the transcript — the last `advisor_tool` entry decides, a failed read
+# never erases what is shown ----------------------------------------------------------------
+
+_NO_FLAG_PS = "claude --session-id sess-tr --effort high\n"
+_OPUS_FLAG_PS = "claude --session-id sess-tr --advisor opus\n"
+_ADVISOR_MARK = "🧐"
+
+
+def _entry_line(available, model=None, change="add"):
+    """One `advisor_tool` attachment line, as the harness writes it."""
+    attachment = {"type": "advisor_tool", "available": available, "toolChange": change}
+    if model:
+        attachment["model"] = model
+    return json.dumps({"type": "attachment", "attachment": attachment})
+
+
+def _message_line(advisor_model="claude-opus-5-5", text="working on it"):
+    """An assistant message: it carries `advisorModel` whatever the advisor's state is."""
+    return json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": text},
+            "advisorModel": advisor_model,
+        }
+    )
+
+
+def _append_lines(path, *lines):
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("".join(f"{line}\n" for line in lines))
+
+
+def _render_advisor(monkeypatch, capsys, transcript, session_id="sess-tr"):
+    """The model row's advisor segment after one `main()` render, or None when there is none."""
+    payload = {
+        **_RICH_PAYLOAD,
+        "session_id": session_id,
+        "transcript_path": str(transcript),
+    }
+    out = _render_through_main(monkeypatch, capsys, payload, 160)
+    rows = [ln for ln in out if _ADVISOR_MARK in ln]
+    return rows[0].split(_ADVISOR_MARK)[1].split("·")[0].strip() if rows else None
+
+
+def test_main_shows_the_model_of_the_last_add_entry(tmp_path, monkeypatch, capsys):
+    transcript = tmp_path / "session.jsonl"
+    _append_lines(transcript, _entry_line(True, "claude-opus-5-5"), _message_line())
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+
+
+def test_main_last_entry_wins_whatever_its_tool_change(tmp_path, monkeypatch, capsys):
+    transcript = tmp_path / "session.jsonl"
+    _append_lines(
+        transcript,
+        _entry_line(True, "claude-opus-5-5"),
+        _entry_line(True, "claude-sonnet-5", change="update"),
+    )
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Sonnet 5"
+
+
+def test_main_a_remove_entry_hides_the_advisor_despite_advisor_model_messages(
+    tmp_path, monkeypatch, capsys
+):
+    """`remove` wins over the `--advisor` flag and over every message still carrying
+    `advisorModel`; lines that only quote `advisor_tool` are not entries."""
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _OPUS_FLAG_PS)
+    transcript = tmp_path / "session.jsonl"
+    quoting = json.dumps(
+        {
+            "type": "assistant",
+            "attachment": {"type": "advisor_tool", "available": True, "model": "x-y"},
+        }
+    )
+    _append_lines(
+        transcript,
+        _entry_line(True, "claude-opus-5-5"),
+        _entry_line(False, change="remove"),
+        *[_message_line() for _ in range(5)],
+        _message_line(text="the advisor_tool attachment says available: true"),
+        quoting,
+        "{not json but advisor_tool",
+    )
+    assert _render_advisor(monkeypatch, capsys, transcript) is None
+
+
+def test_main_without_an_entry_falls_back_to_the_advisor_flag(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _OPUS_FLAG_PS)
+    transcript = tmp_path / "session.jsonl"
+    _append_lines(transcript, _message_line(), _message_line())
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus"
+
+
+def test_main_takes_an_entry_written_mid_session_at_the_next_render(
+    tmp_path, monkeypatch, capsys
+):
+    """A first render with no flag and no entry; the entry arrives; the very next render shows
+    it — "no flag" was only ever the `ps` result, never a final answer."""
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _NO_FLAG_PS)
+    transcript = tmp_path / "session.jsonl"
+    _append_lines(transcript, _message_line())
+    assert _render_advisor(monkeypatch, capsys, transcript) is None
+    _append_lines(transcript, _entry_line(True, "claude-opus-5-5"))
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+
+
+def test_main_disabled_advisor_tool_env_shows_nothing(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _OPUS_FLAG_PS)
+    monkeypatch.setenv("CLAUDE_CODE_DISABLE_ADVISOR_TOOL", "1")
+    transcript = tmp_path / "session.jsonl"
+    _append_lines(transcript, _entry_line(True, "claude-opus-5-5"))
+    assert _render_advisor(monkeypatch, capsys, transcript) is None
+
+
+def test_main_keeps_the_advisor_when_the_transcript_is_deleted_or_truncated(
+    tmp_path, monkeypatch, capsys
+):
+    transcript = tmp_path / "session.jsonl"
+    _append_lines(transcript, _entry_line(True, "claude-opus-5-5"), _message_line())
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+
+    def _failing_ps(*_args):
+        raise subprocess.SubprocessError("ps failed")
+
+    monkeypatch.setattr(_common, "_ps", _failing_ps)
+    transcript.unlink()
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+    # recreated smaller than the stored offset, with no entry: rescanned, nothing found, kept
+    transcript.write_text(_message_line(text="x") + "\n", encoding="utf-8")
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+    # a `remove` is the only thing that takes it away
+    _append_lines(transcript, _entry_line(False, change="remove"))
+    assert _render_advisor(monkeypatch, capsys, transcript) is None
+    transcript.unlink()
+    assert _render_advisor(monkeypatch, capsys, transcript) is None
+
+
+def test_main_never_advances_the_offset_past_a_half_written_line(
+    tmp_path, monkeypatch, capsys
+):
+    transcript = tmp_path / "session.jsonl"
+    complete = _entry_line(True, "claude-opus-5-5") + "\n"
+    removal = _entry_line(False, change="remove")
+    cut = len(removal) // 2
+    transcript.write_text(complete + removal[:cut], encoding="utf-8")
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+    state = json.loads(
+        (tmp_path / "statusline-advisor-transcript-sess-tr.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert state["offset"] == len(complete.encode("utf-8"))
+
+    with open(transcript, "a", encoding="utf-8") as handle:
+        handle.write(removal[cut:] + "\n")
+    assert _render_advisor(monkeypatch, capsys, transcript) is None
+
+
+def test_main_reads_a_finished_entry_that_has_no_newline_yet(
+    tmp_path, monkeypatch, capsys
+):
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_entry_line(True, "claude-opus-5-5"), encoding="utf-8")
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+
+
+class _CountingFile:
+    """A binary file whose reads are tallied in `counter["bytes"]`."""
+
+    def __init__(self, handle, counter):
+        self._handle = handle
+        self._counter = counter
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self._handle.close()
+
+    def seek(self, offset, whence=0):
+        return self._handle.seek(offset, whence)
+
+    def __iter__(self):
+        for line in self._handle:
+            self._counter["bytes"] += len(line)
+            yield line
+
+
+def test_main_second_render_reads_only_the_appended_bytes(
+    tmp_path, monkeypatch, capsys
+):
+    transcript = tmp_path / "session.jsonl"
+    filler = _message_line(text="x" * 900)
+    with open(transcript, "w", encoding="utf-8") as handle:
+        handle.write(_entry_line(True, "claude-opus-5-5") + "\n")
+        for _ in range(5 * 1024 * 1024 // len(filler)):
+            handle.write(filler + "\n")
+    assert transcript.stat().st_size > 5 * 1024 * 1024
+
+    counter = {"bytes": 0}
+    real_open = open
+
+    def counting_open(path, mode="r", *args, **kwargs):
+        handle = real_open(path, mode, *args, **kwargs)
+        if str(path) == str(transcript):
+            return _CountingFile(handle, counter)
+        return handle
+
+    monkeypatch.setattr(sl, "open", counting_open, raising=False)
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+    assert counter["bytes"] > 5 * 1024 * 1024  # the first render scans the file once
+
+    counter["bytes"] = 0
+    _append_lines(transcript, _message_line())
+    assert _render_advisor(monkeypatch, capsys, transcript) == "Opus 5.5"
+    assert 0 < counter["bytes"] < 64 * 1024
+
+
+# --- debug dump — the payloads received, kept per session while the process runs in debug mode -
+
+_DEBUG_PS = "claude --session-id sess-dbg --debug api,hooks\n"
+
+
+def _debug_file(tmp_path, name="statusline", session_id="sess-dbg"):
+    return (
+        tmp_path
+        / "home"
+        / ".claude"
+        / "debug"
+        / f"{session_id}__pc-statusline__{name}.json"
+    )
+
+
+def _debug_payload(cost=1.5):
+    return {
+        **_RICH_PAYLOAD,
+        "session_id": "sess-dbg",
+        "cost": {"total_cost_usd": cost, "total_duration_ms": 0},
+    }
+
+
+def test_main_with_debug_flag_writes_the_payload_as_received(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+    stored = json.loads(_debug_file(tmp_path).read_text(encoding="utf-8"))
+    assert stored == [_debug_payload()]
+
+
+def test_main_without_debug_flag_writes_nothing_to_the_debug_dir(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        _common, "_ps", lambda *_args: "claude --session-id sess-dbg --advisor opus\n"
+    )
+    _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+    assert not (tmp_path / "home" / ".claude" / "debug").exists()
+
+
+def test_main_debug_file_keeps_the_last_five_distinct_payloads_oldest_first(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    costs = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+    for cost in costs:
+        _render_through_main(monkeypatch, capsys, _debug_payload(cost), 160)
+    stored = json.loads(_debug_file(tmp_path).read_text(encoding="utf-8"))
+    assert [p["cost"]["total_cost_usd"] for p in stored] == costs[-5:]
+
+
+def test_main_identical_payload_does_not_rewrite_the_debug_file(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+    path = _debug_file(tmp_path)
+    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+    assert path.stat().st_mtime_ns == 1_000_000_000
+    assert len(json.loads(path.read_text(encoding="utf-8"))) == 1
+
+
+def test_main_unwritable_debug_dir_leaves_the_output_unchanged(
+    tmp_path, monkeypatch, capsys
+):
+    _fixed_now_18h(monkeypatch)
+    expected = _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+
+    (tmp_path / "statusline-advisor-sess-dbg.json").unlink(missing_ok=True)
+    blocker = tmp_path / "home" / ".claude" / "debug"
+    blocker.parent.mkdir(parents=True)
+    blocker.write_text("a file where the directory should be", encoding="utf-8")
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    assert _render_through_main(monkeypatch, capsys, _debug_payload(), 160) == expected
+    assert blocker.is_file()
+
+
+def test_main_reads_the_process_command_line_once_for_both_flags(
+    tmp_path, monkeypatch, capsys
+):
+    calls = []
+
+    def counting_ps(*args):
+        calls.append(args)
+        return "claude --session-id sess-dbg --advisor opus --debug\n"
+
+    monkeypatch.setattr(_common, "_ps", counting_ps)
+    for cost in (1.0, 2.0):
+        out = _render_through_main(monkeypatch, capsys, _debug_payload(cost), 160)
+        assert any("🧐 Opus" in ln for ln in out)
+    assert len(calls) == 1
+    assert _debug_file(tmp_path).exists()
+
+
+def test_main_never_writes_the_command_line_into_the_debug_dump(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        _common,
+        "_ps",
+        lambda *_args: f"claude --session-id sess-dbg --debug {_CANARY_ARG}\n",
+    )
+    _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+    written = [p for p in tmp_path.rglob("*") if p.is_file()]
+    assert _debug_file(tmp_path) in written
+    for path in written:
+        assert _CANARY not in path.read_text(encoding="utf-8")

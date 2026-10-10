@@ -40,9 +40,12 @@ from _common import (
     RED,
     RESET,
     YELLOW,
+    dump_debug_payload,
     enable_ansi_on_windows,
     force_utf8_stdout,
+    process_flags,
     render_bar,
+    write_json_atomic,
 )
 from _quota import provider_rate_limits
 
@@ -75,7 +78,11 @@ _MIN_BRANCH_COLS = 8
 # whitespace: as the left group of such a row it keeps the padding, and so the right alignment.
 _BLANK = "\u2800"
 
-_ADVISOR_RE = re.compile(r"--advisor(?:=|\s+)(\S+)")
+# Set to a truthy value, Claude Code turns the advisor tool off — the flag then has no effect.
+_ADVISOR_DISABLED_ENV = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL"
+# A transcript line is only parsed when it carries this: the harness writes one `attachment` of
+# this type at every advisor add or removal.
+_ADVISOR_ENTRY_MARK = b"advisor_tool"
 
 
 def _term_cols(default=_DEFAULT_COLS):
@@ -409,71 +416,111 @@ def _count_subagents(transcript_path, session_id):
         return None
 
 
-def _ps(*args):
-    return subprocess.run(
-        ["ps", *args], capture_output=True, text=True, timeout=2, check=True
-    ).stdout
+def _advisor_entry(line: bytes) -> dict | None:
+    """The advisor state an `advisor_tool` attachment line carries — `{"available": bool,
+    "model": str | None}` — or None for any other line (an assistant message that merely quotes
+    the word, malformed JSON, an entry with no usable `available`/`model`)."""
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict) or obj.get("type") != "attachment":
+        return None
+    attachment = obj.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "advisor_tool":
+        return None
+    available, model = attachment.get("available"), attachment.get("model")
+    if available is False:
+        return {"available": False, "model": None}
+    if available is True and isinstance(model, str) and model:
+        return {"available": True, "model": model}
+    return None
 
 
-def _is_claude(args):
-    # le premier token de la ligne doit être le binaire claude, pas un process qui cite l'id
-    first = args.split(None, 1)[0] if args.strip() else ""
-    return os.path.basename(first) == "claude"
+def _scan_advisor_entries(path: str, offset: int) -> tuple[dict | None, int]:
+    """The last advisor entry written to the transcript `path` after byte `offset`, and the
+    offset the next read resumes from.
+
+    Only complete lines move the offset: a last line with no newline yet may be half written, so it
+    is parsed (a finished entry is used) but read again next time."""
+    entry = None
+    resume = offset
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        for line in handle:
+            if _ADVISOR_ENTRY_MARK in line:
+                entry = _advisor_entry(line) or entry
+            if not line.endswith(b"\n"):
+                break
+            resume += len(line)
+    return entry, resume
 
 
-def _claude_args_by_session(session_id):
-    for line in _ps("-axo", "args=").splitlines():
-        if _is_claude(line) and (
-            f"--session-id {session_id}" in line or f"--session-id={session_id}" in line
+def _transcript_advisor(session_id: str, transcript_path: str | None) -> dict | None:
+    """The last advisor entry the session's transcript carries, or None when none was ever seen.
+
+    The transcript is append-only and the entry may date from the start of the session, so the
+    last entry read and the byte offset already scanned are kept per session in
+    `statusline-advisor-transcript-<session_id>.json`; a render reads only what was appended since.
+    The entry is never dropped on a failed read: a missing or unreadable transcript leaves it as it
+    was, a transcript smaller than the stored offset is rescanned from the start, and only a newer
+    entry replaces it."""
+    state_path = os.path.join(
+        tempfile.gettempdir(), f"statusline-advisor-transcript-{session_id}.json"
+    )
+    try:
+        with open(state_path, encoding="utf-8") as handle:
+            state = json.load(handle)
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    entry = state.get("entry")
+    if not (isinstance(entry, dict) and isinstance(entry.get("available"), bool)):
+        entry = None
+    if not transcript_path:
+        return entry
+
+    offset = state.get("offset") if state.get("path") == transcript_path else 0
+    try:
+        if not isinstance(offset, int) or not 0 <= offset <= os.path.getsize(
+            transcript_path
         ):
-            return line
-    return None
-
-
-def _claude_args_by_ancestry():
-    # repli : après /clear ou hors cmux, l'id n'est plus dans la ligne de commande
-    pid = os.getppid()
-    for _ in range(8):
-        out = _ps("-o", "ppid=,args=", "-p", str(pid)).strip()
-        if not out:
-            return None
-        ppid, _, args = out.partition(" ")
-        if _is_claude(args.strip()):
-            return args
-        pid = int(ppid)
-        if pid <= 1:
-            return None
-    return None
-
-
-def _get_advisor_model(session_id):
-    """Return the advisor passed via `--advisor` (an alias like "opus" or a full model id), or None.
-
-    advisorModel is not in the status line's stdin JSON, but the flag is in the
-    command line of the claude process, which never changes during its lifetime.
-    The result is cached per session_id, so `ps` runs once per session. The raw value is returned:
-    `_short_model` does the capitalising and, for a full id, the version.
-    """
-    cache = os.path.join(tempfile.gettempdir(), f"statusline-advisor-{session_id}.json")
-    try:
-        with open(cache) as f:
-            return json.load(f)["advisor"]
-    except (OSError, ValueError, KeyError):
-        pass
-
-    try:
-        args = _claude_args_by_session(session_id) or _claude_args_by_ancestry()
-    except (subprocess.SubprocessError, OSError, ValueError):
-        return None  # échec de ps : on ne met rien en cache
-
-    match = _ADVISOR_RE.search(args or "")
-    advisor = match.group(1) if match else None
-    try:
-        with open(cache, "w") as f:
-            json.dump({"advisor": advisor}, f)
+            offset = 0
+        found, resume = _scan_advisor_entries(transcript_path, offset)
     except OSError:
-        pass
-    return advisor
+        return entry
+    entry = found or entry
+    new_state = {"path": transcript_path, "offset": resume, "entry": entry}
+    if new_state != state:
+        try:
+            write_json_atomic(state_path, new_state)
+        except OSError:
+            pass
+    return entry
+
+
+def _get_advisor_model(session_id: str, transcript_path: str | None = None):
+    """The advisor to show — an alias like "opus" or a full model id — or None.
+
+    The harness writes an `advisor_tool` attachment into the transcript at every advisor add or
+    removal, and the last one gives the current state: `available: true` carries the model,
+    `available: false` means no advisor, whatever the command line says. Without any such entry,
+    the `--advisor` flag of the `claude` process is the value (`process_flags`, read once per
+    session). The per-message `advisorModel` field is not used: it outlives a removal.
+    `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` set to a truthy value shows nothing. The raw value is
+    returned: `_short_model` does the capitalising and, for a full id, the version."""
+    if os.environ.get(_ADVISOR_DISABLED_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return None
+    entry = _transcript_advisor(session_id, transcript_path)
+    if entry is not None:
+        return entry.get("model") if entry["available"] else None
+    return process_flags(session_id).advisor
 
 
 @dataclass
@@ -822,7 +869,7 @@ def build_lines(data: dict) -> list[str]:
     thinking_txt = "🧠 ON" if thinking_on else f"{DIM}🧠 off{RESET}"
     fast_txt = "⚡️ fast" if fast_on else f"{DIM}🐢 normal{RESET}"
 
-    advisor_model = _short_model(_get_advisor_model(session_id))
+    advisor_model = _short_model(_get_advisor_model(session_id, transcript_path))
 
     model_txt = f"{CYAN}{BOLD}🤖 {model}{RESET}"
     advisor_txt = f"{YELLOW}🧐 {advisor_model}{RESET}" if advisor_model else None
@@ -972,6 +1019,8 @@ def main():
     except Exception:
         print("[status line: invalid JSON]")
         return
+    # Dumped as received, before the injections below add to the payload.
+    dump_debug_payload(data, _safe_get(data, "session_id"), "statusline")
     # The harness's own `rate_limits` always wins; only when it is absent (any non-Anthropic
     # provider) is the active provider's quota injected — before the state write, so pc-kanban
     # reads the quota of the provider this session is actually spending.

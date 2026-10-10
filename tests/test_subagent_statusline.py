@@ -8,14 +8,28 @@ point `main()`'s per-task loop calls, for a testable seam. A single malformed ta
 dim `⏱ —` placeholder on a type mismatch instead of trusting the schema blindly.
 """
 
+import io
 import json
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 HOOKS = Path(__file__).parent.parent / "plugins" / "pc-statusline" / "scripts"
 sys.path.insert(0, str(HOOKS))
 
+import _common  # noqa: E402
 import subagent_statusline as sal  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_live_process_table(monkeypatch, tmp_path):
+    """No real `ps`, no real `HOME`, no shared temp dir: the process table answers nothing, the
+    per-session caches land in `tmp_path` and `~/.claude/debug` is `tmp_path/home/.claude/debug`."""
+    monkeypatch.setattr(_common, "_ps", lambda *_args: "")
+    monkeypatch.setattr(_common.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
 
 # --- small pure helpers -------------------------------------------------------------------
@@ -309,3 +323,95 @@ def test_main_shows_the_agent_type_from_meta_json(tmp_path):
         timeout=10,
     )
     assert "🧬 general-purpose" in _strip_ansi(json.loads(result.stdout)["content"])
+
+
+# --- debug dump — the payload received, kept per session while the process runs in debug mode ---
+
+_SESSION = "5189a518-7c23-42c0-bbac-4203d8aabe5c"
+_DEBUG_PS = f"claude --session-id {_SESSION} --debug\n"
+
+
+def _debug_file(tmp_path: Path, session_id: str = _SESSION) -> Path:
+    name = f"{session_id}__pc-statusline__subagent_statusline.json"
+    return tmp_path / "home" / ".claude" / "debug" / name
+
+
+def _payload(**extra) -> dict:
+    return {
+        "columns": 120,
+        "tasks": [{"id": "t1", "name": "worker", "status": "completed"}],
+        **extra,
+    }
+
+
+def _run_main(monkeypatch, capsys, payload: dict) -> str:
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    sal.main()
+    return capsys.readouterr().out
+
+
+def test_main_with_debug_flag_writes_the_payload_under_its_session_id(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    payload = _payload(session_id=_SESSION)
+    _run_main(monkeypatch, capsys, payload)
+    assert json.loads(_debug_file(tmp_path).read_text(encoding="utf-8")) == [payload]
+
+
+def test_main_derives_the_session_id_from_the_transcript_name_without_one(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    payload = _payload(transcript_path=f"/some/project/{_SESSION}.jsonl")
+    _run_main(monkeypatch, capsys, payload)
+    assert json.loads(_debug_file(tmp_path).read_text(encoding="utf-8")) == [payload]
+
+
+def test_main_writes_nothing_without_a_session_id_to_name_the_file(
+    tmp_path, monkeypatch, capsys
+):
+    def _ps_must_not_run(*_args):
+        raise AssertionError("ps ran with no session to look for")
+
+    monkeypatch.setattr(_common, "_ps", _ps_must_not_run)
+    _run_main(monkeypatch, capsys, _payload(transcript_path="/some/project/main.jsonl"))
+    assert not (tmp_path / "home").exists()
+
+
+def test_main_without_debug_flag_writes_nothing_to_the_debug_dir(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        _common, "_ps", lambda *_args: f"claude --session-id {_SESSION}\n"
+    )
+    _run_main(monkeypatch, capsys, _payload(session_id=_SESSION))
+    assert not (tmp_path / "home").exists()
+
+
+def test_main_unwritable_debug_dir_leaves_the_output_unchanged(
+    tmp_path, monkeypatch, capsys
+):
+    payload = _payload(session_id=_SESSION)
+    expected = _run_main(monkeypatch, capsys, payload)
+    assert expected.strip()
+
+    (tmp_path / f"statusline-advisor-{_SESSION}.json").unlink(missing_ok=True)
+    blocker = tmp_path / "home" / ".claude" / "debug"
+    blocker.parent.mkdir(parents=True)
+    blocker.write_text("a file where the directory should be", encoding="utf-8")
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    assert _run_main(monkeypatch, capsys, payload) == expected
+    assert blocker.is_file()
+
+
+def test_main_identical_payload_does_not_rewrite_the_debug_file(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(_common, "_ps", lambda *_args: _DEBUG_PS)
+    payload = _payload(session_id=_SESSION)
+    _run_main(monkeypatch, capsys, payload)
+    path = _debug_file(tmp_path)
+    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    _run_main(monkeypatch, capsys, payload)
+    assert path.stat().st_mtime_ns == 1_000_000_000

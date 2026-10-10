@@ -8,6 +8,7 @@ Un id absent du flux de sortie garde le rendu par défaut de Claude Code.
 """
 
 import json
+import re
 import sys
 import time
 import unicodedata
@@ -20,6 +21,7 @@ from _common import (
     GREY,
     MAGENTA,
     RESET,
+    dump_debug_payload,
     enable_ansi_on_windows,
     force_utf8_stdout,
 )
@@ -47,6 +49,9 @@ SPARKS = "▁▂▃▄▅▆▇█"
 
 # Le nom n'est jamais tronqué en dessous de cette largeur
 _MIN_NAME_COLS = 6
+
+# The transcript of a session is named `<session id>.jsonl`, the id being a UUID.
+_UUID_RE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.IGNORECASE)
 
 
 def _short_model(model_id):
@@ -165,6 +170,20 @@ def _agent_type(transcript_path: str | None, task_id: str) -> str | None:
         return None
 
 
+def _session_id(data: dict) -> str | None:
+    """The session id of the payload: its `session_id`, else the UUID file name of its
+    `transcript_path`, else None."""
+    session_id = data.get("session_id")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    transcript_path = data.get("transcript_path")
+    if isinstance(transcript_path, str):
+        stem = Path(transcript_path).stem
+        if _UUID_RE.fullmatch(stem):
+            return stem
+    return None
+
+
 def render_task(task: dict, columns: int, agent_type: str | None = None) -> dict | None:
     """Build the `{"id": ..., "content": ...}` line for one task, or None to skip it (an id
     absent from the output falls back to Claude Code's default rendering for that row — the
@@ -235,6 +254,8 @@ def main():
             file=sys.stderr,
         )
         return
+
+    dump_debug_payload(data, _session_id(data), "subagent_statusline")
 
     columns = data.get("columns", 80) or 80
     tasks = data.get("tasks", []) or []
