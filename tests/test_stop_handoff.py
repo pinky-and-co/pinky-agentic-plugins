@@ -679,7 +679,7 @@ class TestBoundedBoardLines(unittest.TestCase):
                 "## Board\n\n"
                 "| # | Chantier (objectif) | Statut |\n"
                 "|---|---------------------|--------|\n"
-                f"| 0027 | Live-docs | {content} |\n"
+                f"| 0027 | Demo card | {content} |\n"
             )
             kb = self._board(tmp, index)
 
@@ -693,7 +693,7 @@ class TestBoundedBoardLines(unittest.TestCase):
                 [
                     "| # | Chantier (objectif) | Statut |",
                     "|---|---------------------|--------|",
-                    f"| 0027 | Live-docs | {content[:200]}… (+{omitted} car.) |",
+                    f"| 0027 | Demo card | {content[:200]}… (+{omitted} car.) |",
                     "  cards: 0/0/0/0/0",
                 ],
             )

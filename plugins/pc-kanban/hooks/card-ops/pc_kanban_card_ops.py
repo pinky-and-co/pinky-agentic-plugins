@@ -347,21 +347,8 @@ def select(card: Path, boards: list[Path], force: bool = False) -> int:
     return 0
 
 
-def _seed_nav(dest_dir: Path) -> None:
-    """Create an archive folder with its `.nav.yml` (newest first) when missing.
-
-    Args:
-        dest_dir: The archive folder.
-    """
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    nav = dest_dir / ".nav.yml"
-    if not nav.is_file():
-        nav.write_text("sort:\n  direction: desc\n  by: filename\n", encoding="utf-8")
-        print(f"seeded {nav.parent}/.nav.yml")
-
-
 def _archive_destination(card: Path, kind: str) -> Path | None:
-    """Pick the dated archive path of a card, seeding its folder; refuse an existing entry.
+    """Pick the dated archive path of a card, creating its folder; refuse an existing entry.
 
     Args:
         card: The card to move.
@@ -372,7 +359,7 @@ def _archive_destination(card: Path, kind: str) -> Path | None:
     """
     chantier = card.parent.parent
     dest_dir = chantier.parent / "_ARCHIVE" / f"{chantier.name.split('-', 1)[0]}-{kind}"
-    _seed_nav(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{date.today().isoformat()}_{card.name}"
     if dest.exists():
         print(f"refusing to overwrite existing archive entry: {dest}", file=sys.stderr)
