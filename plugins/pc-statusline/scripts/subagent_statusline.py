@@ -7,6 +7,8 @@ agent que l'on veut personnaliser : {"id": "<task id>", "content": "<rendu>"}
 Un id absent du flux de sortie garde le rendu par défaut de Claude Code.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import sys

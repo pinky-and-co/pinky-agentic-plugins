@@ -13,6 +13,8 @@ tighter separator, branch name truncated, model row reduced to the essentials). 
 handed to `build_lines` as `_term` by `main()`.
 """
 
+from __future__ import annotations
+
 import fcntl
 import json
 import os
