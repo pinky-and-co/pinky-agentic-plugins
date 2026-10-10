@@ -18,6 +18,7 @@ stdlib only.
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import re
 import subprocess
@@ -43,6 +44,7 @@ MOCKUP_AXES = ("layout", "design", "content", "behavior")
 MOCKUP_LEVELS = ("strict", "guided", "free")
 EMPTY = ("", "null", "~")
 ID_RE = re.compile(r"\b[A-Z]+-\d{4}-\d+\b")
+QUALIFIED_RE = re.compile(r"(\d{4})/([^/]+)")
 
 
 def default_boards() -> list[Path]:
@@ -68,7 +70,8 @@ def _resolve(slug: str, columns: tuple[str, ...], boards: list[Path]) -> Path:
     """Find the one card named `slug` in `columns` of any board.
 
     Args:
-        slug: The card filename without `.md`.
+        slug: The card filename without `.md`, or `<id>/<slug>` with the four-digit chantier id
+            to pick one chantier's card when the bare slug exists in several.
         columns: The column directories to look into.
         boards: The board roots.
 
@@ -78,18 +81,25 @@ def _resolve(slug: str, columns: tuple[str, ...], boards: list[Path]) -> Path:
     Raises:
         SystemExit: When no card or several cards match.
     """
+    qualified = QUALIFIED_RE.fullmatch(slug)
+    chantier, name = qualified.groups() if qualified else ("", slug)
     found = [
         card
         for board in boards
         for column in columns
-        for card in board.glob(f"CHANTIER*/{column}/{slug}.md")
+        for card in board.glob(
+            f"CHANTIER{chantier or '*'}-*/{column}/{glob.escape(name)}.md"
+        )
     ]
     if not found:
         raise SystemExit(f"no card '{slug}' in {', '.join(columns)}")
     if len(found) > 1:
+        options = sorted(
+            f"{card.parent.parent.name[8:12]}/{card.stem}" for card in found
+        )
         raise SystemExit(
-            "several cards match, pass a path to the script instead:\n"
-            + "\n".join(map(str, found))
+            "several cards match, pass one of these as <id>/<slug>:\n"
+            + "\n".join(options)
         )
     return found[0]
 

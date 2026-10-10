@@ -147,6 +147,28 @@ def test_clean_gone_grammar_rejects_dotdot_spaces_and_flags():
         assert select(grammar, tokens, "/") is None, tokens
 
 
+@pytest.mark.parametrize(
+    "tokens,expected",
+    [
+        (["select", "demo"], ["select", "demo"]),
+        (["select", "0025/demo"], ["select", "0025/demo"]),
+        (["select", "0025/demo", "--force"], ["select", "0025/demo", "--force"]),
+        (["archive", "0025/demo.x-1"], ["archive", "0025/demo.x-1"]),
+        (["drop", "0025/demo", "why", "not"], ["drop", "0025/demo", "why", "not"]),
+        (["select", "25/demo"], None),
+        (["select", "0025/"], None),
+        (["select", "0025/a/b"], None),
+        (["select", "../demo"], None),
+    ],
+)
+def test_move_card_grammar_accepts_id_slash_slug(tokens, expected):
+    command = next(c for _, m, c in _entries() if m == "^pc-kanban:move-card$")
+    argv = _argv("pc-kanban", command)
+    grammar = json.loads(argv[argv.index("--grammar") + 1])
+    runner = _load_runner(Path(argv[1]))
+    assert runner._select_argv(grammar, tokens, "/") == expected
+
+
 def _load_runner(path):
     spec = importlib.util.spec_from_file_location("pc_git_runner", path)
     module = importlib.util.module_from_spec(spec)

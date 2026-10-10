@@ -615,3 +615,79 @@ def test_cli_without_a_session_id_prints_no_recommendation(tmp_path: Path) -> No
     assert "Closing sequence (finishing-a-card.md):" in result.stdout
     assert "Reco:" not in result.stdout
     assert "/rename" not in result.stdout
+
+
+def _twin(root: Path, column: str) -> tuple[Path, Path]:
+    """Write `demo.md` in two chantiers of one board and return both paths."""
+    first = _card(root, column)
+    second = root / "CHANTIER0098-y" / column / "demo.md"
+    second.parent.mkdir(parents=True)
+    second.write_text(first.read_text(encoding="utf-8"), encoding="utf-8")
+    definer = root / "CHANTIER0098-y" / "0-ideas" / "definer.md"
+    definer.parent.mkdir(parents=True, exist_ok=True)
+    definer.write_text(DEFINER, encoding="utf-8")
+    return first, second
+
+
+def test_the_refusal_lists_each_match_as_id_slash_slug(tmp_path: Path) -> None:
+    _twin(tmp_path, "1-todo")
+    result = _run(tmp_path, "select", "demo")
+    assert result.returncode != 0
+    assert result.stderr == (
+        "several cards match, pass one of these as <id>/<slug>:\n0001/demo\n0098/demo\n"
+    )
+
+
+def test_select_with_id_and_slug_moves_only_that_chantiers_card(
+    tmp_path: Path,
+) -> None:
+    first, second = _twin(tmp_path, "1-todo")
+    result = _run(tmp_path, "select", "0098/demo")
+    assert result.returncode == 0, result.stderr
+    assert first.exists()
+    assert not second.exists()
+    assert (tmp_path / "CHANTIER0098-y" / "2-selected-for-dev" / "demo.md").exists()
+
+
+def test_archive_with_id_and_slug_archives_only_that_chantiers_card(
+    tmp_path: Path,
+) -> None:
+    board = tmp_path / "_KANBAN"
+    first, second = _twin(board, "4-done")
+    result = _run(board, "archive", "0098/demo")
+    assert result.returncode == 0, result.stderr
+    assert first.exists()
+    assert not second.exists()
+    assert list((board / "_ARCHIVE" / "CHANTIER0098-done").glob("*_demo.md"))
+
+
+def test_drop_with_id_and_slug_drops_only_that_chantiers_card(tmp_path: Path) -> None:
+    board = tmp_path / "_KANBAN"
+    first, second = _twin(board, "0-ideas")
+    result = _run(board, "drop", "0098/demo", "obsolete")
+    assert result.returncode == 0, result.stderr
+    assert first.exists()
+    assert not second.exists()
+
+
+def test_an_id_with_no_such_card_is_reported(tmp_path: Path) -> None:
+    _card(tmp_path, "1-todo")
+    result = _run(tmp_path, "select", "0042/demo")
+    assert result.returncode != 0
+    assert "no card '0042/demo'" in result.stderr
+
+
+def test_a_qualified_slug_with_extra_segments_is_not_cut_short(tmp_path: Path) -> None:
+    card = _card(tmp_path, "1-todo", name="a")
+    result = _run(tmp_path, "select", "0001/a/b")
+    assert result.returncode != 0
+    assert "no card '0001/a/b'" in result.stderr
+    assert card.exists()
+
+
+def test_a_glob_character_in_the_slug_matches_nothing_else(tmp_path: Path) -> None:
+    card = _card(tmp_path, "1-todo", name="demo")
+    result = _run(tmp_path, "select", "d*o")
+    assert result.returncode != 0
+    assert "no card 'd*o'" in result.stderr
+    assert card.exists()
