@@ -145,8 +145,17 @@ def adversarial(
         resolved_tier = review_complexity.tier_for(diff_text)
 
     if override:
+        named = next(
+            (e for e in model_adversarial.load_pool() if e.get("name") == override),
+            None,
+        )
         entries = [
-            {**model_adversarial._DEFAULT_POOL[0], "model": override, "name": override}
+            named
+            or {
+                **model_adversarial._DEFAULT_POOL[0],
+                "model": override,
+                "name": override,
+            }
         ]
     elif resolved_tier:
         entries = model_adversarial.select_for_delegation_with_fallback(

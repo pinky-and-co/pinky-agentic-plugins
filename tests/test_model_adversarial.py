@@ -1627,5 +1627,56 @@ def test_adversarial_tool_with_a_diff_opens_on_the_higher_priority_entry(
     assert set(heads) == {"ol-top"}
 
 
+def _entries_served_for_model(monkeypatch, pool, model):
+    """The candidate list the `adversarial` tool hands the pool when called with `model` — only
+    the pool read, the model call and the rng are faked."""
+    server = _server()
+    seen: dict[str, list] = {}
+
+    monkeypatch.setattr(
+        server, "random", types.SimpleNamespace(Random=lambda: random.Random(0))
+    )
+    monkeypatch.setattr(server.model_adversarial, "load_pool", lambda: pool)
+
+    def fake_run_pool(entries, prompt, timeout=180, tools=None):
+        seen["entries"] = entries
+        return ma.PoolResult(entries[0], "ok")
+
+    monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
+
+    server.adversarial(task="review", model=model)
+    return seen["entries"]
+
+
+def test_adversarial_tool_model_naming_a_pool_entry_calls_that_entry_as_is(
+    monkeypatch,
+):
+    nemotron = _entry(
+        "ollama-nemotron-3-ultra",
+        "ollama-cloud",
+        "haiku",
+        model="nemotron-3-ultra",
+        timeout=900,
+        thinking="high",
+    )
+    pool = [_entry("nvidia-glm", "nvidia", "opus"), nemotron]
+
+    entries = _entries_served_for_model(monkeypatch, pool, "ollama-nemotron-3-ultra")
+
+    assert entries == [nemotron]
+
+
+def test_adversarial_tool_model_naming_no_pool_entry_is_a_model_id_at_the_default_provider(
+    monkeypatch,
+):
+    pool = [_entry("nvidia-glm", "nvidia", "opus")]
+
+    entries = _entries_served_for_model(monkeypatch, pool, "z-ai/glm-5.3-flash")
+
+    assert [(e["provider"], e["model"]) for e in entries] == [
+        ("nvidia", "z-ai/glm-5.3-flash")
+    ]
+
+
 if __name__ == "__main__":
     unittest.main()
