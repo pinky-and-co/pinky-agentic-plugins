@@ -47,5 +47,6 @@ answered, in the full `provider/model · 🟦🟪🟧 tier` form, never a model 
 `<your own model>` is the model the caller passed to `Agent` for you, or your own model id (e.g.
 `anthropic/sonnet · 🟪 sonnet`). On a change that has a diff, a `Method: reviewer` report states
 why `adversarial` did not answer. Then the findings and the verdict, in the methodology's format.
-An `adversarial` verdict goes back verbatim; add your own findings under it, never a softened
-rewrite of the model's.
+When `adversarial` answered, its verdict goes back verbatim under the `Method:` line and the report
+stops there: nothing is added to it and it is never softened or rewritten. Your own findings exist
+only when you reviewed alone.
