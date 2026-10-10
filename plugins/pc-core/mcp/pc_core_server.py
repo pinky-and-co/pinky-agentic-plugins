@@ -150,7 +150,10 @@ def adversarial(
         ]
     elif resolved_tier:
         entries = model_adversarial.select_for_delegation_with_fallback(
-            model_adversarial.load_pool(), resolved_tier, floor_tier="sonnet"
+            model_adversarial.load_pool(),
+            resolved_tier,
+            floor_tier="sonnet",
+            rng=random.Random(),
         )
     else:
         entries = model_adversarial.select_for_adversarial(

@@ -49,7 +49,7 @@ Each entry:
                    generous provider opens every round without stacking its entries. Never outranks
                    locality, cost or tier. Between entries of the same level, `adversarial` draws
                    at random (which entry opens a provider's queue, which provider opens a round);
-                   delegation keeps pool order.
+                   delegation keeps pool order unless its caller passes an `rng`.
     thinking       optional pi thinking level (`off`, `low`, `medium`, …); absent → pi's own default.
                    `off` for a small local model, which a thinking pass drowns into an empty answer
 
@@ -228,14 +228,17 @@ def select_for_adversarial(
 
 
 def select_for_delegation(
-    pool: list[dict[str, Any]], task_tier: str = "haiku"
+    pool: list[dict[str, Any]],
+    task_tier: str = "haiku",
+    rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
     """Candidates for task delegation: the cheapest entry that can still do the job — free before
     paid, and among equally-priced entries the one just capable enough (frugal: don't spend an
     opus-tier free model on a haiku-tier task when a haiku-tier free one qualifies).
 
     Sonnet and opus count as one tier (`selection_rank`); providers alternate inside each group of
-    equal cost, tier and locality (`spread_providers`).
+    equal cost, tier and locality (`spread_providers`). Entries of equal `priority` keep pool
+    order, or are drawn with `rng` when one is given.
 
     Offline is a real candidate here (free, `capacity_tier: haiku`) — a caller that resolves to a
     `kind: "offline"` entry must route to the separate `offline` MCP tool, never call it through
@@ -253,6 +256,7 @@ def select_for_delegation(
             selection_rank(e["capacity_tier"]),
             not e.get("local", False),
         ),
+        rng=rng,
     )
 
 
@@ -260,7 +264,10 @@ _TIER_ORDER = ("opus", "sonnet", "haiku")
 
 
 def select_for_delegation_with_fallback(
-    pool: list[dict[str, Any]], tier: str, floor_tier: str = "haiku"
+    pool: list[dict[str, Any]],
+    tier: str,
+    floor_tier: str = "haiku",
+    rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
     """`select_for_delegation` at `tier`, degrading one tier at a time when the pool has
     nothing at or above it — a diff routed to `opus` (`review_complexity.tier_for`) must not
@@ -271,13 +278,16 @@ def select_for_delegation_with_fallback(
     path, `offline` going through the separate `offline` tool instead.
 
     `floor_tier` is the lowest tier ever tried: a `tier` below it is raised to it, and the
-    degradation stops there.
+    degradation stops there. `rng` is handed to `select_for_delegation` (draw between entries of
+    equal `priority`; pool order without it).
     """
     floor = _TIER_ORDER.index(floor_tier)
     start = min(_TIER_ORDER.index(tier) if tier in _TIER_ORDER else 0, floor)
     for fallback_tier in _TIER_ORDER[start : floor + 1]:
         candidates = [
-            e for e in select_for_delegation(pool, fallback_tier) if e["kind"] == "cli"
+            e
+            for e in select_for_delegation(pool, fallback_tier, rng=rng)
+            if e["kind"] == "cli"
         ]
         if candidates:
             return candidates
