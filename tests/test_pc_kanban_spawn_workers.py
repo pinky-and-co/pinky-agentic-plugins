@@ -203,7 +203,9 @@ class TestRepoConventionsBlock(unittest.TestCase):
                 "Repo conventions, probed from disk — do not retype these from memory:\n"
                 "- Python tests: `tests/` at the repo root.\n"
                 "- Run tests: `uv run pytest <file> -q`\n"
-                "- Run gates: `prek run --files <touched files>` — must all pass.\n"
+                "- Run gates: `prek run --files <path1> <path2> ...` — write each touched path "
+                "literally, one argument per path, never via a variable or a pipe; must all "
+                "pass.\n"
                 f"- {sw._WORKER_INVARIANTS}",
             )
 
@@ -232,8 +234,46 @@ class TestRepoConventionsBlock(unittest.TestCase):
                 ),
             ):
                 self.assertEqual(
-                    sw.repo_gate_command(repo), "pre-commit run --files <touched files>"
+                    sw.repo_gate_command(repo),
+                    "pre-commit run --files <path1> <path2> ...",
                 )
+
+    def test_gate_line_never_names_a_touched_files_placeholder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for which in ("prek", "pre-commit"):
+                with mock.patch.object(
+                    sw.shutil,
+                    "which",
+                    side_effect=lambda n, w=which: f"/usr/bin/{n}" if n == w else None,
+                ):
+                    block = sw.repo_conventions_block(Path(tmp))
+                self.assertNotIn("<touched files>", block)
+                self.assertIn("one argument per path, never via a variable", block)
+
+    def test_generated_gate_command_is_covered_by_the_card_worker_allowlist(self):
+        agent = SCRIPTS.parent.parent.parent / "agents" / "card-worker.md"
+        tools_line = next(
+            line for line in agent.read_text().splitlines() if line.startswith("tools:")
+        )
+        allowed = [
+            e.strip()[len("Bash(") : -1]
+            for e in tools_line[len("tools:") :].split(", ")
+            if e.strip().startswith("Bash(")
+        ]
+        for which in ("prek", "pre-commit"):
+            with mock.patch.object(
+                sw.shutil,
+                "which",
+                side_effect=lambda n, w=which: f"/x/{n}" if n == w else None,
+            ):
+                gate = sw.repo_gate_command(Path("/ws/repo"))
+            self.assertTrue(
+                any(
+                    a.endswith(":*") and gate.startswith(a[: -len(":*")] + " ")
+                    for a in allowed
+                ),
+                f"{gate!r} not covered by {allowed}",
+            )
 
 
 class TestGeneratedCardBlock(unittest.TestCase):

@@ -276,14 +276,14 @@ def repo_gate_command(repo: Path) -> str | None:
         repo: absolute path to the target repo's worktree root.
 
     Returns:
-        `"prek run --files <touched files>"` when `prek` is installed, else `"pre-commit run
-        --files <touched files>"` when `pre-commit` is (both share the same
+        `"prek run --files <path1> <path2> ..."` when `prek` is installed, else `"pre-commit run
+        --files <path1> <path2> ..."` when `pre-commit` is (both share the same
         `.pre-commit-config.yaml`), else None — never invented.
     """
     if shutil.which("prek"):
-        return "prek run --files <touched files>"
+        return "prek run --files <path1> <path2> ..."
     if shutil.which("pre-commit"):
-        return "pre-commit run --files <touched files>"
+        return "pre-commit run --files <path1> <path2> ..."
     return None
 
 
@@ -319,7 +319,10 @@ def repo_conventions_block(repo: Path) -> str:
     ]
     gate = repo_gate_command(repo)
     if gate:
-        lines.append(f"- Run gates: `{gate}` — must all pass.")
+        lines.append(
+            f"- Run gates: `{gate}` — write each touched path literally, one argument per "
+            "path, never via a variable or a pipe; must all pass."
+        )
     lines.append(f"- {_WORKER_INVARIANTS}")
     return "\n".join(lines)
 
