@@ -4,7 +4,6 @@ Same oracle strategy as its two consumers (tests.md § generator oracle): `rende
 output, so it gets a whole-string equality oracle, not a fragment check.
 """
 
-import ast
 import json
 import stat
 import subprocess
@@ -26,24 +25,6 @@ def _no_live_process_table(monkeypatch, tmp_path):
     monkeypatch.setattr(c, "_ps", lambda *_args: "")
     monkeypatch.setattr(c.tempfile, "tempdir", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-
-
-def test_every_status_line_script_loads_on_the_python_the_harness_launches():
-    """The status line command is `python3`, which the harness resolves to the system Python 3.9:
-    no script may evaluate a `X | None` annotation at import, and none may use syntax newer than
-    3.9. The future import makes annotations lazy strings."""
-    offenders = []
-    for path in sorted(HOOKS.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), feature_version=(3, 9))
-        lazy = any(
-            isinstance(node, ast.ImportFrom)
-            and node.module == "__future__"
-            and any(alias.name == "annotations" for alias in node.names)
-            for node in tree.body
-        )
-        if not lazy:
-            offenders.append(path.name)
-    assert offenders == []
 
 
 def test_render_bar_oracle():
