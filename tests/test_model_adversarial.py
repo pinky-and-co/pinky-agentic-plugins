@@ -1328,7 +1328,7 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_and_routes_its_tie
     monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
     monkeypatch.setattr(server.review_complexity, "tier_for", lambda d: "opus")
 
-    def fake_select(pool, tier):
+    def fake_select(pool, tier, floor_tier="haiku"):
         seen["tier"] = tier
         return [MISTRAL]
 
@@ -1347,6 +1347,74 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_and_routes_its_tie
     assert out.startswith("[answered by ")
     assert seen["tier"] == "opus"
     assert "--- DIFF against main in /work/repo ---\n" + small_diff in seen["prompt"]
+
+
+@pytest.mark.parametrize("tier_arg", [None, "haiku"])
+def test_adversarial_tool_never_routes_a_small_diff_below_the_sonnet_floor(
+    monkeypatch, tier_arg
+):
+    server = _server()
+    small_diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+    )
+    free_haiku = _entry("free-haiku", "openrouter", "haiku")
+    free_sonnet = _entry("free-sonnet", "nvidia", "sonnet")
+    seen: dict = {}
+
+    monkeypatch.setattr(
+        server.model_adversarial, "diff_against", lambda base, scope="all": small_diff
+    )
+    monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
+    monkeypatch.setattr(
+        server.model_adversarial, "load_pool", lambda: [free_haiku, free_sonnet]
+    )
+
+    def fake_run_pool(entries, prompt, timeout=180, tools=None):
+        seen["entries"] = entries
+        return ma.PoolResult(entries[0], "ok")
+
+    monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
+
+    server.adversarial(task="review this", base="main", tier=tier_arg)
+
+    assert seen["entries"] == [free_sonnet]
+
+
+def test_adversarial_tool_blocks_on_a_haiku_only_pool_without_calling_it(monkeypatch):
+    server = _server()
+    small_diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+    )
+    monkeypatch.setattr(
+        server.model_adversarial, "diff_against", lambda base, scope="all": small_diff
+    )
+    monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
+    monkeypatch.setattr(
+        server.model_adversarial,
+        "load_pool",
+        lambda: [_entry("free-haiku", "openrouter", "haiku")],
+    )
+
+    def boom(*args, **kwargs):
+        raise AssertionError("the pool must not be called")
+
+    monkeypatch.setattr(server.model_adversarial, "run_pool", boom)
+
+    assert server.adversarial(task="review", base="main") == (
+        "[adversarial] BLOCKED — no candidate model in the pool."
+    )
+
+
+def test_fallback_floor_raises_a_low_tier_and_stops_degrading():
+    haiku = _entry("free-haiku", "openrouter", "haiku")
+    sonnet = _entry("free-sonnet", "nvidia", "sonnet")
+    assert ma.select_for_delegation_with_fallback(
+        [haiku, sonnet], "haiku", floor_tier="sonnet"
+    ) == [sonnet]
+    assert (
+        ma.select_for_delegation_with_fallback([haiku], "opus", floor_tier="sonnet")
+        == []
+    )
 
 
 def test_adversarial_tool_with_base_and_no_change_does_not_call_the_pool(monkeypatch):

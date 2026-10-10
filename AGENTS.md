@@ -33,12 +33,14 @@ started from `plugins/<name>/mcp/`).
 | Hook script | working tree | next matching tool call — re-executed every time |
 | Skill `scripts/` | working tree | next invocation — run as a fresh process |
 | Skill body | working tree | a new session or `/reload-plugins` — a skill already loaded in a session is not re-read |
-| MCP server | working tree | `/reload-plugins` — the running process keeps its code |
+| MCP server | working tree | `/mcp` → the server → Reconnect — `/reload-plugins` leaves the running process, and its code, in place |
 | `hooks.json`, skill/agent frontmatter | working tree | `/reload-plugins` |
 | Status line (`pc-statusline`) | **cache** | `pinky claude-plugin refresh pc-statusline` |
 
-The `/reload-plugins` rows follow from how each is loaded — a long-lived process, a read at session
-or reload time — and were not measured one by one.
+The MCP server row is measured: after `/reload-plugins`, `ps` showed the `pc-core` server still
+started before the edit and the `adversarial` tool still routed on the old code; `/mcp` → Reconnect
+started a fresh process. The `/reload-plugins` rows follow from how each is loaded — a read at
+session or reload time — and were not measured one by one.
 
 The status line is the one cache consumer: `statusLine` has no plugin-manifest slot, so
 `pinky claude-plugin install` wires an absolute path into `~/.claude/settings.json`, taken from

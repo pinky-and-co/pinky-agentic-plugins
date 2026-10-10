@@ -179,9 +179,15 @@ class ChantierSkillWiringCase(unittest.TestCase):
         self.assertIn("the final diff has been reviewed by", section)
         self.assertIn("`Method:` line relayed verbatim", section)
         self.assertIn(
-            "an `adversarial` call that returned nothing stated as such", section
+            "naming who answered in the full `provider/model · 🟦🟪🟧 tier` form",
+            section,
         )
-        self.assertIn("full `provider/model · 🟦🟪🟧 tier` form", section)
+        self.assertNotIn("when the first line", section)
+        self.assertIn(
+            "the report states why `adversarial` did not answer when its `Method:` "
+            "is `reviewer` on a change that has a diff",
+            " ".join(section.split()),
+        )
 
 
 class FinishingCardRenameCase(unittest.TestCase):
@@ -233,4 +239,25 @@ class SessionEndRenameCase(unittest.TestCase):
         self.assertIn(
             "When the user ends the session,\n  propose the `/rename`",
             KANBAN_PROACTIVITY.read_text(),
+        )
+
+
+_NOT_ANSWERED = (
+    "the report states why `adversarial` did not answer when its `Method:` "
+    "is `reviewer` on a change that has a diff"
+)
+
+
+class ReviewHonestyPinCase(unittest.TestCase):
+    """The same sentence is pinned in every artefact that carries it."""
+
+    def test_finishing_goal_clause_pins_it(self):
+        text = " ".join(FINISHING.read_text().split())
+        self.assertIn(_NOT_ANSWERED, text)
+
+    def test_reviewer_report_format_pins_it(self):
+        reviewer = REPO / "plugins" / "pc-core" / "agents" / "reviewer.md"
+        text = " ".join(reviewer.read_text().split())
+        self.assertIn(
+            "a `Method: reviewer` report states why `adversarial` did not answer", text
         )

@@ -212,9 +212,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     `finishing-a-card.md` § "Reviewing before declaring the card done", i.e. anything beyond a
     purely mechanical change — append to `<condition>`: `… and the final diff has been reviewed by
     `Agent(reviewer)`, findings addressed, the report's `Method:` line relayed verbatim to the
-    user, its label completed to the full `provider/model · 🟦🟪🟧 tier` form from the report's
-    `[answered by …]` line when the first line carries the model name alone —
-    an `adversarial` call that returned nothing stated as such — verdict on the reviewer alone —
+    user, naming who answered in the full `provider/model · 🟦🟪🟧 tier` form, the report states
+    why `adversarial` did not answer when its `Method:` is `reviewer` on a change that has a diff,
     and the `- [x] reviewed (<method>)` box checked on the card` — `<method>` is the `Method:`
     line the reviewer opens its report with. The decision is made pre-work, on `## Done when` and
     `requirements:` alone, so **when it is unclear, include the clause**. A card that

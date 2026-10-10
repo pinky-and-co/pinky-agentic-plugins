@@ -98,10 +98,15 @@ def adversarial(
     methodology, since the pool model cannot invoke a skill itself. Omitted → inferred from import
     markers in `files`.
 
+    Choice rule: a change with a diff always comes here — the reviewer reviews alone only a claim
+    with no diff, or when this tool answers `BLOCKED` or `ERROR`. Whatever the path (no diff given
+    to the tool, tier derived from the diff, explicit `tier`), the model is `sonnet` tier or above,
+    never `haiku`; only `model` bypasses that floor.
+
     `tier` (`haiku` / `sonnet` / `opus`) routes to the cheapest pool entry at or above that
-    capacity — free before paid — instead of the default adversarial selection. `diff` (a path to
-    a unified diff) derives that tier deterministically from the change size and risk factors when
-    `tier` is not passed explicitly.
+    capacity (raised to `sonnet` when lower) — free before paid — instead of the default
+    adversarial selection. `diff` (a path to a unified diff) derives that tier deterministically
+    from the change size and risk factors when `tier` is not passed explicitly.
 
     `tools` (pi tool names, e.g. `["read", "grep"]`) lets the model open files itself; omitted →
     no tools, the model sees only the prompt and the inlined `files`.
@@ -145,7 +150,7 @@ def adversarial(
         ]
     elif resolved_tier:
         entries = model_adversarial.select_for_delegation_with_fallback(
-            model_adversarial.load_pool(), resolved_tier
+            model_adversarial.load_pool(), resolved_tier, floor_tier="sonnet"
         )
     else:
         entries = model_adversarial.select_for_adversarial(
