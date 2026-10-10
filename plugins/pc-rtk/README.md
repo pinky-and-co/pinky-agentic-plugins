@@ -15,6 +15,8 @@ for a command RTK has no filter for, it exits 0 and the command runs unchanged.
 
 ## Prerequisite
 
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hook. `rtk` itself:
+
 ```bash
 brew install rtk
 ```

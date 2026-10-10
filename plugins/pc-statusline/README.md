@@ -55,6 +55,11 @@ Both entry points share `scripts/_common.py` (ANSI palette, Windows/UTF-8 stdout
 renderer). The deliberately divergent helpers — wide-char width, colour thresholds, empty-value
 placeholders — stay per script.
 
+## Requirements
+
+Python 3.12 or newer, resolved as `python3` on the `PATH` — the status line command is
+`python3 …/scripts/statusline.py`, run by the harness.
+
 ## Install
 
 ```bash
