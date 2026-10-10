@@ -6,8 +6,9 @@ that only makes sense inside one specific org). Anyone can install a plugin from
 `claude plugin marketplace add`; private, org-specific knowledge lives in separate plugin repos
 that depend on this one without duplicating it.
 
-Content here is neutral and tool-agnostic — readable by any agentic tool (Claude Code, Codex,
-Cursor…), no tool-specific mechanics (no slash-command name, no literal model id).
+Content here is Claude Code plugin content — skills, agents, hooks and MCP servers use Claude Code's
+own mechanics. A model is named by its tier (`haiku`, `sonnet`, `opus`) in frontmatter and prompts,
+never by a literal model id.
 
 ## Branch strategy
 
