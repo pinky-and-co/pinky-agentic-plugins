@@ -214,16 +214,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py
 ```
 
 It prints `{"context_window_pct": <int|null>, "rate_limit": {"five_hour": {...}, "seven_day":
-{...}}|null}`, each field independently `null` when its own data source is unavailable (missing
-transcript, `pc-statusline` not installed) — never an error. Render the line from this output and
+{...}}|null}`, each field independently `null` when its own data source is unavailable (no state file —
+`pc-statusline` not installed or not rendering —, or a context value last written more than 300 s
+ago) — never an error. Both come from the state file `pc-statusline` writes on every render; the
+transcript is never read. Render the line from this output and
 the candidate card's `repos:`/`sert` against the current session's own:
 
-1. **Rate-limit override, checked first.** If either window in `rate_limit` has `triggered: true`,
+1. **Rate-limit override, checked first.** If a window in `rate_limit` has `triggered: true`,
    the whole line becomes a pause recommendation, naming the window and its `resets_at` — skip
-   step 2 entirely. Do not recommend "continue in session" when the account is about to get cut
-   off regardless of context headroom.
-2. **Otherwise, context-window + proximity.** `context_window_pct` (`null` → omit the line
-   entirely, nothing to base it on) against the `<40` / `≥40` band gives the default recommendation
+   step 2 entirely. Only `five_hour` can trigger: at `≥95` % used with a reset more than 1h away.
+   `seven_day` never triggers — its reset is days away, waiting is not practicable. Do not
+   recommend "continue in session" when the account is about to get cut off regardless of context
+   headroom.
+2. **Otherwise, context-window + proximity.** `context_window_pct` — the status line's own
+   `context_window.used_percentage` (`null` → omit the line entirely, nothing to base it on) against the `<40` / `≥40` band gives the default recommendation
    (continue / spawn a fresh session). The command prints that default line; when relaying it, the
    agent may add the nuance that a candidate sharing `repos:` or `sert` with the current session
    leans toward "continue", but never flips a `≥40` verdict to the opposite — this stays a

@@ -30,7 +30,7 @@ of which skill or agent triggered it — enforcement lives in the hook, not in e
 
 ## Requirements
 
-`git`, `gh` (GitHub) or `glab` (GitLab) on `PATH` for the PR/MR-opening skills.
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hooks and skill scripts. `git`, `gh` (GitHub) or `glab` (GitLab) on `PATH` for the PR/MR-opening skills.
 
 ## Dependencies
 

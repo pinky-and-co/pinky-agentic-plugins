@@ -107,6 +107,10 @@ the shared `skills/permission-change/scripts/guard.py` PreToolUse hook, all four
 `/permission-change deny <dir>... | off`,
 `/permission-change guard <dir>... | on | off`
 
+## Requirements
+
+Python 3.12 or newer, resolved as `python3` on the `PATH` for the hooks; `uv` on `PATH` for the `mcp/` server, which runs on `uv`'s own Python.
+
 ## Best Practices
 
 - Let `commit` group changes on its own judgment — it writes better commit messages and groups

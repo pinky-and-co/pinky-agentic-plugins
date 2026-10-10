@@ -360,6 +360,10 @@ channel. It edits nothing outside memory directories: a promotion (a skill, a ho
 source of the instructions) is made by the session or the user, and only once they say it is done
 does the skill propose deleting the note.
 
+## Requirements
+
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hooks.
+
 ## Enable
 
 ```bash

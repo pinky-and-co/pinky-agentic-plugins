@@ -488,7 +488,7 @@ def current_signals() -> dict:
     """
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
     return {
-        "context_window_pct": ncr.context_window_pct(session_id, os.getcwd()),
+        "context_window_pct": ncr.context_window_pct(session_id),
         "rate_limit": ncr.evaluate_rate_limit(session_id),
     }
 

@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
 """
-Claude Code status line — 3 lines + 1 conditional warning line (rate limits).
+Claude Code status line — 5 rows (budget, cost, repo, session, model) + conditional rows
+(rate-limit alert above, compression proxy below).
 Reads the JSON sent via stdin by Claude Code with every update.
 
-Layout: each line is either a simple concatenation of segments (with a separator
-between them) or a "flex" layout where a left group and a right group are
-pushed to opposite ends of the line (like `ccstatusline` flex separators),
-with a guaranteed minimum gap between them if the terminal is too narrow
-to separate them fully.
+Layout: three logical rows — budget + cost, repo + session, model. A logical row with both a left and
+a right group is fitted as if the two shared one line (left + gap + right must fit the terminal
+width), then drawn on two: the right group first, right-aligned, then the left group, so the right
+text never sits under the left text of the line next to it. Two layouts share the same rows: the
+long one (full labels) when every logical row fits, otherwise the short one (labels dropped,
+tighter separator, branch name truncated, model row reduced to the essentials). The width is read from `COLUMNS` once per refresh and
+handed to `build_lines` as `_term` by `main()`.
 """
 
+from __future__ import annotations
+
+import fcntl
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import unicodedata
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import cast
 
 from _common import (
     BOLD,
@@ -33,20 +42,20 @@ from _common import (
     RED,
     RESET,
     YELLOW,
+    dump_debug_payload,
     enable_ansi_on_windows,
     force_utf8_stdout,
+    process_flags,
     render_bar,
+    write_json_atomic,
 )
 from _quota import provider_rate_limits
 
 enable_ansi_on_windows()
 force_utf8_stdout()
 
-WHITE = "\033[38;2;255;255;255m"
-YELLOW_BG = "\033[43;30m"
-RED_BG = "\033[41;30m"
-
 SEP = f"  {GREY}·{RESET}  "
+_SEP_SHORT = f" {GREY}·{RESET} "
 
 _HEADROOM_STATS_URL = "http://127.0.0.1:8787/stats"
 _HEADROOM_HTTP_TIMEOUT_S = 0.15
@@ -55,9 +64,53 @@ _HEADROOM_CACHE = os.path.join(
     tempfile.gettempdir(), f"pc-statusline-headroom-{os.getuid()}.json"
 )
 
+# Terminal width assumed when `_term` is absent from the payload (tests, `_term_cols` failing).
+_DEFAULT_COLS = 120
+# Columns Claude Code takes out of the terminal width for a statusline row: it indents every row by
+# 2 and truncates anything reaching the last 2 columns with an `…` (measured on a 158-column
+# terminal: 154 usable).
+_RIGHT_MARGIN = 4
+# Minimum gap between a row's left and right groups, long layout / short layout.
 _MIN_GAP = 4
-_BLANK = "⠀"
-_SPACER_ROW = _BLANK
+_MIN_GAP_SHORT = 2
+# Shortest a branch name is allowed to get when the short layout truncates it.
+_MIN_BRANCH_COLS = 8
+# Claude Code trims the leading whitespace of every statusline row, which would pull a row that has
+# only a right group back to the left edge. A braille blank (U+2800) is invisible but not
+# whitespace: as the left group of such a row it keeps the padding, and so the right alignment.
+_BLANK = "\u2800"
+
+# Set to a truthy value, Claude Code turns the advisor tool off — the flag then has no effect.
+_ADVISOR_DISABLED_ENV = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL"
+# A transcript line is only parsed when it carries this: the harness writes one `attachment` of
+# this type at every advisor add or removal.
+_ADVISOR_ENTRY_MARK = b"advisor_tool"
+
+
+def _term_cols(default=_DEFAULT_COLS):
+    try:
+        cols = int(os.environ["COLUMNS"])
+        if cols > 0:
+            return cols
+    except (KeyError, ValueError):
+        pass
+    try:
+        tty = subprocess.run(
+            ["ps", "-o", "tty=", "-p", str(os.getppid())],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip()
+        fd = os.open(f"/dev/{tty}", os.O_RDONLY | os.O_NOCTTY)
+        try:
+            return (
+                struct.unpack("hhhh", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))[1]
+                or default
+            )
+        finally:
+            os.close(fd)
+    except Exception:
+        return default
 
 
 def _safe_get(d, path, default=None):
@@ -92,6 +145,7 @@ def _visible_len(s: str):
         (0xF900, 0xFAFF),
         (0xFF00, 0xFF60),
         (0xFFE0, 0xFFE6),
+        (0x1F194, 0x1F194),
         (0x1F1E6, 0x1F1FF),
         (0x1F300, 0x1FAFF),
     )
@@ -134,31 +188,58 @@ def _visible_len(s: str):
 
 
 def _render_flex(
-    left_parts: list[str], right_parts: list[str], right_edge: int, min_gap=_MIN_GAP
+    left_parts: list[str],
+    right_parts: list[str],
+    right_edge: int,
+    sep: str = SEP,
+    min_gap: int = _MIN_GAP,
 ):
-    """Join `left_parts` and `right_parts` each with `SEP`, then pad so the right group *ends* at
-    column `right_edge` — every row's right group lines up on the same right-hand column. When the
-    two groups are too wide to keep `min_gap` between them, the gap floors at `min_gap` and the
-    row overflows `right_edge` rather than the groups overlapping.
+    """Join `left_parts` and `right_parts` each with `sep`, then pad so the right group *ends* at
+    column `right_edge` — the usable terminal width, i.e. `COLUMNS` minus `_RIGHT_MARGIN`. Every
+    right group therefore lines up on the same right-hand column.
 
-    `right_edge` is a content-derived width (the widest natural row), never the terminal edge — a
-    width read from COLUMNS goes stale the moment a VSCode panel is resized. A shorter right group
-    just gets more padding, so alignment holds even on the row whose left side is empty."""
-    left = SEP.join(left_parts)
+    `COLUMNS` is read afresh on each refresh by `_term_cols` (in cmux it follows a pane resize);
+    `build_lines` receives it as `_term`. When the two groups can't keep `min_gap` between them the
+    gap floors at `min_gap` and the row overflows `right_edge` rather than the groups overlapping —
+    `build_lines` switches to the short layout before that happens, so an overflow means even the
+    short layout does not fit this width."""
+    left = sep.join(left_parts)
     if not right_parts:
         return left
-    right = SEP.join(right_parts)
+    right = sep.join(right_parts)
     pad = max(min_gap, right_edge - _visible_len(left) - _visible_len(right))
     return f"{left}{' ' * pad}{right}"
 
 
-def _content_widths(flex_specs):
-    """`(max_left, max_right)` in visible columns across `flex_specs` — the width of the widest
-    left group and of the widest right group, measured separately so the right column can be
-    placed at one consistent position for every row."""
-    left_widths = [_visible_len(SEP.join(lp)) for lp, _ in flex_specs]
-    right_widths = [_visible_len(SEP.join(rp)) for _, rp in flex_specs if rp]
-    return (max(left_widths, default=0), max(right_widths, default=0))
+def _row_width(left_parts, right_parts, sep, min_gap):
+    """Width a `(left, right)` pair needs at its tightest: both groups side by side with `min_gap`
+    between them, or the one group that is there. This is the figure the layout is chosen on, even
+    when `_render_pair` then draws the two groups on separate lines."""
+    left = _visible_len(sep.join(left_parts)) if left_parts else 0
+    right = _visible_len(sep.join(right_parts)) if right_parts else 0
+    return left + right + (min_gap if left and right else 0)
+
+
+def _render_pair(left_parts, right_parts, right_edge, sep=SEP):
+    """A `(left, right)` pair on two lines: the right group first, right-aligned on `right_edge`,
+    then the left group. A group that is empty simply has no line. The right-aligned line starts
+    with a `_BLANK` standing in for one of its padding cells, so the padding survives Claude Code's
+    trimming without costing a column."""
+    lines = []
+    if right_parts:
+        right = sep.join(right_parts)
+        pad = right_edge - _visible_len(right)
+        lines.append(f"{_BLANK}{' ' * (pad - 1)}{right}" if pad >= 1 else right)
+    if left_parts:
+        lines.append(sep.join(left_parts))
+    return lines
+
+
+def _truncate_end(text: str, max_len: int) -> str:
+    """`text` cut to `max_len` characters, the last one an `…` when something was dropped."""
+    if len(text) <= max_len:
+        return text
+    return text[: max(0, max_len - 1)] + "…"
 
 
 def _color_for_pct(pct):
@@ -205,16 +286,19 @@ def _fmt_epoch(epoch_seconds):
 
 
 def _fmt_duration_until(epoch_seconds):
-    """Countdown to `epoch_seconds` from now — `"27 min"`, `"1h 5min"`, `"1h"`. `"now"` once the
-    deadline has passed (a stale payload should never show a negative duration), `"?"` on a
-    garbage input — same degrade-to-`"?"` contract as `_fmt_epoch`, the sibling it is always shown
-    alongside."""
+    """Countdown to `epoch_seconds` from now — `"27 min"`, `"1h 5min"`, `"1h"`, then days from 24h
+    up (`"1d 3h"`, `"2d"`; minutes are dropped at that scale). `"now"` once the deadline has passed
+    (a stale payload should never show a negative duration), `"?"` on a garbage input — same
+    degrade-to-`"?"` contract as `_fmt_epoch`, the sibling it is always shown alongside."""
     try:
         target = datetime.fromtimestamp(epoch_seconds)
         total_minutes = int((target - datetime.now()).total_seconds() // 60)
         if total_minutes <= 0:
             return "now"
         hours, minutes = divmod(total_minutes, 60)
+        if hours >= 24:
+            days, hours = divmod(hours, 24)
+            return f"{days}d {hours}h" if hours else f"{days}d"
         if hours > 0:
             return f"{hours}h {minutes}min" if minutes else f"{hours}h"
         return f"{minutes} min"
@@ -223,6 +307,7 @@ def _fmt_duration_until(epoch_seconds):
 
 
 _RATE_LIMIT_WINDOW_S = {"five_hour": 5 * 3600, "seven_day": 7 * 24 * 3600}
+_RATE_LIMIT_LABEL = {"five_hour": "5h", "seven_day": "7d"}
 # Floor per window below which nothing is shown: the 5h window burns fast, so it warns earlier;
 # on the weekly one, 90% still leaves a lot of room.
 _RATE_LIMIT_FLOOR_PCT = {"five_hour": 75, "seven_day": 90}
@@ -258,51 +343,55 @@ def _rate_limit_wall_seconds(used_pct, resets_at, window_s, now=None):
     return elapsed * (100 - used_pct) / used_pct
 
 
-def _rate_limit_warning(label, key, used, resets_at):
-    """One warning fragment for a rate-limit window, or `None` to stay silent.
+def _rate_limit_detail(key, used, resets_at, short=False):
+    """The text that follows the bar and the percentage in one window's alert, or `None` to stay
+    silent.
 
     Silent below the window's floor (`_RATE_LIMIT_FLOOR_PCT`). At 100% or with no `resets_at`,
     the percentage is all there is to show. From `_RATE_LIMIT_PROJECTION_CEILING_PCT` up the
-    projection is too unstable to print, so the observed percentage is shown (still silent when
-    the reset is imminent). Below it, a warning only appears when the projection says the quota
-    won't last until the reset, expressed as time rather than a percentage."""
+    projection is too unstable to print, so the observed state is shown (still silent when the
+    reset is imminent). Below it, an alert only appears when the projection says the quota won't
+    last until the reset, expressed as time rather than a percentage.
+
+    `short` drops the reset time where a projected wall exists (`limit in ~1h 5min` is the point of
+    the alert); the states with no wall to show fall back to the time left before the reset."""
     if used is None or used < _RATE_LIMIT_FLOOR_PCT[key]:
         return None
     if not resets_at:
-        return f"{label}: {used:.0f}% (reset ?)"
-    if used >= 100:
-        return (
-            f"{label}: {used:.0f}% (in {_fmt_duration_until(resets_at)}, "
-            f"reset {_fmt_epoch(resets_at)})"
-        )
+        return "(reset ?)"
     now = datetime.now().timestamp()
-    if used >= _RATE_LIMIT_PROJECTION_CEILING_PCT:
-        if resets_at - now <= _RATE_LIMIT_MIN_RESET_S:
+    if used >= 100 or used >= _RATE_LIMIT_PROJECTION_CEILING_PCT:
+        if used < 100 and resets_at - now <= _RATE_LIMIT_MIN_RESET_S:
             return None
-        return (
-            f"{label}: {used:.0f}% (in {_fmt_duration_until(resets_at)}, "
-            f"reset {_fmt_epoch(resets_at)})"
-        )
+        if short:
+            return f"reset in {_fmt_duration_until(resets_at)}"
+        return f"(in {_fmt_duration_until(resets_at)}, reset {_fmt_epoch(resets_at)})"
     wall = _rate_limit_wall_seconds(used, resets_at, _RATE_LIMIT_WINDOW_S[key], now)
     if wall is None:
         return None
     wall_txt = _fmt_duration_until(now + wall)
     wall_txt = "<1 min" if wall_txt == "now" else f"~{wall_txt}"
+    if short:
+        return f"limit in {wall_txt}"
     return (
-        f"{label}: limit in {wall_txt} "
+        f"limit in {wall_txt} "
         f"(reset in {_fmt_duration_until(resets_at)}, {_fmt_epoch(resets_at)})"
     )
 
 
-def _rate_limit_banner_rows(warnings, bg):
-    """One banner row per warning, stacked without a spacer row between them. Every row is padded
-    to the widest warning's visible width *inside* the background colour, so the coloured block
-    is a clean rectangle rather than a ragged edge when the two warnings differ in length."""
-    width = max((_visible_len(w) for w in warnings), default=0)
-    return [
-        f"{bg} ⚠ RATE LIMIT — {w}{' ' * (width - _visible_len(w))} {RESET}"
-        for w in warnings
-    ]
+def _rate_limit_alert(key, data, short=False):
+    """One window's alert segment — `5h ━━━━━━━━── 82% limit in ~1h 5min (...)` — or `None` while
+    the window has nothing to warn about. Coloured yellow, red once the window is exhausted."""
+    used = _safe_get(data, f"rate_limits.{key}.used_percentage")
+    resets_at = _safe_get(data, f"rate_limits.{key}.resets_at")
+    detail = _rate_limit_detail(key, used, resets_at, short)
+    if detail is None:
+        return None
+    color = RED if used >= 100 else YELLOW
+    bar = render_bar(
+        max(0, min(100, used)), width=10, color=color, filled="━", empty="─"
+    )
+    return f"{color}{_RATE_LIMIT_LABEL[key]}{RESET} {bar} {color}{used:.0f}% {detail}{RESET}"
 
 
 def _count_subagents(transcript_path, session_id):
@@ -329,33 +418,111 @@ def _count_subagents(transcript_path, session_id):
         return None
 
 
-def _get_advisor_model(transcript_path, tail_bytes=16384):
-    """advisorModel is not exposed in the status line's stdin JSON (it is not in the documented schema),
-    but it appears in every assistant entry in the .jsonl file when --advisor is active.
-    Only the end of the file (tail_bytes) is read to avoid re-parsing a potentially huge transcript on every refresh.."""
-    if not transcript_path or not os.path.isfile(transcript_path):
-        return None
+def _advisor_entry(line: bytes) -> dict | None:
+    """The advisor state an `advisor_tool` attachment line carries — `{"available": bool,
+    "model": str | None}` — or None for any other line (an assistant message that merely quotes
+    the word, malformed JSON, an entry with no usable `available`/`model`)."""
     try:
-        size = os.path.getsize(transcript_path)
-        with open(transcript_path, "rb") as f:
-            f.seek(max(0, size - tail_bytes))
-            chunk = f.read().decode("utf-8", errors="ignore")
-
-        lines = chunk.split("\n")[1:]
-
-        for raw_line in reversed(lines):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            try:
-                entry = json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get("type") == "assistant" and "advisorModel" in entry:
-                return entry["advisorModel"]
+        obj = json.loads(line)
+    except ValueError:
         return None
-    except Exception:
+    if not isinstance(obj, dict) or obj.get("type") != "attachment":
         return None
+    attachment = obj.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "advisor_tool":
+        return None
+    available, model = attachment.get("available"), attachment.get("model")
+    if available is False:
+        return {"available": False, "model": None}
+    if available is True and isinstance(model, str) and model:
+        return {"available": True, "model": model}
+    return None
+
+
+def _scan_advisor_entries(path: str, offset: int) -> tuple[dict | None, int]:
+    """The last advisor entry written to the transcript `path` after byte `offset`, and the
+    offset the next read resumes from.
+
+    Only complete lines move the offset: a last line with no newline yet may be half written, so it
+    is parsed (a finished entry is used) but read again next time."""
+    entry = None
+    resume = offset
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        for line in handle:
+            if _ADVISOR_ENTRY_MARK in line:
+                entry = _advisor_entry(line) or entry
+            if not line.endswith(b"\n"):
+                break
+            resume += len(line)
+    return entry, resume
+
+
+def _transcript_advisor(session_id: str, transcript_path: str | None) -> dict | None:
+    """The last advisor entry the session's transcript carries, or None when none was ever seen.
+
+    The transcript is append-only and the entry may date from the start of the session, so the
+    last entry read and the byte offset already scanned are kept per session in
+    `statusline-advisor-transcript-<session_id>.json`; a render reads only what was appended since.
+    The entry is never dropped on a failed read: a missing or unreadable transcript leaves it as it
+    was, a transcript smaller than the stored offset is rescanned from the start, and only a newer
+    entry replaces it."""
+    state_path = os.path.join(
+        tempfile.gettempdir(), f"statusline-advisor-transcript-{session_id}.json"
+    )
+    try:
+        with open(state_path, encoding="utf-8") as handle:
+            state = json.load(handle)
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    entry = state.get("entry")
+    if not (isinstance(entry, dict) and isinstance(entry.get("available"), bool)):
+        entry = None
+    if not transcript_path:
+        return entry
+
+    offset = state.get("offset") if state.get("path") == transcript_path else 0
+    try:
+        if not isinstance(offset, int) or not 0 <= offset <= os.path.getsize(
+            transcript_path
+        ):
+            offset = 0
+        found, resume = _scan_advisor_entries(transcript_path, offset)
+    except OSError:
+        return entry
+    entry = found or entry
+    new_state = {"path": transcript_path, "offset": resume, "entry": entry}
+    if new_state != state:
+        try:
+            write_json_atomic(state_path, new_state)
+        except OSError:
+            pass
+    return entry
+
+
+def _get_advisor_model(session_id: str, transcript_path: str | None = None):
+    """The advisor to show — an alias like "opus" or a full model id — or None.
+
+    The harness writes an `advisor_tool` attachment into the transcript at every advisor add or
+    removal, and the last one gives the current state: `available: true` carries the model,
+    `available: false` means no advisor, whatever the command line says. Without any such entry,
+    the `--advisor` flag of the `claude` process is the value (`process_flags`, read once per
+    session). The per-message `advisorModel` field is not used: it outlives a removal.
+    `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` set to a truthy value shows nothing. The raw value is
+    returned: `_short_model` does the capitalising and, for a full id, the version."""
+    if os.environ.get(_ADVISOR_DISABLED_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return None
+    entry = _transcript_advisor(session_id, transcript_path)
+    if entry is not None:
+        return entry.get("model") if entry["available"] else None
+    return process_flags(session_id).advisor
 
 
 @dataclass
@@ -503,9 +670,11 @@ def _rate_limit_state_path(session_id: str) -> str:
 
 
 def _write_rate_limit_state(data: dict, session_id) -> None:
-    """Write server-side aggregated rate limits (`five_hour`/`seven_day`) to disk;
-    pc-kanban reads this state to decide session-vs-spawn. One write per render;
-    errors are swallowed — a statusline render must never fail."""
+    """Write the session's state file: server-side aggregated rate limits
+    (`five_hour`/`seven_day`) and the context-window `used_percentage`
+    (key `context_used_percentage`); pc-kanban reads it to decide session-vs-spawn. One
+    write per render, even with no rate limit; errors are swallowed — a statusline render
+    must never fail."""
     if not session_id:
         return
     state = {}
@@ -517,6 +686,9 @@ def _write_rate_limit_state(data: dict, session_id) -> None:
             "used_percentage": used,
             "resets_at": _safe_get(data, f"rate_limits.{key}.resets_at"),
         }
+    context_used = _safe_get(data, "context_window.used_percentage")
+    if context_used is not None:
+        state["context_used_percentage"] = context_used
     if not state:
         return
     try:
@@ -534,7 +706,8 @@ def _repo_branch(start_dir):
     or `None` outside a git repo / on any lookup failure: timeout, no git binary, detached-HEAD
     edge cases. `CLAUDE_PROJECT_DIR` is often empty in Claude Code and `${CLAUDE_PROJECT_DIR}`-style
     prompts don't render, so this is the one place a session can see at a glance which repo/branch
-    it is actually sitting in. Untruncated — it has its own row, nothing else to crowd.
+    it is actually sitting in. Untruncated — `build_lines` truncates the branch itself when the
+    short layout needs the room.
 
     Shells out to `git -C <dir> ...` (`rev-parse --show-toplevel` + `symbolic-ref --short HEAD`) —
     the same idiom `pc-git`'s own hooks already use, rather than hand-parsing `.git/HEAD` (worktrees,
@@ -670,32 +843,24 @@ def _short_model(model_id):
 def build_lines(data: dict) -> list[str]:
     """Render the status line as a list of lines from the harness payload.
 
+    Three logical rows — budget + cost, repo + session, model — drawn on five lines (cost, budget,
+    session, repo, model), preceded by a rate-limit alert row while a window is about to run out
+    and followed by the compression-proxy row while one is up. The logical rows use the long layout
+    when every one of them fits the terminal width (`_term`) with its two groups side by side, the
+    short layout otherwise; the alert row picks its own form the same way, so an alert showing up
+    never flips the format of the rest.
+
     Pure + total in intent: `main()` wraps this call in a try/except so a malformed payload
     degrades to a bare fallback line instead of blanking the whole bar — but this function itself
     stays the single, testable entry point (tests.md § generator oracle)."""
     transcript_path = _safe_get(data, "transcript_path")
-    lines: list[str] = []
+    session_id = _safe_get(data, "session_id", "?")
+    cols = _safe_get(data, "_term")
+    if not isinstance(cols, int) or cols <= 0:
+        cols = _DEFAULT_COLS
+    right_edge = cols - _RIGHT_MARGIN
 
-    version = _safe_get(data, "version", "?")
-    line0_right_parts = [f"{DIM}v{version}{RESET}"]
-    # ---------- Optional line : rate limits about to run out ----------
-    warnings = []
-    bg = YELLOW_BG
-    for label, key in (("Session", "five_hour"), ("Weekly", "seven_day")):
-        used = _safe_get(data, f"rate_limits.{key}.used_percentage")
-        resets_at = _safe_get(data, f"rate_limits.{key}.resets_at")
-        warning = _rate_limit_warning(label, key, used, resets_at)
-        if warning:
-            warnings.append(warning)
-        if used is not None and used >= 100:
-            bg = RED_BG + WHITE
-
-    # One row per warning; the version rides on the first row only. The extra rows have no right
-    # group, so they sit outside `_content_widths` (which measures left and right groups
-    # independently and would push the right column a whole `max_right` past the banner).
-    banner_rows = _rate_limit_banner_rows(warnings, bg) if warnings else [_BLANK]
-    line0_left_parts = [banner_rows[0]]
-
+    # ---------- Model facts ----------
     model = _safe_get(data, "model.display_name", "?")
     effort = _safe_get(data, "effort.level")
     thinking_on = _safe_get(data, "thinking.enabled", False)
@@ -706,23 +871,22 @@ def build_lines(data: dict) -> list[str]:
     thinking_txt = "🧠 ON" if thinking_on else f"{DIM}🧠 off{RESET}"
     fast_txt = "⚡️ fast" if fast_on else f"{DIM}🐢 normal{RESET}"
 
-    advisor_model = _short_model(_get_advisor_model(transcript_path))
+    advisor_model = _short_model(_get_advisor_model(session_id, transcript_path))
 
-    line1_left_parts: list[str] = [
-        f"{CYAN}{BOLD}🤖 {model}{RESET}",
-        f"{effort_txt}",
-        f"{fast_txt}",
-    ]
+    model_txt = f"{CYAN}{BOLD}🤖 {model}{RESET}"
+    advisor_txt = f"{YELLOW}🧐 {advisor_model}{RESET}" if advisor_model else None
+    # Long form: everything. Short form: only what is worth the room — the model, its effort, the
+    # fast mode when it is on, the advisor when there is one.
+    model_long = [model_txt, effort_txt, fast_txt]
+    model_short = [model_txt, effort_txt]
+    if fast_on:
+        model_short.append(fast_txt)
+    if advisor_txt:
+        model_long.append(advisor_txt)
+        model_short.append(advisor_txt)
+    model_long += [thinking_txt, f"🎨 {style}{RESET}"]
 
-    if advisor_model:
-        line1_left_parts.append(f"{YELLOW}🧐 {advisor_model}{RESET}")
-
-    line1_right_parts: list[str] = [
-        f"{thinking_txt}",
-        f"🎨 {style}{RESET}",
-    ]
-
-    session_id = _safe_get(data, "session_id", "?")
+    # ---------- Session facts ----------
     short_session_id = (
         session_id[:8] if session_id and session_id != "?" else session_id
     )
@@ -734,32 +898,22 @@ def build_lines(data: dict) -> list[str]:
 
     duration_ms = _safe_get(data, "cost.total_duration_ms", 0) or 0
     start_dt = datetime.now() - timedelta(milliseconds=duration_ms)
-    start_txt = start_dt.strftime("%d/%m %H:%M")
     subagent_count = _count_subagents(transcript_path, session_id)
+    subagent_txt = None
+    if subagent_count:
+        subagent_txt = f"{CYAN}🧬 {subagent_count} subagent{'s' if subagent_count > 1 else ''}{RESET}"
+        if transcript_path:
+            session_dir = os.path.join(os.path.dirname(transcript_path), session_id)
+            subagent_txt = _hyperlink(subagent_txt, f"file://{session_dir}/")
 
-    line2_left_parts: list[str] = [
-        f"{MAGENTA}Session 🆔 {session_txt}{RESET}",
-        f"🕐 Started at {start_txt}{RESET}",
-    ]
-    line2_right_parts: list[str] = (
-        [
-            f"{CYAN}🧬 {subagent_count} subagent{'s' if subagent_count > 1 else ''}{RESET}"
-        ]
-        if subagent_count
-        else []
+    # ---------- Repo facts ----------
+    repo_dir = _safe_get(data, "workspace.project_dir") or _safe_get(data, "cwd")
+    repo_branch = _repo_branch(repo_dir)
+    repo_url = (
+        _repo_url(repo_dir, _safe_get(data, "workspace.repo")) if repo_branch else None
     )
 
-    repo_dir = _safe_get(data, "workspace.current_dir") or _safe_get(data, "cwd")
-    repo_branch = _repo_branch(repo_dir)
-    repo_line_left_parts: list[str] = []
-    if repo_branch:
-        repo_url = _repo_url(repo_dir, _safe_get(data, "workspace.repo"))
-        repo_txt = f"📁 {repo_branch}"
-        repo_line_left_parts.append(
-            _hyperlink(repo_txt, repo_url) if repo_url else repo_txt
-        )
-    repo_line_right_parts: list[str] = []
-
+    # ---------- Budget facts ----------
     pct = _safe_get(data, "context_window.used_percentage", 0) or 0
     pct = int(pct)
     bar = _build_bar(pct)
@@ -777,56 +931,86 @@ def build_lines(data: dict) -> list[str]:
     else:
         cache_txt = f"{DIM}—{RESET}"
 
-    line3_left_parts: list[str] = [
-        f"Context window {bar} {_color_for_pct(pct)}{pct}%{RESET}",
-        f"Cache hit {cache_txt}{RESET}",
-    ]
-    line3_right_parts: list[str] = [f"💲 {cost:.2f} (API-equiv)"]
+    def permanent_rows(short: bool):
+        """The logical rows as `(left_parts, right_parts)` pairs, in the long or the short form:
+        budget + cost, repo + session, and the model row, whose parts all sit in the right group
+        (drawn last, right-aligned; reduced to the essentials in the short form). A pair is fitted
+        as one line and drawn on two (`_render_pair`)."""
+        sep = _SEP_SHORT if short else SEP
+        min_gap = _MIN_GAP_SHORT if short else _MIN_GAP
 
-    # ---------- Optional line : the active compression proxy, only while one is up ----------
-    line4_left_parts: list[str] = []
-    line4_right_parts: list[str] = []
+        context_txt = f"{bar} {_color_for_pct(pct)}{pct}%{RESET}"
+        if not short:
+            context_txt = f"Context window {context_txt}"
+        budget_left = [context_txt, f"Cache hit {cache_txt}{RESET}"]
+        if subagent_txt:
+            budget_left.append(subagent_txt)
+        cost_right = [f"💲 {cost:.2f} (API-equiv)"]
+
+        session_label = "" if short else "Session "
+        started_label = "" if short else "Started at "
+        started_txt = start_dt.strftime("%H:%M" if short else "%d/%m %H:%M")
+        session_right = [
+            f"{MAGENTA}{session_label}🆔 {session_txt}{RESET}",
+            f"🕐 {started_label}{started_txt}{RESET}",
+        ]
+
+        repo_left: list[str] = []
+        if repo_branch:
+            repo_txt = f"📁 {repo_branch}"
+            if short:
+                # The branch name is the only elastic part of the row: it gets whatever width
+                # the repo name and the session group leave free.
+                repo_name, _, branch_part = repo_branch.partition(SEP)
+                branch_name = branch_part.split(" ", 1)[-1]
+                fixed = _visible_len(f"📁 {repo_name}{sep}🌿 ")
+                room = (
+                    right_edge - min_gap - _visible_len(sep.join(session_right)) - fixed
+                )
+                branch_name = _truncate_end(branch_name, max(room, _MIN_BRANCH_COLS))
+                repo_txt = f"📁 {repo_name}{sep}🌿 {branch_name}"
+            repo_left.append(_hyperlink(repo_txt, repo_url) if repo_url else repo_txt)
+
+        return [
+            (budget_left, cost_right),
+            (repo_left, session_right),
+            ([], model_short if short else model_long),
+        ]
+
+    rows = permanent_rows(False)
+    sep, min_gap = SEP, _MIN_GAP
+    if not all(
+        _row_width(left, right, sep, min_gap) <= right_edge for left, right in rows
+    ):
+        rows = permanent_rows(True)
+        sep, min_gap = _SEP_SHORT, _MIN_GAP_SHORT
+
+    def alert_row(short: bool) -> tuple[list[str], list[str]] | None:
+        """The rate-limit alert as a `(left_parts, right_parts)` pair — 5h on the left, 7d on the
+        right when both warn, a lone window on the left — or `None` while neither does."""
+        five = _rate_limit_alert("five_hour", data, short)
+        seven = _rate_limit_alert("seven_day", data, short)
+        if five and seven:
+            return ([five], [seven])
+        only = five or seven
+        return ([only], []) if only else None
+
+    lines: list[str] = []
+    alert = alert_row(False)
+    if alert:
+        alert_sep, alert_gap = SEP, _MIN_GAP
+        if _row_width(*alert, alert_sep, alert_gap) > right_edge:
+            alert = cast("tuple[list[str], list[str]]", alert_row(True))
+            alert_sep, alert_gap = _SEP_SHORT, _MIN_GAP_SHORT
+        lines.append(_render_flex(*alert, right_edge, alert_sep, alert_gap))
+
+    for left, right in rows:
+        lines.extend(_render_pair(left, right, right_edge, sep))
+
+    # ---------- Optional row : the active compression proxy, only while one is up ----------
     proxy_line = _compression_proxy_stats()
     if proxy_line:
-        line4_left_parts.append(proxy_line)
-
-    max_left, max_right = _content_widths(
-        [
-            (line1_left_parts, line1_right_parts),
-            (line2_left_parts, line2_right_parts),
-            (repo_line_left_parts, repo_line_right_parts),
-            (line3_left_parts, line3_right_parts),
-            (line4_left_parts, line4_right_parts),
-        ]
-    )
-    right_edge = max_left + max_right + _MIN_GAP
-    # The banner row counts too: its own natural width (banner + gap + version) is a floor for the
-    # right column, otherwise the version lands at `banner + gap` instead of on the column every
-    # other row uses. All banner rows are equally wide, so measuring the first is enough.
-    right_edge = max(
-        right_edge,
-        _visible_len(SEP.join(line0_left_parts))
-        + _MIN_GAP
-        + _visible_len(SEP.join(line0_right_parts)),
-    )
-
-    lines.append(_render_flex(line0_left_parts, line0_right_parts, right_edge))
-    lines.extend(banner_rows[1:])
-    lines.append(_SPACER_ROW)
-    lines.append(_render_flex(line1_left_parts, line1_right_parts, right_edge))
-    lines.append(_SPACER_ROW)
-    lines.append(_render_flex(line2_left_parts, line2_right_parts, right_edge))
-    lines.append(_SPACER_ROW)
-    if repo_line_left_parts:
-        lines.append(
-            _render_flex(repo_line_left_parts, repo_line_right_parts, right_edge)
-        )
-        lines.append(_SPACER_ROW)
-    lines.append(_render_flex(line3_left_parts, line3_right_parts, right_edge))
-    lines.append(_SPACER_ROW)
-    if line4_left_parts:
-        lines.append(_render_flex(line4_left_parts, line4_right_parts, right_edge))
-        lines.append(_SPACER_ROW)
+        lines.append(proxy_line)
 
     return lines
 
@@ -837,6 +1021,8 @@ def main():
     except Exception:
         print("[status line: invalid JSON]")
         return
+    # Dumped as received, before the injections below add to the payload.
+    dump_debug_payload(data, _safe_get(data, "session_id"), "statusline")
     # The harness's own `rate_limits` always wins; only when it is absent (any non-Anthropic
     # provider) is the active provider's quota injected — before the state write, so pc-kanban
     # reads the quota of the provider this session is actually spending.
@@ -844,6 +1030,8 @@ def main():
         injected = provider_rate_limits()
         if injected:
             data["rate_limits"] = injected
+    if isinstance(data, dict):
+        data["_term"] = _term_cols()
     _write_rate_limit_state(data, _safe_get(data, "session_id"))
     try:
         print("\n".join(build_lines(data)))

@@ -63,5 +63,5 @@ plugin loads from a folder you own).
 
 ## Requirements
 
-Python 3 for the hook. `markitdown` (`uv tool install 'markitdown[all]'`) for the conversion; the
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hook. `markitdown` (`uv tool install 'markitdown[all]'`) for the conversion; the
 `[all]` extra pulls the docx/pptx/xlsx/pdf handlers.

@@ -1,18 +1,18 @@
 """next_card_recommendation — session-vs-spawn signals for `/chantier`'s "Proposing the next card"
 step (`kanban/references/finishing-a-card.md`). Two independent, best-effort signals: the
-context-window `%` rebuilt from the session's own transcript (no `pc-statusline` dependency), and
-a rate-limit pace check against `pc-statusline`'s state file (the one cross-plugin coupling
-accepted, only for this axis). Each degrades to `None` rather than raising when its data source is
+context-window `%` and a rate-limit check, both read from `pc-statusline`'s per-session state file
+(the one cross-plugin coupling accepted). Each degrades to `None` rather than raising when its data source is
 missing — the caller (the skill's own prose) treats `None` as "omit that part of the line", never
 as an error.
 
 Oracle strategy (tests.md § generator oracle): the pure helpers each get a direct equality oracle,
-`context_window_pct`/`evaluate_rate_limit` get end-to-end oracles on the witness case from the
-card's `## Done when` (`five_hour` at 96 %, reset in 1h15 on a 5h window).
+`context_window_pct`/`evaluate_rate_limit` get end-to-end oracles against a state file in `tmp_path`.
 """
 
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 SCRIPTS = (
@@ -28,166 +28,103 @@ sys.path.insert(0, str(SCRIPTS))
 import next_card_recommendation as ncr  # noqa: E402
 
 
-def _attachment_line(model_id: str) -> str:
-    """La forme réelle observée du reminder de modèle dans un vrai transcript : une entrée
-    structurée `type: "attachment"`, jamais la phrase en texte libre qu'elle rend visible."""
-    return json.dumps(
-        {
-            "type": "attachment",
-            "attachment": {"type": "model", "identity": {"modelId": model_id}},
-        }
-    )
+def _isolate(tmp_path, monkeypatch):
+    """Point the state file's directory at `tmp_path` so no test writes the shared temp dir."""
+    monkeypatch.setattr(ncr.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(ncr.os, "getuid", lambda: 501, raising=False)
 
 
-# --- model ceiling, from the session's own structured `attachment` entry ----------------------
+def _write_state(session_id, state, mtime=None):
+    path = Path(ncr._rate_limit_state_path(session_id))
+    path.write_text(json.dumps(state), encoding="utf-8")
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
 
 
-def test_model_ceiling_default_without_1m_suffix():
-    assert (
-        ncr._model_ceiling_from_transcript(_attachment_line("claude-sonnet-5"))
-        == ncr.CEILING_DEFAULT
-    )
+# --- context_window_pct(): the status line's own value, from the state file ------------------
 
 
-def test_model_ceiling_1m_variant():
-    assert (
-        ncr._model_ceiling_from_transcript(_attachment_line("claude-sonnet-5[1m]"))
-        == ncr.CEILING_1M
-    )
-
-
-def test_model_ceiling_none_when_reminder_absent():
-    assert ncr._model_ceiling_from_transcript("rien d'utile ici") is None
-
-
-def test_model_ceiling_uses_the_last_occurrence():
-    text = "\n".join(
-        [_attachment_line("claude-sonnet-5[1m]"), _attachment_line("claude-haiku-4-5")]
-    )
-    assert ncr._model_ceiling_from_transcript(text) == ncr.CEILING_DEFAULT
-
-
-def test_model_ceiling_ignores_the_same_sentence_quoted_in_ordinary_content():
-    """Régression : le transcript peut contenir la phrase en clair ("exact model ID is …") dans
-    du contenu ordinaire — une commande échoée, un fichier écrit par la session elle-même — sans
-    que ce soit le vrai reminder. Seule l'entrée structurée `attachment` compte."""
-    text = "\n".join(
-        [
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "exact model ID is claude-sonnet-5.",
-                            }
-                        ]
-                    },
-                }
-            ),
-            _attachment_line("claude-sonnet-5[1m]"),
-        ]
-    )
-    assert ncr._model_ceiling_from_transcript(text) == ncr.CEILING_1M
-
-
-# --- last assistant usage ------------------------------------------------------------------
-
-
-def test_last_assistant_usage_returns_the_most_recent_one():
-    text = "\n".join(
-        json.dumps(e)
-        for e in [
-            {"type": "assistant", "message": {"usage": {"input_tokens": 1}}},
-            {"type": "user", "message": {}},
-            {"type": "assistant", "message": {"usage": {"input_tokens": 42}}},
-        ]
-    )
-    assert ncr._last_assistant_usage(text) == {"input_tokens": 42}
-
-
-def test_last_assistant_usage_none_without_any_assistant_entry():
-    assert ncr._last_assistant_usage("pas du json\n{}") is None
-
-
-def test_last_assistant_usage_skips_assistant_entries_without_usage():
-    text = "\n".join(
-        json.dumps(e)
-        for e in [
-            {"type": "assistant", "message": {"usage": {"input_tokens": 7}}},
-            {"type": "assistant", "message": {}},
-        ]
-    )
-    assert ncr._last_assistant_usage(text) == {"input_tokens": 7}
-
-
-# --- context_window_pct() end-to-end -------------------------------------------------------
-
-
-def test_context_window_pct_oracle(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        ncr, "_transcript_path", lambda session_id, cwd: str(tmp_path / "t.jsonl")
-    )
-    text = "\n".join(
-        [
-            _attachment_line("claude-sonnet-5[1m]"),
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "message": {
-                        "usage": {
-                            "input_tokens": 100_000,
-                            "cache_read_input_tokens": 400_000,
-                            "cache_creation_input_tokens": 0,
-                        }
-                    },
-                }
-            ),
-        ]
-    )
-    (tmp_path / "t.jsonl").write_text(text, encoding="utf-8")
-    assert ncr.context_window_pct("sess", str(tmp_path)) == 50
-
-
-def test_context_window_pct_resolves_ceiling_from_the_head_on_a_large_session(
+def test_context_window_pct_is_the_state_files_value_whatever_the_transcript(
     tmp_path, monkeypatch
 ):
-    """Repro observé en conditions réelles sur une session longue : l'attachment d'identité de
-    modèle n'est journalisé qu'une seule fois, en tout début de fichier — bien au-delà de
-    `_TAIL_BYTES` une fois la session grossie. Le plafond doit venir d'une lecture en tête de
-    fichier, jamais d'un tail (qui, lui, sert uniquement à retrouver le dernier `usage`)."""
-    monkeypatch.setattr(
-        ncr, "_transcript_path", lambda session_id, cwd: str(tmp_path / "t.jsonl")
-    )
-    filler = json.dumps({"type": "user", "message": {"content": "x" * 1000}})
-    lines = [_attachment_line("claude-sonnet-5[1m]")]
-    lines += [filler] * 100  # ~100 Ko de remplissage, au-delà de _TAIL_BYTES par défaut
-    lines.append(
+    """Repro: `/context` at 23 % while a 224 000-token transcript without `[1m]` read as 102 %."""
+    _isolate(tmp_path, monkeypatch)
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(
         json.dumps(
             {
                 "type": "assistant",
-                "message": {
-                    "usage": {
-                        "input_tokens": 100_000,
-                        "cache_read_input_tokens": 400_000,
-                        "cache_creation_input_tokens": 0,
-                    }
-                },
+                "message": {"usage": {"input_tokens": 224_000}},
             }
-        )
+        ),
+        encoding="utf-8",
     )
-    (tmp_path / "t.jsonl").write_text("\n".join(lines), encoding="utf-8")
-    assert ncr.context_window_pct("sess", str(tmp_path)) == 50
+    _write_state("sess", {"context_used_percentage": 23}, mtime=1_000_000.0)
+    assert ncr.context_window_pct("sess", now=1_000_010.0) == 23
 
 
-def test_context_window_pct_none_when_transcript_missing(tmp_path):
-    assert ncr.context_window_pct("sess", str(tmp_path)) is None
+def test_context_window_pct_none_without_state_even_with_a_transcript(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    (tmp_path / "t.jsonl").write_text(
+        json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 1}}}),
+        encoding="utf-8",
+    )
+    assert ncr.context_window_pct("sess", now=1_000_000.0) is None
 
 
-def test_context_window_pct_none_without_session_id_or_cwd():
-    assert ncr.context_window_pct(None, "/tmp") is None
-    assert ncr.context_window_pct("sess", None) is None
+def test_context_window_pct_none_when_state_has_no_context_value(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    _write_state(
+        "sess",
+        {"five_hour": {"used_percentage": 10, "resets_at": 1}},
+        mtime=1_000_000.0,
+    )
+    assert ncr.context_window_pct("sess", now=1_000_000.0) is None
+
+
+def test_context_window_pct_freshness_boundary(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    _write_state("sess", {"context_used_percentage": 23}, mtime=1_000_000.0)
+    assert ncr.context_window_pct("sess", now=1_000_299.0) == 23
+    assert ncr.context_window_pct("sess", now=1_000_300.0) == 23
+    assert ncr.context_window_pct("sess", now=1_000_301.0) is None
+
+
+def test_context_window_pct_ages_from_the_mtime_taken_before_the_read(
+    tmp_path, monkeypatch
+):
+    """A writer replacing the file during the read must not make old content look fresh."""
+    _isolate(tmp_path, monkeypatch)
+    now = 1_000_000.0
+    _write_state("sess", {"context_used_percentage": 23}, mtime=now - 400)
+    real_read = ncr._read_rate_limit_state
+
+    def read_then_bump(session_id):
+        state = real_read(session_id)
+        os.utime(ncr._rate_limit_state_path(session_id), (now, now))
+        return state
+
+    monkeypatch.setattr(ncr, "_read_rate_limit_state", read_then_bump)
+    assert ncr.context_window_pct("sess", now=now) is None
+
+
+def test_context_window_pct_none_when_state_is_not_valid_json(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    Path(ncr._rate_limit_state_path("sess")).write_text("{not json", encoding="utf-8")
+    assert ncr.context_window_pct("sess", now=time.time()) is None
+
+
+def test_context_window_pct_none_when_value_is_not_a_number(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    _write_state("sess", {"context_used_percentage": "23"}, mtime=1_000_000.0)
+    assert ncr.context_window_pct("sess", now=1_000_000.0) is None
+
+
+def test_context_window_pct_none_without_session_id(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    assert ncr.context_window_pct(None) is None
 
 
 # --- rate-limit state file + pace formula --------------------------------------------------
@@ -216,53 +153,55 @@ def test_evaluate_rate_limit_none_without_crashing_when_getuid_is_unavailable(
     assert ncr.evaluate_rate_limit("sess-windows") is None
 
 
-def test_evaluate_rate_limit_triggers_on_the_witness_case(tmp_path, monkeypatch):
-    """Le cas témoin de la carte : five_hour à 96 %, reset dans 1h15 sur une fenêtre de 5h ->
-    elapsed_fraction = 75 % < 96 % et 1h15 > 1h -> déclenché."""
-    monkeypatch.setattr(ncr.tempfile, "gettempdir", lambda: str(tmp_path))
-    monkeypatch.setattr(ncr.os, "getuid", lambda: 501, raising=False)
+def _five_hour(tmp_path, monkeypatch, session, used, remaining_seconds):
+    _isolate(tmp_path, monkeypatch)
     now = 1_000_000.0
-    resets_at = now + 75 * 60
-    Path(ncr._rate_limit_state_path("sess-2")).write_text(
-        json.dumps({"five_hour": {"used_percentage": 96, "resets_at": resets_at}}),
-        encoding="utf-8",
+    _write_state(
+        session,
+        {"five_hour": {"used_percentage": used, "resets_at": now + remaining_seconds}},
     )
-    result = ncr.evaluate_rate_limit("sess-2", now=now)
-    assert result["five_hour"]["triggered"] is True
-    assert result["five_hour"]["elapsed_fraction"] == 0.75
+    return ncr.evaluate_rate_limit(session, now=now)["five_hour"]
+
+
+def test_evaluate_rate_limit_triggers_at_95_with_reset_in_two_hours(
+    tmp_path, monkeypatch
+):
+    result = _five_hour(tmp_path, monkeypatch, "sess-2", 95, 2 * 3600)
+    assert result == {
+        "used_percentage": 95,
+        "resets_at": 1_000_000.0 + 2 * 3600,
+        "elapsed_fraction": 0.6,
+        "triggered": True,
+    }
 
 
 def test_evaluate_rate_limit_not_triggered_when_reset_is_under_an_hour(
     tmp_path, monkeypatch
 ):
-    """Marge < 1h avant reset -> on s'en fout, même à 99 %."""
-    monkeypatch.setattr(ncr.tempfile, "gettempdir", lambda: str(tmp_path))
-    monkeypatch.setattr(ncr.os, "getuid", lambda: 501, raising=False)
-    now = 1_000_000.0
-    resets_at = now + 30 * 60
-    Path(ncr._rate_limit_state_path("sess-3")).write_text(
-        json.dumps({"five_hour": {"used_percentage": 99, "resets_at": resets_at}}),
-        encoding="utf-8",
+    assert (
+        _five_hour(tmp_path, monkeypatch, "sess-3", 95, 30 * 60)["triggered"] is False
     )
-    result = ncr.evaluate_rate_limit("sess-3", now=now)
-    assert result["five_hour"]["triggered"] is False
 
 
-def test_evaluate_rate_limit_not_triggered_when_pace_is_under_elapsed(
+def test_evaluate_rate_limit_not_triggered_under_95_even_ahead_of_pace(
     tmp_path, monkeypatch
 ):
-    """Rythme sous la ligne linéaire (used_fraction < elapsed_fraction) -> pas déclenché,
-    même avec plus d'1h avant le reset."""
-    monkeypatch.setattr(ncr.tempfile, "gettempdir", lambda: str(tmp_path))
-    monkeypatch.setattr(ncr.os, "getuid", lambda: 501, raising=False)
+    """94 % at 10 % of the window elapsed: far ahead of a uniform pace, still no pause."""
+    result = _five_hour(tmp_path, monkeypatch, "sess-4", 94, int(4.5 * 3600))
+    assert result["elapsed_fraction"] == 0.1
+    assert result["triggered"] is False
+
+
+def test_evaluate_rate_limit_seven_day_never_triggers(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
     now = 1_000_000.0
-    resets_at = now + 75 * 60
-    Path(ncr._rate_limit_state_path("sess-4")).write_text(
-        json.dumps({"five_hour": {"used_percentage": 50, "resets_at": resets_at}}),
-        encoding="utf-8",
+    _write_state(
+        "sess-7",
+        {"seven_day": {"used_percentage": 99, "resets_at": now + 3 * 24 * 3600}},
     )
-    result = ncr.evaluate_rate_limit("sess-4", now=now)
-    assert result["five_hour"]["triggered"] is False
+    result = ncr.evaluate_rate_limit("sess-7", now=now)
+    assert result["seven_day"]["used_percentage"] == 99
+    assert result["seven_day"]["triggered"] is False
 
 
 def test_evaluate_rate_limit_skips_a_window_missing_used_percentage(

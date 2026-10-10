@@ -40,6 +40,10 @@ ordinary repo-scoped session shouldn't otherwise have — see the `permission-ch
 - **`orchestrator_freeze.py`** — freezes an orchestrator session out of the repos it dispatches to.
 - **`pc_kanban_secret_patterns.py`** — secret-pattern definitions shared by this plugin's guards.
 
+## Requirements
+
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hooks and skill scripts.
+
 ## Dependencies
 
 `pc-core`.

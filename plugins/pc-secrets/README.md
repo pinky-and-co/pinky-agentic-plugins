@@ -56,7 +56,7 @@ plugin loads from a folder you own).
 
 ## Requirements
 
-Python 3 for the hook. The `delegate offline` button needs `pc-core` (its `offline` tool) and a
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hook. The `delegate offline` button needs `pc-core` (its `offline` tool) and a
 local model server.
 
 ## Upgrading from pc-core

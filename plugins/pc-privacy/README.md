@@ -214,7 +214,7 @@ fresh random salt, returned in the result.
 
 ## Requirements
 
-`uv` on `PATH` (as for any plugin shipping an `mcp/` server). The `file` command improves format
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hooks. `uv` on `PATH` (as for any plugin shipping an `mcp/` server). The `file` command improves format
 detection and is present by default on Linux and macOS; without it (native Windows) detection
 falls back to the file's content and extension alone; that path is covered by a mock only. A zip
 container counts as an xlsx only if it holds `xl/workbook.xml`, otherwise it is skipped as binary.
