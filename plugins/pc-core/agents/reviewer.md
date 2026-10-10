@@ -46,7 +46,9 @@ answered, in the full `provider/model · 🟦🟪🟧 tier` form, never a model 
 `adversarial` label is copied whole from the `[answered by …]` line. Reviewing alone,
 `<your own model>` is the model the caller passed to `Agent` for you, or your own model id (e.g.
 `anthropic/sonnet · 🟪 sonnet`). On a change that has a diff, a `Method: reviewer` report states
-why `adversarial` did not answer. Then the findings and the verdict, in the methodology's format.
-When `adversarial` answered, its verdict goes back verbatim under the `Method:` line and the report
-stops there: nothing is added to it and it is never softened or rewritten. Your own findings exist
-only when you reviewed alone.
+why `adversarial` did not answer.
+
+- When `adversarial` answered, its verdict goes back verbatim under the `Method:` line and the
+  report stops there: nothing is added to it and it is never softened or rewritten.
+- Reviewing alone, the findings and the verdict follow, in the methodology's format. Your own
+  findings exist only then.
