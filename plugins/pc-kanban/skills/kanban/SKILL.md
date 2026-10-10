@@ -22,10 +22,6 @@ _KANBAN/
 │   └── 4-done/               ← done, waiting for its ADR — a card with no ADR to write skips it
 └── _ARCHIVE/
     └── CHANTIER{NNNN}-done/
-        ├── .nav.yml              ← display only: sort: {direction: desc, by: filename} — scoped to
-        │                            this directory, so it reorders the archived cards below without
-        │                            touching how `_ARCHIVE/`'s CHANTIER{NNNN}-done/ folders
-        │                            themselves are listed one level up (default asc, untouched)
         └── YYYY-MM-DD_<card>.md  ← archive-date prefix, applied by `chantier`'s archiving step —
                                      see `chantier` skill § step 5
 ```
@@ -91,7 +87,7 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
 
 The card's state **is** its column folder — there is no `status:` field to keep in sync. The
 mapping is bijective (`0-ideas` ↔ idea, `1-todo` ↔ todo, `2-selected-for-dev` ↔ selected,
-`3-in-progress` ↔ in-progress, `4-done` ↔ done); `live-docs` derives the displayed state from the
+`3-in-progress` ↔ in-progress, `4-done` ↔ done); the board shows a card's state from its
 folder name. A blocked card is not a state — it lives in `blocked_by:` plus a rendered badge.
 
 - **`date`** — one field, meaning derived from the column folder:

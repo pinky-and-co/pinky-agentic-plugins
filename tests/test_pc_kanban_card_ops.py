@@ -437,19 +437,24 @@ def test_archive_refuses_an_open_column(tmp_path: Path) -> None:
     assert card.is_file()
 
 
-def test_archive_seeds_nav_yml_and_dates_the_entry(tmp_path: Path) -> None:
+def test_archive_and_drop_seed_no_nav_yml_and_date_the_entry(tmp_path: Path) -> None:
     board = tmp_path / "_KANBAN"
     _card(board, "4-done")
     result = _run(board, "archive", "demo")
     folder = board / "_ARCHIVE" / "CHANTIER0001-done"
-    assert (
-        folder / ".nav.yml"
-    ).read_text() == "sort:\n  direction: desc\n  by: filename\n"
-    assert result.stdout.splitlines()[0] == f"seeded {folder}/.nav.yml"
+    assert not (folder / ".nav.yml").exists()
+    assert not any(line.startswith("seeded") for line in result.stdout.splitlines())
     assert (
         f"archived -> {folder / (date.today().isoformat() + '_demo.md')}"
         in result.stdout.splitlines()
     )
+    _card(board, "1-todo")
+    dropped = _run(board, "drop", "demo", "superseded")
+    dropped_folder = board / "_ARCHIVE" / "CHANTIER0001-dropped"
+    assert dropped.returncode == 0, dropped.stderr
+    assert dropped_folder.is_dir()
+    assert not (dropped_folder / ".nav.yml").exists()
+    assert not any(line.startswith("seeded") for line in dropped.stdout.splitlines())
 
 
 def test_archive_refuses_to_overwrite_an_entry(tmp_path: Path) -> None:
