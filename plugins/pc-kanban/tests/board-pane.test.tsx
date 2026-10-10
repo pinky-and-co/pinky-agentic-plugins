@@ -578,7 +578,7 @@ describe('board pane', () => {
     expect(await ui.find({ type: 'Button', key: 'edit', text: '✎ open in editor' })).toBeDefined()
     await ui.press({ key: 'select' })
     await ui.redraw()
-    expect(ran.some(argv => argv.slice(-3).join(' ') === '-- select build-widget')).toBe(true)
+    expect(ran.some(argv => argv.slice(-3).join(' ') === '-- select 0007/build-widget')).toBe(true)
     // One Text per line of the refusal, each matched whole.
     expect(await ui.find({ type: 'Text', text: /^build-widget not selected:$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ {2}- no `## Done when` section$/ })).toBeDefined()
@@ -684,7 +684,7 @@ describe('board pane', () => {
     await ui.redraw()
     expect(await ui.find({ type: 'Input', key: 'drop-reason' })).toBeDefined()
     await ui.input({ key: 'drop-reason', text: 'superseded by another card' })
-    expect(ran.some(argv => argv.slice(-4).join('|') === '--|drop|build-widget|superseded by another card')).toBe(true)
+    expect(ran.some(argv => argv.slice(-4).join('|') === '--|drop|0007/build-widget|superseded by another card')).toBe(true)
     await ui.unmount()
   })
 
@@ -756,7 +756,7 @@ describe('board pane', () => {
     await ui.press({ key: 'drop' })
     await ui.redraw()
     await ui.input({ key: 'drop-reason', text: '-h' })
-    expect(ran.some(argv => argv.slice(-4).join('|') === '--|drop|build-widget|-h')).toBe(true)
+    expect(ran.some(argv => argv.slice(-4).join('|') === '--|drop|0007/build-widget|-h')).toBe(true)
     await ui.unmount()
   })
 
@@ -768,7 +768,7 @@ describe('board pane', () => {
     expect(ran.some(argv => argv.includes('search') && argv.indexOf('--') > argv.indexOf('--scope') && argv.at(-1) === '-dropped')).toBe(true)
   })
 
-  test('two cards sharing a slug open apart; the script still gets the bare slug', async ($, on) => {
+  test('two cards sharing a slug open apart; the script gets the chantier id with the slug', async ($, on) => {
     const ran: string[][] = []
     const first = card('dup', '1-todo', {}, { body: 'First body', path: `${ROOT}/_KANBAN/CHANTIER0007-first/1-todo/dup.md` })
     const second = card('dup', '1-todo', {}, { body: 'Second body', chantier: 'CHANTIER0008-second', chantier_id: '0008', path: `${ROOT}/_KANBAN/CHANTIER0008-second/1-todo/dup.md` })
@@ -782,8 +782,23 @@ describe('board pane', () => {
     expect(await ui.find({ type: 'Text', text: 'First body' })).toBeUndefined()
     await ui.press({ key: 'select' })
     await ui.redraw()
-    expect(ran.some(argv => argv.slice(-3).join(' ') === '-- select dup')).toBe(true)
+    expect(ran.some(argv => argv.slice(-3).join(' ') === '-- select 0008/dup')).toBe(true)
     expect(await ui.find({ type: 'Text', text: /^ambiguous: 'dup' matches 2 cards$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a card without a chantier id is sent to the script by its bare slug', async ($, on) => {
+    const ran: string[][] = []
+    const bare = card('lone', '1-todo', {}, { chantier_id: null })
+    engine(on, { cards: [bare], ran, opExit: 1, opErr: 'refused' })
+    await run($, '')
+    const ui = await mount($)
+    await ui.press({ key: 'tab-1-todo' })
+    await ui.press({ key: open(bare) })
+    await ui.redraw()
+    await ui.press({ key: 'select' })
+    await ui.redraw()
+    expect(ran.some(argv => argv.slice(-3).join(' ') === '-- select lone')).toBe(true)
     await ui.unmount()
   })
 

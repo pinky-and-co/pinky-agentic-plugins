@@ -859,6 +859,9 @@ async function openFile($: EngineInterface, path: string, line: number) {
   return set($, s => note(s, 'info', `No editor could be started. Open it with: $EDITOR +${line} ${quote(path)}`))
 }
 
+// How card_ops is told which card: `<id>/<slug>` when the chantier has an id, since the slug alone can repeat across chantiers.
+const cardRef = (card: BoardCard) => (card.chantier_id === null ? card.slug : `${card.chantier_id}/${card.slug}`)
+
 // What the card ops script prints, or its refusal, in the pane; the board is read again either way.
 async function runOp($: EngineInterface, verb: Verb, slug: string, reason?: string) {
   try {
@@ -880,8 +883,10 @@ async function perform($: EngineInterface, effect: Effect) {
       return load($)
     case 'search':
       return runSearch($, effect.query, effect.scopes)
-    case 'act':
-      return runOp($, effect.verb, effect.slug)
+    case 'act': {
+      const card = openCard(await read($, board))
+      return runOp($, effect.verb, card?.slug === effect.slug ? cardRef(card) : effect.slug)
+    }
     case 'editor':
       return openFile($, effect.path, effect.line)
     case 'story': {
@@ -944,7 +949,7 @@ async function drop($: EngineInterface, reason: string) {
   const card = openCard(state)
   if (card === undefined || !state.isDropping) return
   if (reason.trim() === '') return set($, s => note(s, 'error', 'drop needs a reason.'))
-  return runOp($, 'drop', card.slug, reason.trim())
+  return runOp($, 'drop', cardRef(card), reason.trim())
 }
 
 async function open($: EngineInterface, args: string) {
