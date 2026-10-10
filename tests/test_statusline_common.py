@@ -201,6 +201,15 @@ def test_dump_debug_payload_moves_a_repeated_payload_to_the_end(
     assert stored == [{"n": 2}, {"n": 1}]
 
 
+def test_dump_debug_payload_writes_a_file_meant_to_be_read_by_a_person(
+    tmp_path, debug_session
+):
+    payload = {"model": {"display_name": "Sonnet"}, "cwd": "/tmp/é"}
+    c.dump_debug_payload(payload, "s1", "statusline")
+    text = _debug_file(tmp_path).read_text(encoding="utf-8")
+    assert text == json.dumps([payload], indent=2, ensure_ascii=False) + "\n"
+
+
 def test_dump_debug_payload_replaces_a_stored_file_that_is_not_a_payload_list(
     tmp_path, debug_session
 ):

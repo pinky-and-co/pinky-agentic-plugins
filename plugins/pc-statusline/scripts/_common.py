@@ -128,9 +128,12 @@ def _claude_args_by_ancestry() -> str | None:
     return None
 
 
-def write_json_atomic(path: str, payload: object) -> None:
+def write_json_atomic(path: str, payload: object, readable: bool = False) -> None:
     """Write `payload` as JSON to `path` through a sibling temp file (mode 0o600) and
     `os.replace`, so a concurrent reader sees the old file or the new one, never half of it.
+
+    `readable` writes a file a person opens: indented, non-ASCII characters kept, a final
+    newline. The default stays compact, for the caches only the scripts read.
 
     The temp file is removed on any failure before the replace, a serialisation error included;
     the exception then propagates."""
@@ -138,7 +141,11 @@ def write_json_atomic(path: str, payload: object) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle)
+            if readable:
+                json.dump(payload, handle, indent=2, ensure_ascii=False)
+                handle.write("\n")
+            else:
+                json.dump(payload, handle)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -222,6 +229,6 @@ def dump_debug_payload(payload: object, session_id: object, name: str) -> None:
             return
         kept = [item for item in stored if item != payload][-(_DEBUG_KEEP - 1) :]
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_json_atomic(str(path), [*kept, payload])
+        write_json_atomic(str(path), [*kept, payload], readable=True)
     except Exception:
         pass
