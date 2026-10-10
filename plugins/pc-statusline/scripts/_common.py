@@ -194,22 +194,24 @@ def process_flags(session_id: str) -> ProcessFlags:
 
 def dump_debug_payload(payload: object, session_id: object, name: str) -> None:
     """Keep `payload` in `~/.claude/debug/<session_id>__pc-statusline__<name>.json` while the
-    session's `claude` process runs with `--debug`; write nothing otherwise.
+    session is in debug mode; write nothing otherwise.
 
-    The file is a JSON array of the last `_DEBUG_KEEP` distinct payloads, oldest first, and is
+    Debug mode is the `--debug` flag of the session's `claude` process (`process_flags`, read once
+    per session) or the presence of `~/.claude/debug/<session_id>.txt`, the log Claude Code
+    writes once debug is on, a `/debug` typed mid-session included. The file is tested at every
+    render, so the dump starts at the render after it appears.
+
+    The dump is a JSON array of the last `_DEBUG_KEEP` distinct payloads, oldest first, and is
     rewritten only when `payload` differs from the last one stored. Every error is swallowed: a
     status line renders whatever happens to its debug file."""
     try:
         if not (isinstance(session_id, str) and _SESSION_ID_RE.fullmatch(session_id)):
             return
-        if not process_flags(session_id).debug:
-            return
-        path = (
-            Path.home()
-            / ".claude"
-            / "debug"
-            / f"{session_id}__pc-statusline__{name}.json"
-        )
+        debug_dir = Path.home() / ".claude" / "debug"
+        if not (debug_dir / f"{session_id}.txt").exists():
+            if not process_flags(session_id).debug:
+                return
+        path = debug_dir / f"{session_id}__pc-statusline__{name}.json"
         try:
             stored = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):

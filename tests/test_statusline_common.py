@@ -245,3 +245,14 @@ def test_write_json_atomic_leaves_no_temp_file_when_the_payload_is_not_serialisa
     c.dump_debug_payload({"a": object()}, "s1", "statusline")
     debug_dir = tmp_path / "home" / ".claude" / "debug"
     assert list(debug_dir.iterdir()) == []
+
+
+def test_dump_debug_payload_never_follows_a_session_log_out_of_the_debug_dir(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(c, "_ps", lambda *_args: "claude --session-id s1\n")
+    claude_dir = tmp_path / "home" / ".claude"
+    (claude_dir / "debug").mkdir(parents=True)
+    (claude_dir / "x.txt").write_text("", encoding="utf-8")
+    c.dump_debug_payload({"n": 1}, "../x", "statusline")
+    assert sorted(p.name for p in claude_dir.rglob("*")) == ["debug", "x.txt"]

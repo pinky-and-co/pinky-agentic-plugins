@@ -415,3 +415,20 @@ def test_main_identical_payload_does_not_rewrite_the_debug_file(
     os.utime(path, ns=(1_000_000_000, 1_000_000_000))
     _run_main(monkeypatch, capsys, payload)
     assert path.stat().st_mtime_ns == 1_000_000_000
+
+
+def test_main_without_debug_flag_dumps_once_the_session_log_appears(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        _common, "_ps", lambda *_args: f"claude --session-id {_SESSION}\n"
+    )
+    payload = _payload(session_id=_SESSION)
+    _run_main(monkeypatch, capsys, payload)
+    assert not _debug_file(tmp_path).exists()
+
+    log = tmp_path / "home" / ".claude" / "debug" / f"{_SESSION}.txt"
+    log.parent.mkdir(parents=True)
+    log.write_text("", encoding="utf-8")
+    _run_main(monkeypatch, capsys, payload)
+    assert json.loads(_debug_file(tmp_path).read_text(encoding="utf-8")) == [payload]

@@ -1730,3 +1730,23 @@ def test_main_never_writes_the_command_line_into_the_debug_dump(
     assert _debug_file(tmp_path) in written
     for path in written:
         assert _CANARY not in path.read_text(encoding="utf-8")
+
+
+def test_main_without_debug_flag_dumps_once_the_session_log_appears(
+    tmp_path, monkeypatch, capsys
+):
+    """A `/debug` typed mid-session leaves `<session_id>.txt` in the debug dir: the render after
+    it dumps, though the launch arguments carried no `--debug`."""
+    monkeypatch.setattr(
+        _common, "_ps", lambda *_args: "claude --session-id sess-dbg --advisor opus\n"
+    )
+    _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+    assert not _debug_file(tmp_path).exists()
+
+    log = tmp_path / "home" / ".claude" / "debug" / "sess-dbg.txt"
+    log.parent.mkdir(parents=True)
+    log.write_text("", encoding="utf-8")
+    _render_through_main(monkeypatch, capsys, _debug_payload(), 160)
+    assert json.loads(_debug_file(tmp_path).read_text(encoding="utf-8")) == [
+        _debug_payload()
+    ]
