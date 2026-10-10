@@ -24,9 +24,9 @@ code.
   never answers with a model below `sonnet` tier (only an explicit `model` override bypasses that
   floor). Pass `base` (the ref the change is measured against: the tool computes the diff,
   routes its model tier on it and appends it to the prompt), `scope` (`staged` / `unstaged`) when
-  the review is narrowed, a `task` stating the intent and what to attack, and `stack` only when the change is in
-  that stack. The tool diffs the repository of the session's project directory and names it in its
-  answer.
+  the review is narrowed, a `task` stating the intent and what to attack, and `stack` only when
+  the change is in that stack. The tool diffs the repository of the session's project directory
+  and names it in its answer.
   - No `tools` by default: the diff is in the prompt, and a model given tools explores for
     minutes, turn after turn. Pass `tools: ["read", "grep"]` only when the verdict needs files
     beyond the diff.
