@@ -72,7 +72,11 @@ mechanical check, in this order:
    included — the real change of perspective) whenever there is a diff, and reviews by itself under
    the `review-guidelines` skill only a claim with no diff, or after `adversarial` answered
    `BLOCKED` or `ERROR`. It opens its report with `Method: adversarial (<model>)` or
-   `Method: reviewer (<model>)`, the model that answered either way.
+   `Method: reviewer (<model>)`, the model that answered either way. Pass the reviewer its own
+   frontmatter defaults (`model: sonnet`, `effort: high`) and never a `model` or an `effort`
+   above them on the `adversarial` path: the extra cost buys no second voice, since the report
+   relays that verdict as is. When the reviewer reviews alone (a claim with no diff, or `adversarial`
+   answered `BLOCKED` / `ERROR`) its own reasoning is the review, and the cap does not apply.
 
    When the card declares `mockup:`, the hand-off also carries the mockup path (the unpacked
    folder for a `.zip`, the sibling `<zip name>/`) and the card's `mockup_fidelity` levels, an axis

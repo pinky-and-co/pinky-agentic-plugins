@@ -244,9 +244,9 @@ What a session did, cross-chantier, that no single card's handoff would hold. On
 names which agentic tool wrote the entry — needed because more than one tool can share the same git
 identity and write to the same log. **Derive it from the running tool's own environment, never
 hardcode one tool's name**: for Claude Code, `$AI_AGENT` (e.g. `claude-code_2-1-261_agent` → the
-segment before the first `_`); another tool exposes its own equivalent variable. This file is
-tool-agnostic by policy (see the marketplace's own `CLAUDE.md`) — a skill that only ever wrote
-`claude-code-` would silently mislabel every entry from any other tool. Read the recent entries at
+segment before the first `_`); another tool exposes its own equivalent variable. The log is shared
+by every agentic tool that works on the board — a skill that only ever wrote `claude-code-` would
+silently mislabel every entry from any other tool. Read the recent entries at
 session start alongside the board; write into the org whose board carries the chantier worked on.
 Never log secrets, credentials or internal URLs.
 

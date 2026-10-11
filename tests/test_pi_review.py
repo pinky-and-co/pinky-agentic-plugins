@@ -10,25 +10,6 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-_REAL_SUBPROCESS_RUN = subprocess.run
-
-
-def _pi_only_run(pi_result):
-    """A `subprocess.run` double that lets a real `git rev-parse` through (needed by
-    `policy_lib.resolve_repo_root`, itself called by `load_pool`) and answers every other call —
-    the `pi` invocation — with `pi_result`. Mocking `subprocess.run` wholesale would also swallow
-    that internal `git` call, breaking `load_pool`'s repo-root resolution."""
-
-    def _run(cmd, *args, **kwargs):
-        if cmd[0] == "git":
-            return _REAL_SUBPROCESS_RUN(cmd, *args, **kwargs)
-        if isinstance(pi_result, Exception):
-            raise pi_result
-        return pi_result
-
-    return _run
-
-
 SCRIPT_PATH = (
     Path(__file__).parent.parent
     / "plugins"
@@ -52,6 +33,7 @@ sys.path.insert(
     ),
 )
 import pi_review  # noqa: E402
+from pi_fakes import PiPopen  # noqa: E402
 
 CARD_TWO_POINTS = """---
 date: 2026-09-22
@@ -178,7 +160,7 @@ class TestReviewCandidates(unittest.TestCase):
 
 
 class TestReviewPoint(unittest.TestCase):
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_ok_status_parsed(self, mock_run):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="STATUS: OK\nJUSTIFICATION: file.py line 3 does it.",
@@ -191,7 +173,7 @@ class TestReviewPoint(unittest.TestCase):
         self.assertEqual(constat["model"], "local-qwen3.5")
         self.assertIn("file.py line 3", constat["detail"])
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_gap_status_parsed(self, mock_run):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="STATUS: GAP\nJUSTIFICATION: missing in file.py.",
@@ -202,7 +184,7 @@ class TestReviewPoint(unittest.TestCase):
         constat = pi_review.review_point(entries, "/repo", "First thing", "detail", 60)
         self.assertEqual(constat["status"], "GAP")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_unparseable_response_is_error_not_fabricated(self, mock_run):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="I refuse to answer in that format.", stderr="", returncode=0
@@ -212,7 +194,7 @@ class TestReviewPoint(unittest.TestCase):
         self.assertEqual(constat["status"], "ERROR")
         self.assertIn("unparseable", constat["detail"])
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_429_on_first_model_falls_over_to_second(self, mock_run):
         mock_run.side_effect = [
             subprocess.CalledProcessError(
@@ -230,7 +212,7 @@ class TestReviewPoint(unittest.TestCase):
         self.assertEqual(constat["status"], "OK")
         self.assertEqual(constat["model"], "openrouter-free")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_503_out_of_memory_falls_over_to_second(self, mock_run):
         mock_run.side_effect = [
             subprocess.CalledProcessError(
@@ -248,7 +230,7 @@ class TestReviewPoint(unittest.TestCase):
         self.assertEqual(constat["status"], "OK")
         self.assertEqual(constat["model"], "openrouter-free")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_other_error_is_reported_without_fallover(self, mock_run):
         mock_run.side_effect = subprocess.CalledProcessError(
             1, "pi", output="", stderr="401: invalid api key"
@@ -261,7 +243,7 @@ class TestReviewPoint(unittest.TestCase):
         self.assertEqual(constat["status"], "ERROR")
         self.assertIsNone(constat["model"])
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_pool_exhausted_is_error_not_fabricated(self, mock_run):
         mock_run.side_effect = [
             subprocess.CalledProcessError(
@@ -278,10 +260,10 @@ class TestReviewPoint(unittest.TestCase):
         self.assertEqual(constat["status"], "ERROR")
         self.assertIsNone(constat["model"])
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_full_command_is_constructed_through_review_point(self, mock_run):
         # Oracle sur la ligne de commande réelle construite par review_point → run_pool,
-        # pas seulement sur le verdict — la card exige explicitement -p, -t read et --model <provider>/<id>.
+        # pas seulement sur le verdict — la card exige explicitement --mode json, -t read et --model <provider>/<id>.
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="STATUS: OK\nJUSTIFICATION: fine.", stderr="", returncode=0
         )
@@ -290,7 +272,8 @@ class TestReviewPoint(unittest.TestCase):
         mock_run.assert_called_once_with(
             [
                 "pi",
-                "-p",
+                "--mode",
+                "json",
                 "--model",
                 "mlx/mlx-community/Qwen3.5-9B-MLX-4bit",
                 "-t",
@@ -299,11 +282,13 @@ class TestReviewPoint(unittest.TestCase):
                 pi_review.build_prompt("/repo", "First thing", "detail"),
             ],
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=unittest.mock.ANY,
-            capture_output=True,
             text=True,
-            timeout=60,
-            check=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
         )
 
 
@@ -364,14 +349,12 @@ class TestMain(unittest.TestCase):
             json.dumps({"model_pool": pool})
         )
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_end_to_end_one_constat_per_point(self, mock_run):
         card_path = self._write_card(CARD_TWO_POINTS)
         self._write_pool([CLI_ENTRY])
-        mock_run.side_effect = _pi_only_run(
-            unittest.mock.MagicMock(
-                stdout="STATUS: OK\nJUSTIFICATION: fine.", stderr="", returncode=0
-            )
+        mock_run.return_value = unittest.mock.MagicMock(
+            stdout="STATUS: OK\nJUSTIFICATION: fine.", stderr="", returncode=0
         )
         buf = []
         with unittest.mock.patch("builtins.print", lambda s: buf.append(s)):

@@ -27,9 +27,9 @@ code.
   the review is narrowed, a `task` stating the intent and what to attack, and `stack` only when
   the change is in that stack. The tool diffs the repository of the session's project directory
   and names it in its answer.
-  - No `tools` by default: the diff is in the prompt, and a model given tools explores for
-    minutes, turn after turn. Pass `tools: ["read", "grep"]` only when the verdict needs files
-    beyond the diff.
+  - Pass `tools: ["read", "grep"]` on every call: without them the model cannot open a file, and
+    answers a check that needs one (callers, references, packaging) with a tool call written as
+    text, which is no review.
   - The tool already applies the review methodology and the stack checklist: do not load them
     yourself.
   - `nothing to review`, or a repository that is not the one you read: check `git status` and
@@ -46,6 +46,9 @@ answered, in the full `provider/model · 🟦🟪🟧 tier` form, never a model 
 `adversarial` label is copied whole from the `[answered by …]` line. Reviewing alone,
 `<your own model>` is the model the caller passed to `Agent` for you, or your own model id (e.g.
 `anthropic/sonnet · 🟪 sonnet`). On a change that has a diff, a `Method: reviewer` report states
-why `adversarial` did not answer. Then the findings and the verdict, in the methodology's format.
-An `adversarial` verdict goes back verbatim; add your own findings under it, never a softened
-rewrite of the model's.
+why `adversarial` did not answer.
+
+- When `adversarial` answered, its verdict goes back verbatim under the `Method:` line and the
+  report stops there: nothing is added to it and it is never softened or rewritten.
+- Reviewing alone, the findings and the verdict follow, in the methodology's format. Your own
+  findings exist only then.

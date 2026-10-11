@@ -103,6 +103,12 @@ def adversarial(
     to the tool, tier derived from the diff, explicit `tier`), the model is `sonnet` tier or above,
     never `haiku`; only `model` bypasses that floor.
 
+    `model` names a pool entry first — used as is, which also bypasses the tier floor — and
+    otherwise is a model id at the built-in nvidia provider.
+
+    Under cmux (`CMUX_SURFACE_ID`) a split to the right follows the run live; cmux only — wmux is
+    not covered.
+
     `tier` (`haiku` / `sonnet` / `opus`) routes to the cheapest pool entry at or above that
     capacity (raised to `sonnet` when lower) — free before paid — instead of the default
     adversarial selection. `diff` (a path to a unified diff) derives that tier deterministically
@@ -145,12 +151,24 @@ def adversarial(
         resolved_tier = review_complexity.tier_for(diff_text)
 
     if override:
+        named = next(
+            (e for e in model_adversarial.load_pool() if e.get("name") == override),
+            None,
+        )
         entries = [
-            {**model_adversarial._DEFAULT_POOL[0], "model": override, "name": override}
+            named
+            or {
+                **model_adversarial._DEFAULT_POOL[0],
+                "model": override,
+                "name": override,
+            }
         ]
     elif resolved_tier:
         entries = model_adversarial.select_for_delegation_with_fallback(
-            model_adversarial.load_pool(), resolved_tier, floor_tier="sonnet"
+            model_adversarial.load_pool(),
+            resolved_tier,
+            floor_tier="sonnet",
+            rng=random.Random(),
         )
     else:
         entries = model_adversarial.select_for_adversarial(
@@ -166,7 +184,7 @@ def adversarial(
         adversarial_task += f"\n\n--- DIFF against {base} in {repo} ---\n{diff_text}"
     prompt = model_adversarial.build_prompt(adversarial_task, files)
 
-    pool_result = model_adversarial.run_pool(entries, prompt, tools=tools)
+    pool_result = model_adversarial.run_pool(entries, prompt, tools=tools, watch=True)
     if pool_result.entry is None:
         return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
     return f"[answered by {model_adversarial.answer_label(pool_result.entry)}]\n\n{pool_result.result}"

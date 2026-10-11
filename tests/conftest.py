@@ -31,6 +31,14 @@ def _isolate_pool_log(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_ambient_cmux(monkeypatch):
+    """A session run from a cmux pane carries `CMUX_SURFACE_ID`, which makes `run_pool(watch=True)`
+    open a split once per run — every test starts without it, a test that wants the split sets it
+    itself."""
+    monkeypatch.delenv("CMUX_SURFACE_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_decision_gate(monkeypatch):
     """The `pii_guard` decision gate is off unless a test sets its variables — a developer who
     runs a local decision server would otherwise send every test digest to it."""

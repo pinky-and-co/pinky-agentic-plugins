@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
 import model_adversarial as ma
+from pi_fakes import PiPopen
 
 
 class TestFailoverPredicates(unittest.TestCase):
@@ -62,7 +63,8 @@ class TestCliModelIdJoin(unittest.TestCase):
     def _expected_cmd(self, model_arg: str) -> list[str]:
         return [
             "pi",
-            "-p",
+            "--mode",
+            "json",
             "--model",
             model_arg,
             "--no-tools",
@@ -70,7 +72,7 @@ class TestCliModelIdJoin(unittest.TestCase):
             "p",
         ]
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_simple_id(self, mock_run):
         entry = {
             "name": "gemini-3.6-flash",
@@ -86,14 +88,16 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.assert_called_once_with(
             self._expected_cmd("gemini/gemini-3.6-flash"),
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=unittest.mock.ANY,
-            capture_output=True,
             text=True,
-            timeout=900,
-            check=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
         )
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_id_already_containing_a_slash_gets_two_levels_after_the_provider(
         self, mock_run
     ):
@@ -111,14 +115,16 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.assert_called_once_with(
             self._expected_cmd("mlx/mlx-community/Qwen3.5-9B-MLX-4bit"),
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=unittest.mock.ANY,
-            capture_output=True,
             text=True,
-            timeout=900,
-            check=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
         )
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_ambiguous_id_is_prefixed_by_its_own_entrys_provider(self, mock_run):
         entry = {
             "name": "groq-gpt-oss-120b",
@@ -134,14 +140,16 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.assert_called_once_with(
             self._expected_cmd("groq/openai/gpt-oss-120b"),
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=unittest.mock.ANY,
-            capture_output=True,
             text=True,
-            timeout=900,
-            check=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
         )
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_a_prompt_starting_with_dashes_is_not_mistaken_for_an_option(
         self, mock_run
     ):
@@ -162,7 +170,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         called_args = mock_run.call_args[0][0]
         self.assertEqual(called_args[-2:], ["--", prompt])
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_requested_tools_become_an_allowlist(self, mock_run):
         entry = {
             "name": "groq-gpt-oss-120b",
@@ -176,7 +184,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         )
         ma.run_pool([entry], "p", tools=["read", "grep"])
         called_args = mock_run.call_args[0][0]
-        self.assertEqual(called_args[4:6], ["-t", "read,grep"])
+        self.assertEqual(called_args[5:7], ["-t", "read,grep"])
         self.assertNotIn("--no-tools", called_args)
 
 
@@ -192,7 +200,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         }
         self.prompt = "review this code"
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_cli_success(self, mock_run):
         # Mock successful pi call
         mock_run.return_value = unittest.mock.MagicMock(
@@ -204,7 +212,8 @@ class TestModelAdversarialCLI(unittest.TestCase):
         # Le champ `tools` de l'entrée n'est plus lu : les outils se demandent à l'appel.
         expected_cmd = [
             "pi",
-            "-p",
+            "--mode",
+            "json",
             "--model",
             "anthropic/claude-3-5-sonnet",
             "--no-tools",
@@ -214,17 +223,19 @@ class TestModelAdversarialCLI(unittest.TestCase):
         mock_run.assert_called_once_with(
             expected_cmd,
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=unittest.mock.ANY,
-            capture_output=True,
             text=True,
-            timeout=900,
-            check=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
         )
 
         self.assertEqual(result.entry, self.cli_entry)
         self.assertEqual(result.result, "The code is correct.")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_cli_failover_on_rate_limit(self, mock_run):
         # Pool de deux modèles cli pour tester la bascule. Le premier appel échoue avec un 429
         # au format Mistral réel, le second réussit.
@@ -246,7 +257,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         self.assertEqual(result.entry["name"], "pi-model-2")
         self.assertEqual(result.result, "Success on second try")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_cli_failover_on_oom(self, mock_run):
         # Forme réelle du refus préflight de MLX-SERVE : corps 503 portant out_of_memory.
         pool = [self.cli_entry, {**self.cli_entry, "name": "pi-model-2"}]
@@ -260,7 +271,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         result = ma.run_pool(pool, self.prompt)
         self.assertEqual(result.entry["name"], "pi-model-2")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_cli_failover_on_insufficient_credit(self, mock_run):
         pool = [
             self.cli_entry,
@@ -276,7 +287,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         result = ma.run_pool(pool, self.prompt)
         self.assertEqual(result.entry["name"], "pi-model-2")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_cli_failover_matches_stdout_too_not_only_stderr(self, mock_run):
         # Un fournisseur qui écrit son erreur sur stdout, pas stderr, doit quand même être
         # détecté — les deux flux combinés sont vérifiés, jamais stderr seul.
@@ -294,7 +305,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         result = ma.run_pool(pool, self.prompt)
         self.assertEqual(result.entry["name"], "pi-model-2")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_cli_critical_failure(self, mock_run):
         # Error that is NOT in the fail-over list
         mock_run.side_effect = subprocess.CalledProcessError(
@@ -307,7 +318,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
         self.assertIn("critical failure", result.result)
         self.assertIn("Unexpected internal crash", result.result)
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
     def test_cli_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="pi", timeout=180)
 
