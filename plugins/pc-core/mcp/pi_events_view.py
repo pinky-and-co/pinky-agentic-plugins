@@ -49,7 +49,7 @@ def _is_hidden(char: str) -> bool:
         unicodedata.category(char) in _HIDDEN_CATEGORIES
         or "\u2060" <= char <= "\u206f"
         or char == "\u034f"
-        or "\u180b" <= char <= "\u180d"
+        or "\u180b" <= char <= "\u180f"
         or "\ufe00" <= char <= "\ufe0f"
         or "\U000e0100" <= char <= "\U000e01ef"
     )

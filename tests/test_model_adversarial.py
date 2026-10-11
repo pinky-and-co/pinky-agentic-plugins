@@ -2651,7 +2651,7 @@ class TestPiEventsView:
             pytest.param(range(0x2060, 0x2070), id="word-joiner-block"),
             pytest.param(range(0xFE00, 0xFE10), id="variation-selectors"),
             pytest.param(
-                range(0x180B, 0x180E), id="mongolian-free-variation-selectors"
+                range(0x180B, 0x1810), id="mongolian-free-variation-selectors"
             ),
             pytest.param(range(0xE0100, 0xE01F0), id="variation-selectors-supplement"),
             pytest.param([0xFEFF], id="byte-order-mark"),
