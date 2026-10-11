@@ -40,7 +40,8 @@ _ASCII_SPACE_RE = re.compile(r"[ \t\n\r\f\v]+")
 def _is_hidden(char: str) -> bool:
     """Whether `char` could hide or reorder text on a terminal: a control (ESC included), a format
     or separator character, the whole U+2060-U+206F block (unassigned points included), the
-    combining grapheme joiner and the variation selectors. Newline and tab are not.
+    combining grapheme joiner and the variation selectors (Mongolian free ones, the standard block
+    and the supplement). Newline and tab are not.
     """
     if char in "\n\t":
         return False
@@ -48,7 +49,9 @@ def _is_hidden(char: str) -> bool:
         unicodedata.category(char) in _HIDDEN_CATEGORIES
         or "\u2060" <= char <= "\u206f"
         or char == "\u034f"
+        or "\u180b" <= char <= "\u180d"
         or "\ufe00" <= char <= "\ufe0f"
+        or "\U000e0100" <= char <= "\U000e01ef"
     )
 
 
