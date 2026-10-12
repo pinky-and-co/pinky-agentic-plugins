@@ -60,3 +60,7 @@ cache_dir = ".cache/mypy"
 
 [tool.pytest.ini_options]
 cache_dir = ".cache/pytest"
+# Les tests `integration` appellent un vrai compte Snowflake en lecture seule : exclus par défaut
+# (le CI n'a pas d'identifiants), lancés par `pytest -m integration`.
+addopts = "-m 'not integration'"
+markers = ["integration: appels en lecture seule sur la connexion Snowflake par défaut"]
