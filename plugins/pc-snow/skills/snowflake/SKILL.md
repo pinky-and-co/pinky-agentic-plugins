@@ -1,10 +1,10 @@
 ---
 name: snowflake
-description: Snowflake platform reference — Python Core API (snowflake.core) for IaC deployment, warehouse/compute-pool sizing and caching, PyPI packages in UDFs/procedures via the artifact repository, governance (classification, tags, masking, row access, lineage, GDPR), telemetry/event tables, cost model and tracking, and the Native App framework. Use when the work touches Snowflake deployment, sizing, governance, telemetry, cost or Native Apps.
+description: Snowflake platform reference — Python Core API (snowflake.core) for IaC deployment, warehouse/compute-pool sizing and caching, PyPI packages in UDFs/procedures via the artifact repository, governance (classification, tags, masking, row access, lineage, GDPR), telemetry/event tables, cost model and tracking, the Native App framework, and reading task and query history through the pc-snow tools. Use when the work touches Snowflake deployment, sizing, governance, telemetry, cost, Native Apps or diagnosing a task or a query.
 user-invocable: false
 metadata:
   source: Snowflake official docs (docs.snowflake.com) — distilled/rewritten content
-  updated: 2026-08-23
+  updated: 2026-10-12
 ---
 
 # Snowflake — Platform
@@ -30,6 +30,7 @@ Stack: Snowpark Python (stored procedures, serverless tasks) + Snowflake Python 
 - `references/telemetry.md` — LOG_LEVEL/TRACE_LEVEL/METRIC_LEVEL, the event table, custom telemetry via `snowflake.telemetry` (`add_event`, `set_span_attribute`), storage lifecycle policy, per-schema event table architecture.
 - `references/costs.md` — credit consumption model per stack component (SPs, serverless Tasks, Dynamic Tables, Streamlit, Cortex, Openflow), storage & retention costs, Resource Monitors vs Budgets vs per-user Quotas, optimization patterns.
 - `references/native-app.md` — Native App Framework: provider/consumer model, `snowflake.yml`/`manifest.yml`, `setup.sql` rules, telemetry cascade, `snow app` CLI, RBAC via application roles, lifecycle (install/upgrade/uninstall), publication (private listing vs Marketplace).
+- `references/system-views.md` — the `task_history` and `query_history` tools of the `pc-snow` MCP server: what each `INFORMATION_SCHEMA` function returns, how to read its columns, its traps, and the interview to run (scope, range, timezone) before calling.
 - `references/review.md` — the Snowflake-stack review checklist (deployment, SP/UDF, telemetry/event table, governance), applied on top of `pc-core:review-guidelines` when reviewing code that deploys to or runs on Snowflake.
 
 Load whichever reference fits the task — most questions need only one; a deployment question

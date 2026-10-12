@@ -461,6 +461,9 @@ pinky-agentic-plugins/
 │   ├── pc-snow/
 │   │   ├── agents/
 │   │   │   └── snowflake-guide.md
+│   │   ├── mcp/
+│   │   │   ├── pc_snow_server.py
+│   │   │   └── pc_snow_tools.py
 │   │   ├── skills/
 │   │   │   ├── cortex/
 │   │   │   │   ├── references/
@@ -476,6 +479,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── gov.md
 │   │   │   │   │   ├── native-app.md
 │   │   │   │   │   ├── review.md
+│   │   │   │   │   ├── system-views.md
 │   │   │   │   │   ├── telemetry.md
 │   │   │   │   │   └── warehouses.md
 │   │   │   │   └── SKILL.md
@@ -509,6 +513,8 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── conftest.py
 │   ├── fake_local_server.py
+│   ├── pc_snow_live_probe.py
+│   ├── pc_snow_stdio.py
 │   ├── pi_fakes.py
 │   ├── smoke_model_pool.py
 │   ├── test_activate_plugins_for_repos.py
@@ -557,6 +563,8 @@ pinky-agentic-plugins/
 │   ├── test_pc_memory_review.py
 │   ├── test_pc_memory_write.py
 │   ├── test_pc_rtk.py
+│   ├── test_pc_snow_integration.py
+│   ├── test_pc_snow_server.py
 │   ├── test_pending_gate.py
 │   ├── test_pending_user_action_channel.py
 │   ├── test_pi_review.py

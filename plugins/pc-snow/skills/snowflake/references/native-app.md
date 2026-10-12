@@ -67,7 +67,7 @@ entities:
       - src: streamlit/my_app/
         dest: streamlit/my_app/
     meta:
-      role: DEPLOYER
+      role: <deployer_role>
       warehouse: DEPLOY_WH
       post_deploy:
         - sql_script: scripts/shared_content.sql   # only if the app exposes provider data
@@ -83,7 +83,7 @@ entities:
       optional_shared_events:
         - DEBUG_LOGS
     meta:
-      role: DEPLOYER
+      role: <deployer_role>
       warehouse: DEPLOY_WH
 ```
 

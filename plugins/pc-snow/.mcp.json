@@ -1,0 +1,6 @@
+{
+  "pc-snow": {
+    "command": "uv",
+    "args": ["run", "--script", "${CLAUDE_PLUGIN_ROOT}/mcp/pc_snow_server.py"]
+  }
+}
