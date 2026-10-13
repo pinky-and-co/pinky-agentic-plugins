@@ -110,7 +110,7 @@ def test_render_oracle(tmp_path: Path) -> None:
     _card(chantier / "1-todo" / "a.md", ["PKG-0025-1"], questions=["q?"])
     _card(chantier / "1-todo" / "b.md", cites="PKG-0025-1", blocked_by="a")
     assert _run(str(chantier)).stdout == (
-        "## Requirements (open cards)\n\n"
+        "## Requirements (open cards and 4-done)\n\n"
         "| PKG-0025-1 | MUST | x | y |  <- a\n\n"
         "## Open questions\n\n"
         "- [a] q?\n\n"
@@ -182,7 +182,7 @@ def test_same_id_with_identical_rows_is_listed_once(tmp_path: Path) -> None:
     _row_card(chantier / "1-todo" / "a.md", "| PKG-0025-1 | MUST | x | y |")
     _row_card(chantier / "3-in-progress" / "b.md", "| PKG-0025-1 | MUST | x | y |")
     assert _run(str(chantier)).stdout == (
-        "## Requirements (open cards)\n\n"
+        "## Requirements (open cards and 4-done)\n\n"
         "| PKG-0025-1 | MUST | x | y |  <- a, b\n\n"
         "## Open questions\n\n\n"
         "## Open cards (blockers first)\n\n"
@@ -199,7 +199,7 @@ def test_same_id_with_different_rows_warns_and_names_the_cards(
     _row_card(chantier / "1-todo" / "b.md", "| PKG-0025-1 | SHOULD | x | y |")
     _row_card(chantier / "3-in-progress" / "c.md", "| PKG-0025-1 | MUST | x | y |")
     assert _run(str(chantier)).stdout == (
-        "## Requirements (open cards)\n\n"
+        "## Requirements (open cards and 4-done)\n\n"
         "| PKG-0025-1 | MUST | x | y |  <- a, c\n"
         "| PKG-0025-1 | SHOULD | x | y |  <- b\n\n"
         "## Open questions\n\n\n"
@@ -210,3 +210,36 @@ def test_same_id_with_different_rows_warns_and_names_the_cards(
         "## Warning: defined with different rows\n\n"
         "- PKG-0025-1 in a, b, c\n"
     )
+
+
+def test_done_cards_keep_rows_and_questions_but_are_not_open(tmp_path: Path) -> None:
+    chantier = tmp_path / "_KANBAN" / "CHANTIER0025-demo"
+    _card(chantier / "4-done" / "old.md", ["PKG-0025-9"], questions=["still open?"])
+    _card(chantier / "1-todo" / "new.md", cites="PKG-0025-9")
+    out = _run(str(chantier)).stdout
+    assert "| PKG-0025-9 | MUST | x | y |  <- old" in out
+    assert "- [old] still open?" in out
+    open_cards = out.split("## Open cards (blockers first)")[1]
+    assert "- old\n" not in open_cards
+    assert "- new\n" in open_cards
+    assert "Warning" not in out
+
+
+def test_held_parents_section_lists_the_holding_cards(tmp_path: Path) -> None:
+    chantier = tmp_path / "_KANBAN" / "CHANTIER0025-demo"
+    _card(chantier / "4-done" / "parent.md")
+    _card(chantier / "0-ideas" / "kid-a.md")
+    (chantier / "0-ideas" / "kid-a.md").write_text(
+        "---\nsert: parent\nrequirements: []\n---\n# a\n", encoding="utf-8"
+    )
+    _card(chantier / "1-todo" / "kid-b.md", blocked_by="parent")
+    out = _run(str(chantier)).stdout
+    assert "## Held parents (in 4-done, kept by open cards)" in out
+    assert "- parent <- kid-a, kid-b" in out
+
+
+def test_no_held_parents_section_without_open_children(tmp_path: Path) -> None:
+    chantier = tmp_path / "_KANBAN" / "CHANTIER0025-demo"
+    _card(chantier / "4-done" / "parent.md")
+    _card(chantier / "1-todo" / "other.md")
+    assert "Held parents" not in _run(str(chantier)).stdout

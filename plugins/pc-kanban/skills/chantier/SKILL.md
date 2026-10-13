@@ -40,7 +40,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   ```bash
   python3 "${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py" <chantier-dir>
   ```
-  A `Warning: cited but defined in no open card` or `Warning: defined with different rows` line is
+  A `Warning: cited but defined in no open or 4-done card` or `Warning: defined with different rows` line is
   worth one line in the report.
 4. **Read the live state, in priority order:**
   - `3-in-progress/` first — an in-progress card is the thread to resume.
@@ -65,6 +65,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     most idle one or two. Not blocking — a fallback net behind the closing-time
     obsolescence check (`finishing-a-card.md` § "Flagging cards the closed card just made
     obsolete"), never a reason to stop and re-triage on its own.
+  - if `story_view` printed a `Held parents (in 4-done, kept by open cards)` section: relay it —
+    each parent named there stays in `4-done/` while the cards listed after it are open; it is not
+    archived until they close (`--force` is the exit).
   - if `4-done/` is non-empty: flag it and offer to archive, naming any card that carries a
     durable decision (a rejected alternative written nowhere else) as an ADR candidate — never a
     fold into the story. Once the user has settled the ADR candidates, archive via:

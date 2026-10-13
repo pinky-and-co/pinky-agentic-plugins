@@ -696,3 +696,71 @@ def test_a_glob_character_in_the_slug_matches_nothing_else(tmp_path: Path) -> No
     assert result.returncode != 0
     assert "no card 'd*o'" in result.stderr
     assert card.exists()
+
+
+def _child(board: Path, column: str, head: str = "sert: demo\n") -> Path:
+    return _card(board, column, "kid", head=f"model: sonnet\n{head}")
+
+
+def test_archive_refuses_a_parent_held_by_an_open_child(tmp_path: Path) -> None:
+    for column in ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress"):
+        for head in ("sert: demo\n", "blocked_by: demo\n"):
+            board = tmp_path / f"{column}-{head.split(':')[0]}"
+            parent = _card(board, "4-done")
+            child = _child(board, column, head)
+            result = _run(board, "archive", "demo")
+            assert result.returncode == 1, result.stderr
+            assert "kid" in result.stderr
+            assert parent.exists() and child.exists()
+
+
+def test_archive_ignores_a_child_that_is_done_or_archived(tmp_path: Path) -> None:
+    board = tmp_path / "child-in-done"
+    _card(board, "4-done")
+    _child(board, "4-done")
+    assert _run(board, "archive", "demo").returncode == 0
+    for kind in ("done", "dropped"):
+        board = tmp_path / kind
+        _card(board, "4-done")
+        archived = board / "_ARCHIVE" / f"CHANTIER0001-{kind}" / "2026-01-02_kid.md"
+        archived.parent.mkdir(parents=True)
+        archived.write_text("---\nsert: demo\n---\n", encoding="utf-8")
+        result = _run(board, "archive", "demo")
+        assert result.returncode == 0, result.stderr
+
+
+def test_archive_force_passes_despite_open_children(tmp_path: Path) -> None:
+    for column in ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress"):
+        board = tmp_path / column
+        _card(board, "4-done")
+        _child(board, column)
+        result = _run(board, "archive", "demo", "--force")
+        assert result.returncode == 0, result.stderr
+        assert list((board / "_ARCHIVE" / "CHANTIER0001-done").glob("*_demo.md"))
+
+
+def test_select_accepts_an_id_defined_only_in_a_done_card(tmp_path: Path) -> None:
+    card = _card(
+        tmp_path, "1-todo", head="model: sonnet\nrequirements: [PKG-0001-09]\n"
+    )
+    (tmp_path / "CHANTIER0001-x" / "0-ideas" / "definer.md").unlink()
+    assert _run(tmp_path, "select", "demo").returncode == 1
+    done = tmp_path / "CHANTIER0001-x" / "4-done" / "old.md"
+    done.parent.mkdir()
+    done.write_text(DEFINER.replace("PKG-0001-01", "PKG-0001-09"), encoding="utf-8")
+    result = _run(tmp_path, "select", "demo")
+    assert result.returncode == 0, result.stderr
+    assert not card.exists()
+
+
+def test_archive_refusal_wording_follows_the_card_column(tmp_path: Path) -> None:
+    in_progress = tmp_path / "in-progress"
+    _card(in_progress, "3-in-progress")
+    _child(in_progress, "1-todo")
+    refused = _run(in_progress, "archive", "demo")
+    assert refused.returncode == 1
+    assert "moved to 4-done/ and wait there" in refused.stderr
+    done = tmp_path / "done-col"
+    _card(done, "4-done")
+    _child(done, "1-todo")
+    assert "it waits in 4-done/" in _run(done, "archive", "demo").stderr

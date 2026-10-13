@@ -4,13 +4,15 @@
     story_view.py <chantier-dir>
     story_view.py --next-id <FAMILY> <chantier-dir>
 
-Open cards are the ones in ``0-ideas`` to ``3-in-progress``. A requirement is *defined* in the
+Open cards are the ones in ``0-ideas`` to ``3-in-progress``; the cards of ``4-done`` keep their
+requirement rows and open questions in the view without being open cards. A requirement is *defined* in the
 ``## Requirements`` table of a card (several cards may repeat an identical row) and *cited* by
 other cards through their frontmatter ``requirements:`` key. The view prints the requirements
 defined in open cards (identical rows listed once), the open questions of open cards, the open
 cards ordered so a card follows the one that blocks it, a warning for each id whose rows differ
-between the open cards that define it, and a warning for each id cited by an open card but defined
-in no open card.
+between the cards that define it, and a warning for each id cited by an open card but defined
+in no open or ``4-done`` card. A section lists each ``4-done`` card an open card holds (``sert`` or
+``blocked_by``) with the holders.
 
 ``--next-id PKG`` prints the next free id of the family for the chantier (``PKG-0025-13``), counting
 open cards, the chantier's cards under ``_ARCHIVE/`` and ``story.md``.
@@ -31,8 +33,11 @@ sys.path.insert(
 from pc_kanban_requirement_rows import (  # noqa: E402
     ID_RE,
     RequirementRow,
+    DONE_COLUMN,
     cited_ids,
     frontmatter,
+    holders,
+    read_cards,
     read_open_cards,
     requirement_rows,
     section,
@@ -155,7 +160,8 @@ def render(chantier: Path) -> str:
         The text to print.
     """
     cards = read_open_cards(chantier)
-    out = ["## Requirements (open cards)", ""]
+    done = read_cards(chantier, (DONE_COLUMN,))
+    out = ["## Requirements (open cards and 4-done)", ""]
     story = chantier / "story.md"
     # Une story pas encore migrée garde sa table : ses lignes restent valides jusqu'au déplacement.
     sources = (
@@ -163,7 +169,7 @@ def render(chantier: Path) -> str:
         if story.is_file()
         else []
     )
-    all_rows = requirement_rows(sources + cards)
+    all_rows = requirement_rows(sources + cards + done)
     defined = {r.id for r in all_rows}
     differing: list[str] = []
     for rid in dict.fromkeys(r.id for r in all_rows):
@@ -177,7 +183,9 @@ def render(chantier: Path) -> str:
         if len(groups) > 1:
             differing.append(f"{rid} in {', '.join(r.slug for r in mine)}")
     out += ["", "## Open questions", ""]
-    out += [f"- [{slug}] {q}" for slug, text in cards for q in open_questions(text)]
+    out += [
+        f"- [{slug}] {q}" for slug, text in cards + done for q in open_questions(text)
+    ]
     out += ["", "## Open cards (blockers first)", ""]
     out += [f"- {slug}" for slug in order_cards(cards)]
     unresolved = [
@@ -186,11 +194,16 @@ def render(chantier: Path) -> str:
         for rid in cited_ids(frontmatter(text))
         if rid not in defined
     ]
+    held = [(slug, holders(chantier, slug)) for slug, _ in done]
+    held = [(slug, kids) for slug, kids in held if kids]
+    if held:
+        out += ["", "## Held parents (in 4-done, kept by open cards)", ""]
+        out += [f"- {slug} <- {', '.join(kids)}" for slug, kids in held]
     if differing:
         out += ["", "## Warning: defined with different rows", ""]
         out += [f"- {d}" for d in differing]
     if unresolved:
-        out += ["", "## Warning: cited but defined in no open card", ""]
+        out += ["", "## Warning: cited but defined in no open or 4-done card", ""]
         out += [f"- {u}" for u in unresolved]
     return "\n".join(out) + "\n"
 

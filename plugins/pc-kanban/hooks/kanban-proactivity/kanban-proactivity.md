@@ -16,7 +16,8 @@ Do not wait for "create a card" or "move it to done". Surface the board update a
 - **Select → commit.** The commitment column is a user decision by default; the agent may *propose*
   a selection, never select unasked.
 - **Progress → move.** Taking a card in goes through the `chantier` skill (its step 7,
-  in place when already loaded), never a hand move — it moves the card to in-progress and
+  in place when already loaded), never a hand move. The session invokes it itself with the Skill
+  tool and never asks the user to type the command. The skill moves the card to in-progress and
   routes the implementation to the `card-worker` agent. Finished
   and verified means archiving it (`move-card archive`), straight from in-progress — through done
   only when it needs an ADR first. Archiving or dropping a card prints the closing sequence; carry it out as

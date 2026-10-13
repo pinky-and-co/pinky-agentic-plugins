@@ -22,6 +22,13 @@ the verb only on their word, never on your own initiative.
 | `archive` | `4-done/`, `3-in-progress/` | dated archive, reviewed-box check, then the closing sequence (open cards, next-card candidates, session recommendation) — the card's requirements leave with it: move a row another open card still cites into that card first. A card carrying a durable decision needs its ADR first. |
 | `drop` | `0-ideas/` to `3-in-progress/` | `-dropped` archive, the reason appended — the card's requirements leave with it. When the need survives the card, move its `## Requirements` rows into the card taking the need over first. |
 
+## After `select`
+
+A `select` run through this skill is a card taken now: once it succeeds, invoke
+`pc-kanban:chantier <id> <slug>` yourself with the Skill tool (in place when it is already loaded) —
+never ask the user to type the command. Selecting without taking is the typed command or the mod,
+never this skill.
+
 ## When the script refuses
 
 The direct command stays silent on any refusal and this skill runs the script again, so you see the

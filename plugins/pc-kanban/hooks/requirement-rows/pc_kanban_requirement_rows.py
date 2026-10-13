@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Parse the requirement rows of a chantier's open cards, for every skill that reads them.
+"""Parse the requirement rows of a chantier's cards, for every skill that reads them.
 
 A requirement is *defined* by a row of the ``## Requirements`` table of a card and *cited* by the
 ``requirements:`` key of a card's frontmatter. The same id may be defined in several open cards
 (``0-ideas`` to ``3-in-progress``) provided the rows are identical on priority, statement and check.
+The cards of ``4-done`` keep their rows defined too (``READ_COLUMNS``) without being open.
 Shared by the ``chantier`` skill (``story_view.py``) and the ``spawn-workers`` skill, so neither
 imports the other's scripts. Python 3.11+, stdlib only.
 """
@@ -11,10 +12,13 @@ imports the other's scripts. Python 3.11+, stdlib only.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 OPEN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress")
+DONE_COLUMN = "4-done"
+READ_COLUMNS = (*OPEN_COLUMNS, DONE_COLUMN)
 ID_RE = re.compile(r"\b([A-Z]+)-(\d{4})-(\d+)\b")
 KEY_RE = re.compile(r"^[A-Za-z_][\w-]*:")
 
@@ -97,6 +101,30 @@ def defined_rows(text: str) -> dict[str, str]:
     return rows
 
 
+def read_cards(
+    chantier: Path, columns: Sequence[str] = OPEN_COLUMNS
+) -> list[tuple[str, str]]:
+    """Read the cards of the given columns of a chantier in column then name order.
+
+    Args:
+        chantier: The chantier directory.
+        columns: The column folders to read, in order.
+
+    Returns:
+        ``(slug, text)`` pairs; an unreadable card is skipped.
+    """
+    cards = []
+    for column in columns:
+        for card in sorted((chantier / column).glob("*.md")):
+            try:
+                text = card.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                # Une card illisible (lien cassé…) ne doit faire échouer aucun appelant.
+                continue
+            cards.append((card.stem, text))
+    return cards
+
+
 def read_open_cards(chantier: Path) -> list[tuple[str, str]]:
     """Read the open cards of a chantier in column then name order.
 
@@ -106,16 +134,43 @@ def read_open_cards(chantier: Path) -> list[tuple[str, str]]:
     Returns:
         ``(slug, text)`` pairs; an unreadable card is skipped.
     """
-    cards = []
-    for column in OPEN_COLUMNS:
-        for card in sorted((chantier / column).glob("*.md")):
-            try:
-                text = card.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                # Une card illisible (lien cassé…) ne doit faire échouer aucun appelant.
-                continue
-            cards.append((card.stem, text))
-    return cards
+    return read_cards(chantier, OPEN_COLUMNS)
+
+
+def scalar(head: list[str], key: str) -> str:
+    """Read one scalar frontmatter value, without comment or quotes.
+
+    Args:
+        head: The frontmatter lines.
+        key: The field name.
+
+    Returns:
+        The value; empty when the key is absent or null.
+    """
+    for line in head:
+        if line.startswith(f"{key}:"):
+            value = line.partition(":")[2].split("#", 1)[0].strip().strip("'\"")
+            return "" if value in ("null", "~") else value
+    return ""
+
+
+def holders(chantier: Path, slug: str) -> list[str]:
+    """List the open cards that hold a parent: they name it in ``sert`` or ``blocked_by``.
+
+    Args:
+        chantier: The chantier directory.
+        slug: The parent card's filename without ``.md``.
+
+    Returns:
+        The slugs of the holding cards, in column then name order; the card itself is not one.
+    """
+    return [
+        s
+        for s, text in read_open_cards(chantier)
+        if s != slug
+        and slug
+        in (scalar(frontmatter(text), "sert"), scalar(frontmatter(text), "blocked_by"))
+    ]
 
 
 @dataclass(frozen=True)
