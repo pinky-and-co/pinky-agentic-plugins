@@ -9,10 +9,16 @@ Ascend at SessionStart, descend at CwdChanged, restore at SessionEnd:
   inject_policies.py already reads — see plugin_scope_lib's module
   docstring for why it's one file, not one per repo touched, and for the
   shared-backup mechanism itself), then activate — at project scope, in the
-  repo opened in — every project-scoped plugin whose projectPath is an
+  directory opened in — every project-scoped plugin whose projectPath is an
   ancestor of it. Same call `spawn-workers`' pre-enable makes (`claude
-  plugin install --scope project`), so the write lands in that repo's
+  plugin install --scope project`), so the write lands in that directory's
   versioned `.claude/settings.json`, not an ephemeral settings.local.json.
+  The activation applies to a git repo root and to a directory outside any
+  git repo (a group, the workspace root); a directory nested inside a repo
+  without being its root gets nothing written, asked or injected — project
+  settings load only from the launch directory, so a file there would be
+  committed noise. The shared backup and the stored open path still happen,
+  the descent depends on them.
 - CwdChanged: local-scope matching against the *new* cwd, additive only —
   never deactivates a plugin a previous position already turned on. Passes
   the session's open path so the match drops what the SessionStart ascend
@@ -35,6 +41,7 @@ tool call into a permission `ask` carrying it, so it can't scroll away.
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -130,7 +137,31 @@ def activate_for_path(
     return newly_enabled
 
 
+def _nested_in_repo(directory: Path) -> bool:
+    """True when `directory` sits inside a git repo without being its root.
+
+    False — the activation proceeds as before — when `directory` is a repo
+    root or outside any repo, and also when git cannot answer: not installed,
+    timed out, a directory that does not exist, or a directory inside `.git`
+    itself (`git rev-parse --show-toplevel` exits 128 there)."""
+    try:
+        root = repo_root(directory)
+    except (OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
+        print(
+            f"sync_plugin_scope: could not tell whether {directory} is nested "
+            f"in a git repo: {exc}",
+            file=sys.stderr,
+        )
+        return False
+    return root is not None and root.resolve() != directory.resolve()
+
+
 def handle_session_start(payload: dict) -> None:
+    """Ascend: activate the inherited project-scoped plugins in the directory
+    opened in — unless it is nested inside a git repo without being the root,
+    in which case the hook only records the open path and the shared backup
+    and emits the minimal output. When git cannot answer (absent, timed out),
+    the activation proceeds as before."""
     session_id = payload["session_id"]
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", payload.get("cwd", os.getcwd()))
     settings_local = settings_local_for(project_dir)
@@ -139,12 +170,14 @@ def handle_session_start(payload: dict) -> None:
     state["settings_local_path"] = str(settings_local)
     backup_settings_local_shared(settings_local, session_id, os.getppid())
 
-    newly_enabled = activate_for_path(
-        Path(payload.get("cwd", project_dir)),
-        state,
-        session_dir=Path(project_dir),
-        descent=False,
-    )
+    newly_enabled: list[str] = []
+    if not _nested_in_repo(Path(project_dir)):
+        newly_enabled = activate_for_path(
+            Path(payload.get("cwd", project_dir)),
+            state,
+            session_dir=Path(project_dir),
+            descent=False,
+        )
     save_state(session_id, state)
 
     out: dict = {"hookSpecificOutput": {"hookEventName": "SessionStart"}}
@@ -165,7 +198,10 @@ def _settings_written_context(newly_enabled: list[str], session_dir: Path) -> st
     """Model-facing note: the ascend wrote the versioned settings.json, so the
     change is legitimate and belongs in the current work's commit."""
     settings = session_dir / SETTINGS_REL
-    root = repo_root(session_dir)
+    try:
+        root = repo_root(session_dir)
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
+        root = None
     try:
         shown = settings.relative_to(root) if root else settings
     except ValueError:

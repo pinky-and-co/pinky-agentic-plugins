@@ -30,6 +30,19 @@ import plugin_scope_lib as psl  # noqa: E402
 import sync_plugin_scope as sps  # noqa: E402
 
 
+def _isolate_git_env() -> unittest.mock._patch_dict:  # type: ignore[name-defined]
+    """Started patcher that removes every `GIT_*` variable (a git hook exports
+    some that point git at the hooking repo, others set an identity) for the
+    duration of a test: every `git` subprocess — the tests' own and
+    `repo_root`'s — then sees a clean environment. The caller registers the
+    patcher's stop with `addCleanup` to restore os.environ."""
+    patcher = unittest.mock.patch.dict(os.environ, {})
+    patcher.start()
+    for name in [n for n in os.environ if n.startswith("GIT_")]:
+        del os.environ[name]
+    return patcher
+
+
 class _Base(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -337,6 +350,7 @@ class TestHandleSessionStartSettingsNote(unittest.TestCase):
         root = Path(self._tmp.name)
         self._orig_psl_dir, psl.STATE_DIR = psl.STATE_DIR, root / "scope"
         self._orig_pua_dir, pua.STATE_DIR = pua.STATE_DIR, root / "pending"
+        self.addCleanup(_isolate_git_env().stop)
         self.session = "sess-start"
         self.repo = root / "repo"
         (self.repo / ".claude").mkdir(parents=True)
@@ -345,10 +359,10 @@ class TestHandleSessionStartSettingsNote(unittest.TestCase):
             os.environ, {"CLAUDE_PROJECT_DIR": str(self.repo)}
         )
         self._env.start()
+        self.addCleanup(self._env.stop)
         self._orig_activate = sps.activate_for_path
 
     def tearDown(self):
-        self._env.stop()
         psl.STATE_DIR = self._orig_psl_dir
         pua.STATE_DIR = self._orig_pua_dir
         sps.activate_for_path = self._orig_activate
@@ -381,6 +395,263 @@ class TestHandleSessionStartSettingsNote(unittest.TestCase):
     def test_cwd_changed_does_not_mention_settings_json(self):
         message = sps._reload_message(["pc-snow@mp"])
         self.assertNotIn("settings.json", message)
+
+
+class TestHandleSessionStartInsideARepo(unittest.TestCase):
+    """The ascend writes a versioned settings.json in the opened directory —
+    wanted for a repo root or a folder outside any git repo, not for a
+    directory nested inside a repo. Real temporary git repos; only the `claude`
+    CLI call is intercepted, every other subprocess (git) runs for real."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name).resolve()
+        self.root = root
+        self._orig_psl_dir, psl.STATE_DIR = psl.STATE_DIR, root / "scope"
+        self._orig_pua_dir, pua.STATE_DIR = pua.STATE_DIR, root / "pending"
+        self.installed = root / "installed_plugins.json"
+        self._orig_installed = psl.INSTALLED_PLUGINS_PATH
+        psl.INSTALLED_PLUGINS_PATH = self.installed
+        self.installed.write_text(
+            json.dumps(
+                {
+                    "plugins": {
+                        "pc-snow@mp": [{"scope": "project", "projectPath": str(root)}]
+                    }
+                }
+            )
+        )
+        self.addCleanup(_isolate_git_env().stop)
+        self.session = "sess-nested"
+        self.claude_calls: list[tuple[list[str], object]] = []
+        real_run = subprocess.run
+
+        def _run(argv, *args, **kwargs):
+            if argv and argv[0] == "claude":
+                self.claude_calls.append((list(argv), kwargs.get("cwd")))
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return real_run(argv, *args, **kwargs)
+
+        self._patch = unittest.mock.patch("subprocess.run", side_effect=_run)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+    def tearDown(self):
+        psl.STATE_DIR = self._orig_psl_dir
+        pua.STATE_DIR = self._orig_pua_dir
+        psl.INSTALLED_PLUGINS_PATH = self._orig_installed
+        self._tmp.cleanup()
+
+    def _git_repo(self, name: str) -> Path:
+        repo = self.root / name
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        return repo
+
+    def _start(self, opened: Path) -> dict:
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(opened)}),
+            contextlib.redirect_stdout(out),
+        ):
+            sps.handle_session_start({"session_id": self.session, "cwd": str(opened)})
+        return json.loads(out.getvalue())
+
+    def test_subfolder_of_a_repo_writes_and_asks_nothing(self):
+        repo = self._git_repo("repo")
+        nested = repo / "plugins" / "x"
+        nested.mkdir(parents=True)
+        out = self._start(nested)
+        self.assertEqual(self.claude_calls, [])
+        self.assertEqual(list(nested.rglob("settings*.json")), [])
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "SessionStart"}})
+        self.assertEqual(pua.pending(self.session), {})
+
+    def test_folder_outside_any_repo_installs_as_before(self):
+        group = self.root / "group"
+        group.mkdir()
+        out = self._start(group)
+        self.assertEqual(
+            self.claude_calls,
+            [
+                (
+                    [
+                        "claude",
+                        "plugin",
+                        "install",
+                        "pc-snow@mp",
+                        "--scope",
+                        "project",
+                        "--yes",
+                    ],
+                    group,
+                )
+            ],
+        )
+        self.assertIn("additionalContext", out["hookSpecificOutput"])
+
+    def test_repo_root_installs_as_before(self):
+        repo = self._git_repo("repo")
+        self._start(repo)
+        self.assertEqual(
+            self.claude_calls,
+            [
+                (
+                    [
+                        "claude",
+                        "plugin",
+                        "install",
+                        "pc-snow@mp",
+                        "--scope",
+                        "project",
+                        "--yes",
+                    ],
+                    repo,
+                )
+            ],
+        )
+
+    def _start_with_git_failing(self, exc: Exception) -> tuple[Path, str]:
+        group = self.root / "group"
+        group.mkdir()
+        inner = subprocess.run
+
+        def _run(argv, *args, **kwargs):
+            if argv and argv[0] == "git":
+                raise exc
+            return inner(argv, *args, **kwargs)
+
+        err = io.StringIO()
+        with (
+            unittest.mock.patch("subprocess.run", side_effect=_run),
+            contextlib.redirect_stderr(err),
+        ):
+            self._start(group)
+        return group, err.getvalue()
+
+    def _assert_ascend_ran_as_before(self, group: Path, err: str) -> None:
+        self.assertEqual(
+            self.claude_calls,
+            [
+                (
+                    [
+                        "claude",
+                        "plugin",
+                        "install",
+                        "pc-snow@mp",
+                        "--scope",
+                        "project",
+                        "--yes",
+                    ],
+                    group,
+                )
+            ],
+        )
+        lines = [ln for ln in err.splitlines() if ln]
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(
+            lines[0].startswith(
+                f"sync_plugin_scope: could not tell whether {group} is nested "
+                "in a git repo: "
+            )
+        )
+
+    def test_git_not_installed_keeps_the_previous_ascend(self):
+        group, err = self._start_with_git_failing(FileNotFoundError("git"))
+        self._assert_ascend_ran_as_before(group, err)
+
+    def test_git_timeout_keeps_the_previous_ascend(self):
+        group, err = self._start_with_git_failing(
+            subprocess.TimeoutExpired(["git"], 10)
+        )
+        self._assert_ascend_ran_as_before(group, err)
+
+    def test_undecodable_git_output_keeps_the_previous_ascend(self):
+        group, err = self._start_with_git_failing(
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        )
+        self._assert_ascend_ran_as_before(group, err)
+
+    _INSTALL_ARGV = [
+        "claude",
+        "plugin",
+        "install",
+        "pc-snow@mp",
+        "--scope",
+        "project",
+        "--yes",
+    ]
+
+    def test_symlink_to_the_repo_root_installs_like_a_root(self):
+        repo = self._git_repo("repo")
+        link = self.root / "link"
+        link.symlink_to(repo)
+        self._start(link)
+        self.assertEqual(self.claude_calls, [(self._INSTALL_ARGV, link)])
+
+    def test_symlink_to_a_nested_folder_writes_nothing(self):
+        repo = self._git_repo("repo")
+        nested = repo / "plugins" / "x"
+        nested.mkdir(parents=True)
+        link = self.root / "link"
+        link.symlink_to(nested)
+        out = self._start(link)
+        self.assertEqual(self.claude_calls, [])
+        self.assertEqual(list(nested.rglob("settings*.json")), [])
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "SessionStart"}})
+
+    def test_linked_worktree_root_installs_like_a_root(self):
+        repo = self._git_repo("repo")
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(
+            [*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True
+        )
+        worktree = self.root / "wt"
+        subprocess.run([*git, "worktree", "add", "-q", str(worktree)], check=True)
+        self._start(worktree)
+        self.assertEqual(self.claude_calls, [(self._INSTALL_ARGV, worktree)])
+
+    def test_missing_opened_directory_attempts_the_install_as_before(self):
+        missing = self.root / "does-not-exist"
+        self._start(missing)
+        self.assertEqual(self.claude_calls, [(self._INSTALL_ARGV, missing)])
+
+    def test_session_end_after_an_ignored_start_cleans_up(self):
+        repo = self._git_repo("repo")
+        nested = repo / "plugins" / "x"
+        nested.mkdir(parents=True)
+        self._start(nested)
+        self.assertEqual(self.claude_calls, [])
+        self.assertTrue(psl.state_path(self.session).exists())
+        sps.handle_session_end({"session_id": self.session})
+        self.assertEqual(list(nested.rglob("*")), [])
+        self.assertFalse(psl.state_path(self.session).exists())
+        self.assertEqual(pua.pending(self.session), {})
+
+    def test_descent_after_an_ignored_start_enables_in_the_opened_folder(self):
+        repo = self._git_repo("repo")
+        nested = repo / "plugins" / "x"
+        nested.mkdir(parents=True)
+        neighbour = self._git_repo("neighbour")
+        self.installed.write_text(
+            json.dumps(
+                {
+                    "plugins": {
+                        "pc-pypi@mp": [
+                            {"scope": "project", "projectPath": str(neighbour)}
+                        ]
+                    }
+                }
+            )
+        )
+        self._start(nested)
+        self.assertEqual(self.claude_calls, [])
+        with contextlib.redirect_stderr(io.StringIO()):
+            sps.handle_cwd_changed({"session_id": self.session, "cwd": str(neighbour)})
+        self.assertEqual(
+            self.claude_calls,
+            [(["claude", "plugin", "enable", "-s", "local", "pc-pypi@mp"], nested)],
+        )
 
 
 class TestHandleSessionEndScopeIsolation(unittest.TestCase):
