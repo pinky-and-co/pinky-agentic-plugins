@@ -28,7 +28,9 @@ bound to position 2 would call it a status when it is really the second director
   `sudo`, …) returns `permissionDecision: ask` instead of running silently. A speed bump, not
   a block.
 - **`freeze <dir>... | off`** — a whitelist: locks `Edit`/`Write`/`MultiEdit`/
-  `NotebookEdit` to the given directories; anything outside is denied.
+  `NotebookEdit` to the given directories; a target inside the project root or an added
+  directory but outside them is denied. A target further out reaches the always-on outside-scope
+  guard first and gets its `ask`, never a `deny`.
 - **`deny <dir>... | off`** — the inverse of `freeze`: a blocklist. The given
   directories become unwritable; everything else stays open. Not the same as the
   `permissions.deny` settings key (harder guarantee, session-start only, not a toggle).
@@ -37,6 +39,28 @@ bound to position 2 would call it a status when it is really the second director
 
 **Honest limit, all four**: only the write-class TOOLS are covered. A Bash write (`sed -i`,
 `tee`, `>`, `mv`/`cp`) is NOT intercepted — for a hard guarantee, use `permissions.deny` instead.
+
+## State is per session
+
+`careful`, `freeze` and `deny` belong to the session that set them: another session of the same
+project, or a later one, never inherits them. The state file
+(`<project root>/.claude/.guard-state.json`) holds one entry per `session_id`. A sub-agent's tool
+calls carry its parent's `session_id` (observed: a parent's `deny` blocked a sub-agent's `Write`),
+so a sub-agent shares its parent's entry. The `SessionEnd` hook deletes the session's entry, and
+any write prunes entries untouched for seven days (`SessionEnd` is not guaranteed to run). The
+entry is dropped whenever the `SessionEnd` hook runs, whatever its reason. A
+state file still in the earlier flat format is renamed to `.guard-state.json.legacy` by the first
+write (unless one exists) and read as empty. The control script reads the session from
+`CLAUDE_CODE_SESSION_ID` and exits with an error when it is not set — run it from the session's
+own shell. `status` also prints the session's count of added directories and its short id, and
+`guard off` clears `careful` and `freeze` but keeps the session's `added_dirs`.
+
+The always-on outside-scope guard asks before a write outside the project root. It reads two
+lists of directories that count as in scope: the ones a `/add-dir` typed in this session added
+(filed per session by the `DirectoryAdded` hook), and `permissions.additionalDirectories` in
+`.claude/settings.json`, `.claude/settings.local.json` and `~/.claude/settings.json`. A
+`--add-dir` passed when `claude` starts emits no event and sits in no file, so it is not seen — a
+write there asks. It asks for any unknown target and never denies one.
 
 ## Action
 

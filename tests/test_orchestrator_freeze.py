@@ -3,6 +3,8 @@
 python3 -m unittest discover tests
 """
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -15,9 +17,12 @@ from pathlib import Path
 _PLUGIN = Path(__file__).parent.parent / "plugins" / "pc-kanban"
 sys.path.insert(0, str(_PLUGIN / "hooks"))
 sys.path.insert(0, str(_PLUGIN / "skills" / "permission-change" / "scripts"))
+sys.path.insert(0, str(_PLUGIN / "hooks" / "guard-state"))
 
-import guard  # noqa: E402
 import orchestrator_freeze as of  # noqa: E402
+import pc_kanban_guard_state as gs  # noqa: E402
+
+SID = "t"
 
 
 class TestApplyOrchestratorScope(unittest.TestCase):
@@ -37,14 +42,14 @@ class TestApplyOrchestratorScope(unittest.TestCase):
         machine's boards)."""
         payload = {
             "hook_event_name": "SessionStart",
-            "session_id": "t",
+            "session_id": SID,
             "cwd": str(cwd),
         }
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(cwd)}):
             return of.apply_orchestrator_scope(payload)
 
     def _state(self, cwd: Path) -> dict:
-        return guard.load_state(guard.state_path(cwd))
+        return gs.load_session(gs.state_path(cwd), SID)
 
     def test_out_of_repo_with_a_board_freezes_to_board_dirs(self):
         summary = self._apply(self.ws)
@@ -74,12 +79,44 @@ class TestApplyOrchestratorScope(unittest.TestCase):
         self.assertIsNone(self._apply(self.ws))
 
     def test_existing_deny_list_is_preserved(self):
-        guard.save_state(
-            guard.state_path(self.ws),
-            {"careful": False, "freeze": [], "deny": [str(self.base / "secret")]},
+        gs.update_session(
+            gs.state_path(self.ws),
+            SID,
+            lambda entry: entry.update(deny=[str(self.base / "secret")]),
         )
         self._apply(self.ws)
         self.assertEqual(self._state(self.ws)["deny"], [str(self.base / "secret")])
+
+    def test_the_freeze_is_the_starting_sessions_own(self):
+        self._apply(self.ws)
+        other = gs.load_session(gs.state_path(self.ws), "another-session")
+        self.assertEqual((other["careful"], other["freeze"]), (False, []))
+
+    def test_an_event_without_a_session_id_writes_nothing_and_says_so_on_stderr(self):
+        payload = {"hook_event_name": "SessionStart", "cwd": str(self.ws)}
+        err = io.StringIO()
+        with (
+            unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(self.ws)}),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertIsNone(of.apply_orchestrator_scope(payload))
+        self.assertFalse(gs.state_path(self.ws).exists())
+        self.assertEqual(len(err.getvalue().strip().splitlines()), 1)
+        self.assertIn("without a session_id", err.getvalue())
+        self.assertIn("hook_event_name", err.getvalue())
+
+    def test_a_worker_without_a_session_id_stays_silent(self):
+        repo = self.ws / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        payload = {"hook_event_name": "SessionStart", "cwd": str(repo)}
+        err = io.StringIO()
+        with (
+            unittest.mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(repo)}),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertIsNone(of.apply_orchestrator_scope(payload))
+        self.assertEqual(err.getvalue(), "")
 
 
 class TestInGitRepo(unittest.TestCase):
@@ -107,7 +144,13 @@ class TestMainEndToEnd(unittest.TestCase):
             (ws / "_KANBAN").mkdir(parents=True)
             result = subprocess.run(
                 [sys.executable, self.SCRIPT],
-                input=json.dumps({"hook_event_name": "SessionStart", "cwd": str(ws)}),
+                input=json.dumps(
+                    {
+                        "hook_event_name": "SessionStart",
+                        "session_id": SID,
+                        "cwd": str(ws),
+                    }
+                ),
                 capture_output=True,
                 text=True,
                 env={"CLAUDE_PROJECT_DIR": str(ws), "PATH": "/usr/bin:/bin"},
@@ -118,7 +161,7 @@ class TestMainEndToEnd(unittest.TestCase):
                 json.loads(result.stdout)["hookSpecificOutput"]["hookEventName"],
                 "SessionStart",
             )
-            state = guard.load_state(guard.state_path(ws))
+            state = gs.load_session(gs.state_path(ws), SID)
             self.assertTrue(state["careful"])
             self.assertIn(str(ws / "_KANBAN"), state["freeze"])
 
