@@ -16,7 +16,7 @@ import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +111,12 @@ def visible() -> dict[str, Any]:
 
 def test_tools_are_announced_before_any_connection_is_used(server: StdioMcp) -> None:
     names = {tool["name"] for tool in server.list_tools()}
-    assert names == {"task_history", "query_history"}
+    assert names == {
+        "task_history",
+        "query_history",
+        "warehouse_credits",
+        "event_table_records",
+    }
 
 
 def test_task_history_statement_is_accepted_for_a_visible_task(
@@ -227,6 +232,158 @@ def test_query_history_by_warehouse_then_by_id(
     print(f"query_history with include_text: {with_text['row_count']} row(s)")
     assert with_text["row_count"] > 0
     assert all("QUERY_TEXT" in row for row in with_text["rows"])
+
+
+def test_warehouse_credits_returns_hours_or_names_the_missing_privilege(
+    server: StdioMcp, visible: dict[str, Any]
+) -> None:
+    outcome = server.call_tool(
+        "warehouse_credits",
+        {"all_warehouses": True, "last_minutes": 24 * 60, "limit": 5},
+    )
+    if outcome.get("isError") is True:
+        message = outcome["content"][0]["text"]
+        print(f"\nwarehouse_credits refused: {message}")
+        assert "MONITOR USAGE" in message
+        return
+    result = _structured(outcome)
+    print(
+        f"\nwarehouse_credits, all warehouses: {result['row_count']} row(s), "
+        f"truncated={result['truncated']}"
+    )
+    assert result["source"].endswith("WAREHOUSE_METERING_HISTORY")
+    assert result["fraicheur"]
+    assert result["row_count"] <= 5
+    assert result["timezone"]
+    if result["rows"]:
+        stamp = result["rows"][0]["START_TIME"]
+        assert datetime.fromisoformat(stamp).utcoffset() is not None
+        print(f"first row: {result['rows'][0]}")
+
+
+TASK_TEXT_COLUMNS = {"ERROR_MESSAGE", "RETURN_VALUE", "QUERY_TEXT"}
+QUERY_TEXT_COLUMNS = {"ERROR_MESSAGE", "QUERY_TEXT"}
+
+
+@pytest.mark.parametrize("tool", ["query_history", "task_history"])
+def test_a_range_beyond_seven_days_reads_account_usage_or_names_the_role(
+    server: StdioMcp, visible: dict[str, Any], tool: str
+) -> None:
+    if tool == "query_history":
+        if not visible["warehouses"]:
+            pytest.skip("the connection sees no warehouse")
+        scope: dict[str, Any] = {"warehouse": visible["warehouses"][0]}
+        text_columns = QUERY_TEXT_COLUMNS
+    else:
+        busiest = json.loads(_run_probe("busiest-task").stdout)
+        if busiest["task"] is None:
+            pytest.skip(f"no task to read from the view: {busiest['reason']}")
+        scope = dict(busiest["task"])
+        scope["task"] = scope.pop("name")
+        text_columns = TASK_TEXT_COLUMNS
+    arguments = {**scope, "last_minutes": 10 * 24 * 60, "limit": 5}
+    outcome = server.call_tool(tool, arguments)
+    if outcome.get("isError") is True:
+        message = outcome["content"][0]["text"]
+        print(f"\n{tool} beyond 7 days refused: {message}")
+        own, other = (
+            ("GOVERNANCE_VIEWER", "USAGE_VIEWER")
+            if tool == "query_history"
+            else ("USAGE_VIEWER", "GOVERNANCE_VIEWER")
+        )
+        assert f"SNOWFLAKE.{own}" in message
+        assert f"SNOWFLAKE.{other}" not in message
+        assert "IMPORTED PRIVILEGES" not in message
+        return
+    result = _structured(outcome)
+    print(
+        f"\n{tool} beyond 7 days: {result['row_count']} row(s) from {result['source']}"
+    )
+    assert result["source"].startswith("SNOWFLAKE.ACCOUNT_USAGE.")
+    assert "différée" in result["fraicheur"]
+    assert result["row_count"] <= 5
+    stamp = "SCHEDULED_TIME" if tool == "task_history" else "START_TIME"
+    if tool == "task_history":
+        assert result["row_count"] > 0, "the chosen task has executions in the window"
+    for row in result["rows"]:
+        assert datetime.fromisoformat(row[stamp]).utcoffset() is not None
+        assert text_columns.isdisjoint(row)
+    with_text = _structured(server.call_tool(tool, {**arguments, "include_text": True}))
+    print(f"{tool} beyond 7 days with include_text: {with_text['row_count']} row(s)")
+    assert with_text["source"] == result["source"]
+    assert with_text["row_count"] == result["row_count"]
+    for row in with_text["rows"]:
+        assert text_columns <= set(row)
+
+
+def test_a_credits_call_without_warehouse_or_flag_is_an_instruction(
+    server: StdioMcp,
+) -> None:
+    result = server.call_tool("warehouse_credits", {"last_minutes": 60})
+    assert result["isError"] is True
+    assert "Ask the user" in result["content"][0]["text"]
+
+
+def test_event_table_records_name_the_resolved_table_or_say_why_not(
+    server: StdioMcp, visible: dict[str, Any]
+) -> None:
+    for database in visible["databases"]:
+        outcome = server.call_tool(
+            "event_table_records",
+            {"database": database, "last_minutes": 24 * 60, "limit": 5},
+        )
+        if outcome.get("isError") is True:
+            print(
+                f"\nevent_table_records refused: {outcome['content'][0]['text'][:300]}"
+            )
+            continue
+        result = _structured(outcome)
+        print(
+            f"\nevent_table_records: source={result['source']}, "
+            f"{result['row_count']} row(s)"
+        )
+        assert "EVENT_TABLE resolved at the" in result["source"]
+        assert result["row_count"] <= 5
+        assert all("MESSAGE" not in row for row in result["rows"])
+        if result["row_count"]:
+            return
+    pytest.skip(
+        "no database resolves to an event table the connection can read records of"
+    )
+
+
+def test_event_records_of_one_interval_are_found_with_any_offset(
+    server: StdioMcp, visible: dict[str, Any]
+) -> None:
+    for database in visible["databases"]:
+        outcome = server.call_tool(
+            "event_table_records",
+            {"database": database, "last_minutes": 24 * 60, "limit": 1},
+        )
+        if outcome.get("isError") is not True and _structured(outcome)["row_count"]:
+            break
+    else:
+        pytest.skip("no readable event table holds a record from the last day")
+    stamp = datetime.fromisoformat(_structured(outcome)["rows"][0]["TIMESTAMP"])
+    start = (stamp - timedelta(minutes=1)).astimezone(UTC)
+    end = (stamp + timedelta(minutes=1)).astimezone(UTC)
+    found = []
+    for zone in (UTC, timezone(timedelta(hours=2))):
+        found.append(
+            _structured(
+                server.call_tool(
+                    "event_table_records",
+                    {
+                        "database": database,
+                        "start": start.astimezone(zone).isoformat(),
+                        "end": end.astimezone(zone).isoformat(),
+                        "limit": 200,
+                    },
+                )
+            )["rows"]
+        )
+    assert found[0]
+    assert found[0] == found[1]
 
 
 def test_the_default_connection_variable_selects_the_connection(

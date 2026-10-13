@@ -3,7 +3,7 @@
 # requires-python = ">=3.12,<3.14"
 # dependencies = ["mcp>=2", "snowflake-snowpark-python"]
 # ///
-"""pc-snow observability MCP server — `task_history` and `query_history` as native tools.
+"""pc-snow observability MCP server — `task_history`, `query_history`, `warehouse_credits` and `event_table_records`.
 
 Each tool is a thin wrapper around `pc_snow_tools.py`, which holds the scope, range and date
 contract and receives the Snowflake session as a parameter. No session is opened and nothing is
@@ -84,11 +84,11 @@ async def task_history(
 
     Required scope, to ask the user and never guess: database, schema, task (plain identifiers).
     Required range: start and end (ISO-8601, no offset = the user's timezone), or last_minutes
-    (at most 10079). Never both. Timestamps carry their offset, which is authoritative: `timezone`
-    is the PC_SNOW_TIMEZONE name, else the system abbreviation (e.g. CEST).
-    limit: 1..200 rows (default 50), newest first; `truncated` tells whether more exist.
-    Text fields are cut at 200 characters; error messages, return values and the task SQL are
-    returned only with include_text=true. Returns source, fraicheur, range, rows.
+    (at most 525600), never both. Starting over 7 days ago reads ACCOUNT_USAGE instead (delayed,
+    365 days; needs SNOWFLAKE.USAGE_VIEWER, the error names it). Timestamps carry their offset
+    (authoritative); `timezone` is the PC_SNOW_TIMEZONE name, else the system abbreviation.
+    limit: 1..200 rows (default 50), newest first; `truncated` flags more. Error messages, return
+    values and task SQL need include_text=true. Returns source, fraicheur, range, rows.
     """
     try:
         request = pc_snow_tools.plan_task_history(
@@ -118,16 +118,81 @@ async def query_history(
     Scope, to ask the user and never guess: a query_id, or a warehouse with a range. A query_id
     alone searches the whole 7-day window. Other users' queries need MONITOR or OPERATE on the
     warehouse or task. Range: start and end (ISO-8601, no offset = the user's timezone), or
-    last_minutes (at most 10079), never both. Timestamps carry their offset (authoritative);
-    `timezone` is the PC_SNOW_TIMEZONE name, else the system abbreviation (e.g. CEST).
-    limit: 1..200 rows (default 50), newest first. Query text and error messages need
-    include_text=true and are cut at 200 characters. Returns source, fraicheur, range, rows.
+    last_minutes (at most 525600), never both. Starting over 7 days ago reads ACCOUNT_USAGE
+    instead (delayed, 365 days; needs SNOWFLAKE.GOVERNANCE_VIEWER, the error names it). Timestamps
+    carry their offset (authoritative). limit: 1..200 rows (default 50), newest first. Query text
+    and error messages need include_text=true. Returns source, fraicheur, range, rows.
     """
     try:
         request = pc_snow_tools.plan_query_history(
             query_id, warehouse, start, end, last_minutes, limit, include_text
         )
         return await pc_snow_tools.query_history(
+            connection, _profile_asker(ctx), request
+        )
+    except pc_snow_tools.PcSnowError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@m.tool()
+async def warehouse_credits(
+    warehouse: str | None = None,
+    all_warehouses: bool = False,
+    start: str | None = None,
+    end: str | None = None,
+    last_minutes: int | None = None,
+    limit: int = 50,
+    *,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Hourly credits per warehouse, from INFORMATION_SCHEMA.WAREHOUSE_METERING_HISTORY (7 days).
+
+    Required scope, to ask the user and never guess: a warehouse (plain identifier), or
+    all_warehouses=true; omitting the name never means all. Needs ACCOUNTADMIN or MONITOR USAGE;
+    without either, Snowflake answers no row and no error (measured), which the notes say.
+    Range: start and end (ISO-8601, no offset = the user's timezone), or last_minutes (at most
+    10079), never both. Timestamps carry their offset (authoritative); `timezone` is the
+    PC_SNOW_TIMEZONE name, else the system abbreviation.
+    limit: 1..200 hourly rows (default 50), newest first. Returns source, fraicheur, range, rows.
+    """
+    try:
+        request = pc_snow_tools.plan_credits(
+            warehouse, all_warehouses, start, end, last_minutes, limit
+        )
+        return await pc_snow_tools.warehouse_credits(
+            connection, _profile_asker(ctx), request
+        )
+    except pc_snow_tools.PcSnowError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@m.tool()
+async def event_table_records(
+    database: str | None = None,
+    schema: str | None = None,
+    query_id: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    last_minutes: int | None = None,
+    limit: int = 50,
+    include_text: bool = False,
+    *,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Log, span and event records of an event table, resolved from the EVENT_TABLE parameter.
+
+    Required scope, to ask the user and never guess: database; schema is optional and tried
+    first. The table is the one EVENT_TABLE names (schema, else database, else account), never
+    one the caller names. query_id keeps one query's records. Range: start and end (ISO-8601, no
+    offset = the user's timezone), or last_minutes (at most 10079), never both. limit: 1..200
+    rows (default 50), newest first. Log messages and attributes need include_text=true and are
+    cut at 200 characters. Returns source (the resolved table), fraicheur, range, rows.
+    """
+    try:
+        request = pc_snow_tools.plan_event_records(
+            database, schema, query_id, start, end, last_minutes, limit, include_text
+        )
+        return await pc_snow_tools.event_table_records(
             connection, _profile_asker(ctx), request
         )
     except pc_snow_tools.PcSnowError as exc:
