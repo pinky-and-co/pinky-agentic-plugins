@@ -107,6 +107,18 @@ the shared `skills/permission-change/scripts/guard.py` PreToolUse hook, all four
 `/permission-change deny <dir>... | off`,
 `/permission-change guard <dir>... | on | off`
 
+## Adversarial pool timeout
+
+The `adversarial` pool has no wall-clock bound by default: a `pi` run is never cut by the pool
+while it progresses, tool loop included. `pi` itself bounds a blocked provider — its
+`httpIdleTimeoutMs` setting (300 000 ms of HTTP inactivity by default, `0` disables it), and
+`retry.provider.timeoutMs` for one request. No setting of `pi` bounds the total duration or the
+number of turns, so a tool loop that never ends is cut by nothing.
+
+A pool entry's `timeout` field (seconds) is the explicit option to bound one entry: it always cuts
+the run, kills the `pi` session, and drops the entry without a retry. The panel (180 s) and
+`pool_check` (60 s) keep their own delay; `offline` keeps its own.
+
 ## Requirements
 
 Python 3.12 or newer, resolved as `python3` on the `PATH` for the hooks; `uv` on `PATH` for the `mcp/` server, which runs on `uv`'s own Python.
