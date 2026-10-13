@@ -16,14 +16,24 @@ Primary consumption interface: **Snowsight Monitoring UI** — not raw SQL on EV
 Activating `LOG_LEVEL`, `TRACE_LEVEL`, or `METRIC_LEVEL` on a database or schema makes Snowflake automatically write records to the event table for every SP and UDF execution. No code change required in the SP itself.
 
 ```sql
--- Set at schema level (one event table per schema — see architecture section)
+-- Levels are set per schema (or database)
 ALTER SCHEMA my_db.my_schema SET LOG_LEVEL   = 'WARN';
 ALTER SCHEMA my_db.my_schema SET TRACE_LEVEL = 'ON_EVENT';
 ALTER SCHEMA my_db.my_schema SET METRIC_LEVEL = 'NONE';     -- see below
 
--- Bind the event table to the schema
-ALTER SCHEMA my_db.my_schema SET EVENT_TABLE = my_db.my_schema.EVENTS;
+-- The event table is bound at the database (or the account)
+ALTER DATABASE my_db SET EVENT_TABLE = my_db.my_schema.EVENTS;
 ```
+
+The Snowflake documentation describes `EVENT_TABLE` at the `ACCOUNT` and `DATABASE` levels, the
+database level winning. Observed on one test account, with one role, in two states. Before any
+binding, `SHOW PARAMETERS LIKE 'event_table'` returned the Snowflake-provided default event table
+(`snowflake.telemetry.events`, `level` empty) both `IN ACCOUNT` and `IN DATABASE`. After
+`ALTER DATABASE <db> SET EVENT_TABLE = <table>`, `IN DATABASE <db>` returned that table with
+`level` = `DATABASE` while `IN ACCOUNT` still returned the default. `IN SCHEMA` of one schema of
+that database returned no row in both states, while `SHOW PARAMETERS IN SCHEMA` did list `LOG_LEVEL`, `TRACE_LEVEL` and
+`METRIC_LEVEL`. `ALTER SCHEMA ... SET EVENT_TABLE` was not attempted, so whether a schema accepts
+the parameter is not established.
 
 **Requires `GRANT MODIFY LOG LEVEL ON ACCOUNT TO ROLE <your_deploy_role>`** — object ownership alone is not enough.
 
@@ -120,24 +130,23 @@ Retention guidance:
 
 ---
 
-## Architecture — one event table per schema
+## Architecture — an event table bound at the database
 
 ```
-my_db
-├── my_schema_a
-│   ├── EVENTS              ← schema-local event table
+my_db                       ← ALTER DATABASE my_db SET EVENT_TABLE = my_db.telemetry.EVENTS
+├── telemetry
+│   ├── EVENTS              ← the database's event table
 │   └── EVENTS_LIFECYCLE    ← 90-day retention policy
+├── my_schema_a             ← LOG_LEVEL / TRACE_LEVEL set here
 └── my_schema_b
-    ├── EVENTS
-    └── EVENTS_LIFECYCLE
 ```
 
-**Why per-schema, not per-database:**
-- Snowsight Monitoring UI is scoped per event table — per-schema isolation makes the Snowsight view clean and relevant per team/pipeline
-- `ALTER DATABASE SET EVENT_TABLE` points to a shared table — all schemas' traces mixed together, poor Snowsight UX
-- `ALTER SCHEMA SET EVENT_TABLE` overrides the database default for that schema
-
-Per-schema is the recommended default. The database-level event table can serve as a fallback for schemas that don't have their own.
+- The event table is bound at the database (levels observed to carry a value: `ACCOUNT` and
+  `DATABASE`); `LOG_LEVEL`, `TRACE_LEVEL` and `METRIC_LEVEL` are chosen per schema, so the schemas
+  of one database write to one table and differ by what they let through.
+- Records of several schemas then share a table: tell them apart by the record's executable and
+  query id, not by table.
+- A database without its own event table writes to the account's.
 
 ---
 

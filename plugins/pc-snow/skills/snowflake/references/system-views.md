@@ -1,10 +1,14 @@
 # Snowflake system views — what the pc-snow observability tools read
 
-Covers: the two tools of the `pc-snow` MCP server (`task_history`, `query_history`), the `INFORMATION_SCHEMA`
-functions behind them, how to read their columns, and the interview to run before calling either.
-Facts below come from the Snowflake documentation pages of `TASK_HISTORY` and `QUERY_HISTORY`
-(Information Schema); a fact marked *measured* was observed on a real account through these tools,
-and one marked *not measured* is announced by the tool but has no observation behind it. For a
+Covers: the tools of the `pc-snow` MCP server (`task_history`, `query_history`, `warehouse_credits`,
+`event_table_records`), the `INFORMATION_SCHEMA` functions and the event table behind them, how to
+read their columns, and the interview to run before calling them. Facts below come from the
+Snowflake documentation pages of `TASK_HISTORY`, `QUERY_HISTORY` and `WAREHOUSE_METERING_HISTORY`
+(Information Schema), of the `ACCOUNT_USAGE` views
+(<https://docs.snowflake.com/en/sql-reference/account-usage>, and
+<https://docs.snowflake.com/en/user-guide/ui-snowsight-activity> for the role that covers query
+history) and of event tables; a fact marked *measured* was observed on a real account through these
+tools, and one marked *not measured* is announced by the tool but has no observation behind it. For a
 signature or limit you are unsure of, query `context7` (`libraryId: /websites/snowflake_en`).
 
 The tools are fixed queries with bound arguments: no SQL goes in, only a scope and a range. Each
@@ -25,21 +29,59 @@ are what the user must supply, in their own words, before the call.
 |---|---|---|
 | `task_history` | `database`, `schema`, `task` | `start` and `end`, or `last_minutes` — always |
 | `query_history` | `query_id`, or `warehouse` | `start` and `end`, or `last_minutes` — optional with a `query_id` |
+| `warehouse_credits` | `warehouse`, or `all_warehouses=true` — one of the two, never both | `start` and `end`, or `last_minutes` — always |
+| `event_table_records` | `database`; `schema` and `query_id` optional | `start` and `end`, or `last_minutes` — always, even with a `query_id` |
 
 Ask for what is missing, in one question, and nothing else:
 
-1. Which task (`database`, `schema`, `task`) or which query (`query_id`, or `warehouse`)?
+1. Which task (`database`, `schema`, `task`), which query (`query_id`, or `warehouse`) or which
+   warehouse's credits (`warehouse`, or all of them with `all_warehouses=true`) or which
+   telemetry (`event_table_records`: the `database`, the `schema` if any, a `query_id` if known)?
 2. Which period? Either two dates (`start`, `end`) or "the last N minutes" (`last_minutes`).
    A date without an offset is read in the user's timezone (`PC_SNOW_TIMEZONE`, else the machine's
    zone); an offset is honoured as written. The Snowflake session's own `TIMEZONE` is never used.
    A wall-clock time that does not exist or occurs twice in a daylight-saving change is refused —
    ask for an explicit offset. A range that starts in the future is refused.
-3. Does the user need the text (`include_text=true`)? Query text, error messages and task return
-   values can hold literals and leave the machine for a cloud model: ask before turning it on.
+3. Does the user need the text (`include_text=true`)? Query text, error messages, task return
+   values, log messages and span attributes can hold literals and leave the machine for a cloud model: ask before turning it on.
 
-Also: `limit` is 1 to 200 rows, 50 by default; a period over 7 days is refused (the functions keep
-7 days) — ask for a shorter one rather than splitting it silently. `last_minutes` is at most 10079,
-one minute under 7 days: the window a `query_id` alone searches.
+Also: `limit` is 1 to 200 rows, 50 by default. `warehouse_credits` and `event_table_records` refuse
+a period over 7 days — ask for a shorter one rather than splitting it silently — and their
+`last_minutes` is at most 10079, one minute under 7 days. For `query_history` that is also the
+window a `query_id` alone searches.
+`task_history` and `query_history` accept a period that starts earlier, up to 365 days
+(`last_minutes` at most 525600), and read the `ACCOUNT_USAGE` view for it; see *Beyond 7 days* below.
+
+---
+
+## Beyond 7 days — `task_history` and `query_history`
+
+A range that starts more than 7 days before Snowflake's clock, or a `last_minutes` over 10079, is read
+from the `ACCOUNT_USAGE` view instead of the function. The result's `source` names the view and
+`fraicheur` says it is delayed (*différée*); the latest executions may be missing. The view is
+account-wide: the scope is a bound `WHERE`, and the range filters on `SCHEDULED_TIME` (tasks) or
+`END_TIME` (queries). The view keeps 365 days; a longer range is refused. The exact latency comes
+from the documentation and is *not measured*. The time columns are `TIMESTAMP_LTZ`
+(*measured* by `DESCRIBE VIEW`, on one test account, one role): `START_TIME` and `END_TIME` of
+`QUERY_HISTORY` are `TIMESTAMP_LTZ(6)`, `SCHEDULED_TIME` of `TASK_HISTORY` is `TIMESTAMP_LTZ(3)`.
+
+Access is a database role per view, not a role the tool can choose, and one role does not cover
+both views:
+
+| View | Database role | Status |
+|---|---|---|
+| `TASK_HISTORY` | `SNOWFLAKE.USAGE_VIEWER` | *measured*: readable after the grant (289 rows over 10 days), on one test account, one role |
+| `QUERY_HISTORY` | `SNOWFLAKE.GOVERNANCE_VIEWER` | *measured*: refused (error 2003) with only `USAGE_VIEWER`; after the `GOVERNANCE_VIEWER` grant, 29583 rows over 10 days; one test account, one role |
+
+The server runs one trial `SELECT` per view, the first time a call needs that view, and keeps each
+answer in the memory of the process, never on disk: a grant made later is seen after the server
+restarts or reconnects. A refusal names `GRANT DATABASE ROLE SNOWFLAKE.<role> TO ROLE <role>` for
+the view that was refused — never the other view's role — which `ACCOUNTADMIN` runs. A range inside
+7 days never needs it. A refused object of the `SNOWFLAKE` database comes back as error 2003
+(*does not exist or not authorized*), not as an empty result (*measured*).
+
+The view reads are bounded by `LIMIT`, not by what the view scans: ask for the narrowest range that
+answers the question.
 
 ---
 
@@ -49,8 +91,8 @@ one minute under 7 days: the window a `query_id` alone searches.
 
 - **What it returns**: one row per execution (scheduled, running or finished) whose scheduled time
   falls in the period, in descending `SCHEDULED_TIME` order.
-- **Freshness**: 7 days of history, an error beyond. The tool reports it as near real time (*not
-  measured*); older data is in the `ACCOUNT_USAGE` view, which this tool does not read.
+- **Freshness**: 7 days of history from the function, reported as near real time (*not measured*);
+  a range that starts earlier is read from `SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY` (*Beyond 7 days*).
 - **Scope arguments**: `DATABASE_NAME`, `SCHEMA_NAME` and `TASK_NAME` are function arguments,
   applied *before* `RESULT_LIMIT` (1 to 10 000, default 100; the tool always asks for 10 000), so a
   task is found even when other tasks have thousands of executions. `SCHEMA_NAME` requires
@@ -96,7 +138,8 @@ warehouse, newest first.
 
 - **What it returns**: one row per query whose *end time* falls in the period. The tool always
   sends an end bound, so a query still running is not returned.
-- **Freshness**: 7 days of history, an error beyond. Reported as near real time (*not measured*).
+- **Freshness**: 7 days of history from the function, reported as near real time (*not measured*);
+  a range that starts earlier is read from `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY` (*Beyond 7 days*).
 - **Visibility**: both functions return the connected user's queries, and any user's queries when
   the active role holds MONITOR or OPERATE on the warehouse where they ran, or on the task, or
   MONITOR EXECUTION on the account. A query that does not appear is not necessarily absent: the
@@ -134,3 +177,74 @@ Pitfalls:
 - Text fields are cut at 200 characters; `truncated_fields` lists each cut with the original length.
 - Whether a query launched by a task appears through `QUERY_HISTORY` follows the visibility rule
   above (MONITOR or OPERATE on the task); *not measured* — the test account has no task run.
+
+---
+
+## warehouse_credits
+
+`SNOWFLAKE.INFORMATION_SCHEMA.WAREHOUSE_METERING_HISTORY` — credits consumed per warehouse and per
+hour, newest first.
+
+- **What it returns**: one row per warehouse and hour in the period, with `CREDITS_USED_COMPUTE`,
+  `CREDITS_USED_CLOUD_SERVICES` and their sum `CREDITS_USED`; `START_TIME` and `END_TIME` bound the
+  hour and are rendered in the user's timezone.
+- **Scope**: a `warehouse` (matched as an unquoted identifier, upper-cased), or `all_warehouses=true`
+  which calls the function without a name. Omitting both is refused with an instruction to ask the
+  user; giving both is refused. Omitting the name never means all.
+- **Source**: the `INFORMATION_SCHEMA` function, not `ACCOUNT_USAGE` (latency of up to 3 hours, see
+  `references/costs.md`); it does not need imported privileges on the `SNOWFLAKE` database. Called
+  without a database prefix, it did not resolve on the test account (*measured*: `Invalid identifier
+  INFORMATION_SCHEMA.WAREHOUSE_METERING_HISTORY`); the tool qualifies it with `SNOWFLAKE`.
+- **Privileges**: ACCOUNTADMIN, or a role granted the global `MONITOR USAGE`. A refusal from
+  Snowflake is returned with `MONITOR USAGE` named and the active roles. **Without the privilege the
+  function returned no row and no error** on the test account (*measured*: role without `MONITOR
+  USAGE`, three warehouses, 0 rows over 7 days). The result's `notes` says so: an empty result is not
+  proof that nothing was consumed.
+
+Pitfalls:
+
+- The 7-day range limit of the common contract applies; the function itself keeps more, which the
+  tool does not expose.
+- `limit` caps hourly rows, not warehouses: 200 rows cover about 8 days of one warehouse, or one
+  day of eight. Narrow the range or name a warehouse before raising it.
+
+---
+
+## event_table_records
+
+The event table that `EVENT_TABLE` designates for the scope, read directly — logs, spans and events
+of procedures, functions and tasks, newest first. The caller never names the table.
+
+- **Resolution**: `SHOW PARAMETERS LIKE 'event_table'` at the schema (when a `schema` is given),
+  then at the database, then at the account; the first level that returns a value wins, and the
+  table it names is read. A level Snowflake refuses is skipped and named in `notes`; if all are
+  refused, the last refusal is returned. The resolved table, with its level, is the `source`.
+- **Measured** on one test account, one role, in two states. Before any binding:
+  `SHOW PARAMETERS LIKE 'event_table'` IN ACCOUNT and IN DATABASE both returned the
+  Snowflake-provided default table `snowflake.telemetry.events`, with `level` empty. After
+  `ALTER DATABASE <db> SET EVENT_TABLE = <table>`: IN DATABASE `<db>` returned that table with
+  `level` = `DATABASE`, and IN ACCOUNT still the default. IN SCHEMA of one schema of that database
+  returned no row and no error, in both states. `ALTER SCHEMA ... SET EVENT_TABLE` was not
+  attempted; whether another account holds a schema-level value is not established. See
+  `references/telemetry.md`.
+- **Visibility**: before the lookup the tool checks that the `database` (and the `schema`) is
+  visible to the connected role, with `SHOW TERSE DATABASES|SCHEMAS`, because error 2003 (*does not
+  exist or not authorized*) cannot tell a misspelling from a missing grant. A name that is not
+  visible is refused with the visible names, up to 20, and the question to ask the user.
+- **Measured** on one real event table record: the columns `RECORD_TYPE`, `RECORD['severity_text']`,
+  `RESOURCE_ATTRIBUTES['snow.executable.name']`, `RESOURCE_ATTRIBUTES['snow.query.id']`, `VALUE` and
+  `RECORD_ATTRIBUTES` exist; `TIMESTAMP`, `START_TIMESTAMP` and `OBSERVED_TIMESTAMP` are
+  `TIMESTAMP_NTZ(9)`; one `LOG` record returned severity `INFO` and the executable name of the
+  logging procedure.
+- **Columns**: `TIMESTAMP` and `START_TIMESTAMP` are `TIMESTAMP_NTZ` in UTC and are rendered in the
+  user's timezone with their offset; a range given with an offset selects the same records
+  whatever the session's `TIMEZONE`. `SEVERITY` is `RECORD['severity_text']`, `EXECUTABLE_NAME` is
+  `RESOURCE_ATTRIBUTES['snow.executable.name']` and `QUERY_ID` is
+  `RESOURCE_ATTRIBUTES['snow.query.id']`, the filter a `query_id` applies. `MESSAGE` (the log body,
+  `VALUE`) and `ATTRIBUTES` (`RECORD_ATTRIBUTES`) hold text written by user code and come back only
+  with `include_text=true`, cut at 200 characters.
+- **Pitfalls**: an empty result is not proof that nothing was recorded — the table holds only what
+  `LOG_LEVEL` and `TRACE_LEVEL` let through. A missing privilege on the resolved table came back as
+  an error (2003, *measured* on the default table), not as an empty result; the empty-instead-of-error
+  behaviour is measured for `warehouse_credits` only. Records are written asynchronously and may lag the
+  event. The 7-day range limit of the common contract applies although an event table keeps more.

@@ -5,10 +5,12 @@
 # ///
 """Read-only probes run by `test_pc_snow_integration.py` on the default Snowflake connection.
 
-Two commands, each printing one JSON document on stdout:
+Three commands, each printing one JSON document on stdout:
 
 - `discover` lists the databases, tasks and warehouses the connection can see (`SHOW`), so the integration
   test never needs a name written down anywhere.
+- `busiest-task` names the task with the most executions in `ACCOUNT_USAGE.TASK_HISTORY` over the
+  last 10 days, or `null` when that view is not readable by the connection.
 - `timezone <warehouse> <start> <end>` runs the sibling module's `query_history` on two sessions
   whose `TIMEZONE` parameter differs and prints the query ids each one returned.
 """
@@ -63,6 +65,33 @@ def discover() -> dict[str, Any]:
     }
 
 
+def busiest_task() -> dict[str, Any]:
+    """The task with the most executions in the last 10 days of the view, `task: null` if unreadable."""
+    connection = pc_snow_tools.Connection(_builder)
+    session = asyncio.run(connection.session(None))
+    try:
+        rows = session.sql(
+            "SELECT DATABASE_NAME, SCHEMA_NAME, NAME, COUNT(*) AS RUNS "
+            "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
+            "WHERE SCHEDULED_TIME > DATEADD(day, -10, CURRENT_TIMESTAMP()) "
+            "GROUP BY DATABASE_NAME, SCHEMA_NAME, NAME ORDER BY RUNS DESC LIMIT 1"
+        ).collect()
+    except Exception as exc:
+        # La vue n'est pas lisible par ce rôle : le test appelant saute, la raison est rapportée.
+        return {"task": None, "reason": f"{type(exc).__name__}: {exc}"[:300]}
+    if not rows:
+        return {"task": None, "reason": "no execution in the last 10 days"}
+    row = rows[0]
+    return {
+        "task": {
+            "database": row["DATABASE_NAME"],
+            "schema": row["SCHEMA_NAME"],
+            "name": row["NAME"],
+        },
+        "runs": row["RUNS"],
+    }
+
+
 def _default_profile() -> str:
     """The profile the default connection resolves to, read at run time."""
     from snowflake.connector.config_manager import CONFIG_MANAGER
@@ -107,10 +136,16 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["discover"]:
         print(json.dumps(discover()))
         return 0
+    if argv[:1] == ["busiest-task"]:
+        print(json.dumps(busiest_task()))
+        return 0
     if argv[:1] == ["timezone"] and len(argv) == 4:
         print(json.dumps(timezone(argv[1], argv[2], argv[3])))
         return 0
-    print("usage: discover | timezone <warehouse> <start> <end>", file=sys.stderr)
+    print(
+        "usage: discover | busiest-task | timezone <warehouse> <start> <end>",
+        file=sys.stderr,
+    )
     return 2
 
 
