@@ -10,6 +10,7 @@ Referenced from `SKILL.md`. Read this when taking a card in, or before declaring
 - Making the review visible on the card
 - Proposing the next card, once the card is done
 - Flagging cards the closed card just made obsolete
+- Archiving a parent whose children are still open
 - Recommending session vs spawn, next to the proposal
 - Naming the session, at the end of the session only
 - Touching a repo the card does not list
@@ -207,6 +208,17 @@ drop. Without it, "checked, nothing found" and "never checked" look the same.
 
 **Nothing looks obsolete** → say nothing extra in the conversation; the `obsolescence (none)` line on
 the card is the only trace, same discipline as the next-card proposal's own silence.
+
+### Archiving a parent whose children are still open
+
+`move-card archive` refuses a card that an open card (`0-ideas/` to `3-in-progress/` of the same
+chantier) still names in `sert` or `blocked_by`, and lists those cards. A parent with open children
+(enfants ouverts) waits in `4-done/`: its children stay unblocked (`blocked_by` reads `4-done/` as
+done) and its `## Requirements` rows and open questions stay defined and are printed by `story_view`
+under "Requirements (open cards and 4-done)" and "Open questions"; its "Held parents" section only
+lists `parent <- holders`. It is archived once its children are closed. `--force` archives it anyway —
+then move any row or id an open card still cites into that card first, since a row leaves with the
+archive.
 
 ### Recommending session vs spawn, next to the proposal
 

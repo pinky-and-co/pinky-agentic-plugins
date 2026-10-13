@@ -162,8 +162,9 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
 - **`requirements`** — the requirement ids this card traces to, as a list; `[]` or omitted = none. Orthogonal to `sert`: `sert` is card-to-card filiation (critical
   path), `requirements` is card-to-requirement traceability, and a card may trace to several
   requirements where `sert` allows only one parent. A requirement id is only valid if an open card
-  of the chantier defines it in its `## Requirements` table with a verification criterion — this
-  card or another — never invent an id. `move-card select` refuses an id defined nowhere.
+  or a `4-done` card of the chantier defines it in its `## Requirements` table with a verification
+  criterion — this card or another — never invent an id. `move-card select` refuses an id defined
+  nowhere.
 
   **A chantier earns its requirements when it is reopened, never in a campaign.** Backfilling this
   field across a sleeping chantier assumes its requirements are already stated; where they are not,

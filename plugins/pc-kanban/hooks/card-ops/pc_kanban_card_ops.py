@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Move one kanban card by slug: archive it, drop it, or select it for development.
 
-    pc_kanban_card_ops.py [--board DIR]... archive <slug>
+    pc_kanban_card_ops.py [--board DIR]... archive <slug> [--force]
     pc_kanban_card_ops.py [--board DIR]... drop <slug> <reason...>
     pc_kanban_card_ops.py [--board DIR]... select <slug> [--force]
 
 The slug is the card's filename without `.md`. It is resolved across the kanban boards in the
 columns the verb accepts; zero or several matches is an error, never a guess. `archive` and `drop`
 move the card to `_ARCHIVE/` and print the closing sequence (open cards, next-card candidates,
-session recommendation); `select` moves the card from
+session recommendation); `archive` refuses a card an open card still serves or is blocked by,
+unless `--force`; `select` moves the card from
 `1-todo/` to `2-selected-for-dev/` once it meets the selection conditions (`selection_problems`).
 
 Without `--board`, the boards are those `stop_handoff.py --list-kanbans` reports. Python 3.12+,
@@ -31,13 +32,15 @@ sys.path.insert(0, str(PLUGIN_ROOT / "skills" / "kanban" / "scripts"))
 import next_card_recommendation as ncr  # noqa: E402
 import open_cards_brief as ob  # noqa: E402
 
+sys.path.insert(0, str(PLUGIN_ROOT / "hooks" / "requirement-rows"))
+from pc_kanban_requirement_rows import READ_COLUMNS, holders  # noqa: E402
+
 SESSION_THRESHOLD_PCT = 40
 COLUMNS = {
     "archive": ("4-done", "3-in-progress"),
     "drop": ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress"),
     "select": ("1-todo",),
 }
-OPEN_COLUMNS = ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress")
 MODELS = ("haiku", "sonnet", "opus", "fable")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 MOCKUP_AXES = ("layout", "design", "content", "behavior")
@@ -273,7 +276,7 @@ def selection_problems(
     ids = [] if force else requirement_ids(head)
     declared = "\n".join(
         c.read_text(encoding="utf-8", errors="ignore")
-        for col in OPEN_COLUMNS
+        for col in READ_COLUMNS
         for c in sorted((card.parent.parent / col).glob("*.md"))
     )
     story = card.parent.parent / "story.md"
@@ -284,7 +287,7 @@ def selection_problems(
             "no `requirements:` — a card traces to at least one requirement"
         )
     problems += [
-        f"requirement {i} is not defined in any open card's `## Requirements` (nor the story's)"
+        f"requirement {i} is not defined in any open or `4-done` card's `## Requirements` (nor the story's)"
         for i in ids
         if not any(
             re.search(rf"^\|\s*{re.escape(i)}\s*\|", line)
@@ -367,16 +370,32 @@ def _archive_destination(card: Path, kind: str) -> Path | None:
     return dest
 
 
-def archive(card: Path, boards: list[Path]) -> int:
+def archive(card: Path, boards: list[Path], force: bool = False) -> int:
     """Archive a done card, or a reviewed one straight from `3-in-progress/`.
 
     Args:
         card: The card in `4-done/` or `3-in-progress/`.
         boards: The board roots.
+        force: Archive although open cards still serve the card or wait on it.
 
     Returns:
-        The exit status; 1 when the reviewed box is unchecked or the target exists.
+        The exit status; 1 when the reviewed box is unchecked, an open card holds the card, or
+        the target exists.
     """
+    held = [] if force else holders(card.parent.parent, card.stem)
+    if held:
+        wait = (
+            "it has to be moved to 4-done/ and wait there"
+            if card.parent.name == "3-in-progress"
+            else "it waits in 4-done/"
+        )
+        print(
+            f"{card.name} is still held by open cards (`sert` or `blocked_by`):\n"
+            + "\n".join(f"  - {s}" for s in held)
+            + f"\n{wait} while they are open; --force archives it anyway",
+            file=sys.stderr,
+        )
+        return 1
     if card.parent.name == "3-in-progress" and "- [x] reviewed (" not in card.read_text(
         encoding="utf-8"
     ):
@@ -565,7 +584,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("slug")
     parser.add_argument("reason", nargs="*")
     parser.add_argument(
-        "--force", action="store_true", help="select without requirements"
+        "--force",
+        action="store_true",
+        help="select without requirements, or archive despite open children",
     )
     args = parser.parse_args(argv)
     if args.verb == "drop" and not args.reason:
@@ -575,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.verb == "select":
         return select(card, boards, args.force)
     if args.verb == "archive":
-        return archive(card, boards)
+        return archive(card, boards, args.force)
     return drop(card, " ".join(args.reason), boards)
 
 
