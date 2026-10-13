@@ -231,6 +231,17 @@ class TestRunPanel(unittest.TestCase):
         self.assertEqual(resp.answers, [])
         self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "empty answer")])
 
+    def test_the_panel_keeps_its_own_180_seconds(self):
+        seen: dict = {}
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            seen["timeout"] = timeout
+            return "answer"
+
+        with unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli):
+            mp.run_panel([GLM], ["p1"])
+        self.assertEqual(seen["timeout"], 180)
+
     def test_entry_timeout_is_passed_and_reported(self):
         seen: dict = {}
 

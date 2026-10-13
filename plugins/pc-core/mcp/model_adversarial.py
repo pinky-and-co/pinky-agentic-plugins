@@ -43,8 +43,12 @@ Each entry:
                    network call. Both selectors below tie-break on it so a local entry is tried
                    before an equally-ranked remote one, without special-casing a provider name.
     timeout        optional wall-clock seconds for the whole `pi` run of this entry (tool loop
-                   included), overriding the caller's default — a backstop against a run that never
-                   ends; `pi` bounds each request itself
+                   included), overriding the caller's default. The pool's default is no bound at
+                   all (`RUN_TIMEOUT` is None): a run that progresses is never cut by the pool,
+                   and `pi` itself bounds a blocked provider (`httpIdleTimeoutMs`, 300 s of HTTP
+                   inactivity by default; `retry.provider.timeoutMs` bounds one request). Set
+                   `timeout` only on an entry that must be cut — it then always cuts, the `pi`
+                   session is killed, and the entry is dropped without a retry
     priority       optional integer, default 0, higher first: a strict order between levels, orders
                    the providers inside each round of the selection's provider alternation — a
                    generous provider opens every round without stacking its entries. Never outranks
@@ -84,7 +88,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from subprocess import Popen
-from typing import Any, Literal, NamedTuple, TextIO
+from typing import Any, Literal, NamedTuple, TextIO, TypeVar
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 import load_secrets  # noqa: E402
@@ -96,7 +100,8 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 DEFAULT_MODEL = "z-ai/glm-5.3"
-RUN_TIMEOUT = 900
+RUN_TIMEOUT: int | None = None
+_T = TypeVar("_T")
 CHECK_PROMPT = "Reply with exactly: OK"
 CHECK_WORKERS = 4
 
@@ -661,9 +666,9 @@ def _not_callable(entry: dict[str, Any]) -> str:
     return f"{entry['name']}: kind {kind!r} is not callable through pi"
 
 
-def entry_timeout(entry: dict[str, Any], default: int) -> int:
-    """The entry's own `timeout` when it sets one, else the caller's `default`."""
-    return int(entry.get("timeout", default))
+def entry_timeout(entry: dict[str, Any], default: _T) -> int | _T:
+    """The entry's own `timeout` when it sets one, else the caller's `default` (None: no bound)."""
+    return int(entry["timeout"]) if "timeout" in entry else default
 
 
 def secret_env() -> dict[str, str]:
@@ -855,7 +860,7 @@ def open_events_split(events_path: Path) -> None:
 def call_cli(
     entry: dict[str, Any],
     prompt: str,
-    timeout: int,
+    timeout: int | None,
     tools: list[str] | None = None,
     env: dict[str, str] | None = None,
     events: TextIO | None = None,
@@ -870,7 +875,8 @@ def call_cli(
         entry: the pool entry — `provider` and `model` form pi's `--model`.
         prompt: sent as the positional argument after `--`, so a prompt opening with `---` is
             never read as an option.
-        timeout: seconds before `subprocess.TimeoutExpired`; the process is killed.
+        timeout: seconds before `subprocess.TimeoutExpired`; the process is killed. None waits
+            without a bound.
         tools: pi tool names to allow (`-t read,grep`); None or empty means `--no-tools`.
         env: variables layered over this process's environment for pi — the provider keys.
             None reads them with `secret_env`; a caller making several calls passes them once.
@@ -1045,7 +1051,7 @@ def log_pool_event(name: str, kind: str, **fields: object) -> None:
 def call_context(
     entry: dict[str, Any],
     prompt: str,
-    timeout: int,
+    timeout: int | None,
     tools: list[str] | None,
     attempt: int,
 ) -> dict[str, object]:
@@ -1056,7 +1062,7 @@ def call_context(
     return {
         "model": cli_model_id(entry),
         "prompt_chars": len(prompt),
-        "timeout": f"{timeout}s",
+        "timeout": "none" if timeout is None else f"{timeout}s",
         "attempt": attempt,
         "tools": ",".join(tools) if tools else "none",
     }
@@ -1069,7 +1075,7 @@ _RESULT_DETAIL_CHARS = 100
 def run_pool(
     entries: list[dict[str, Any]],
     prompt: str,
-    timeout: int = RUN_TIMEOUT,
+    timeout: int | None = RUN_TIMEOUT,
     tools: list[str] | None = None,
     watch: bool = False,
 ) -> PoolResult:
@@ -1088,9 +1094,10 @@ def run_pool(
     had no tools) or a timeout `pi` itself reports (`is_timeout`) is transient: the entry is appended to
     the end of the remaining queue once; a second such failure from the same entry drops it for
     good — at most `2 * len(entries)` attempts, never an infinite loop. `timeout` is the wall
-    clock of the whole `pi` run, tool loop included — `pi` bounds each request itself
-    (`retry.provider.timeoutMs`, `httpIdleTimeoutMs`) — so it is a backstop against a run that
-    never ends, and a `subprocess.TimeoutExpired` drops the entry without a requeue: a second
+    clock of the whole `pi` run, tool loop included; the default (None) sets none — `pi` bounds
+    each request itself (`retry.provider.timeoutMs`, `httpIdleTimeoutMs`), nothing bounds a tool
+    loop that never ends. An entry's own `timeout` always cuts, and a
+    `subprocess.TimeoutExpired` drops the entry without a requeue: a second
     attempt would repeat the whole exploration. Trade-off: a
     pool where every entry times out now takes up to twice as long to exhaust, since each gets a
     second attempt before being dropped — deliberate, in exchange for surviving a transient blip.
@@ -1108,7 +1115,8 @@ def run_pool(
     Args:
         entries: the candidates, in the order to try them.
         prompt: the text sent to each.
-        timeout: the default wall clock per entry, overridden by an entry's own `timeout`.
+        timeout: the default wall clock per entry, overridden by an entry's own `timeout`;
+            None sets no bound.
         tools: pi tool names the model may use; None or empty means none.
         watch: open the cmux split described above.
 
@@ -1136,7 +1144,7 @@ def run_pool(
 def _run_pool(
     entries: list[dict[str, Any]],
     prompt: str,
-    timeout: int,
+    timeout: int | None,
     tools: list[str] | None,
     events: TextIO | None,
 ) -> PoolResult:

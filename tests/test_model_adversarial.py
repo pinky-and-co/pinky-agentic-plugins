@@ -623,12 +623,13 @@ class TestRunPoolRequeue(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(GLM, "answer"))
 
-    def test_the_default_backstop_is_900_seconds(self):
+    def test_the_default_has_no_wall_clock(self):
+        self.assertIsNone(ma.RUN_TIMEOUT)
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
         ) as run:
             ma.run_pool([MISTRAL], "p")
-        self.assertEqual(run.wait_timeouts, [900])
+        self.assertEqual(run.wait_timeouts, [None])
 
     def test_timeout_marker_in_a_process_error_is_transient_too(self):
         timeout_error = subprocess.CalledProcessError(1, "pi", "", "504 timed out")
@@ -958,7 +959,7 @@ def test_pool_exhaustion_logs_every_failure_and_the_final_event(tmp_path, monkey
         ma.run_pool([MISTRAL], "p")
     log_path = tmp_path / ".claude" / "debug" / "sess1_mcp__pc-core__model-pool.txt"
     call = (
-        "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=900s attempt={n} "
+        "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=none attempt={n} "
         "tools=none elapsed=0.0s answer_chars=0"
     )
     assert log_path.read_text(encoding="utf-8") == (
@@ -983,7 +984,7 @@ def test_a_successful_call_is_logged_with_its_size_and_duration(tmp_path, monkey
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=6\n"
         "2026-01-01T00:00:00+00:00 mistral-medium-3.5 answered "
-        "model=mistral/mistral-medium-3.5 prompt_chars=6 timeout=900s attempt=1 "
+        "model=mistral/mistral-medium-3.5 prompt_chars=6 timeout=none attempt=1 "
         "tools=read,grep elapsed=2.5s answer_chars=6\n"
     )
 
@@ -1002,7 +1003,7 @@ def test_an_os_error_is_logged_with_its_message(tmp_path, monkeypatch):
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=1\n"
         "2026-01-01T00:00:00+00:00 mistral-medium-3.5 os error "
-        "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=900s attempt=1 "
+        "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=none attempt=1 "
         "tools=none elapsed=0.0s error=[Errno 7] Argument list too long: 'pi'\n"
         "2026-01-01T00:00:00+00:00 (pool) exhausted\n"
     )
@@ -1025,7 +1026,7 @@ def test_a_provider_error_is_logged_with_the_provider_own_line(tmp_path, monkeyp
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=1\n"
         "2026-01-01T00:00:00+00:00 mistral-medium-3.5 "
         "rate limit / out of memory / insufficient credit "
-        "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=900s attempt=1 "
+        "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=none attempt=1 "
         "tools=none elapsed=0.0s error=429 too many requests\n"
         "2026-01-01T00:00:00+00:00 (pool) exhausted\n"
     )
@@ -1151,6 +1152,28 @@ class TestEntryTimeout(unittest.TestCase):
         ) as run:
             ma.run_pool([slow], "p", timeout=180)
         self.assertEqual(run.wait_timeouts, [300])
+
+    def test_missing_entry_timeout_keeps_an_absent_default(self):
+        self.assertIsNone(ma.entry_timeout(MISTRAL, None))
+
+    def test_entry_timeout_replaces_an_absent_default(self):
+        self.assertEqual(ma.entry_timeout({**MISTRAL, "timeout": 300}, None), 300)
+
+    def test_run_pool_gives_an_entry_with_a_timeout_that_bound_over_no_default(self):
+        ok = subprocess.CompletedProcess([], 0, "answer", "")
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
+        ) as run:
+            ma.run_pool([{**GLM, "timeout": 300}, MISTRAL], "p", timeout=None)
+        self.assertEqual(run.wait_timeouts, [300])
+
+    def test_check_pool_keeps_its_own_60_seconds(self):
+        ok = subprocess.CompletedProcess([], 0, "OK", "")
+        with unittest.mock.patch(
+            "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
+        ) as run:
+            ma.check_pool([MISTRAL])
+        self.assertEqual(run.wait_timeouts, [60])
 
     def test_check_pool_waits_the_entry_timeout(self):
         with unittest.mock.patch(
@@ -2352,6 +2375,29 @@ class TestPoolRun:
         else:
             os.kill(kills[0], signal.SIGKILL)
             pytest.fail("pi is still running after the interrupt")
+
+    def test_an_entry_without_timeout_waits_for_a_slow_run(self, bins, tmp_path):
+        (tmp_path / "out.1").write_text(pi_events("slow answer"))
+        _fake_binary(bins, "pi", f'/bin/sleep 2\n/bin/cat "{tmp_path}/out.1"')
+
+        result = ma.run_pool([MISTRAL], "p")
+
+        assert result == ma.PoolResult(MISTRAL, "slow answer")
+
+    def test_an_entry_with_a_timeout_is_cut_and_its_session_killed(
+        self, bins, tmp_path, monkeypatch
+    ):
+        _fake_binary(bins, "pi", "exec /bin/sleep 30")
+        popen, kills = self._recording_popen()
+        monkeypatch.setattr(ma, "Popen", popen)
+
+        started = time.monotonic()
+        result = ma.run_pool([{**MISTRAL, "timeout": 1}], "p")
+
+        assert result.entry is None
+        assert "timed out after 1" in str(result.result)
+        assert len(kills) == 1
+        assert time.monotonic() - started < 10
 
     def test_a_run_past_its_timeout_is_killed(self, bins, tmp_path):
         _fake_binary(bins, "pi", "exec /bin/sleep 30")

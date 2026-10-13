@@ -384,9 +384,11 @@ class TestMain(unittest.TestCase):
 
 
 class TestDefaultTimeout(unittest.TestCase):
-    def test_the_tool_loop_gets_the_pools_wall_clock_backstop(self):
-        # `review_point` passe des outils : une boucle d'exploration dure des minutes.
+    def test_the_tool_loop_follows_the_pools_default(self):
+        # `review_point` passe des outils : une boucle d'exploration dure des minutes, et le
+        # pool n'a plus de borne murale par défaut.
         self.assertEqual(pi_review.DEFAULT_TIMEOUT, pi_review.ma.RUN_TIMEOUT)
+        self.assertIsNone(pi_review.DEFAULT_TIMEOUT)
 
 
 if __name__ == "__main__":

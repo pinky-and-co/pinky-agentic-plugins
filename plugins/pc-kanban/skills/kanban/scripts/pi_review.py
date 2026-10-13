@@ -84,7 +84,7 @@ def review_candidates(pool: list[dict]) -> list[dict]:
 
 
 def review_point(
-    entries: list[dict], repo: str, title: str, body: str, timeout: int
+    entries: list[dict], repo: str, title: str, body: str, timeout: int | None
 ) -> dict:
     """One constat: `{point, status, detail, model}` — `status` one of `OK`/`GAP`/`ERROR`.
 
