@@ -17,8 +17,8 @@ boundary (the grill's own framing: "the session is bound to the repo"). No cwd �
 board mounted → orchestrator; anything else → this hook does nothing. Lift a freeze you do not
 want with `permission-change freeze off` (it returns next SessionStart).
 
-`guard.py`'s PreToolUse enforcement and its `status` output are untouched — this hook only
-populates the state file they already read.
+The freeze lands in the entry of the starting session (`session_id`), like every guard setting —
+`guard.py`'s PreToolUse enforcement and its `status` output read that entry and are untouched.
 
 Python 3.11+, stdlib only. A hook failure must never block a session → unexpected errors exit 0.
 """
@@ -34,7 +34,9 @@ from pathlib import Path
 _HOOKS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HOOKS_DIR))
 sys.path.insert(0, str(_HOOKS_DIR.parent / "skills" / "permission-change" / "scripts"))
-import guard  # noqa: E402  — dual-role: the /permission-change ctl AND the PreToolUse enforcer; used here for its state I/O
+sys.path.insert(0, str(_HOOKS_DIR / "guard-state"))
+import guard  # noqa: E402  — seulement pour `project_root`, l'unique endroit qui résout la racine
+import pc_kanban_guard_state as gs  # noqa: E402
 import stop_handoff  # noqa: E402  — the one board resolver (find_kanbans + agent_log_dir)
 
 
@@ -70,7 +72,8 @@ def board_scope(start: Path) -> list[str]:
 def apply_orchestrator_scope(payload: dict) -> str | None:
     """Freeze the guard state to the board scope when this session is an orchestrator (cwd in no
     git repo, at least one board mounted). Returns a one-line summary of what changed, or None
-    when nothing did (a worker, no board mounted, or the scope is already in place)."""
+    when nothing did (a worker, no board mounted, no session id — reported on stderr — or the
+    scope is already in place)."""
     cwd = Path(payload.get("cwd") or os.getcwd())
     if in_git_repo(cwd):
         return None
@@ -79,16 +82,25 @@ def apply_orchestrator_scope(payload: dict) -> str | None:
     if not scope:
         return None  # no board mounted → not an orchestrator context, leave the session alone
 
-    path = guard.state_path(guard.project_root(payload))
-    state = guard.load_state(path)
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        print(
+            "orchestrator_freeze: SessionStart without a session_id, no freeze applied — "
+            f"payload keys: {sorted(payload)}",
+            file=sys.stderr,
+        )
+        return None  # sans session, aucune entrée où poser le gel
+
+    path = gs.state_path(guard.project_root(payload))
+    state = gs.load_session(path, session_id)
     if bool(state.get("careful")) and sorted(state.get("freeze") or []) == sorted(
         scope
     ):
         return None  # already in place — no rewrite, no mtime churn
 
-    state["careful"] = True
-    state["freeze"] = scope
-    guard.save_state(path, state)
+    gs.update_session(
+        path, session_id, lambda entry: entry.update(careful=True, freeze=scope)
+    )
     return (
         f"orchestrator scope applied: careful on · freeze → {len(scope)} board dir(s)"
     )

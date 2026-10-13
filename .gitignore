@@ -10,6 +10,7 @@ __pycache__/
 # Claude Code local session state, not source. Named files, never the directory:
 # `.claude/settings.json` and `.claude/settings.pinky.json` are versioned per repo.
 **/.claude/.guard-state.json
+**/.claude/.guard-state.json.legacy
 **/.claude/settings.local.json
 
 # Plugin evaluation results (test output)

@@ -3,6 +3,8 @@
 python3 -m unittest discover tests
 """
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -24,7 +26,23 @@ sys.path.insert(
     ),
 )
 
+sys.path.insert(
+    0,
+    str(
+        Path(__file__).parent.parent / "plugins" / "pc-kanban" / "hooks" / "guard-state"
+    ),
+)
+
 import guard as g
+import pc_kanban_guard_state as gs
+
+_STATE_DIR = Path(gs.__file__).parent
+SID = "session-a"
+
+
+def set_state(root: Path, session_id: str = SID, **keys) -> None:
+    """Write `keys` (`careful`, `freeze`, `deny`, `added_dirs`) into one session's entry."""
+    gs.update_session(gs.state_path(root), session_id, lambda entry: entry.update(keys))
 
 
 class TestGeneratedTreeViolation(unittest.TestCase):
@@ -93,6 +111,7 @@ class TestBoardDirCarveOut(unittest.TestCase):
             "tool_name": "Write",
             "tool_input": {"file_path": str(target)},
             "cwd": str(root),
+            "session_id": SID,
         }
         return g.decide(event, root)
 
@@ -115,29 +134,26 @@ class TestBoardDirCarveOut(unittest.TestCase):
             decision = self._decide(target)
         self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "ask")
 
-    def test_out_of_scope_other_repo_target_denies(self):
+    def test_fr_0025_382_out_of_scope_other_repo_target_asks_never_denies(self):
         other = self.base / "otherrepo"
         other.mkdir()
         subprocess.run(["git", "init", "-q", str(other)], check=True)
         with self._env():
             decision = self._decide(other / "app.py")
-        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "ask")
 
-    def test_board_resolution_failure_degrades_to_ask_not_deny(self):
+    def test_fr_0025_383_ask_message_names_what_the_guard_reads(self):
         other = self.base / "otherrepo"
         other.mkdir()
         subprocess.run(["git", "init", "-q", str(other)], check=True)
-        with unittest.mock.patch.object(
-            g, "board_dirs", return_value=g.BoardDirs([], False)
-        ):
+        with self._env():
             decision = self._decide(other / "app.py")
-        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "ask")
+        reason = decision["hookSpecificOutput"]["permissionDecisionReason"]
+        for needle in ("/add-dir", "permissions.additionalDirectories", "--add-dir"):
+            self.assertIn(needle, reason)
 
     def test_freeze_does_not_block_a_board_card_under_the_session_root(self):
-        g.save_state(
-            g.state_path(self.ws),
-            {"careful": False, "freeze": [str(self.ws / "src")], "deny": []},
-        )
+        set_state(self.ws, freeze=[str(self.ws / "src")])
         card = self.ws / "_KANBAN" / "CHANTIER0025" / "3-in-progress" / "x.md"
         with unittest.mock.patch.dict(
             os.environ,
@@ -202,10 +218,9 @@ class TestScratchpadCarveOut(unittest.TestCase):
             "tool_name": "Write",
             "tool_input": {"file_path": str(target)},
             "cwd": str(self.session_root),
+            "session_id": SID,
         }
-        with unittest.mock.patch.object(
-            g, "board_dirs", return_value=g.BoardDirs([], True)
-        ):
+        with unittest.mock.patch.object(g, "board_dirs", return_value=[]):
             return g.decide(event, self.session_root)
 
     def test_scratchpad_write_is_allowed_outside_any_repo(self):
@@ -216,10 +231,7 @@ class TestScratchpadCarveOut(unittest.TestCase):
             self.assertIsNone(self._decide(target))
 
     def test_freeze_does_not_block_the_scratchpad(self):
-        g.save_state(
-            g.state_path(self.session_root),
-            {"careful": False, "freeze": [str(self.session_root)], "deny": []},
-        )
+        set_state(self.session_root, freeze=[str(self.session_root)])
         target = self.scratchpad / "commit_messages.txt"
         with unittest.mock.patch.dict(
             os.environ, {"CLAUDE_PROJECT_DIR": str(self.session_root)}
@@ -252,18 +264,14 @@ class TestBashFreeze(unittest.TestCase):
         self._tmp.cleanup()
 
     def _decide(self, command, freeze=True):
-        g.save_state(
-            g.state_path(self.repo),
-            {"careful": False, "freeze": self.freeze if freeze else [], "deny": []},
-        )
+        set_state(self.repo, freeze=self.freeze if freeze else [])
         event = {
             "tool_name": "Bash",
             "tool_input": {"command": command},
             "cwd": str(self.repo),
+            "session_id": SID,
         }
-        with unittest.mock.patch.object(
-            g, "board_dirs", return_value=g.BoardDirs([], True)
-        ):
+        with unittest.mock.patch.object(g, "board_dirs", return_value=[]):
             return g.decide(event, self.repo)
 
     def test_write_outside_scope_asks(self):
@@ -298,6 +306,286 @@ class TestBashFreeze(unittest.TestCase):
 
     def test_no_freeze_is_silent(self):
         self.assertIsNone(self._decide(f"echo x > {self.other}/a.txt", freeze=False))
+
+
+class TestPerSessionState(unittest.TestCase):
+    """The guard's state is per session: a `/add-dir` typed, a `careful`, `freeze` or `deny` set
+    in one session never reaches another session of the same project root."""
+
+    HOOK = str(_STATE_DIR / "pc_kanban_guard_session_hook.py")
+    A, B = "session-a", "session-b"
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        self.root = self.base / "repo"
+        (self.root / "docs").mkdir(parents=True)
+        self.extra = self.base / "extra"
+        self.extra.mkdir()
+        env = unittest.mock.patch.dict(
+            os.environ,
+            {
+                "HOME": str(self.base / "home"),
+                "CLAUDE_PROJECT_DIR": str(self.root),
+            },
+        )
+        env.start()
+        self.addCleanup(env.stop)
+        boards = unittest.mock.patch.object(g, "board_dirs", return_value=[])
+        boards.start()
+        self.addCleanup(boards.stop)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _decide(self, session_id, target=None, command=None, **extra):
+        event = {
+            "tool_name": "Bash" if command else "Write",
+            "tool_input": (
+                {"command": command} if command else {"file_path": str(target)}
+            ),
+            "cwd": str(self.root),
+            "session_id": session_id,
+            **extra,
+        }
+        return g.decide(event, self.root)
+
+    def _verdict(self, decision):
+        return (
+            decision["hookSpecificOutput"]["permissionDecision"] if decision else None
+        )
+
+    def _hook(self, event):
+        result = subprocess.run(
+            [sys.executable, self.HOOK],
+            input=json.dumps({"cwd": str(self.root), **event}),
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.root)},
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def _ctl(self, session_id, *argv):
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        if session_id:
+            env["CLAUDE_CODE_SESSION_ID"] = session_id
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            unittest.mock.patch.dict(os.environ, env, clear=True),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = g.main(["--root", str(self.root), *argv])
+        return code, out.getvalue(), err.getvalue()
+
+    def _add_dir(self, session_id, directory):
+        self._hook(
+            {
+                "hook_event_name": "DirectoryAdded",
+                "session_id": session_id,
+                "directory": str(directory),
+                "source": "slash_command",
+            }
+        )
+
+    def test_fr_0025_376_a_typed_add_dir_makes_the_directory_writable(self):
+        target = self.extra / "f.py"
+        self.assertEqual(self._verdict(self._decide(self.A, target)), "ask")
+        self._add_dir(self.A, self.extra)
+        self.assertIsNone(self._decide(self.A, target))
+
+    def test_fr_0025_378_an_added_dir_is_not_writable_from_another_session(self):
+        self._add_dir(self.A, self.extra)
+        self.assertEqual(
+            self._verdict(self._decide(self.B, self.extra / "f.py")), "ask"
+        )
+
+    def test_ass_0025_183_event_workspace_added_dirs_is_not_a_source(self):
+        decision = self._decide(
+            self.A,
+            self.extra / "f.py",
+            workspace={"added_dirs": [str(self.extra)]},
+        )
+        self.assertEqual(self._verdict(decision), "ask")
+
+    def test_fr_0025_379_freeze_set_in_one_session_spares_another(self):
+        code, _, _ = self._ctl(self.A, "freeze", str(self.root / "src"))
+        self.assertEqual(code, 0)
+        target = self.root / "docs" / "x.md"
+        self.assertEqual(self._verdict(self._decide(self.A, target)), "deny")
+        self.assertIsNone(self._decide(self.B, target))
+
+    def test_freeze_denies_inside_the_root_and_asks_further_out(self):
+        """The outside-scope `ask` runs before the freeze check: a frozen session's `deny` is
+        reached inside the project root or an added directory, never further out."""
+        self._ctl(self.A, "freeze", str(self.root / "src"))
+        outside = self.extra / "f.py"
+        self.assertEqual(self._verdict(self._decide(self.A, outside)), "ask")
+        self.assertEqual(
+            self._verdict(self._decide(self.A, self.root / "docs" / "x.md")), "deny"
+        )
+        self._add_dir(self.A, self.extra)
+        self.assertEqual(self._verdict(self._decide(self.A, outside)), "deny")
+
+    def test_fr_0025_379_deny_set_in_one_session_spares_another(self):
+        self._ctl(self.A, "deny", str(self.root / "docs"))
+        target = self.root / "docs" / "x.md"
+        self.assertEqual(self._verdict(self._decide(self.A, target)), "deny")
+        self.assertIsNone(self._decide(self.B, target))
+
+    def test_fr_0025_379_careful_set_in_one_session_spares_another(self):
+        self._ctl(self.A, "careful", "on")
+        self.assertEqual(
+            self._verdict(self._decide(self.A, command="rm -rf build")), "ask"
+        )
+        self.assertIsNone(self._decide(self.B, command="rm -rf build"))
+
+    def test_imp_0025_23_a_subagent_event_shares_its_parents_state(self):
+        self._ctl(self.A, "freeze", str(self.root / "src"))
+        decision = self._decide(
+            self.A,
+            self.root / "docs" / "x.md",
+            agent_id="agent-7",
+            agent_type="general-purpose",
+        )
+        self.assertEqual(self._verdict(decision), "deny")
+
+    def test_fr_0025_384_unreadable_or_old_state_means_nothing_added_nothing_frozen(
+        self,
+    ):
+        state = gs.state_path(self.root)
+        legacy = {"careful": True, "freeze": [str(self.root / "src")], "deny": []}
+        variants = {
+            "absent": None,
+            "corrupt": "{not json",
+            "legacy flat keys": json.dumps(legacy),
+            "sessions not a table": json.dumps({"sessions": []}),
+            "entry not a table": json.dumps({"sessions": {self.A: "oops"}}),
+        }
+        for label, content in variants.items():
+            with self.subTest(label):
+                state.parent.mkdir(parents=True, exist_ok=True)
+                state.unlink(missing_ok=True)
+                if content is not None:
+                    state.write_text(content, encoding="utf-8")
+                self.assertIsNone(self._decide(self.A, self.root / "docs" / "x.md"))
+                self.assertIsNone(self._decide(self.A, command="rm -rf build"))
+                self.assertEqual(
+                    self._verdict(self._decide(self.A, self.extra / "f.py")), "ask"
+                )
+
+    def test_a_change_landing_before_a_careful_write_survives_it(self):
+        real = gs.update_session
+
+        def racing(path, session_id, mutate):
+            """Another writer of the same session lands just before this call's own write."""
+            real(path, session_id, lambda e: e.update(freeze=["/other"], deny=["/d"]))
+            return real(path, session_id, mutate)
+
+        with unittest.mock.patch.object(gs, "update_session", racing):
+            code, _, _ = self._ctl(self.A, "careful", "on")
+        entry = gs.load_session(gs.state_path(self.root), self.A)
+        self.assertEqual(
+            (code, entry["careful"], entry["freeze"], entry["deny"]),
+            (0, True, ["/other"], ["/d"]),
+        )
+
+    def _run_hook_process(self, event):
+        return subprocess.run(
+            [sys.executable, g.__file__],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.root)},
+            check=False,
+        )
+
+    def test_a_pretooluse_event_without_a_session_id_says_so_on_stderr_only(self):
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(self.extra / "f.py")},
+            "cwd": str(self.root),
+        }
+        result = self._run_hook_process(event)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+        self.assertIn("session_id", result.stderr)
+        decision = json.loads(result.stdout)  # a single, valid decision on stdout
+        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_a_pretooluse_event_with_a_session_id_prints_nothing_on_stderr(self):
+        event = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(self.root / "docs" / "x.md")},
+            "cwd": str(self.root),
+            "session_id": self.A,
+        }
+        result = self._run_hook_process(event)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+
+    def test_a_directory_filed_by_the_hook_survives_a_cli_freeze(self):
+        self._add_dir(self.A, self.extra)
+        code, _, _ = self._ctl(self.A, "freeze", str(self.root / "src"))
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            gs.load_session(gs.state_path(self.root), self.A)["added_dirs"],
+            [str(self.extra)],
+        )
+
+    def test_guard_off_clears_careful_and_freeze_but_keeps_added_dirs(self):
+        self._add_dir(self.A, self.extra)
+        self._ctl(self.A, "guard", str(self.root / "src"))
+        code, _, _ = self._ctl(self.A, "guard", "off")
+        entry = gs.load_session(gs.state_path(self.root), self.A)
+        self.assertEqual(
+            (code, entry["careful"], entry["freeze"], entry["added_dirs"]),
+            (0, False, [], [str(self.extra)]),
+        )
+
+    def test_format_status_reports_added_dirs_and_the_short_session_id(self):
+        state = {"careful": True, "freeze": [], "deny": [], "added_dirs": ["/x", "/y"]}
+        self.assertEqual(
+            g.format_status(state, "0123456789abcdef"),
+            "careful: on · freeze: off · deny: off · added dirs: 2 · session: 01234567",
+        )
+
+    def test_status_prints_the_calling_sessions_counts(self):
+        sid = "abcdef12-3456-7890"
+        self._add_dir(sid, self.extra)
+        code, out, _ = self._ctl(sid, "status")
+        self.assertEqual(
+            (code, out.strip()),
+            (
+                0,
+                "careful: off · freeze: off · deny: off · added dirs: 1 · session: abcdef12",
+            ),
+        )
+
+    def test_a_malformed_command_exits_two_before_the_session_is_looked_up(self):
+        for argv in (("freeze",), ("deny",), ("bogus",), ()):
+            with self.subTest(argv=argv):
+                code, out, err = self._ctl(None, *argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("usage", err)
+                self.assertNotIn("CLAUDE_CODE_SESSION_ID", err)
+
+    def test_ctl_without_a_session_id_fails_loudly_and_writes_nothing(self):
+        for argv in (
+            ("careful", "on"),
+            ("freeze", str(self.root)),
+            ("deny", str(self.root)),
+            ("guard", "on"),
+            ("status",),
+        ):
+            with self.subTest(argv=argv):
+                code, out, err = self._ctl(None, *argv)
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("CLAUDE_CODE_SESSION_ID", err)
+                self.assertFalse(gs.state_path(self.root).exists())
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the `UserPromptExpansion` registries of pc-git and pc-kanban — run with: python3 -m pytest tests/test_direct_command_hooks.py"""
 
+import argparse
 import importlib.util
 import json
 import os
@@ -33,7 +34,13 @@ def _argv(plugin, command):
 def _fire(plugin, command, command_args, tmp_path):
     proc = subprocess.run(
         _argv(plugin, command),
-        input=json.dumps({"command_args": command_args, "cwd": str(tmp_path)}),
+        input=json.dumps(
+            {
+                "command_args": command_args,
+                "cwd": str(tmp_path),
+                "session_id": "direct-command-session",
+            }
+        ),
         capture_output=True,
         text=True,
         env={"PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": str(tmp_path)},
@@ -174,6 +181,50 @@ def _load_runner(path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _child_session_id(tmp_path, event_extra):
+    """What `CLAUDE_CODE_SESSION_ID` a script started by the runner sees for this event."""
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import os\nprint(os.environ.get('CLAUDE_CODE_SESSION_ID', 'absent'))\n"
+    )
+    runner = _load_runner(
+        PLUGINS / "pc-kanban" / "hooks" / "pc_kanban_direct_command_runner.py"
+    )
+    args = argparse.Namespace(
+        script=str(probe),
+        interpreter="python3",
+        grammar=json.dumps({"forms": [{"match": [], "emit": []}]}),
+        timeout=10.0,
+    )
+    return runner._run(args, {"command_args": "", "cwd": str(tmp_path), **event_extra})
+
+
+def test_runner_forwards_the_event_session_id_to_the_child(tmp_path):
+    assert _child_session_id(tmp_path, {"session_id": "sess-42"}) == "sess-42"
+
+
+def test_runner_event_session_id_wins_over_the_ambient_variable(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "ambient")
+    assert _child_session_id(tmp_path, {"session_id": "sess-42"}) == "sess-42"
+
+
+def test_runner_leaves_the_environment_untouched_without_a_session_id(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    assert _child_session_id(tmp_path, {}) == "absent"
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "ambient")
+    assert _child_session_id(tmp_path, {}) == "ambient"
+
+
+@pytest.mark.parametrize("bad", ["", None, 7, ["x"]])
+def test_runner_ignores_a_session_id_that_is_not_a_non_empty_string(
+    tmp_path, monkeypatch, bad
+):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    assert _child_session_id(tmp_path, {"session_id": bad}) == "absent"
 
 
 @pytest.mark.parametrize("skill", ["commit", "commit-and-pr", "clean-gone"])

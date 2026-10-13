@@ -207,7 +207,8 @@ def _run(args: argparse.Namespace, event: object) -> str | None:
 
     Returns:
         The script's stripped stdout (or `(no output)`), or None when nothing should
-        be blocked.
+        be blocked. The child gets the event's `session_id` as `CLAUDE_CODE_SESSION_ID`
+        when the event carries one, and an untouched environment otherwise.
     """
     if not isinstance(event, dict):
         return None
@@ -220,6 +221,13 @@ def _run(args: argparse.Namespace, event: object) -> str | None:
     argv = _select_argv(json.loads(args.grammar), tokens, cwd)
     if argv is None:
         return None
+    # L'id de session de l'événement : un hook n'hérite pas forcément de CLAUDE_CODE_SESSION_ID.
+    session_id = event.get("session_id")
+    env = (
+        {**os.environ, "CLAUDE_CODE_SESSION_ID": session_id}
+        if isinstance(session_id, str) and session_id
+        else None
+    )
     # Session dédiée : sur timeout on tue tout le groupe, sinon un petit-enfant garde le pipe ouvert.
     proc = subprocess.Popen(  # nosec B603 - liste, jamais de shell
         [*_command(args.script, args.interpreter), *argv],
@@ -227,6 +235,7 @@ def _run(args: argparse.Namespace, event: object) -> str | None:
         stderr=subprocess.PIPE,
         text=True,
         cwd=cwd,
+        env=env,
         start_new_session=True,
     )
     try:

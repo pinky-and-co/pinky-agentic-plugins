@@ -13,12 +13,14 @@ this **single script** that reads it. The script is dual-mode:
     this guard makes that loss mode loud instead of silent. Layered ABOVE `freeze` — a freeze
     scoped to `.claude` must not reopen what this guard closes.
   - **Outside-scope guard, ALWAYS ON** → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target
-    sits outside the project root, every `--add-dir`/`/add-dir` directory (read live from the
-    event's `workspace.added_dirs` field — a common field the harness fills on every hook call,
-    no state file needed), and every declared `permissions.additionalDirectories` entry is
-    stopped. Read-visibility (Claude Code natively loads ancestor `CLAUDE.md` files as context)
-    is not write authorization — this guard makes that boundary mechanical instead of relying on
-    the agent to remember it. Three carve-outs:
+    sits outside the project root, every directory a `/add-dir` typed in THIS session added (the
+    `DirectoryAdded` hook files it in the session's state), and every declared
+    `permissions.additionalDirectories` entry (`.claude/settings.json`,
+    `.claude/settings.local.json`, `~/.claude/settings.json`) returns ``ask``. A `--add-dir` passed
+    at startup emits no event and sits in no settings file: the guard cannot see it, so it never
+    answers ``deny`` for an unknown target. Read-visibility (Claude Code natively loads ancestor
+    `CLAUDE.md` files as context) is not write authorization — this guard makes that boundary
+    mechanical instead of relying on the agent to remember it. Two carve-outs:
     - **Board dirs are always writable** — the card and agent-log directories of every kanban
       board mounted on this machine (`stop_handoff.py --list-kanbans` / `--list-agent-log-dirs`),
       whatever the session root. An orchestrator or a repo-scoped worker session must still be
@@ -29,15 +31,12 @@ this **single script** that reads it. The script is dual-mode:
       directory needs no permission prompt; without this carve-out a `context: fork` skill that
       writes there (no channel back to answer an ``ask``) stalls waiting on a prompt nobody can
       answer.
-    - **Outside every git repo → ``ask``, never a silent ``deny``.** A target that is out of
-      scope *and* sits in no git repo at all (`~/.config/...`, a scratch dir) returns
-      ``permissionDecision: "ask"``. Only a target that lands inside *another* git repo is a
-      hard ``deny`` (a repo-scoped session has no business writing another repo). If board
-      resolution fails, every out-of-scope write degrades to ``ask`` rather than fail closed.
   - `careful` on  → a destructive `Bash` command returns ``permissionDecision: "ask"`` (interactive
     confirm; the user clears it with one keystroke). Never a silent denial — careful is a speed bump.
   - `freeze`  set → an `Edit`/`Write`/`MultiEdit`/`NotebookEdit` whose target sits **outside** the
-    frozen directories returns ``permissionDecision: "deny"`` (a lock, not a prompt). A `Bash`
+    frozen directories returns ``permissionDecision: "deny"`` (a lock, not a prompt) — but only for
+    a target inside the project root or an added directory: the outside-scope guard above runs
+    first, so a target further out gets its ``ask``, never this ``deny``. A `Bash`
     command that both looks like a write (`>`, `tee`, `sed -i`, `mv`, `cp`, `rm`, `git commit`…)
     and names an absolute/`~` path, a `cd` target or a `git -C` dir outside the frozen directories
     returns ``ask`` (a speed bump, never a deny). HONEST LIMIT: this is a string heuristic — a
@@ -55,8 +54,16 @@ this **single script** that reads it. The script is dual-mode:
   deterministically (no LLM guesswork about JSON shape) — one skill forwarding `$ARGUMENTS`
   straight through, instead of four near-identical skills each hardcoding their own mode.
 
-State lives at ``$CLAUDE_PROJECT_DIR/.claude/.guard-state.json`` (override: ``PC_GUARD_STATE``).
-It persists across turns until explicitly lifted; every deny/ask reason says how to lift it.
+State is **per session**: ``careful``, ``freeze``, ``deny`` and the `/add-dir` directories belong
+to the ``session_id`` that set them and never reach another session of the same project. A
+sub-agent's tool calls carry its parent's ``session_id`` (observed: a parent's `deny` blocked a
+sub-agent's `Write`), so a sub-agent shares its parent's state. It lives at
+``$CLAUDE_PROJECT_DIR/.claude/.guard-state.json`` (override: ``PC_GUARD_STATE``), one entry per
+session, described in `hooks/guard-state/pc_kanban_guard_state.py`. The `SessionEnd` hook deletes
+the session's entry and a write prunes entries untouched for seven days. Within a session it
+persists across turns until explicitly lifted; every deny/ask reason says how to lift it. A state
+file that is absent, unreadable or in an older format reads as "nothing added, nothing frozen".
+Ctl mode reads the session from ``CLAUDE_CODE_SESSION_ID`` and fails when it is not set.
 
 Python 3.11+, stdlib only. A hook failure must never block a tool call → unexpected errors exit 0.
 """
@@ -68,16 +75,17 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
+
+_PLUGIN_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(_PLUGIN_ROOT / "hooks" / "guard-state"))
+import pc_kanban_guard_state as gs  # noqa: E402  — le fichier d'état, partagé avec les hooks
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-STATE_ENV = "PC_GUARD_STATE"
-DEFAULT_STATE_REL = ".claude/.guard-state.json"
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 FREEZE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
@@ -164,42 +172,6 @@ def project_root(event: dict | None = None) -> Path:
     return cwd
 
 
-def state_path(root: Path) -> Path:
-    """Where the guard state lives — env override, else `<root>/.claude/.guard-state.json`."""
-    override = os.environ.get(STATE_ENV)
-    return Path(override) if override else root / DEFAULT_STATE_REL
-
-
-def load_state(path: Path) -> dict:
-    """Read the state file; tolerate absent / malformed content (returns the empty default)."""
-    empty = {"careful": False, "freeze": [], "deny": []}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, ValueError):
-        return empty
-    if not isinstance(data, dict):
-        return empty
-    data.setdefault("careful", False)
-    for key in ("freeze", "deny"):
-        values = data.get(key)
-        data[key] = [str(d) for d in values] if isinstance(values, list) else []
-    return data
-
-
-def save_state(path: Path, state: dict) -> None:
-    """Persist the state file, stamping the update time. Creates the parent dir if needed."""
-    state = {
-        "careful": bool(state.get("careful")),
-        "freeze": list(state.get("freeze") or []),
-        "deny": list(state.get("deny") or []),
-    }
-    state["updated"] = f"{datetime.now():%Y-%m-%d %H:%M}"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-
-
 def is_destructive(command: str) -> str | None:
     """Return the label of the first destructive pattern the command matches, else None."""
     for label, pattern in _DESTRUCTIVE:
@@ -242,16 +214,16 @@ def generated_tree_violation(target: str, root: Path) -> str | None:
     return None
 
 
-def additional_dirs(event: dict, root: Path) -> list[Path]:
+def additional_dirs(state: dict, root: Path) -> list[Path]:
     """Directories this session may write to beyond the project root.
 
-    Two sources, merged: `workspace.added_dirs` on the PreToolUse event itself — a common field
-    the harness fills on every hook call with the live `--add-dir` / `/add-dir` list, no state
-    file needed — and `permissions.additionalDirectories` in every settings file the harness reads
-    (project, project-local, user-global), for directories granted that way instead.
+    Two sources, merged: the directories a `/add-dir` typed in this session added (`added_dirs`
+    of the session's state, filed there by the `DirectoryAdded` hook), and
+    `permissions.additionalDirectories` in every settings file the harness reads (project,
+    project-local, user-global). A `--add-dir` passed at startup is in neither.
     """
     dirs: list[Path] = []
-    for d in (event.get("workspace") or {}).get("added_dirs") or []:
+    for d in state.get("added_dirs") or []:
         dp = Path(str(d))
         dirs.append(dp if dp.is_absolute() else root / dp)
     for f in (
@@ -271,9 +243,9 @@ def additional_dirs(event: dict, root: Path) -> list[Path]:
     return dirs
 
 
-def outside_scope_violation(event: dict, target: str, root: Path) -> str | None:
-    """Return guidance when `target` sits outside the project root AND every declared
-    additional directory, else None. ALWAYS ON, no opt-out — like the generated-tree guard above.
+def outside_scope_violation(state: dict, target: str, root: Path) -> str | None:
+    """Return guidance when `target` sits outside the project root AND every known additional
+    directory, else None. ALWAYS ON, no opt-out — like the generated-tree guard above.
 
     Read-visibility is not write authorization: Claude Code natively loads ancestor `CLAUDE.md`
     files as context (walking up from the project root), and that read access says nothing about
@@ -281,46 +253,34 @@ def outside_scope_violation(event: dict, target: str, root: Path) -> str | None:
     """
     tgt = Path(target)
     tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
-    allowed = [root.resolve(), *(d.resolve() for d in additional_dirs(event, root))]
+    allowed = [root.resolve(), *(d.resolve() for d in additional_dirs(state, root))]
     if any(tgt == a or tgt.is_relative_to(a) for a in allowed):
         return None
     return (
-        f"`{target}` resolves outside the project root (`{root}`) and every `--add-dir` / "
-        "`permissions.additionalDirectories` directory. A file Claude Code loads as ancestor "
-        "context (e.g. a CLAUDE.md one level up) is read-visible by design — that is not write "
-        "authorization. If this edit is genuinely intended, do it by hand, or add the directory "
-        "with `/add-dir` or `permissions.additionalDirectories` first."
+        f"`{target}` resolves outside the project root (`{root}`) and outside every directory "
+        "this guard reads: a `/add-dir` typed in this session, and "
+        "`permissions.additionalDirectories` in `.claude/settings.json`, "
+        "`.claude/settings.local.json` and `~/.claude/settings.json`. A `--add-dir` passed at "
+        "startup is not seen, so the directory may be added and still unknown here. A file "
+        "Claude Code loads as ancestor context (e.g. a CLAUDE.md one level up) is read-visible by "
+        "design — that is not write authorization. Confirm if this write is intended; otherwise "
+        "cancel, or add the directory with `/add-dir` or `permissions.additionalDirectories`."
     )
 
-
-_OUT_OF_SCOPE_ASK = (
-    "`{target}` is outside this session's project root, every added directory, and every git "
-    "repo on this machine. Confirm if this write is intended; otherwise cancel — nothing in "
-    "scope has asked for it."
-)
 
 _STOP_HANDOFF = Path(__file__).resolve().parents[3] / "hooks" / "stop_handoff.py"
 
 
-class BoardDirs(NamedTuple):
-    """Result of `board_dirs`. `dirs` are the mounted boards' card + agent-log directories;
-    `resolved` is False when the lookup subprocess failed — a caller then degrades an
-    out-of-scope write to `ask`, never a silent `deny`."""
-
-    dirs: list[Path]
-    resolved: bool
-
-
-def board_dirs(event: dict, root: Path) -> BoardDirs:
+def board_dirs(event: dict, root: Path) -> list[Path]:
     """Card + agent-log directories of every kanban board mounted on this machine — writable
     from any session root.
 
     Resolved through `stop_handoff.py`'s own CLI (`--list-kanbans` + `--list-agent-log-dirs`),
-    the one place board resolution lives.
+    the one place board resolution lives. A failed lookup contributes nothing: the board's files
+    then fall through to the outside-scope ``ask``.
     """
     cwd = event.get("cwd") or str(root)
     dirs: list[Path] = []
-    ok = True
     for mode in ("--list-kanbans", "--list-agent-log-dirs"):
         try:
             out = subprocess.run(
@@ -332,16 +292,14 @@ def board_dirs(event: dict, root: Path) -> BoardDirs:
                 check=False,
             )
         except (OSError, subprocess.SubprocessError):
-            ok = False
             continue
         if out.returncode != 0:
-            ok = False
             continue
         for line in out.stdout.splitlines():
             line = line.strip()
             if line:
                 dirs.append(Path(line).resolve())
-    return BoardDirs(dirs, ok)
+    return dirs
 
 
 def is_session_scratchpad(target: str) -> bool:
@@ -369,24 +327,6 @@ def is_session_scratchpad(target: str) -> bool:
         if re.fullmatch(r"claude-\d+", part) and "scratchpad" in parts[i + 1 :]:
             return True
     return False
-
-
-def in_git_repo(target: str, root: Path) -> bool:
-    """True when `target` resolves inside some real git repo. Splits the out-of-scope guard:
-    a target in another repo is a hard `deny`, one in no repo at all is an `ask`."""
-    tgt = Path(target)
-    tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(tgt.parent), "rev-parse", "--git-dir"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        return out.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
 
 
 def frozen_violation(target: str, freeze_dirs: list[str], root: Path) -> str | None:
@@ -469,8 +409,11 @@ def _decision(kind: str, reason: str) -> dict:
 
 
 def decide(event: dict, root: Path) -> dict | None:
-    """Core hook decision: ask on careful, deny on freeze escape, else None (let flow proceed)."""
-    state = load_state(state_path(root))
+    """Core hook decision: ask on careful, deny on freeze escape, else None (let flow proceed).
+
+    The state read is the entry of the event's `session_id` — nothing set by another session.
+    """
+    state = gs.load_session(gs.state_path(root), event.get("session_id"))
     tool = event.get("tool_name", "")
     tool_input = event.get("tool_input") or {}
 
@@ -488,7 +431,7 @@ def decide(event: dict, root: Path) -> dict | None:
             tool_input.get("command", ""), state["freeze"], root
         )
         if escapes:
-            board_paths = board_dirs(event, root).dirs
+            board_paths = board_dirs(event, root)
 
             def exempt(raw: str) -> bool:
                 tgt = Path(raw)
@@ -523,9 +466,9 @@ def decide(event: dict, root: Path) -> dict | None:
                         f"Lift it with `/permission-change deny off`.",
                     )
 
-            memo: list[BoardDirs] = []
+            memo: list[list[Path]] = []
 
-            def board() -> BoardDirs:
+            def board() -> list[Path]:
                 if not memo:
                     memo.append(board_dirs(event, root))
                 return memo[0]
@@ -533,19 +476,15 @@ def decide(event: dict, root: Path) -> dict | None:
             def on_board() -> bool:
                 tgt = Path(target)
                 tgt = (tgt if tgt.is_absolute() else root / tgt).resolve()
-                return any(tgt == d or tgt.is_relative_to(d) for d in board().dirs)
+                return any(tgt == d or tgt.is_relative_to(d) for d in board())
 
             scratchpad = is_session_scratchpad(target)
 
-            message = outside_scope_violation(event, target, root)
+            message = outside_scope_violation(state, target, root)
             if message:
                 if on_board() or scratchpad:
                     return None
-                if not board().resolved:
-                    return _decision("ask", _OUT_OF_SCOPE_ASK.format(target=target))
-                if in_git_repo(target, root):
-                    return _decision("deny", message)
-                return _decision("ask", _OUT_OF_SCOPE_ASK.format(target=target))
+                return _decision("ask", message)
 
             if state.get("freeze"):
                 scope = frozen_violation(target, state["freeze"], root)
@@ -565,6 +504,13 @@ def run_hook() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0
     try:
+        sid = event.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            print(
+                "guard.py: PreToolUse event without a usable session_id — careful, freeze, "
+                "deny and added directories are not applied to this call.",
+                file=sys.stderr,
+            )
         decision = decide(event, project_root(event))
     except Exception:
         return 0
@@ -580,14 +526,18 @@ def _onoff(arg: str | None, default: bool = True) -> bool:
     return arg.strip().lower() not in {"off", "false", "0", "no"}
 
 
-def format_status(state: dict) -> str:
-    """One-line human summary of the active guards."""
+def format_status(state: dict, session_id: str) -> str:
+    """One-line human summary of the session's guards, added directories and short session id."""
     careful = "on" if state.get("careful") else "off"
     freeze = state.get("freeze") or []
     freeze_str = ", ".join(freeze) if freeze else "off"
     deny = state.get("deny") or []
     deny_str = ", ".join(deny) if deny else "off"
-    return f"careful: {careful} · freeze: {freeze_str} · deny: {deny_str}"
+    added = len(state.get("added_dirs") or [])
+    return (
+        f"careful: {careful} · freeze: {freeze_str} · deny: {deny_str}"
+        f" · added dirs: {added} · session: {session_id[:8]}"
+    )
 
 
 USAGE = (
@@ -604,53 +554,55 @@ def ctl(argv: list[str], root: Path) -> int:
 
     A single `permission-change` skill forwards `$ARGUMENTS` straight through — one positional
     mode word (`careful`/`freeze`/`guard`/`deny`/`status`) picks the branch below, instead of four
-    near-duplicate skills each hardcoding their own mode.
+    near-duplicate skills each hardcoding their own mode. The change is computed on the entry
+    read under the state lock, so a concurrent writer of the same session (a `/add-dir` filed by
+    the `DirectoryAdded` hook, another `freeze`) is never overwritten with a stale value.
     """
-    path = state_path(root)
-    state = load_state(path)
-
     if not argv:
         print(USAGE, file=sys.stderr)
         return 2
     mode = argv[0]
     rest = argv[1:]
-
-    if mode == "status":
-        print(format_status(state))
-        return 0
-    elif mode == "careful":
-        state["careful"] = _onoff(rest[0] if rest else None)
-    elif mode == "freeze":
-        if rest and rest[0].lower() in {"off", "none", "clear"}:
-            state["freeze"] = []
-        elif rest:
-            state["freeze"] = rest
-        else:
-            print("usage: guard.py freeze <dir>... | off", file=sys.stderr)
-            return 2
-    elif mode == "deny":
-        if rest and rest[0].lower() in {"off", "none", "clear"}:
-            state["deny"] = []
-        elif rest:
-            state["deny"] = rest
-        else:
-            print("usage: guard.py deny <dir>... | off", file=sys.stderr)
-            return 2
-    elif mode == "guard":
-        on = _onoff(rest[0] if rest else None)
-        if not on:
-            state["careful"], state["freeze"] = False, []
-        else:
-            state["careful"] = True
-            dirs = [a for a in rest if a.lower() not in {"on", "true", "1", "yes"}]
-            if dirs:
-                state["freeze"] = dirs
-    else:
+    if mode not in {"status", "careful", "freeze", "deny", "guard"}:
         print(f"unknown mode: {mode}\n{USAGE}", file=sys.stderr)
         return 2
+    if mode in {"freeze", "deny"} and not rest:
+        print(f"usage: guard.py {mode} <dir>... | off", file=sys.stderr)
+        return 2
+    session_id = os.environ.get(SESSION_ENV)
+    if not session_id:
+        print(
+            f"guard.py: {SESSION_ENV} is not set — the guard state is per session and this "
+            "command cannot tell which session to read or change. Run it from the session's "
+            "own shell.",
+            file=sys.stderr,
+        )
+        return 1
+    path = gs.state_path(root)
 
-    save_state(path, state)
-    print(format_status(state))
+    if mode == "status":
+        print(format_status(gs.load_session(path, session_id), session_id))
+        return 0
+
+    def change(entry: dict) -> None:
+        if mode == "careful":
+            entry["careful"] = _onoff(rest[0] if rest else None)
+        elif mode in {"freeze", "deny"}:
+            off = rest[0].lower() in {"off", "none", "clear"}
+            entry[mode] = [] if off else list(rest)
+        elif mode == "guard":
+            if not _onoff(rest[0] if rest else None):
+                entry["careful"], entry["freeze"] = False, []
+            else:
+                entry["careful"] = True
+                dirs = [a for a in rest if a.lower() not in {"on", "true", "1", "yes"}]
+                if dirs:
+                    entry["freeze"] = dirs
+        else:
+            raise AssertionError(mode)
+
+    saved = gs.update_session(path, session_id, change)
+    print(format_status(saved, session_id))
     return 0
 
 
