@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import model_adversarial
 import model_offline
 import model_panel
+import model_sanitize
 import review_complexity
 from mcp.server import MCPServer
 
@@ -91,8 +92,9 @@ def adversarial(
     self-check inherits its own blind spots, which is exactly what this tool exists to avoid. Tries
     each pool candidate in order, falling through to the next on failure; the returned text always
     opens with which model actually answered — never present a review as verdict without knowing
-    which model produced it. The verdict itself is returned verbatim below that line; do not
-    summarize or soften it on the model's behalf.
+    which model produced it. The verdict itself is returned below that line, stripped of the
+    answering model's reasoning traces (`model_sanitize` — the raw unsanitized output stays in the
+    `[raw: …]` log); do not summarize or soften it on the model's behalf.
 
     `stack` (`fastapi` / `streamlit` / `snowflake`) appends that stack's review checklist to the
     methodology, since the pool model cannot invoke a skill itself. Omitted → inferred from import
@@ -187,7 +189,10 @@ def adversarial(
     pool_result = model_adversarial.run_pool(entries, prompt, tools=tools, watch=True)
     if pool_result.entry is None:
         return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
-    return f"[answered by {model_adversarial.answer_label(pool_result.entry)}]\n\n{pool_result.result}"
+    return (
+        f"[answered by {model_adversarial.answer_label(pool_result.entry)}]\n\n"
+        f"{pool_result.result}\n\n[raw: {model_sanitize.raw_log_path()}]"
+    )
 
 
 @m.tool()
@@ -224,7 +229,7 @@ def panel(
     response = model_panel.run_panel(entries, tasks[: len(entries)], tools=tools)
     if not response.answers:
         return f"[panel] BLOCKED — every candidate failed. Skipped: {response.skipped}"
-    return model_panel.format_panel(response, len(tasks))
+    return f"{model_panel.format_panel(response, len(tasks))}\n\n[raw: {model_sanitize.raw_log_path()}]"
 
 
 @m.tool()
