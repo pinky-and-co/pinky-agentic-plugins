@@ -17,6 +17,8 @@ def pi_events(
     text: str = "",
     stop_reason: str = "stop",
     error_message: str | None = None,
+    reasoning_content: str | None = None,
+    thinking: str | None = None,
 ) -> str:
     """The JSONL a `pi --mode json` run prints for one assistant answer.
 
@@ -24,17 +26,27 @@ def pi_events(
         text: the answer's text block.
         stop_reason: the final assistant message's `stopReason`.
         error_message: its `errorMessage`, when the provider failed.
+        reasoning_content: a top-level reasoning field on the message, as a reasoning
+            provider sends it.
+        thinking: a `thinking` content block before the text one.
 
     Returns:
         The events, one per line, newline-terminated.
     """
+    content: list[dict[str, Any]] = []
+    if thinking is not None:
+        content.append({"type": "thinking", "thinking": thinking})
+    if text:
+        content.append({"type": "text", "text": text})
     message: dict[str, Any] = {
         "role": "assistant",
-        "content": [{"type": "text", "text": text}] if text else [],
+        "content": content,
         "stopReason": stop_reason,
     }
     if error_message is not None:
         message["errorMessage"] = error_message
+    if reasoning_content is not None:
+        message["reasoning_content"] = reasoning_content
     events = [
         {"type": "session", "id": "00000000-0000-4000-8000-000000000000"},
         {"type": "agent_start"},

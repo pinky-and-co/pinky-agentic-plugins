@@ -598,6 +598,26 @@ class TestRunPoolRequeue(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
 
+    def test_tool_call_text_in_plural_form_requeues(self):
+        # Un modèle sans outils écrit parfois les balises d'appel au pluriel
+        # (`<tool_calls>`…`</tool_calls>`) — même signal, même requeue.
+        text_call = (
+            "I'll review the suite.\n"
+            "<tool_calls>\n"
+            '<invoke name="Bash">\n'
+            '<parameter name="command">ls -la</parameter>\n'
+            "</invoke>\n"
+            "</tool_calls>"
+        )
+        with unittest.mock.patch(
+            "model_adversarial.Popen",
+            new_callable=PiPopen,
+            side_effect=[self._ok(text_call), self._ok("answer")],
+        ) as run:
+            result = ma.run_pool([MISTRAL], "p")
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
+
     def test_run_wall_clock_is_a_backstop_never_requeued(self):
         # Le chrono global coupe une boucle d'outils : la rejouer referait toute l'exploration.
         with unittest.mock.patch(
@@ -1604,7 +1624,10 @@ def test_adversarial_tool_header_names_the_provider_model_and_tier(monkeypatch):
 
     out = server.adversarial(task="review", model="x")
 
-    assert out == "[answered by nvidia/glm-5.3 · 🟧 opus]\n\nverdict"
+    assert out == (
+        "[answered by nvidia/glm-5.3 · 🟧 opus]\n\nverdict"
+        f"\n\n[raw: {server.model_sanitize.raw_log_path()}]"
+    )
 
 
 def test_adversarial_tool_forwards_the_diff_scope(monkeypatch):

@@ -92,6 +92,7 @@ from typing import Any, Literal, NamedTuple, TextIO, TypeVar
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 import load_secrets  # noqa: E402
+import model_sanitize  # noqa: E402
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
@@ -118,10 +119,10 @@ _OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
 _ORGANIZATION_LIMIT_RE = re.compile(r"\borgani[sz]ation reached\b", re.IGNORECASE)
 _TIMEOUT_RE = re.compile(r"\btimed out\b")
-# Une réponse qui finit sur une balise fermante d'appel d'outil est un appel écrit en texte par un
-# modèle sans outils, jamais un avis. Une balise citée au milieu d'un avis, suivie de prose, ne
-# correspond pas : l'ancre est la fin du texte.
-_TOOL_CALL_TAIL_RE = re.compile(r"</(?:function|tool_call)>\s*\Z")
+# Une réponse qui finit sur une balise fermante d'appel d'outil, singulier comme pluriel
+# (`</tool_call>` / `</tool_calls>`), est un appel écrit en texte par un modèle sans outils,
+# jamais un avis — l'ancre est la fin du texte, une balise citée au milieu ne compte pas.
+_TOOL_CALL_TAIL_RE = re.compile(r"</(?:function|tool_call)s?>\s*\Z")
 
 
 class PoolResult(NamedTuple):
@@ -884,7 +885,10 @@ def call_cli(
             follows the run; None copies nothing.
 
     Returns:
-        The text blocks of the last assistant message; empty when the run produced none.
+        The text blocks of the last assistant message, sanitized of every reasoning trace
+        (`model_sanitize` — the raw message is appended to its raw log first, and
+        `PI_INCLUDE_REASONING=1` returns the verbatim text instead); empty when the run
+        produced none.
 
     Raises:
         ValueError: the entry is not `kind: "cli"`.
@@ -976,11 +980,11 @@ def call_cli(
         )
     if message is None:
         return ""
-    return "".join(
-        str(block.get("text", ""))
-        for block in message.get("content") or []
-        if isinstance(block, dict) and block.get("type") == "text"
-    )
+    model_sanitize.append_raw(entry, message, stray)
+    answer = model_sanitize.extract_answer(message)
+    if model_sanitize.include_reasoning():
+        return answer
+    return model_sanitize.sanitize_answer(answer)
 
 
 def failure_detail(exc: subprocess.CalledProcessError) -> str:
