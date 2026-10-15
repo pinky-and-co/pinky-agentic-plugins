@@ -367,9 +367,11 @@ class TestPerSessionState(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
 
-    def _ctl(self, session_id, *argv):
+    def _ctl(self, session_id, *argv, unset=()):
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SESSION_ID", None)
+        for name in unset:
+            env.pop(name, None)
         if session_id:
             env["CLAUDE_CODE_SESSION_ID"] = session_id
         out, err = io.StringIO(), io.StringIO()
@@ -378,7 +380,7 @@ class TestPerSessionState(unittest.TestCase):
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
-            code = g.main(["--root", str(self.root), *argv])
+            code = g.main(list(argv))
         return code, out.getvalue(), err.getvalue()
 
     def _add_dir(self, session_id, directory):
@@ -565,7 +567,7 @@ class TestPerSessionState(unittest.TestCase):
         )
 
     def test_a_malformed_command_exits_two_before_the_session_is_looked_up(self):
-        for argv in (("freeze",), ("deny",), ("bogus",), ()):
+        for argv in (("freeze",), ("deny",), ("bogus",)):
             with self.subTest(argv=argv):
                 code, out, err = self._ctl(None, *argv)
                 self.assertEqual((code, out), (2, ""))
@@ -585,6 +587,53 @@ class TestPerSessionState(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(out, "")
                 self.assertIn("CLAUDE_CODE_SESSION_ID", err)
+                self.assertFalse(gs.state_path(self.root).exists())
+
+    def test_fr_0025_399_without_a_root_ctl_fails_loudly_and_writes_nothing(self):
+        for argv in (
+            ("careful", "on"),
+            ("freeze", str(self.root)),
+            ("deny", str(self.root)),
+            ("guard", "on"),
+            ("status",),
+        ):
+            with self.subTest(argv=argv):
+                code, out, err = self._ctl(
+                    self.A, *argv, unset=("CLAUDE_PROJECT_DIR", "PC_GUARD_STATE")
+                )
+                self.assertEqual((code, out), (1, ""))
+                self.assertIn("project root is unknown", err)
+                self.assertIn("restart the session", err)
+                self.assertIn("/clear", err)
+                self.assertIn("/reload-plugins", err)
+                self.assertNotIn("guessing", err)
+                self.assertEqual(list(self.base.rglob(".guard-state.json*")), [])
+                self.assertFalse(gs.state_path(self.root).exists())
+
+    def test_fr_0025_399_pc_guard_state_alone_still_names_the_state_file(self):
+        state = self.base / "elsewhere" / "state.json"
+        with unittest.mock.patch.dict(os.environ, {"PC_GUARD_STATE": str(state)}):
+            code, out, _ = self._ctl(
+                self.A, "careful", "on", unset=("CLAUDE_PROJECT_DIR",)
+            )
+            entry = gs.load_session(gs.state_path(self.root), self.A)
+        self.assertEqual((code, entry["careful"]), (0, True))
+        self.assertTrue(state.exists())
+        self.assertFalse((self.root / ".claude" / ".guard-state.json").exists())
+
+    def test_fr_0025_400_the_root_option_is_refused_and_not_in_the_usage(self):
+        self.assertNotIn("--root", g.USAGE)
+        for argv in (
+            ("--root", "/x", "status"),
+            ("status", "--root", "/x"),
+            ("--root=/x", "status"),
+            ("freeze", "--root", "/x"),
+        ):
+            with self.subTest(argv=argv):
+                code, out, err = self._ctl(self.A, *argv)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("unknown option", err)
+                self.assertTrue(err.endswith(g.USAGE + "\n"))
                 self.assertFalse(gs.state_path(self.root).exists())
 
 

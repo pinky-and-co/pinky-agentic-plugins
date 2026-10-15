@@ -294,6 +294,7 @@ pinky-agentic-plugins/
 │   │   │   ├── card-ops/
 │   │   │   │   └── pc_kanban_card_ops.py
 │   │   │   ├── guard-state/
+│   │   │   │   ├── pc_kanban_guard_env_hook.py
 │   │   │   │   ├── pc_kanban_guard_session_hook.py
 │   │   │   │   └── pc_kanban_guard_state.py
 │   │   │   ├── kanban-proactivity/
@@ -541,6 +542,7 @@ pinky-agentic-plugins/
 │   ├── test_detect_format.py
 │   ├── test_direct_command_hooks.py
 │   ├── test_guard.py
+│   ├── test_guard_env_hook.py
 │   ├── test_guard_state.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py

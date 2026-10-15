@@ -52,7 +52,11 @@ this **single script** that reads it. The script is dual-mode:
 - **Ctl mode** (argv): the `permission-change` skill calls
   ``guard.py careful|freeze|guard|deny [args]`` or ``guard.py status`` to mutate the state file
   deterministically (no LLM guesswork about JSON shape) — one skill forwarding `$ARGUMENTS`
-  straight through, instead of four near-identical skills each hardcoding their own mode.
+  straight through, instead of four near-identical skills each hardcoding their own mode. The
+  state file is the one the hook reads: the `SessionStart` hook
+  `hooks/guard-state/pc_kanban_guard_env_hook.py` exports ``CLAUDE_PROJECT_DIR`` to `Bash`, and ctl
+  mode takes the root from it (or the file from ``PC_GUARD_STATE``). With neither set it fails
+  and writes nothing — it never infers a root from the shell's cwd, and has no option to name one.
 
 State is **per session**: ``careful``, ``freeze``, ``deny`` and the `/add-dir` directories belong
 to the ``session_id`` that set them and never reach another session of the same project. A
@@ -86,6 +90,7 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+PROJECT_ENV = "CLAUDE_PROJECT_DIR"
 
 FREEZE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
@@ -150,14 +155,10 @@ CLAUDE_DIR_HAND_EDITED_PREFIXES = {".claude/memory"}
 
 
 def project_root(event: dict | None = None) -> Path:
-    """Resolve the project root: $CLAUDE_PROJECT_DIR > event cwd > current dir.
+    """Resolve the hook's project root: $CLAUDE_PROJECT_DIR > event cwd > current dir.
 
-    The last fallback only holds when the caller's shell cwd truly IS the project root — always
-    true for the hook (Claude Code sets the event itself) but not for a ctl-mode call from a
-    long-running session shell, where an earlier `cd` can drift it silently and leave a stray
-    `.guard-state.json` under the wrong repo, undetected until the next freeze check misses it.
-    `main()`'s `--root` lets a caller that already knows the root (`/chantier`) skip this guess
-    entirely; this is the last resort, so it prints what it guessed.
+    Ctl mode never guesses (see `ctl`). The last fallback only holds when the process cwd truly
+    IS the project root; it is the last resort, so it prints what it guessed.
     """
     proj = os.environ.get("CLAUDE_PROJECT_DIR")
     if proj:
@@ -166,7 +167,7 @@ def project_root(event: dict | None = None) -> Path:
         return Path(event["cwd"])
     cwd = Path.cwd()
     print(
-        f"guard.py: no $CLAUDE_PROJECT_DIR/--root given — guessing project root from cwd: {cwd}",
+        f"guard.py: no $CLAUDE_PROJECT_DIR or event cwd — guessing project root from cwd: {cwd}",
         file=sys.stderr,
     )
     return cwd
@@ -541,15 +542,15 @@ def format_status(state: dict, session_id: str) -> str:
 
 
 USAGE = (
-    "usage: guard.py [--root <path>] careful [on|off]\n"
-    "       guard.py [--root <path>] freeze <dir>... | off\n"
-    "       guard.py [--root <path>] guard <dir>... | on | off\n"
-    "       guard.py [--root <path>] deny <dir>... | off\n"
-    "       guard.py [--root <path>] status"
+    "usage: guard.py careful [on|off]\n"
+    "       guard.py freeze <dir>... | off\n"
+    "       guard.py guard <dir>... | on | off\n"
+    "       guard.py deny <dir>... | off\n"
+    "       guard.py status"
 )
 
 
-def ctl(argv: list[str], root: Path) -> int:
+def ctl(argv: list[str]) -> int:
     """Mutate the state file from a skill invocation; print the resulting status.
 
     A single `permission-change` skill forwards `$ARGUMENTS` straight through — one positional
@@ -557,10 +558,10 @@ def ctl(argv: list[str], root: Path) -> int:
     near-duplicate skills each hardcoding their own mode. The change is computed on the entry
     read under the state lock, so a concurrent writer of the same session (a `/add-dir` filed by
     the `DirectoryAdded` hook, another `freeze`) is never overwritten with a stale value.
+
+    The state file is `$PC_GUARD_STATE`, else `$CLAUDE_PROJECT_DIR/.claude/.guard-state.json`;
+    with neither set the root is unknown and nothing is written.
     """
-    if not argv:
-        print(USAGE, file=sys.stderr)
-        return 2
     mode = argv[0]
     rest = argv[1:]
     if mode not in {"status", "careful", "freeze", "deny", "guard"}:
@@ -578,7 +579,22 @@ def ctl(argv: list[str], root: Path) -> int:
             file=sys.stderr,
         )
         return 1
-    path = gs.state_path(root)
+    project_dir = os.environ.get(PROJECT_ENV)
+    override = os.environ.get(gs.STATE_ENV)
+    if override:
+        path = Path(override)
+    elif project_dir:
+        path = gs.state_path(Path(project_dir))
+    else:
+        print(
+            f"guard.py: the project root is unknown for this session — {PROJECT_ENV} is not "
+            "set, so the guard would not read the state written from here and nothing was "
+            "written. It is exported at session start and `/reload-plugins` does not replay "
+            "that: if the plugin's hooks are not loaded yet run `/reload-plugins`, then "
+            "restart the session (`/clear`).",
+            file=sys.stderr,
+        )
+        return 1
 
     if mode == "status":
         print(format_status(gs.load_session(path, session_id), session_id))
@@ -609,23 +625,20 @@ def ctl(argv: list[str], root: Path) -> int:
 def main(argv: list[str]) -> int:
     """Dispatch: argv present → ctl mode; otherwise → hook mode (stdin).
 
-    `--root <path>` (ctl mode only, anywhere in argv) skips `project_root()`'s cwd guess — the
-    caller (e.g. `/chantier`, which already resolved the workspace root) states it explicitly
-    instead of leaving guard.py to infer it from wherever the shell happens to be.
+    Ctl mode has no option to name the root: it is the session's `$CLAUDE_PROJECT_DIR`, the one
+    the hook reads. A `--root` option, anywhere in argv, is refused — never read as a directory
+    to freeze.
     """
     if not argv:
         return run_hook()
-    root: Path | None = None
-    rest: list[str] = []
-    i = 0
-    while i < len(argv):
-        if argv[i] == "--root" and i + 1 < len(argv):
-            root = Path(argv[i + 1])
-            i += 2
-            continue
-        rest.append(argv[i])
-        i += 1
-    return ctl(rest, root if root is not None else project_root())
+    if any(a == "--root" or a.startswith("--root=") for a in argv):
+        print(
+            "guard.py: unknown option --root — the project root is the session's "
+            f"{PROJECT_ENV}, it cannot be overridden.\n{USAGE}",
+            file=sys.stderr,
+        )
+        return 2
+    return ctl(argv)
 
 
 if __name__ == "__main__":

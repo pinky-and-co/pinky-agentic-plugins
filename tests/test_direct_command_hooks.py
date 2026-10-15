@@ -31,7 +31,7 @@ def _argv(plugin, command):
     return argv
 
 
-def _fire(plugin, command, command_args, tmp_path):
+def _fire(plugin, command, command_args, tmp_path, env=None):
     proc = subprocess.run(
         _argv(plugin, command),
         input=json.dumps(
@@ -43,7 +43,7 @@ def _fire(plugin, command, command_args, tmp_path):
         ),
         capture_output=True,
         text=True,
-        env={"PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": str(tmp_path)},
+        env=env or {"PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": str(tmp_path)},
     )
     assert proc.returncode == 0
     return proc.stdout
@@ -96,6 +96,48 @@ def test_permission_change_accepts_a_real_path_but_not_a_flag_or_bare_dot_dot_fl
     assert out["decision"] == "block"
     assert "deny:" in out["reason"]
     assert _fire(entry[0], entry[2], "deny -x", tmp_path) == ""
+
+
+def _permission_change_entry():
+    (entry,) = [e for e in _entries() if e[1].endswith("permission-change$")]
+    return entry
+
+
+def test_permission_change_falls_back_to_the_skill_without_a_project_dir_in_the_hook_env(
+    tmp_path,
+):
+    plugin, _, command = _permission_change_entry()
+    out = _fire(
+        plugin,
+        command,
+        "deny /tmp/some-dir",
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+    assert out == ""
+    assert not (tmp_path / ".claude" / ".guard-state.json").exists()
+
+
+def test_permission_change_project_dir_of_the_hook_env_wins_over_the_event_cwd(
+    tmp_path,
+):
+    plugin, _, command = _permission_change_entry()
+    project = tmp_path / "project"
+    session = tmp_path / "session"
+    project.mkdir()
+    session.mkdir()
+    out = json.loads(
+        _fire(
+            plugin,
+            command,
+            "deny /tmp/some-dir",
+            session,
+            env={"PATH": "/usr/bin:/bin", "CLAUDE_PROJECT_DIR": str(project)},
+        )
+    )
+    assert "deny:" in out["reason"]
+    assert (project / ".claude" / ".guard-state.json").is_file()
+    assert not (session / ".claude").exists()
 
 
 def _clean_gone_entry():
