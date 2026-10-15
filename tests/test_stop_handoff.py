@@ -356,6 +356,12 @@ class TestFindKanbans(unittest.TestCase):
         )
         self._patch.start()
         self.addCleanup(self._patch.stop)
+        # `find_kanbans` reads CLAUDE_PROJECT_DIR before its argument, and a Claude Code session
+        # exports it to every Bash call: unset, the test sees only the board it builds.
+        env = unittest.mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CLAUDE_PROJECT_DIR", None)
 
     def test_no_primary_board_means_no_declared_board_either(self):
         with tempfile.TemporaryDirectory() as tmp:
