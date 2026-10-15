@@ -351,19 +351,36 @@ def frozen_violation(target: str, freeze_dirs: list[str], root: Path) -> str | N
     return freeze_dirs[0] if len(freeze_dirs) == 1 else ", ".join(freeze_dirs)
 
 
-_BASH_WRITE_MARKER = re.compile(
+_BASH_WRITE_HEAD = (
     r">|\btee\b|\bsed\s+(?:-\w+\s+)*-\w*i|"
     r"\b(?:mv|cp|rm|touch|mkdir|ln|install|rsync|truncate|unlink)\b|"
     r"\bos\.(?:remove|rename|replace|rmdir|makedirs)\b|\bshutil\.(?:copy\w*|move|rmtree)\b|"
-    r"\bgit\b[^\n;|&]*?\b(?:commit|checkout|switch|restore|apply|add|reset|merge|rebase|push)\b"
+)
+_BASH_GIT_VERB = (
+    r"\b(?:commit|checkout|switch|restore|apply|add|reset|merge|rebase|push)\b"
+)
+# Search form: the gap never crosses another `git`, so a start stops at the next one and the scan
+# is linear. A verb reached from an earlier `git` is reached from the last one too.
+_BASH_WRITE_MARKER = re.compile(
+    _BASH_WRITE_HEAD + r"\bgit\b(?:(?!\bgit\b)[^\n;|&])*?" + _BASH_GIT_VERB
 )
 # A quoted string that opens with a write command (`rm …`, `sudo git commit …`) is code handed to a
 # wrapper (`watch`, `parallel`, `<<<`), not text. Anchored: one match per string.
 _BASH_WRITE_COMMAND = re.compile(
-    r"\s*(?:\b(?:sudo|env|nohup|time)\b\s+)*(?:" + _BASH_WRITE_MARKER.pattern + ")"
+    r"\s*(?:\b(?:sudo|env|nohup|time)\b\s+)*(?:"
+    + _BASH_WRITE_HEAD
+    + r"\bgit\b[^\n;|&]*?"
+    + _BASH_GIT_VERB
+    + ")"
 )
 _BASH_PATH = re.compile(r"(?<![\w:./-])(~?/[^\s'\";|&<>()`$]*)")
-_BASH_DIR_ARG = re.compile(r"(?:\bcd|\bgit\s+-C|--git-dir=?)\s*([^\s'\";|&<>()`$]+)")
+_BASH_DIR_PREFIX = r"(?:\bcd|\bgit\s+-C|--git-dir=?)\s*"
+# Target of `cd` / `git -C` / `--git-dir`: bare, or quoted and read whole, spaces included. A target
+# holding `$` is a variable, not a path: no alternative matches it.
+_BASH_DIR_ARG = re.compile(
+    _BASH_DIR_PREFIX + r"""(?:'([^'$]*)'|"([^"$]*)"|([^\s'";|&<>()`$]+))"""
+)
+_BASH_DIR_BEFORE_QUOTE = re.compile(_BASH_DIR_PREFIX + "$")
 _BASH_SYSTEM_PREFIXES = (
     "/usr", "/bin", "/sbin", "/opt", "/dev", "/proc", "/tmp",
     "/private/tmp",
@@ -567,7 +584,10 @@ def _drop_quoted_text(command: str) -> str | None:
         starts = ("/", "~", "$") if text[0] == '"' else ("/", "~")
         runs = text[0] == '"' and ("$(" in body or "`" in body)
         code = code_scope or _BASH_WRITE_COMMAND.match(text, 1) is not None
-        slots.append((len(out), text, body.startswith(starts) or runs or code))
+        target = "$" not in body and _BASH_DIR_BEFORE_QUOTE.search(piece) is not None
+        slots.append(
+            (len(out), text, body.startswith(starts) or runs or code or target)
+        )
         out.append("")
         segments.append(" ".join(current))
         current = []
@@ -612,7 +632,9 @@ def bash_write_escapes(command: str, freeze_dirs: list[str], root: Path) -> list
     text = command if stripped is None else _BASH_NEUTRAL_REDIRECT.sub(" ", stripped)
     if not _BASH_WRITE_MARKER.search(text):
         return []
-    candidates = _BASH_PATH.findall(text) + _BASH_DIR_ARG.findall(text)
+    candidates = _BASH_PATH.findall(text) + [
+        "".join(m.groups(default="")) for m in _BASH_DIR_ARG.finditer(text)
+    ]
     escapes: list[str] = []
     for raw in dict.fromkeys(candidates):
         path = os.path.expanduser(raw)

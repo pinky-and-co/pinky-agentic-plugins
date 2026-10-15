@@ -451,6 +451,49 @@ class TestBashWriteEscapes(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.escapes(cmd), [])
 
+    def test_quoted_directory_target_outside_asks(self):
+        for cmd, target in (
+            ("cd '../outside' && echo x > f", "../outside"),
+            ('cd "../outside" && echo x > f', "../outside"),
+            ('git -C "../out side" commit -am x', "../out side"),
+            ("git -C '../out side' commit -am x", "../out side"),
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [target])
+
+    def test_quoted_directory_target_inside_does_not_ask(self):
+        for cmd in (
+            "cd 'sub/dir' && echo x > f",
+            'git -C "sub/di r" commit -am x',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [])
+
+    def test_quoted_directory_target_with_variable_is_ignored(self):
+        for cmd in (
+            'cd "$REPO" && echo x > f',
+            'cd "$REPO/../outside" && echo x > f',
+            "cd '${REPO}/../outside' && echo x > f",
+            'git -C "$REPO/../outside" commit -am x',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [])
+
+    def test_git_segment_cost_is_linear(self):
+        def cost(n: int) -> float:
+            command = "git " * n + "notes"
+            start = time.perf_counter()
+            self.escapes(command)
+            return time.perf_counter() - start
+
+        # Mesures alternées, minimum de chaque taille : la suite tourne en parallèle (xdist) et une
+        # rafale de charge ne doit tomber que sur quelques essais, jamais sur une seule taille.
+        pairs = [(cost(16000), cost(32000)) for _ in range(9)]
+        small = min(s for s, _ in pairs)
+        double = min(d for _, d in pairs)
+        self.assertLess(small, 0.2)
+        self.assertLessEqual(double, small * 2.5)
+
     def test_neutral_redirections_are_not_writes(self):
         for cmd in (
             f"ls {self.abs} 2>&1",

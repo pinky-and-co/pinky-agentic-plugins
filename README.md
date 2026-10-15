@@ -338,7 +338,8 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   ├── permission-change/
 │   │   │   │   ├── scripts/
-│   │   │   │   │   └── guard.py
+│   │   │   │   │   ├── guard.py
+│   │   │   │   │   └── guard_replay.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── spawn-workers/
 │   │   │   │   ├── scripts/
@@ -543,6 +544,7 @@ pinky-agentic-plugins/
 │   ├── test_direct_command_hooks.py
 │   ├── test_guard.py
 │   ├── test_guard_env_hook.py
+│   ├── test_guard_replay.py
 │   ├── test_guard_state.py
 │   ├── test_hook_output_invariants.py
 │   ├── test_inject_policies.py
