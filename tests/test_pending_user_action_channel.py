@@ -176,18 +176,16 @@ class ChantierSkillWiringCase(unittest.TestCase):
 
     def test_review_clause_requires_the_method_line_relay(self):
         section = self._section("**Review clause.**", "**Escape clause.**")
-        self.assertIn("the final diff has been reviewed by", section)
-        self.assertIn("`Method:` line relayed verbatim", section)
-        self.assertIn(
-            "naming who answered in the full `provider/model · 🟦🟪🟧 tier` form",
-            section,
-        )
+        flat = " ".join(section.split())
+        self.assertIn("the final diff has been reviewed by", flat)
+        self.assertIn("the last pass's `Method:` line relayed verbatim", flat)
         self.assertNotIn("when the first line", section)
-        self.assertIn(
-            "the report states why `adversarial` did not answer when its `Method:` "
-            "is `reviewer` on a change that has a diff",
-            " ".join(section.split()),
-        )
+        self.assertNotIn("box checked on the card`", flat)
+
+    def test_no_waiver_branch_an_amendment_is_a_new_goal_line(self):
+        self.assertNotIn("**Waiver clause.**", self.text)
+        section = self._section("**Amending the condition.**", "`/goal clear`")
+        self.assertIn("require goal '/goal <amended condition>' --surfaced", section)
 
 
 class FinishingCardRenameCase(unittest.TestCase):
@@ -243,7 +241,7 @@ class SessionEndRenameCase(unittest.TestCase):
 
 
 _NOT_ANSWERED = (
-    "the report states why `adversarial` did not answer when its `Method:` "
+    "stating why `adversarial` did not answer when the `Method:` "
     "is `reviewer` on a change that has a diff"
 )
 
@@ -251,7 +249,7 @@ _NOT_ANSWERED = (
 class ReviewHonestyPinCase(unittest.TestCase):
     """The same sentence is pinned in every artefact that carries it."""
 
-    def test_finishing_goal_clause_pins_it(self):
+    def test_finishing_relay_rule_pins_it(self):
         text = " ".join(FINISHING.read_text().split())
         self.assertIn(_NOT_ANSWERED, text)
 

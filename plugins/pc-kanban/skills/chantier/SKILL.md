@@ -218,11 +218,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     **Review clause.** If the card's work needs judgment reviewed — the same criterion as
     `finishing-a-card.md` § "Reviewing before declaring the card done", i.e. anything beyond a
     purely mechanical change — append to `<condition>`: `… and the final diff has been reviewed by
-    `Agent(reviewer)`, findings addressed, the report's `Method:` line relayed verbatim to the
-    user, naming who answered in the full `provider/model · 🟦🟪🟧 tier` form, the report states
-    why `adversarial` did not answer when its `Method:` is `reviewer` on a change that has a diff,
-    and the `- [x] reviewed (<method>)` box checked on the card` — `<method>` is the `Method:`
-    line the reviewer opens its report with. The decision is made pre-work, on `## Done when` and
+    `Agent(reviewer)`, its findings fixed or filed in a follow-up card, and the last pass's
+    `Method:` line relayed verbatim to the user`. The clause names the substance only: the
+    `reviewed (…)` box and the rest of the report's relay are the session's own bookkeeping
+    (`finishing-a-card.md` § "Making the review visible on the card"), never a goal clause — the
+    evaluator re-reads every clause on every yield, and a card reviewed in several passes has no
+    box shape that answers every reading. The decision is made pre-work, on `## Done when` and
     `requirements:` alone, so **when it is unclear, include the clause**. A card that
     is *obviously* mechanical (doc typo, a rename, a one-line config) gets no clause and is closed
     with `- [x] reviewed (n/a — mechanical)`.
@@ -233,9 +234,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     tool`.
     Anti-cheat: the named action must be precise, nameable, and necessary — never a vague "I'm
     stuck", and never an action the agent could have run itself instead of yielding.
-    **Waiver clause.** Append a second OR branch: `… OR a clause of this condition was shown false
-    by construction, the evidence quoted in the transcript, and the user, asked through
-    `AskUserQuestion`, waived that clause or amended it — the amended clause then holding`.
+    **Amending the condition.** The evaluator judges the stored condition alone: an answer in the
+    conversation — an `AskUserQuestion` that waives or rewords a clause included — never changes
+    it. A clause the work shows wrong or ambiguous is amended by a new `/goal` line: offer the
+    amended line through `AskUserQuestion`, and on approval queue it and close the turn with it
+    exactly as below (`require goal '/goal <amended condition>' --surfaced`, then the pasteable
+    block), for the user to paste.
     `/goal clear` is never an exit to propose: the evaluator reads it as abandoning the goal, not
     meeting it, and re-fires the hook on every yield. A user decision under an active goal goes
     through `AskUserQuestion` — the turn stays open, the Stop hook does not fire — never as a prose
@@ -258,8 +262,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   fixes findings, and closes the loop — it does not write the implementation in its own turn,
   except for the single-mechanical-fix carve-out that section names.
   A worker hand-back, a review report or a test run that disproves a premise of the goal's
-  `<condition>` stops the loop right there: ask the user through `AskUserQuestion` — waive the
-  clause, amend it, or rework — before any further step, never once the card is closed.
+  `<condition>` stops the loop right there: ask the user through `AskUserQuestion` — amend the
+  condition (step 7's **Amending the condition**) or rework — before any further step, never once
+  the card is closed.
+  **A Stop-hook rejection.** The hook judges the transcript, not the work. A rejection naming
+  missing evidence — a test not re-run, a background output never read back — is met by producing
+  that evidence. A rejection that turns on form — how a line is shaped, which of several passes a
+  sentence names — is not a defect of the work: never edit a card, a commit or any other artefact
+  only to satisfy it. The second rejection on the same clause stops the loop: one
+  `AskUserQuestion` offering the amended `/goal` line. The card leaves `3-in-progress/` only once
+  the transcript meets the condition.
   **Routing a renvoi.** Every message sent to a kept worker — a review finding, a failing test or a
   user feedback — is routed by the nature of the retouche, never by the worker's context size, which
   the caller cannot observe, before any send. A worker kept on every renvoi re-reads its whole design

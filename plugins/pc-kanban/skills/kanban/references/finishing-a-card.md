@@ -96,19 +96,34 @@ relayed verbatim before any findings — naming who answered in the full
 was reached, and a summary that drops it presents a pool-model challenge and a solo same-model
 read as the same review.
 
+**Three review rounds per card at most.** A round is one reviewer pass plus the fixes it triggers.
+A reviewer reads without executing: each finding is a candidate route until replayed, and a
+criterion with no bound (open-ended input such as shell text) yields a rarer route every round.
+After the third round, a new finding is fixed in this card only when it is a regression shown by
+running it — a test or a command whose output shows the change doing worse than the base branch.
+Every other finding goes to a follow-up card (`sert:` this card), and the card closes.
+
+**A heuristic gets its differential test before the first round.** When the card changes a
+heuristic over open-ended input — a parser of shell text, a pattern guard, a classifier — the
+worker builds, before any review, a differential test: generated inputs run through the base
+branch and the change, every changed verdict listed. The fixes land from that list in one batch;
+the review then reads the differential's output along with the diff. On `freeze-bash-faux-positifs`
+one such pass (2 754 generated commands) surfaced in one run the 88 regressions nine review rounds
+had been finding one at a time.
+
 ### The review belongs in the `/goal` condition, not in an after-the-fact hope
 
 The section above is a *should* that nothing enforced — an audit of closed cards found it skipped
 on roughly half the judgment work, invisibly. So when a card's work needs judgment review, the
 review goes **into the `/goal` condition itself**, set when the card is taken (`chantier` SKILL.md
 step 7): the harness-native Stop-hook then holds the card open until the transcript shows the
-review ran. Phrase it as a transcript-verifiable state, never a promise — e.g. append to the
+review ran. Phrase it as a transcript-verifiable state, never a promise — append to the
 `## Done when`-derived condition `… and the final diff has been reviewed by `Agent(reviewer)`,
-findings addressed, the report's `Method:` line relayed verbatim to the user, naming who answered
-in the full `provider/model · 🟦🟪🟧 tier` form, the report states why `adversarial` did not answer
-when its `Method:` is `reviewer` on a change that has a diff, and the `- [x] reviewed (<method>)`
-box checked on the card`
-— naming the checkbox so satisfying the goal and stamping the box are one action.
+its findings fixed or filed in a follow-up card, and the last pass's `Method:` line relayed
+verbatim to the user`. The clause carries the substance only — that the review ran and who
+answered. The checkbox and its shape stay out of it: the evaluator re-reads every clause on every
+yield, and a form clause over a card reviewed in several passes has no wording that answers every
+reading, so the Stop hook rejects work that is done.
 
 The judgment/mechanical call is made at intake, before the diff exists — so **when it is unclear,
 include the clause**: a spurious clause on a card that turns out mechanical costs one
@@ -130,9 +145,11 @@ reviewer to catch, and stamping one on every card regardless would turn a real j
 box-ticking ritual. When a card's work *did* need real judgment reviewed, make it visible on the
 card itself: immediately above the `## Done when` line (already present by this point — it was set at
 selection), add `- [ ] reviewed (method)`, `method` the reviewer's own `Method:` line
-(`adversarial`, or `reviewer` when it reviewed by itself) or `self-degraded`, comma-separated if
-more than one was actually used (e.g. `adversarial, reviewer`) — or `n/a — mechanical` for a
-mechanical card that had nothing for a reviewer to catch.
+(`adversarial`, or `reviewer` when it reviewed by itself) or `self-degraded` — or
+`n/a — mechanical` for a mechanical card that had nothing for a reviewer to catch. Several passes
+still make one line: the final pass first, then the earlier ones, each `reviewer` pass on a diff
+followed by why `adversarial` did not answer — e.g. `- [x] reviewed (reviewer (anthropic/sonnet ·
+🟪 sonnet), adversarial timed out; adversarial (<provider/model · tier>) ×2)`.
 Check it — `- [x] reviewed (…)` — once the review above is done, before declaring the card done.
 
 Added by the session doing the work, never by `/chantier`'s intake (step 7). This checkbox is
