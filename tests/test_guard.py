@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -306,6 +307,387 @@ class TestBashFreeze(unittest.TestCase):
 
     def test_no_freeze_is_silent(self):
         self.assertIsNone(self._decide(f"echo x > {self.other}/a.txt", freeze=False))
+
+
+# Ways a command can be carried: `@W@` is the write, `@Q@` the write with double quotes
+# escaped, `@S@` the write with single quotes escaped.
+_CARRIERS = (
+    ("plain", "@W@"),
+    ("seq-;", "cd /tmp; @W@"),
+    ("seq-&&", "cd . && @W@"),
+    ("seq-||", "false || @W@"),
+    ("pipe-after", "@W@ | cat"),
+    ("background", "@W@ &"),
+    ("stderr", "@W@ 2>&1"),
+    ("devnull", "@W@ > /dev/null 2>&1"),
+    ("if", "if true; then @W@; fi"),
+    ("for", "for i in 1; do @W@; done"),
+    ("subshell", "( @W@ )"),
+    ("group", "{ @W@; }"),
+    ("cmdsub", "echo $( @W@ )"),
+    ("backtick", "echo `@W@`"),
+    ("bash-c-dq", 'bash -c "@Q@"'),
+    ("bash-c-sq", "bash -c '@S@'"),
+    ("sh-c", 'sh -c "@Q@"'),
+    ("zsh-lc", 'zsh -lc "@Q@"'),
+    ("bash-c-norc", "bash --norc -c '@S@'"),
+    ("eval-dq", 'eval "@Q@"'),
+    ("eval-bare", "eval @W@"),
+    ("ssh", "ssh host '@S@'"),
+    ("ssh-opt", "ssh -o StrictHostKeyChecking=no -p 22 user@host '@S@'"),
+    ("sudo-sh", "sudo sh -c '@S@'"),
+    ("env-bash", "env X=1 bash -c '@S@'"),
+    ("time-bash", "time bash -c '@S@'"),
+    ("nohup", "nohup bash -c '@S@' &"),
+    ("xargs", "ls | xargs -I{} sh -c '@S@'"),
+    ("find-exec", "find . -exec sh -c '@S@' \\;"),
+    ("watch", 'watch "@Q@"'),
+    ("parallel", 'parallel "@Q@"'),
+    ("su-c", "su - user -c '@S@'"),
+    ("docker", "docker exec c sh -c '@S@'"),
+    ("herestring-bash", "bash <<< '@S@'"),
+    ("herestring-at", "at now <<< '@S@'"),
+    ("heredoc-bash", "bash <<'EOF'\n@W@\nEOF"),
+    ("heredoc-sh", "sh <<EOF\n@W@\nEOF"),
+    ("heredoc-bash-s", "bash -s <<'EOF'\n@W@\nEOF"),
+    ("heredoc-ssh", "ssh host <<'EOF'\n@W@\nEOF"),
+    ("heredoc-dash", "bash <<-EOF\n\t@W@\n\tEOF"),
+    ("heredoc-pipe-sh", "cat <<'EOF' | sh\n@W@\nEOF"),
+    ("heredoc-cont", "bash \\\n<<'EOF'\n@W@\nEOF"),
+    ("heredoc-then-write", "cat <<'EOF' > notes.txt\ntext\nEOF\n@W@"),
+    ("continuation", "bash -c \\\n'@S@'"),
+    ("python-c", "python3 -c \"import os; os.system('@S@')\""),
+    ("pipe-echo-sh", "echo '@S@' | sh"),
+    ("pipe-printf-bash", "printf '%s\\n' '@S@' | bash"),
+    ("pipe-echo-dq-sh", 'echo "@Q@" | sh -s'),
+    ("ssh-dq", 'ssh host "@Q@"'),
+    ("ssh-t-bash", "ssh -t host bash -c '@S@'"),
+    ("command-sh", "command sh -c '@S@'"),
+    ("exec-bash", "exec bash -c '@S@'"),
+    ("bash-xc", "bash -xc '@S@'"),
+    ("bash-ec", "bash -ec '@S@'"),
+    ("xargs0", "find . -print0 | xargs -0 sh -c '@S@' _"),
+    ("env-i", "env -i bash -c '@S@'"),
+    ("sh-c-arg0", "sh -c '@S@' arg0"),
+    ("sh-c-cd", "sh -c 'cd d && @S@'"),
+    ("sh-c-seq", "sh -c 'true; @S@'"),
+    ("ansi-c", "bash -c $'@S@'"),
+    ("bash-c-split", "bash -c 'true' ; bash -c '@S@'"),
+    ("herestring-dq", 'sh <<< "@Q@"'),
+    ("bash-stdin-redirect", "bash < <(echo '@S@')"),
+    ("timeout", "timeout 5 bash -c '@S@'"),
+    ("sudo-u", "sudo -u root bash -c '@S@'"),
+    ("script-c", "script -q -c '@S@' /dev/null"),
+    ("chained-wrapper", "watch -n1 'bash -c \"@Q@\"'"),
+    ("heredoc-two", "cat <<A > a.txt; bash <<'B'\ntext\nA\n@W@\nB"),
+    ("heredoc-tab-sh", "sh <<-X\n\t@W@\n\tX"),
+    ("heredoc-after-text", "cat <<'A' > n.txt\ntext\nA\nbash <<'B'\n@W@\nB"),
+    ("heredoc-subst-multiline", "bash -c \"$(\ncat <<'EOF'\n@W@\nEOF\n)\""),
+    ("heredoc-pipe-cont-sh", "cat <<'EOF' |\nsh\n@W@\nEOF"),
+    ("heredoc-pipe-cont-bash-s", "cat <<'EOF' |\n  bash -s\n@W@\nEOF"),
+    ("heredoc-redirect-cont", "cat <<'EOF' >\n@T@\npayload\nEOF"),
+    ("pipe-path-sh", "echo '@S@' | /bin/sh"),
+    ("pipe-env-sh", "echo '@S@' | env sh"),
+    ("arith-nested", "n=$(( (1+1) << x ))\n@W@\nx"),
+    ("heredoc-source", "source /dev/stdin <<EOF\n@W@\nEOF"),
+    ("heredoc-dot", ". /dev/stdin <<EOF\n@W@\nEOF"),
+    ("heredoc-at", "at now <<EOF\n@W@\nEOF"),
+    ("heredoc-su", "su - user <<EOF\n@W@\nEOF"),
+)
+
+_WRITERS = {
+    "rm": "rm {T}",
+    "mv": "mv a {T}",
+    "cp": "cp a {T}",
+    "touch": "touch {T}",
+    "mkdir": "mkdir -p {T}",
+    "tee": "tee {T}",
+    "redirect": "echo x > {T}",
+    "append": "echo x >> {T}",
+    "sed-i": "sed -i s/a/b/ {T}",
+    "ln": "ln -s a {T}",
+    "git-add": "git -C {D} add .",
+    "git-commit": "git -C {D} commit -m x",
+}
+
+
+class TestBashWriteEscapes(unittest.TestCase):
+    """`bash_write_escapes` asks for real writes outside the freeze and ignores text that only
+    looks like a path."""
+
+    def setUp(self):
+        top = next(
+            (
+                d
+                for d in ("/Users", "/home", "/root", "/srv", "/mnt")
+                if os.path.isdir(d)
+            ),
+            None,
+        )
+        if top is None:
+            self.skipTest(
+                "no top-level directory among /Users, /home, /root, /srv, /mnt"
+            )
+        self.abs = f"{top}/guard-fixture"
+        self.root = Path(top) / "guard-fixture-root"
+        self.freeze = [str(self.root)]
+
+    def escapes(self, command: str) -> list[str]:
+        return g.bash_write_escapes(command, self.freeze, self.root)
+
+    def test_text_is_not_a_path(self):
+        for cmd in (
+            'git commit -m "fix /clear and /add-dir handling"',
+            'echo "see /x and /y" > notes.txt',
+            "echo 'see /x and /y' > notes.txt",
+            "sed -n '/^def/,/^$/p' a.py > out.txt",
+            f"cat <<'EOF' > notes.txt\nsee {self.abs}/secret\nEOF",
+            f"cat <<-EOF > notes.txt\n\tsee {self.abs}/secret\n\tEOF",
+            f"cat <<A > a.txt; cat <<'B' > b.txt\n{self.abs}/a\nA\n{self.abs}/b\nB",
+            "git commit -m /clear",
+            "echo a / b > out.txt",
+            'git commit -m "$(cat <<\'EOF\'\nfix it\'s /clear with "x"\nEOF\n)"',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [])
+
+    def test_neutral_redirections_are_not_writes(self):
+        for cmd in (
+            f"ls {self.abs} 2>&1",
+            "cat a.py 2>/dev/null",
+            "cat a.py &>/dev/null",
+            "cat a.py 2>>/dev/null",
+            f"ls {self.abs}/x > /dev/null 2>&1",
+            "ls /nonexistentroot/x > /dev/null 2>&1",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [])
+
+    def test_real_writes_still_ask(self):
+        a = self.abs
+        cases = {
+            f'rm "{a}/f"': [f"{a}/f"],
+            f'cp a "{a}/avec espace/a"': [f"{a}/avec"],
+            f'mv x "{a}/y"': [f"{a}/y"],
+            f"echo hi > {a}/f": [f"{a}/f"],
+            f"tee {a}/f < a": [f"{a}/f"],
+            f"sed -i '' s/a/b/ {a}/f": [f"{a}/f"],
+            f"git -C {a} commit -m 'msg /clear'": [a],
+            f"cat <<'EOF' > {a}/z\nbody\nEOF": [f"{a}/z"],
+            f"cat <<'EOF' > notes.txt\nbody\nEOF\necho x > {a}/f": [f"{a}/f"],
+            f"cmd > {a}/f": [f"{a}/f"],
+            f"cmd 2>&1 > {a}/f": [f"{a}/f"],
+            f'echo "x $(rm {a}/f)"': [f"{a}/f"],
+            f'echo \\" > {a}/f \\"': [f"{a}/f"],
+        }
+        for cmd, expected in cases.items():
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), expected)
+
+    def test_quoted_code_is_analysed(self):
+        a = self.abs
+        cases = {
+            f'bash -c "rm {a}/f"': [f"{a}/f"],
+            f"sh -c 'rm {a}/f'": [f"{a}/f"],
+            f"ssh h 'rm {a}/f'": [f"{a}/f"],
+            f"ssh -p 22 h 'rm {a}/f'": [f"{a}/f"],
+            f"ssh 'user@host' 'rm {a}/f'": [f"{a}/f"],
+            f"ssh -o 'ProxyCommand=ssh -W %h:22 j' host 'rm {a}/f'": [f"{a}/f"],
+            f"ssh {'-o Opt0=v ' * 40}host 'rm {a}/f'": [f"{a}/f"],
+            f"ssh -o 'A=1' -o 'B=2' h 'rm {a}/f'": [f"{a}/f"],
+            f"ssh h 2>&1 'rm {a}/f'": [f"{a}/f"],
+            f"ssh h 'echo a;' 'rm {a}/f'": [f"{a}/f"],
+            f'bash -c"rm {a}/f"': [f"{a}/f"],
+            f"bash <<'EOF'\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"sh <<EOF\nmv a {a}/b\nEOF": [f"{a}/b"],
+            f"sudo bash <<'EOF'\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"ssh host <<'EOF'\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"bash -s <<'EOF' > log.txt\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"bash <<'EOF'\nrm {a}/f\nEOF\necho x > {a}/g": [f"{a}/f", f"{a}/g"],
+            f"cat <<'EOF' | sh\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"cat <<EOF | bash -s\nmv a {a}/b\nEOF": [f"{a}/b"],
+            f"bash \\\n<<'EOF'\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"cat <<EOF \\\n| sh\nmv a {a}/b\nEOF": [f"{a}/b"],
+            f"cat <<EOF > run.sh\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"bash -c \"$(\ncat <<'EOF'\nrm {a}/f\nEOF\n)\"": [f"{a}/f"],
+            f"cat <<'EOF' |\nsh\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"cat <<'EOF' |\n  bash -s\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"cat <<'EOF' >\n{a}/victim\npayload\nEOF": [f"{a}/victim"],
+            f"echo 'cd {a} && rm f' | /bin/sh": [a],
+            f"echo 'cd {a} && rm f' | sudo env /usr/bin/bash": [a],
+            f"n=$(( (1+1) << x ))\nrm {a}/f\nx": [f"{a}/f"],
+            f"cat <<'EOF' && bash\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"source /dev/stdin <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            f". /dev/stdin <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"at now <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"su - user <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"fish <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"tcsh <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"bash /dev/fd/0 <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            f"cat /dev/fd/3 <<EOF\nrm {a}/f\nEOF": [f"{a}/f"],
+            # The word `at` on the opening line counts even inside a text: accepted over-ask.
+            f'echo "look at it" <<EOF > n.txt\nrm {a}/f\nEOF': [f"{a}/f"],
+            f'watch "rm {a}/f"': [f"{a}/f"],
+            f'watch "> {a}/f"': [f"{a}/f"],
+            f"parallel '> {a}/f'": [f"{a}/f"],
+            f'echo "> {a}/x" > notes.txt': [f"{a}/x"],
+            f'watch "env rm {a}/f"': [f"{a}/f"],
+            f'parallel "rm {a}/f"': [f"{a}/f"],
+            f"at now <<<'rm {a}/f'": [f"{a}/f"],
+            f"bash <<<'rm {a}/f'": [f"{a}/f"],
+            f'sudo "rm {a}/f"': [f"{a}/f"],
+            f'watch " sudo env rm {a}/f"': [f"{a}/f"],
+            f'watch "git commit -m x -C {a}"': [a],
+            f'echo x | xargs -I{{}} sh -c "mv {{}} {a}/y"': [f"{a}/y"],
+            f"bash -c --norc 'rm {a}/f'": [f"{a}/f"],
+            f"bash -c --norc --noprofile 'rm {a}/f'": [f"{a}/f"],
+            f"bash -c {' ' * 60}'rm {a}/f'": [f"{a}/f"],
+            f"bash -c $(printf '%50s') 'rm {a}/f'": [f"{a}/f"],
+            f"su - user -c 'rm {a}/f'": [f"{a}/f"],
+            f"docker exec c sh -c 'rm {a}/f'": [f"{a}/f"],
+            f"bash -c \"echo a\" ; bash -c 'rm {a}/f'": [f"{a}/f"],
+            f'eval"rm {a}/f"': [f"{a}/f"],
+            f'eval "mv a {a}/b"': [f"{a}/b"],
+            f"python3 -c \"import os; os.remove('{a}/f')\"": [f"{a}/f"],
+            f"zsh -lc 'rm {a}/f'": [f"{a}/f"],
+            f'bash -c "echo hi > {a}/f"': [f"{a}/f"],
+        }
+        for cmd, expected in cases.items():
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), expected)
+
+    def test_quoted_code_without_a_write_outside_is_silent(self):
+        for cmd in (
+            'git commit -m "fix /clear and /add-dir"',
+            'echo "see /x" > notes.txt',
+            'bash -c "echo hi"',
+            "ssh host 'ls /clear'",
+            f"ssh host 'ls /clear'; echo 'see {self.abs}/f' > notes.txt",
+            f"ssh h; echo 'see {self.abs}/f' > notes.txt",
+            f'ssh h | cat; echo "see {self.abs}/f" > notes.txt',
+            f"ssh h && echo 'see {self.abs}/f' > notes.txt",
+            "ssh h; echo 'x /y'",
+            "echo ssh 'a' > notes.txt",
+            f"cat <<'EOF' > notes.txt\nrm {self.abs}/f\nEOF",
+            f"tee notes.txt <<EOF\nmv a {self.abs}/b\nEOF",
+            f"cat <<EOF\nssh {self.abs}/f\nEOF",
+            f"git commit -m \"$(cat <<'EOF'\nrm {self.abs}/f\nEOF\n)\"",
+            f"git commit -m \"$(\ncat <<'EOF'\nrm {self.abs}/f\nEOF\n)\"",
+            f"echo (a) b > notes.txt\ncat <<'EOF' > n.txt\nrm {self.abs}/f\nEOF",
+            f"cat <<'EOF' |\ncat\nrm {self.abs}/f\nEOF",
+            f"cat \\\n<<'EOF' > notes.txt\nrm {self.abs}/f\nEOF",
+            f"echo a \\\n b\ncat <<'EOF' > notes.txt\nrm {self.abs}/f\nEOF",
+            f"echo a \\\\\ncat <<'EOF' > notes.txt\nrm {self.abs}/f\nEOF",
+            f"python3 - <<'PY'\nimport os\nif 1 > 0: os.remove('{self.abs}/f')\nPY",
+            f"perl <<'PL'\nunlink '{self.abs}/f';\nPL",
+            f"ruby <<'RB'\nFile.delete('{self.abs}/f')\nRB",
+            f"node <<'JS'\nrequire('fs').unlinkSync('{self.abs}/f')\nJS",
+            f"echo bash_history <<EOF > notes.txt\nrm {self.abs}/f\nEOF",
+            f'git commit -m "remove old notes {self.abs}/x"',
+            f'echo "mvp {self.abs}/x" > notes.txt',
+            'echo "  rmdir-me" > notes.txt',
+            f'echo "envpkg rm {self.abs}/f" > notes.txt',
+            f'echo "sudo ls {self.abs}/x" > notes.txt',
+            f"bash -c \"echo hi\"; echo 'see {self.abs}/f' > notes.txt",
+            f'retrieval"see {self.abs}/f" > notes.txt',
+            "echo -c 'x' > out.txt",
+            f'echo abc-c"see {self.abs}/f" > notes.txt',
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [])
+
+    def test_arithmetic_shift_is_not_a_heredoc(self):
+        a = self.abs
+        cases = {
+            f"echo $((x << 4)) && pwd\necho secret > {a}/victim\n4": [f"{a}/victim"],
+            f"echo $((x<<y)) && pwd\necho secret > {a}/victim\ny": [f"{a}/victim"],
+            f"(( n = x << y ))\necho secret > {a}/victim\ny": [f"{a}/victim"],
+            f"cat <<EOF > {a}/z\nbody\nEOF": [f"{a}/z"],
+            f"cat <<'EOF' > notes.txt\nsee {a}/x\nEOF": [],
+        }
+        for cmd, expected in cases.items():
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), expected)
+
+    def test_every_carrier_still_asks(self):
+        silent: list[str] = []
+        for target, directory in (
+            (f"{self.abs}/f", self.abs),
+            (f'"{self.abs} repo/f"', f'"{self.abs} repo"'),
+        ):
+            for writer, template in _WRITERS.items():
+                if writer.startswith("git-") and target.startswith('"'):
+                    continue
+                write = template.format(T=target, D=directory)
+                quoted = write.replace('"', '\\"')
+                single = write.replace("'", "'\\''")
+                for carrier, carried in _CARRIERS:
+                    cmd = (
+                        carried.replace("@W@", write)
+                        .replace("@Q@", quoted)
+                        .replace("@S@", single)
+                        .replace("@T@", target)
+                    )
+                    if not self.escapes(cmd):
+                        silent.append(f"{carrier} / {writer}: {cmd!r}")
+        self.assertEqual(silent, [])
+
+    def test_malformed_command_is_analysed_without_the_rules(self):
+        a = self.abs
+        cases = {
+            f'echo "abc > {a}/f': [f"{a}/f"],
+            f"cat <<EOF > {a}/f\nbody /x": [f"{a}/f", "/x"],
+            f"echo 'abc > {a}/f 2>&1": [f"{a}/f"],
+            f"cat <<EOF > {a}/f": [f"{a}/f"],
+            f'echo "see /x" > {a}/f "open': ["/x", f"{a}/f"],
+        }
+        for cmd, expected in cases.items():
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), expected)
+
+    def test_no_freeze_is_silent(self):
+        self.assertEqual(
+            g.bash_write_escapes(f"echo x > {self.abs}/f", [], self.root), []
+        )
+
+    def test_large_command_is_analysed_in_under_a_second(self):
+        block = (
+            "cat <<'EOF' > out.txt\n"
+            + ('it\'s "quoted" /x /y text\n' * 20)
+            + "EOF\n"
+            + "git commit -m \"a /clear b\" && echo 'c /add-dir d' >> log.txt\n"
+        )
+        inputs = {
+            "realistic": block * (200_000 // len(block) + 1),
+            "unclosed double quote": '"' + '\\"' * 100_000,
+            "unterminated heredocs": "cat <<A <<B <<C\n" + "<<A " * 50_000,
+            "unclosed single quote": "echo '" + "a > /x " * 28_000,
+            "arithmetic shifts": "echo $((x << 4)) " * 11_000,
+            "write-looking strings": "echo 'rm a b c d e f' " * 9_000,
+            "twenty-char strings": 'echo "abcdefghijklmnopqrst" ' * 7_000,
+            "interpreter heredoc openers": "bash " + "<<A " * 20_000,
+            "continuation lines": "echo a \\\n" * 20_000 + "bash <<A",
+            "pipes to nothing": "echo 'a' | " * 20_000,
+            "shell then strings": "bash 'a' " * 20_000,
+            "strings then shell pipe": "echo 'a' " * 20_000 + "| sh",
+            "nested parens": "((((" * 20_000,
+            "nested parens with groups": "((" + "(a)" * 50_000 + "(((" * 20_000,
+            "lines ending in pipe": "echo a |\n" * 20_000 + "bash <<A",
+            "open substitution": 'bash -c "$(\n' + "cat <<'E'\nx\nE\n" * 14_000,
+            "code strings": "bash -c 'a' \"b\" " * 12_000,
+            "bare -c": "-c " * 30_000,
+            "ssh with strings": "ssh 'a' \"b\" " * 16_000,
+            "many quoted strings": "echo 'a' \"b\" " * 15_000,
+            "many code strings": "bash -c 'a' ssh h \"b\" " * 8_000,
+        }
+        for name, command in inputs.items():
+            with self.subTest(name=name):
+                start = time.perf_counter()
+                result = self.escapes(command)
+                elapsed = time.perf_counter() - start
+                self.assertLess(elapsed, 1.0)
+                self.assertIsInstance(result, list)
+        self.assertEqual(self.escapes(inputs["realistic"]), [])
 
 
 class TestPerSessionState(unittest.TestCase):
