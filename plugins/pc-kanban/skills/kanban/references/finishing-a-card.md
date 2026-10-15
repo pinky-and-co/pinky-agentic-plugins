@@ -43,12 +43,13 @@ command, gate command; a 2026-09-20 witness run measured exactly what a hand-typ
 missed) — plus the card's absolute path and `## Done when` as the generated block. The agent
 inherits nothing from this session's context.
 
-The loop this closes: worker → hand-back → review (below) → renvoi if KO → acceptance → gates/tests
-green → `pc-git:commit`/`commit-and-pr` → card closed. The session that dispatched the worker never
-writes the implementation itself and never commits mid-loop — a commit outside the `commit`/
-`commit-and-pr` fork skips the gitmoji/commit-message convention those forks load. Two renvois
-maximum: a worker that misses the same point twice on the same card is a brief problem, not a work
-problem — stop and bring it to the user rather than trying a third time.
+The loop this closes: worker → hand-back → review (below) → renvoi if KO, routed per `chantier`
+SKILL.md step 8 → acceptance → gates/tests green → `pc-git:commit`/`commit-and-pr` → card closed.
+The session that dispatched the worker never writes the implementation itself and never commits
+mid-loop — a commit outside the `commit`/`commit-and-pr` fork skips the gitmoji/commit-message
+convention those forks load. Two renvois maximum: a worker that misses the same point twice on the
+same card is a brief problem, not a work problem — stop and bring it to the user rather than trying
+a third time.
 
 **Carve-out — a single mechanical fix stays in-session.** A narrow regex widened by one
 alternative, a docstring correction, a single-file caller update with no design decision left open

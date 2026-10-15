@@ -256,8 +256,31 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   A worker hand-back, a review report or a test run that disproves a premise of the goal's
   `<condition>` stops the loop right there: ask the user through `AskUserQuestion` — waive the
   clause, amend it, or rework — before any further step, never once the card is closed.
-  A review finding or a failing test goes back to the same `card-worker` (`SendMessage`), never
-  fixed in the session's own turn — the single-mechanical-fix carve-out aside.
+  **Routing a renvoi.** Every message sent to a kept worker — a review finding, a failing test or a
+  user feedback — is routed by the nature of the retouche, never by the worker's context size, which
+  the caller cannot observe, before any send. A worker kept on every renvoi re-reads its whole design
+  context each turn.
+
+  Rows are read top to bottom; the first match wins.
+
+  | Nature of the retouche | Lane |
+  |---|---|
+  | Single mechanical fix (`finishing-a-card.md` carve-out, bound unchanged) | The session, in its own turn |
+  | Depends on design reasoning that worker carries | Same worker (`SendMessage`) |
+  | Localised and readable in the diff | Fresh worker: a new `Agent(subagent_type: "pc-kanban:card-worker")` |
+
+  - A fresh worker runs `sonnet`/`medium` by default, or the card's `model:` when that is lower,
+    and never above the card's `model:`. Model or effort climb only after a fresh pass missed its
+    retouche. Its prompt is the one printed by the script (not the `spawn-workers` skill, which a
+    worker session never invokes on its own repo):
+    `python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py"
+    <chantier-id> <card-slug> --model <m> --effort <e> --arbitrage <retouche>` — the `Agent` call
+    takes the printed `model:`/`effort:` and prompt as printed.
+  - Nature undecidable → fresh worker. A missed fresh pass goes back up to the same worker or the
+    session; the two-renvois cap of `finishing-a-card.md` bounds the loop.
+  - A model or effort change is always a new `Agent`; `SendMessage` takes neither.
+  - A resume or unblock message (no retouche asked) goes to the same worker — only it holds its
+    plan and progress.
 
 ## Rules
 
