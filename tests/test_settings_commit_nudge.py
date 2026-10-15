@@ -11,10 +11,12 @@ silent. `git` runs for real against a tmp repo; only the outside world is real.
 
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -32,6 +34,12 @@ class TestSettingsCommitNudge(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.repo = Path(self._tmp.name)
+        # The hook reads CLAUDE_PROJECT_DIR before the payload's `cwd`, and a Claude Code session
+        # exports it to every Bash call: unset, the hook looks at the repo the test builds.
+        env = unittest.mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CLAUDE_PROJECT_DIR", None)
         _git(self.repo, "init", "-q")
         _git(self.repo, "config", "user.email", "t@t.t")
         _git(self.repo, "config", "user.name", "t")
