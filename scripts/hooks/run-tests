@@ -45,6 +45,12 @@ if [ -d tests ]; then
         if $PY -c "import pytest_cov" > /dev/null 2>&1; then
             COV_FLAG="--no-cov"
         fi
+        # pytest-xdist installé : la suite se répartit sur tous les cœurs. L'activation se fait
+        # par le repo, en ajoutant xdist à ses dépendances de dev ; sans lui, rien ne change.
+        XDIST_FLAG=""
+        if $PY -c "import xdist" > /dev/null 2>&1; then
+            XDIST_FLAG="-n auto"
+        fi
         # Pas de `-p no:cacheprovider` : les repos configurent déjà cache_dir en pyproject ;
         # désactiver le plugin ferait cracher un PytestConfigWarning à chaque commit.
         # Aucune option pytest ne retire les lignes de progression (`....F.. [ 42%]`, même en -qq) :
@@ -58,7 +64,7 @@ if [ -d tests ]; then
         if [ -z "$NO_COLOR" ] && { [ -t 1 ] || [ -n "$FORCE_COLOR" ]; }; then
             COLOR_FLAG="--color=yes"
         fi
-        $PY -m pytest -q $COV_FLAG $COLOR_FLAG 2>&1 | awk '
+        $PY -m pytest -q $COV_FLAG $XDIST_FLAG $COLOR_FLAG 2>&1 | awk '
             { plain = $0; gsub(/\033\[[0-9;]*m/, "", plain) }
             plain !~ /^[.sxXFE]+ *(\[ *[0-9]+%\])?$/ { print; fflush() }'
         rc=${PIPESTATUS[0]}
