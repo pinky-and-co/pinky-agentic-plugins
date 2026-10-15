@@ -174,8 +174,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     --list-kanbans`, itself multi-board aware — this workspace has more than one), so the session
     stays able to maintain cards/handoffs while frozen:
     ```bash
-    python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" --root <workspace-root> freeze <resolved-repo-paths...> <kanban-board-roots...>
+    python3 "${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py" freeze <resolved-repo-paths...> <kanban-board-roots...>
     ```
+    Exit 1 means the guard's project root is unknown for this session (the `SessionStart` hook has
+    not exported it): say so in one line and stop before the Grill gate — the session restarts with
+    `/clear`, which re-runs `SessionStart`. Never write the freeze under another root. Any other
+    non-zero exit: report it as is and stop there too.
    - **Grill gate — before the goal.** Set the goal only when the card is execution-ready: its
     `## Done when` is a concrete demonstrable state and its requirements are settled. **If the card
     still carries open design questions** — a `## Options to explore` / `## To decide`
