@@ -37,47 +37,8 @@ bound to position 2 would call it a status when it is really the second director
 - **`guard <dir>... | on | off`** — convenience: `careful` on + `freeze` to the given
   directories in one call.
 
-**What `freeze` asks for in `Bash`, and its honest limit.** `careful` and `deny` cover their own
-scope only (`careful`: destructive `Bash`; `deny`: the write-class tools). `freeze` also asks for a
-`Bash` command that looks like a write (`>`, `tee`, `sed -i`, `mv`/`cp`/`rm`, `git commit`…) and
-names an absolute or `~` path, a `cd` target or a `git -C` directory outside the frozen scope. It
-is a string heuristic. Three rules keep text from counting as a path:
-
-- **Text is dropped.** Heredoc bodies and quoted strings that do not start with `/` or `~` are
-  ignored; the heredoc's opening line and quoted paths are not. A command whose heredoc or quote
-  is never closed is analysed as written, no rule applied.
-- **A path starts with a real directory.** An absolute candidate whose first component is not an
-  existing directory under `/` (`/`, `/clear`, `/^def`) is not a path.
-- **Neutral redirections are not writes.** `N>&M`, `&>/dev/null`, `>/dev/null`.
-
-What stays code, and is analysed like the rest of the command:
-
-- **Quoted strings that run.** A string after `-c` (`-lc`…), `eval`, a word `sh`/`bash`/`zsh`/
-  `ksh`/`dash`/`ssh`, `watch`, `parallel` or `<<<`, up to the next `;`, `|`, `&` or newline; a
-  string piped into a word `sh`/`bash`… later in the command (`echo '…' | /bin/sh`, up to the next
-  `;`, `&` or newline); and a string whose first word is a write command (`rm`, `mv`,
-  `git commit`…, optionally after `sudo`/`env`/`nohup`/`time`).
-- **Heredoc bodies that run.** A body is kept when a word `sh`/`ssh`/`eval`/`source`/`at`/`su`…
-  or an input descriptor (`/dev/stdin`, `/dev/fd/N`) stands anywhere on its opening line
-  (`bash <<EOF`, `cat <<EOF | sh`), or the opening line sits inside a `$(…)` or backtick
-  substitution that holds such a word (`bash -c "$(` newline `cat <<EOF`). A line that ends with
-  `\`, a pipe, `&&` or a redirection operator is joined to the next one: the body starts after
-  the last. A `$((x << 4))` shift opens no heredoc.
-
-Over-asks it accepts: a text that starts with `>` followed by an existing path; a file name that
-holds the word `sh` (`cat <<EOF > run.sh`); the word `at`, `su` or `source` on a heredoc's opening
-line, even inside a text; any string after `grep -c`, `git -c`…
-
-What it does not see (use `permissions.deny` for a hard guarantee):
-
-- a computed path (`$(…)`) or a write verb outside the list;
-- code reached another way: `xargs sh -c` building its argument, a string stored in a variable,
-  `python -c` writing with `open`, a command name held in a variable (`$cmd host 'rm …'`);
-- a string that does not start with a write command, handed to any other runner
-  (`some-runner "cmd && rm …"`);
-- a script read by `python`, `perl`, `ruby` or `node` from a heredoc (it stays text);
-- a path whose first component does not exist under `/`; a quoted `cd` or `git -C` target; a path
-  under a system prefix written with `..` (`/tmp/../x`, not resolved before the prefix test).
+**`freeze` does not judge `Bash`.** `careful` confirms destructive `Bash`; `freeze` and `deny` cover
+the write-class tools only. For a hard guarantee on `Bash`, use `permissions.deny` or the sandbox.
 
 ## State is per session
 
