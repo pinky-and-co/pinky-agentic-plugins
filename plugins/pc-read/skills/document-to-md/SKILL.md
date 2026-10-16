@@ -7,8 +7,7 @@ allowed-tools: Bash(command -v markitdown:*), Bash(mktemp:*), Bash(markitdown:*)
 
 # Read a document by converting it first
 
-Runs in the calling session on purpose — no fork. The point is that **you** end up holding the
-content; a forked agent would convert the file and take the result with it.
+Runs in the calling session on purpose — no fork: **you** must end up holding the content.
 
 ## Step 1 — Is the conversion warranted?
 
@@ -21,8 +20,7 @@ content; a forked agent would convert the file and take the result with it.
 
 **The carve-out that matters: a document to read is not a dataset to query.** An `.xlsx` of specs or
 a data dictionary is prose, so it converts. An `.xlsx`/`.csv`/`.parquet` of *rows* must not be
-flattened into Markdown prose — query it (DuckDB, or `pinky dump` on this instance). Flattening a
-dataset produces a wall of tokens that answers nothing.
+flattened into Markdown prose — query it (DuckDB, or `pinky dump` on this instance).
 
 ## Step 2 — Check the tool exists, then convert
 

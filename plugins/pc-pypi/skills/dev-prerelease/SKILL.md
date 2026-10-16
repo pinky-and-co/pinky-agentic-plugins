@@ -8,13 +8,12 @@ allowed-tools: Bash(git branch:*), Bash(git -C * branch*), Bash(rtk git -C * bra
 # Dev pre-release (PyPI via tag)
 
 Cut a `.devN` pre-release of the library in the current repo: bump the version, deliver the bump to
-the release branch the way the repo's rule requires (direct push or pull request, see "Delivery"),
-then **stop before the tag**. The tag push is what publishes to PyPI
-(irreversible), so it always needs an explicit human go — this skill never publishes on its own.
+the release branch (direct push or pull request, see "Delivery"), then **stop before the tag**. The
+tag push publishes to PyPI (irreversible), so it always needs an explicit human go — this skill never
+publishes on its own.
 
-**Scope: dev pre-releases only.** Final `X.Y.Z` releases go a different way (mainline tag, changelog,
-release notes — guarded separately) — out of scope here. If the current version is already a final
-`X.Y.Z`, stop and say so.
+**Scope: dev pre-releases only.** Final `X.Y.Z` releases are out of scope. If the current version is
+already a final `X.Y.Z`, stop and say so.
 
 **Applicability — check first, stop with the reason if it does not hold.** This skill fits a repo
 whose PyPI publish is driven by a version tag: a `.github/workflows/publish.yml` that triggers on
@@ -23,8 +22,7 @@ not wired for tag-driven dev publishing — say which piece is absent and stop.
 
 ## Target repo — resolve, then confirm
 
-There is no repo argument by default: this acts on **one** library checkout, the one you point it
-at. Resolve it before anything else:
+This acts on **one** library checkout. Resolve it before anything else:
 
 - An argument was given → treat it as the checkout path; `cd` there.
 - No argument → the repo is `git rev-parse --show-toplevel` from the current directory.
@@ -37,8 +35,7 @@ Announce the resolved repo — its directory name and the `[project].name` from 
 
 ## Release branch — resolve, never assume
 
-The branch a pre-release is tagged from is a per-repo choice, never hardcoded here. Read
-`branch_workflow` from the nearest `.claude/settings.pinky.json` (walk up from the repo root):
+The tagging branch is a per-repo choice. Read `branch_workflow` from the nearest `.claude/settings.pinky.json` (walk up from the repo root):
 
 - `git flow` → the integration branch `develop`
 - `github flow` (or any trunk-based value) → the trunk `main`
@@ -49,8 +46,7 @@ Call the resolved name `<release-branch>` in every step below.
 
 ## Delivery — direct push or pull request, per the repo's rule
 
-How the bump reaches `<release-branch>` is the repo's rule, not a choice made here. Two things
-define it, and the skill reads both instead of assuming:
+How the bump reaches `<release-branch>` is the repo's rule. Two things define it:
 
 - **Local guard** — `pyproject.toml` is on the `pc-git` non-guarded list (`branch_paths.sh`), so
   nothing local stops a direct commit on a permanent branch.
@@ -66,14 +62,14 @@ Resolve the mode once, and say which you picked:
 ## Tag-trap — the tagged commit must not skip CI
 
 A commit message carrying `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]`
-makes GitHub skip the workflows of any push whose head commit it is — including a tag push. Tagging
-such a commit silently never runs `publish.yml`, and the dev number is neither published nor
-reported. Never merge the release PR with a skip marker, and check the commit before tagging (Step 3).
+makes GitHub skip the workflows of any push whose head commit it is — including a tag push, so
+`publish.yml` silently never runs. Never merge the release PR with a skip marker, and check the commit
+before tagging (Step 3).
 
 ## Preconditions — fail fast
 
-Collect and check, reporting the exact failure and stopping if any does not hold. Do not silently
-fix a failed precondition — report it and let the user decide.
+Check each, reporting the exact failure and stopping if any does not hold. Never silently fix a
+failed precondition — report it and let the user decide.
 
 - `git branch --show-current` → must be `<release-branch>` (resolved above).
 - `git status --porcelain` → must be empty. A dirty tree is uncommitted work — never release it.
@@ -86,10 +82,9 @@ fix a failed precondition — report it and let the user decide.
 
 ## Step 0 — Doc reconciliation (advisory, never blocks)
 
-Releasing a package whose feature documentation contradicts the code ships a lie, so a reconciliation
-of the feature doc against the code belongs here, before the bump. Two layers: a **deterministic**
-pass whose findings are real, and a **model** pass that is **advisory** — it is a lead generator, not
-a gate, and a missing model transport skips it without blocking the release.
+Reconcile the feature doc against the code before the bump. Two layers: a **deterministic** pass
+whose findings are real, and a **model** pass that is **advisory** — a lead generator, not a gate; a
+missing model transport skips it without blocking the release.
 
 `${CLAUDE_SKILL_DIR}/scripts/reconcile.py` — call it `$RECONCILE` below — drives every step
 (stdlib only, no model calls). Resolve two per-repo values first, from the nearest
@@ -128,13 +123,12 @@ python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,
      bodies. A `[offline] BLOCKED` line means MLX-SERVE unreachable, out of memory, or `pi` missing
      — fall through.
    - `panel` (MCP tool `mcp__plugin_pc-core_pc-core-models__panel`) with `tasks` = `[the prompt]`
-     and `models` = `["mistral-medium-3.5"]`. Pin that model — it is the one cloud pool entry the
-     reconcile oracle passes; the unpinned default does not. A `[panel] BLOCKED` line means no key —
+     and `models` = `["mistral-medium-3.5"]`. Pin that model — the unpinned default fails the
+     reconcile oracle. A `[panel] BLOCKED` line means no key —
      fall through.
    - Neither answered → print "reconcile — modèle non joignable, passe advisory sautée" and go to
      Step 1. **Never block the release on this.**
-3. Filter the model's MANQUANT findings through the deterministic post-filter (kills the recurring
-   "add a row for something already in the table" false positive):
+3. Filter the model's MANQUANT findings through the deterministic post-filter:
    ```
    printf '%s' "<the model's full reply>" | python3 "$RECONCILE" --repo <repo> \
      --features-doc <path> --features-header <a,b,c> --filter-model-output
@@ -144,13 +138,13 @@ python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,
    **surviving MANQUANT** findings. For each one the user accepts, `Edit` **exactly that one line**
    of the feature doc — nothing else. Reject-all → the doc is left byte-for-byte unchanged.
 
-**Vigilance — the model pass is advisory, treat every finding as a lead to verify, not a verdict.**
-Known failure modes: a small model rubber-stamps a thin brief, and cloud models vary (only local
-`gemma4:12b` and `mistral-medium-3.5` clear the oracle). On a repo's first few releases, read the
-feature doc against the code by hand regardless of what this step reports.
+**Vigilance — treat every model finding as a lead to verify, not a verdict.** A small model
+rubber-stamps a thin brief, and cloud models vary (only local `gemma4:12b` and `mistral-medium-3.5`
+clear the oracle). On a repo's first few releases, read the feature doc against the code by hand
+regardless of what this step reports.
 
-The `adversarial` MCP tool is **never** used here: it injects a review methodology and a contrarian
-posture built for auditing this session's own work, which is wrong for a neutral doc↔code diff.
+The `adversarial` MCP tool is **never** used here: its contrarian posture is wrong for a neutral
+doc↔code diff.
 
 Then proceed to Step 1.
 
@@ -160,8 +154,7 @@ Then proceed to Step 1.
 2. **PR mode only** — `git checkout -b chore/release-v<new>`: the bump is committed on this topic
    branch, never on `<release-branch>`.
 3. Edit `pyproject.toml`'s `version = "…"` to the new value.
-4. Commit with the `🔖 release` gitmoji — the message is fully specified here, no convention lookup
-   needed: `git add pyproject.toml && git commit -m "🔖 release: v<new>"`. Never `--no-verify` — the
+4. Commit with the `🔖 release` gitmoji: `git add pyproject.toml && git commit -m "🔖 release: v<new>"`. Never `--no-verify` — the
    hooks (version-format, etc.) are part of the gate. No skip marker in the message (see Tag-trap).
 5. Deliver the commit:
    - **Direct mode** — `git push origin <release-branch>`.

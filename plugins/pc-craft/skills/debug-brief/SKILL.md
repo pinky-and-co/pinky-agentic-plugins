@@ -11,12 +11,12 @@ metadata:
 
 # Debug Brief
 
-Assemble a self-contained debug brief. The brief confronts a **human-reported behavior discrepancy**
-against the code, an optional spec, and a sample of the dataset the bug was reported against — so a
-model can reason about root cause. The output is a single text block: no commentary, no preamble.
+Assemble a self-contained debug brief confronting a **human-reported behavior discrepancy** against
+the code, an optional spec, and a sample of the dataset the bug was reported against — so a model
+can reason about root cause. The output is a single text block: no commentary, no preamble.
 
-The point of the skill is the **qualify-first discipline** — is this actually a defect, or
-intended/documented behavior the reporter isn't aware of?
+The point is the **qualify-first discipline**: is this a defect, or intended/documented behavior the
+reporter isn't aware of?
 
 ## Preflight
 
@@ -27,10 +27,9 @@ eligible pool entry), produce the brief block instead and say the send step was 
 
 ## Data boundary — the guard decides
 
-Read each `--data` file like any other file. Personal data is the business of the privacy guard, not
-of this skill: when `pc-privacy` is installed, it intercepts a `Read` of a file holding personal data
-and offers to anonymize it into a `<name>.anon.<ext>` copy, allow the read, or refuse it. Anonymizing
-is the person's choice.
+Read each `--data` file like any other file. Personal data is the privacy guard's business: when
+`pc-privacy` is installed, it intercepts a `Read` of a file holding personal data and offers to
+anonymize it into a `<name>.anon.<ext>` copy, allow the read, or refuse it — the person's choice.
 
 - The person anonymized: read the `*.anon.*` copy, not the original.
 - The person allowed the read: use the file as read.
@@ -75,9 +74,9 @@ a `*.anon.*` copy, say so and ask for confirmation — the brief leaves the mach
 `tasks=["Follow the ROLE / GUIDELINES / OUTPUT FORMAT instructions embedded in the brief below.\n\n"
 + <the full brief block>]` — and `models=["<model>"]` if `[model]` names a pool entry, else omit
 `models`. The brief goes inline in the task; there is no file parameter. Show the answer verbatim,
-prefixed with which model produced it (the tool's header reports this). The model has not been
-scored against any oracle — tell the user to verify the QUALIFICATION independently before trusting
-the SUGGESTED FIX.
+prefixed with which model produced it (the tool's header reports this). Tell the user to verify the
+QUALIFICATION independently before trusting the SUGGESTED FIX — the model is not scored against any
+oracle.
 
 **Otherwise:** output **only** the brief block below. Replace placeholders. No intro text.
 

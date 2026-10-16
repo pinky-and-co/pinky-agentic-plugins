@@ -11,8 +11,7 @@ model: haiku
 A card is worked by **one worker per repo it touches**, not one wide session. This skill, run from
 the **orchestrator** (opened outside any git repo — board curation, selection, spawning; never
 edits code), hands each repo's slice to a `card-worker` Agent call built from a fully generated
-prompt — never a hand-typed one (a 2026-09-20 witness run measured what a hand-typed prompt missed:
-the target repo's own test location, retyped from memory instead of read off disk).
+prompt — never a hand-typed one.
 
 ## Default path — an `Agent` call per repo
 
@@ -33,14 +32,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
    --- prompt ---
    <the two-block prompt>
    ```
-   `<tier>` is `--model` when given, else the card's own `model:` frontmatter (`effective_model`) —
-   the caller's judgment on how much the card is already briefed. `effort:` is `--effort` when
+   `<tier>` is `--model` when given, else the card's own `model:` frontmatter (`effective_model`).
+   `effort:` is `--effort` when
    given, else the card's own `effort:` (`low|medium|high|xhigh|max`); no line when neither is set. The
    prompt (`build_worker_prompt`) is two blocks:
    - **fixed** — this repo's own conventions (`repo_conventions_block`), probed from disk/PATH:
      where its Python tests live, its test command, its gate command, and the standing worker
-     invariants (dedicated branch, no commit/push/PR). The same every time for this repo — never
-     retyped by whoever is running this skill.
+     invariants (dedicated branch, no commit/push/PR). The same every time for this repo.
    - **generated** — the card's absolute path, the repo, the full table row of each requirement the
      card cites without defining (taken from the open cards of its chantier, since the worker reads no
      other card), and `--arbitrage` (any judgment call the card leaves for the worker to resolve
@@ -52,17 +50,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
    ```
    Pass `effort:` exactly as printed; when no `effort:` line is printed, omit the parameter
    altogether — the worker then inherits the session's effort.
-   one call per repo. `card-worker`'s own agent definition (`agents/card-worker.md`) carries the
+   One call per repo. `card-worker`'s own agent definition (`agents/card-worker.md`) carries the
    role invariants (one card, no board file, no column move, hand-back format); the printed prompt
-   carries the task and the repo facts. No `skills:` preload — the worker shells the repo's own
-   test/gate commands directly.
+   carries the task and the repo facts. No `skills:` preload.
 
 ## `--cmux` — the session path, for an environment that doesn't reduce to commands
 
 A repo whose worker needs something a subagent cannot get cold — a project-scoped plugin resolved
 at process start, a scoped MCP server — still needs a real `claude` process, not an `Agent` call.
-Pass `--cmux` for that repo; nothing here decides it automatically, because the criterion is the
-repo's own environment, not the card's size:
+Pass `--cmux` for that repo; nothing decides it automatically:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py" --cmux <chantier-id> <card-slug> [repo-slug...] [--effort <level>]
@@ -84,8 +80,8 @@ The mockup brief and the `.zip` unpacking (card `mockup:`) exist on the default 
 reads no mockup and unpacks nothing.
 
 `--dry-run` only affects `--cmux`: it previews the command line(s) and skips the project-scope
-plugin enable. The default path prints, and unpacks a `.zip` mockup into its sibling folder — also
-under `--dry-run` — so `--dry-run` has nothing else to add there.
+plugin enable. The default path prints, and unpacks a `.zip` mockup into its sibling folder, also
+under `--dry-run`.
 
 ## Multi-repo cards — sequential by convention
 
@@ -107,7 +103,6 @@ Spawn every repo in one call (no slug filter) only for a card whose repos are ge
 2. The skill itself never moves the card. In `--cmux` mode, the worker's own `/pc-kanban:chantier`
    run does that (its `chantier/SKILL.md` step 7 moves the card from `2-selected-for-dev` to
    `3-in-progress` and bumps `date:`). A `card-worker` Agent call never touches the board at all
-   (its own agent definition forbids it) — the orchestrator is the one that moves the card, since
-   it is the only actor in that flow ever allowed to.
+   (its own agent definition forbids it) — the orchestrator moves the card.
 3. Work state for a multi-repo hand-off lives in the card's handoff block, never in the
    inter-session message (`finishing-a-card.md`).

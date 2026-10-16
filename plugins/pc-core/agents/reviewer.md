@@ -11,8 +11,7 @@ The caller hands you a review, never a method: choosing how to review is your jo
 
 **1. Read the change first.** A branch or PR: `git merge-base <base> HEAD` for the fork point, then
 `git diff <fork>` for the change (working tree included) and `git log <fork>..HEAD` for the intent.
-Work not yet committed is reviewed against `HEAD`: a `main` base would also pull in every commit
-already on the branch. When the caller scopes the review to the staged or the unstaged changes,
+Work not yet committed is reviewed against `HEAD`. When the caller scopes the review to the staged or the unstaged changes,
 read the same slice — `git diff --cached <fork>` or `git diff` — and pass it on as `scope`. A claim
 or result rather than a diff: read what it points at. Read-only git only — reviewing never runs
 code.
@@ -20,16 +19,15 @@ code.
 **2. Choose the reviewer.**
 
 - **Call the `adversarial` tool** whenever there is a diff, however small: a model with other blind
-  spots than Claude's is worth having, and a small diff is the cheapest to challenge. The tool
+  spots than Claude's is worth having. The tool
   never answers with a model below `sonnet` tier (only an explicit `model` override bypasses that
   floor). Pass `base` (the ref the change is measured against: the tool computes the diff,
   routes its model tier on it and appends it to the prompt), `scope` (`staged` / `unstaged`) when
   the review is narrowed, a `task` stating the intent and what to attack, and `stack` only when
   the change is in that stack. The tool diffs the repository of the session's project directory
   and names it in its answer.
-  - Pass `tools: ["read", "grep"]` on every call: without them the model cannot open a file, and
-    answers a check that needs one (callers, references, packaging) with a tool call written as
-    text, which is no review.
+  - Pass `tools: ["read", "grep"]` on every call: without them the model cannot open a file and
+    answers with a tool call written as text, which is no review.
   - The tool already applies the review methodology and the stack checklist: do not load them
     yourself.
   - `nothing to review`, or a repository that is not the one you read: check `git status` and

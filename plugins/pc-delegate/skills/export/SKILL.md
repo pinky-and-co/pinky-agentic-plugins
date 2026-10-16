@@ -13,9 +13,9 @@ From the selected cards' own content (and, when relevant, `git status`/`git diff
 repo), name the files the external agent actually needs to see or edit — plus any hygiene hook or
 test that targets one of them (a `repo: local` hook whose own script is a file in the repo and
 whose `files:` pattern matches an edited file, the test module covering an edited one). A hook with
-no file of its own (a third-party one like `trailing-whitespace`) has nothing to add here. This is
-the one list passed to `export_subtree` below (so its own direct imports resolve the same way) and
-later to `--repo-file`. This is a judgment call — never guess silently; if it is unclear, ask.
+no file of its own (a third-party one like `trailing-whitespace`) adds nothing. This is the one list
+passed to `export_subtree` below and later to `--repo-file`. It is a judgment call — never guess
+silently; if it is unclear, ask.
 
 ## Step 2 — Compute the subtree
 
@@ -51,6 +51,5 @@ the zip ships without `_AGENT_LOG` and the script prints an explicit line saying
 ## Step 4 — Hand off
 
 `build_export.py` prints a ready-to-paste prompt for the external agent's chat, after the zip is
-written — hand that to the user as-is alongside the zip path. Nothing beyond this is this skill's
-job — sending the zip, and reintegrating what comes back (the `reintegrate` skill, same plugin), are
-separate, explicit steps.
+written — hand that to the user as-is alongside the zip path. Sending the zip, and reintegrating what
+comes back (the `reintegrate` skill, same plugin), are separate, explicit steps.

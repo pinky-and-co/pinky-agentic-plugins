@@ -11,8 +11,7 @@ metadata:
 # Improve
 
 Find where a codebase's design works against its callers, and propose changes that concentrate
-complexity instead of scattering it. The verdict is per-candidate and evidence-backed — not a
-vague "this could be cleaner".
+complexity instead of scattering it. The verdict is per-candidate and evidence-backed.
 
 ## Vocabulary — use these terms exactly
 

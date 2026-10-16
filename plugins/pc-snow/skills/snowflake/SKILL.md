@@ -9,16 +9,16 @@ metadata:
 
 # Snowflake — Platform
 
-Covers the operational/IaC side of Snowflake: how to deploy objects, size and pay for compute,
-package code, govern data, observe pipelines, and ship a Native App.
+Operational/IaC side of Snowflake: deploy objects, size and pay for compute, package code, govern
+data, observe pipelines, ship a Native App.
 
 Stack: Snowpark Python (stored procedures, serverless tasks) + Snowflake Python Core (deployment).
 
 > Snowflake ships fast — any class, method, parameter, limit, or preview-status claim that seems
 > uncertain should be checked against `context7` (`libraryId: /websites/snowflake_en`) before being
 > taken at face value. Prefer the native Python API (`snowflake.core`, `snowflake.snowpark`) over
-> raw `session.sql()` wherever a Python equivalent exists — see `references/core-api.md`. Where SQL
-> is shown for DDL or config that has no clean Python equivalent, that's deliberate, not an oversight.
+> raw `session.sql()` wherever a Python equivalent exists — see `references/core-api.md`. SQL
+> shown for DDL or config is where no clean Python equivalent exists.
 
 ## References
 
@@ -33,5 +33,4 @@ Stack: Snowpark Python (stored procedures, serverless tasks) + Snowflake Python 
 - `references/system-views.md` — the four tools of the `pc-snow` MCP server (`task_history`, `query_history`, `warehouse_credits`, `event_table_records`): what each reads (the `INFORMATION_SCHEMA` functions, the `ACCOUNT_USAGE` views beyond 7 days, the event table), how to read its columns, its traps, and the interview to run (scope, range, timezone) before calling.
 - `references/review.md` — the Snowflake-stack review checklist (deployment, SP/UDF, telemetry/event table, governance), applied on top of `pc-core:review-guidelines` when reviewing code that deploys to or runs on Snowflake.
 
-Load whichever reference fits the task — most questions need only one; a deployment question
-spanning cost and governance may need two.
+Load whichever reference fits the task — usually one, two when a question spans cost and governance.

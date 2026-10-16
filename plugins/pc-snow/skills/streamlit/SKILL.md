@@ -18,10 +18,8 @@ constraints, and how to evaluate a version upgrade.
 > `libraryId: /websites/snowflake_en` for the Snowflake-in-Streamlit integration layer
 > (`st.connection`, secrets, caller's rights, runtime differences). Streamlit ships new releases
 > roughly monthly — any version number in the reference below (e.g. "1.52.0+") marks when a
-> feature was introduced at the time this was distilled, not a guarantee of current behavior.
-> Don't trust a specific version claim, including this file's, without checking context7 first;
-> this reference deliberately does not track a rolling "what's new since our pin" list, because
-> that kind of content goes stale within weeks and was cut for exactly that reason.
+> feature was introduced at distillation time, not current behavior. Don't trust a specific version
+> claim without checking context7 first.
 
 ## References
 

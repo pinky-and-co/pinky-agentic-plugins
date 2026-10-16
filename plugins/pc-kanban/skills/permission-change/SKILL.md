@@ -13,13 +13,8 @@ Four related guards, one command — `$mode` (the first word) picks which. All f
 the same PreToolUse hook (`guard.py`) and share one state file; `$mode` decides what gets written
 to it.
 
-**Why `arguments: [mode]` and not `[mode, scope]` or more**: `$mode` is always the first token,
-unambiguous whatever follows. Everything after it is variadic and mode-dependent (0+ scope
-directories for `freeze`/`deny`/`guard`, or a bare `on`/`off` for `careful`) — a fixed named slot
-for it would mislabel real invocations, e.g. `/permission-change freeze src/core tests` has TWO
-scope directories; a `$scope` bound to position 1 would silently drop `tests` and a `$status`
-bound to position 2 would call it a status when it is really the second directory. `$ARGUMENTS`
-(the full string) stays the only correct vehicle for that variadic remainder — see Action below.
+Only `$mode` is a named slot: what follows is variadic and mode-dependent (0+ scope directories,
+or a bare `on`/`off`), so `$ARGUMENTS` (the full string) carries it — see Action below.
 
 ## Modes
 
@@ -45,10 +40,9 @@ the write-class tools only. For a hard guarantee on `Bash`, use `permissions.den
 `careful`, `freeze` and `deny` belong to the session that set them: another session of the same
 project, or a later one, never inherits them. The state file
 (`<project root>/.claude/.guard-state.json`) holds one entry per `session_id`. A sub-agent's tool
-calls carry its parent's `session_id` (observed: a parent's `deny` blocked a sub-agent's `Write`),
-so a sub-agent shares its parent's entry. The `SessionEnd` hook deletes the session's entry, and
-any write prunes entries untouched for seven days (`SessionEnd` is not guaranteed to run). The
-entry is dropped whenever the `SessionEnd` hook runs, whatever its reason. A
+calls carry its parent's `session_id`, so a sub-agent shares its parent's entry. The `SessionEnd`
+hook deletes the session's entry whatever its reason, and any write prunes entries untouched for
+seven days (`SessionEnd` is not guaranteed to run). A
 state file still in the earlier flat format is renamed to `.guard-state.json.legacy` by the first
 write (unless one exists) and read as empty. The control script reads the session from
 `CLAUDE_CODE_SESSION_ID` and exits with an error when it is not set — run it from the session's
@@ -64,10 +58,7 @@ write there asks. It asks for any unknown target and never denies one.
 
 ## Action
 
-`$ARGUMENTS` is the mode word plus whatever that mode takes — pass it straight through, do not
-reinterpret it.
-
-Run the control script (use `py -3` instead of `python3` on Windows):
+Pass `$ARGUMENTS` straight through, do not reinterpret it. Run the control script (use `py -3` instead of `python3` on Windows):
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/guard.py" $ARGUMENTS

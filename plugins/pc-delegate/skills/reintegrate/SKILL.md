@@ -15,10 +15,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/apply_reintegrate.py" 
 ```
 
 `--agent-log-dir`/`--card` are optional — pass them whenever the reintegration belongs to a known
-chantier/card, so a `REPORT.md` at the root of `<source>` (the external agent's own account of
-what it did, any judgment call, anything found but out of scope) gets written as a new dated
-`_AGENT_LOG` entry instead of only printed to the terminal. `REPORT.md` is never applied into the
-repo — it is reserved, pulled out before the file-apply pass.
+chantier/card, so a `REPORT.md` at the root of `<source>` (the external agent's own account) gets
+written as a new dated `_AGENT_LOG` entry instead of only printed. `REPORT.md` is never applied into
+the repo — it is pulled out before the file-apply pass.
 
 Run with `--dry-run` first when the source is unfamiliar or large — same output, nothing written.
 The script's own report already separates what happened:
@@ -28,10 +27,9 @@ The script's own report already separates what happened:
 - **dirty-skipped** — a tracked file with a local uncommitted diff since the export.
 - **conflict-skipped** — an untracked file already at that path, different content.
 
-Report the skipped entries to the user as-is — a skip is not a failure to paper over, it is the
-guard doing its job (a local edit that would otherwise be silently lost). If a `REPORT.md` printed
-inline (no `--agent-log-dir` given) names something worth tracking, fold it into the card's own
-handoff yourself — the script only persists it when told where.
+Report the skipped entries to the user as-is — a skip is the guard doing its job, not a failure to
+paper over. If a `REPORT.md` printed inline (no `--agent-log-dir` given) names something worth
+tracking, fold it into the card's own handoff yourself.
 
 ## Step 2 — Verify loop
 
@@ -44,8 +42,8 @@ declares). Two different reactions, never blur them:
   marker, a file placed at the wrong path, a defaulted value that changes runtime behaviour) —
   **stop and ask**. Never auto-correct a judgment call.
 
-A file classified `code-changed` in Step 1 is exactly the set to read closely here — a
-`comments-only` file changed nothing the verify loop would ever flag.
+Read the `code-changed` files of Step 1 closely here; a `comments-only` file changes nothing the
+verify loop would flag.
 
 ## Step 3 — Review, ship, close
 

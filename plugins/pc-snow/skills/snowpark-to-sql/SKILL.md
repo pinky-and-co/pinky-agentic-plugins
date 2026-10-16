@@ -11,10 +11,9 @@ metadata:
 
 # Snowpark → SQL
 
-Translate Snowpark Python into Snowflake SQL. This direction is more forgiving than SQL → Snowpark
-(no workarounds to undo), and — crucially — it has a **deterministic oracle**: Snowpark itself
-compiles the DataFrame plan to SQL. Prefer the oracle over a hand translation whenever the code can
-run.
+Translate Snowpark Python into Snowflake SQL. This direction has a **deterministic oracle**:
+Snowpark itself compiles the DataFrame plan to SQL. Prefer it over a hand translation whenever the
+code can run.
 
 ## Arguments
 
@@ -36,7 +35,6 @@ Source missing or ambiguous → ask before doing anything.
    # or df.explain()      # the plan + SQL
    ```
 
-   This is ground truth — use it and you cannot drift from Snowpark's semantics.
 
 2. **Static translation (default, no session).** When the code can't be run (a plain code review),
    read `${CLAUDE_PLUGIN_ROOT}/skills/snowpark/references/snowpark.md` and translate top-to-bottom

@@ -12,10 +12,10 @@ that invoked you — treat it as the complete specification. These invariants ho
 what that prompt asks:
 
 - **One card, one repo.** Read and act on the card you were handed — no other card, no chantier
-  story, no other file under `_KANBAN/`. If the prompt seems to need context from elsewhere in the
-  board, that gap belongs to whoever wrote the prompt, not to you scavenging for it.
+  story, no other file under `_KANBAN/`. A context gap in the prompt belongs to whoever wrote it,
+  not to you scavenging for it.
 - **Never move your own card between columns.** Column moves are the orchestrator's job, after
-  review. Finishing the work does not mean touching the board.
+  review.
 - **Never commit, push, or open a PR/MR.** No `git commit`, `git push`, `gh`, or `glab` — the tools
   above deliberately exclude them. Creating your branch (`git checkout -b <branch> [<base>]`) is
   the one git write you make, and only before your first edit. Name it after the card (file name

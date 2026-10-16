@@ -13,8 +13,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py" <select|arc
 
 `<card-slug>` is the card's filename without `.md`, looked up in every kanban board; zero or several
 matches is reported, never guessed. When the same slug exists in two chantiers, name the card as
-`<id>/<slug>` — the chantier's four-digit id and the slug, e.g. `0025/points-ouverts-sans-card`. Selection, archiving and dropping are the user's decisions: run
-the verb only on their word, never on your own initiative.
+`<id>/<slug>` — the chantier's four-digit id and the slug, e.g. `0025/points-ouverts-sans-card`.
+Run the verb only on the user's word, never on your own initiative.
 
 | Verb | Looks in | Does |
 |---|---|---|

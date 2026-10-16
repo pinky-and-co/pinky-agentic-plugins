@@ -6,8 +6,6 @@ user-invocable: false
 
 # commit-convention — Commit convention
 
-Reference knowledge base for the gitmoji commit convention used across all repos.
-
 ______________________________________________________________________
 
 ## 1. Generation process
@@ -125,13 +123,9 @@ Signal it either way (or both):
 
 - **`!`** right after `type`, before the `:` — e.g. `♻️ refactor!: rename upload_packages signature`
 - **`BREAKING CHANGE: <description>`** as the last block of the message (blank line before it).
-  One form only: both words uppercase, a single space between them. That exact casing is what
-  downstream tooling (e.g. semantic-release) keys off for a major bump.
-
-  The spec (§16) also allows `BREAKING-CHANGE:` with a hyphen as a synonym; this house style does
-  not. The `commit-msg` hook rejects any near-miss at the start of a line — the hyphen form, a
-  miscased `Breaking change:` — rather than letting it pass as body text, so a footer that
-  wouldn't trigger the bump never slips through unnoticed.
+  One form only: both words uppercase, a single space between them — the casing downstream tooling
+  (e.g. semantic-release) keys off for a major bump. The `commit-msg` hook rejects any near-miss at
+  the start of a line (the hyphen form `BREAKING-CHANGE:`, a miscased `Breaking change:`).
 
 ```
 ♻️ refactor!: rename upload_packages signature
@@ -142,14 +136,12 @@ BREAKING CHANGE: upload_packages now takes (bucket, key) instead of (path).
 ## Gotchas
 
 - **`.md` is not automatically `docs`** — in a plugin-marketplace repo, `SKILL.md`, agent
-  definitions, and hook-config `.md` files ARE the executable unit: editing one changes what an
-  agent does, the same as editing a `.py` file. Judge the emoji from what the change *does*, never
-  from the file extension: a behavioral fix to a `SKILL.md` is `🐛 fix`, a new skill is `✨ feat`, a
-  restructure is `♻️ refactor`. Reserve `📝 docs` for genuine prose with no behavioral effect — a
-  README, a guide, a comment.
+  definitions, and hook-config `.md` files ARE the executable unit, like a `.py` file. Judge the
+  emoji from what the change *does*, never from the file extension: a behavioral fix to a `SKILL.md`
+  is `🐛 fix`, a new skill is `✨ feat`, a restructure is `♻️ refactor`. Reserve `📝 docs` for
+  genuine prose with no behavioral effect — a README, a guide, a comment.
 - **Multiple unrelated changes in one diff** → propose one commit per logical group, never merge them
 - **Emoji chosen before reading the diff fully** → read everything before picking the emoji, late changes often shift the type
-- **`BREAKING CHANGE:` in the wrong case or hyphenated** → `Breaking change:` / `BREAKING-CHANGE:` are rejected by the `commit-msg` hook — always exactly `BREAKING CHANGE:` (space, both words uppercase)
 - **`💾 save`** → a human-only WIP savepoint (`💾 save: … [skip ci]`), enforced by the `commit-msg` hook; agents never write it
 
 ### Valid examples
@@ -159,8 +151,5 @@ BREAKING CHANGE: upload_packages now takes (bucket, key) instead of (path).
 ✨ feat: add zip_python_package function
 🐛 fix: handle None value in format_date
 📝 docs: migrate AGENT_GITMOJI from _CODE_SRC_LEGACY
-♻️ refactor: extract stage upload logic
-🔧 chore: add ruff pre-commit hook
-⬆️ build: upgrade snowflake to 1.12.0
 ♻️ refactor!: rename upload_packages signature
 ```

@@ -12,16 +12,16 @@ handoff's `## Done when` condition is met"). Read whatever the claim points at a
 way: skeptically, against evidence, never on the caller's word alone.
 
 **This is the one shared methodology.** The `reviewer` agent and the `adversarial` MCP tool
-(`mcp/model_adversarial.py::load_methodology`) both apply it, so a finding looks the same
-regardless of which model reviews. Keep this file generic — stack-specific guidance (FastAPI,
-Streamlit, Snowflake, ...) belongs in its own skill, invoked on top of this, never inlined here.
+(`mcp/model_adversarial.py::load_methodology`) both apply it. Keep this file generic —
+stack-specific guidance (FastAPI, Streamlit, Snowflake, ...) belongs in its own skill, never
+inlined here.
 
 ## Adversarial mode
 
 The `adversarial` MCP tool always operates this way; a reviewer agent only when explicitly asked
-to. A same-model self-check inherits its own blind spots — the job is to actively try to break the
-material, not confirm it. Assume it is wrong until genuinely failing to find a flaw. No praise, no
-default approval — approve only after trying hard to break it and failing. Prioritize wrong
+to. The job is to actively try to break the material, not confirm it. Assume it is wrong until
+genuinely failing to find a flaw. No praise, no default approval — approve only after trying hard to
+break it and failing. Prioritize wrong
 assumptions, edge cases, and failure modes over style.
 
 ## What NOT to review

@@ -26,4 +26,4 @@ line.
   section in them (only the title and intro survive). Repo-level files are hand-authored and are
   never regenerated.
 - The SessionStart hook does nothing on a `python3` older than 3.11 (no `tomllib`): a stale
-  workspace or group AGENTS.md on such a machine means the hook never ran.
+  workspace or group AGENTS.md there means the hook never ran.

@@ -8,8 +8,7 @@ allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/inventory.py:*), Bash(ca
 # Reconcile
 
 Memory is a transit zone: a note is promoted to where it belongs and deleted, or deleted. This skill
-walks the notes with the user and applies what they approve. It dialogues, so it runs in the main
-session. Talk to the user in the user's own language; keep file names, paths and JSON as they are.
+walks the notes with the user and applies what they approve, in the main session. Talk to the user in the user's own language; keep file names, paths and JSON as they are.
 
 ## Promotion principle
 
@@ -39,8 +38,8 @@ session. Talk to the user in the user's own language; keep file names, paths and
    otherwise recommend keeping, search the sources yourself first: run `grep -rn` through Bash on
    two or three distinctive words of the note over the CLAUDE.md and AGENTS.md of each level, its
    `.claude/rules/`, its skills and its hook descriptions, read the lines found, and recommend
-   DELETE with the cited path and line when one of them states the same fact. Counts and ages are hints too, there is no fixed threshold, and a count is a biased proxy:
-   a poorly indexed note is under-counted. Also look for near-duplicates in the index lines,
+   DELETE with the cited path and line when one of them states the same fact. Counts and ages are hints too, with no fixed threshold: a poorly indexed note is under-counted.
+   Also look for near-duplicates in the index lines,
    across levels too. Read a note only when its description and index line are not enough, with
    `cat` through Bash, not the Read tool: a Read is counted as a consultation and would skew the
    very counters being reviewed. A read that is refused (a confidentiality guard) is never retried
@@ -92,10 +91,9 @@ session. Talk to the user in the user's own language; keep file names, paths and
    notes to delete, a separate and explicit option that is never the default; change something;
    cancel. If the user changes something, rebuild the plan, run the dry run again and ask again.
 5. Run exactly the plan shown: the same JSON with `--dry-run` removed (`"hard": true` only when the
-   user chose permanent deletion). This command is not pre-approved: the permission prompt shows
-   the command and its plan, which is the last check. Report a refusal or a failure as it is, with
-   the `left` actions. After a failure, applying the plan again is allowed once the cause is fixed;
-   after a run that was killed, a new plan is refused until its marker is 10 minutes old.
+   user chose permanent deletion). The permission prompt shows the command and its plan, the last check. Report a refusal or a failure as it is, with
+   the `left` actions. After a failure, apply the plan again once the cause is fixed; after a killed
+   run, a new plan is refused until its marker is 10 minutes old.
 6. This skill edits nothing outside memory directories. A promotion is made by the session or by
    the user, outside this flow: a note to promote stays untouched in the plan. Only after the user
    says the promotion is done, propose deleting the note, and apply it the same way after approval.
