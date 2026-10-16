@@ -9,16 +9,13 @@ metadata:
 
 # Council
 
-Ask one model, get one answer — and no way to tell if it's good, because you saw one perspective.
 The council runs the question through 5 advisors, each on a **different model family** and each
 thinking from a different angle, has them peer-review each other anonymously, then a chairman
-synthesises a verdict that says where they agree, where they clash, and what to actually do.
+synthesises a verdict: where they agree, where they clash, what to do.
 
-This is Karpathy's LLM Council: independent models, anonymous peer review, a chairman. The five
-thinking lenses are pinky's addition — they force spread even when two models would otherwise
-converge. Cross-model dispatch runs through the `panel` MCP tool (`pc-core-models` server); when the
-pool can't field enough distinct families, the unfilled lenses fall back to Claude sub-agents,
-**traced as such** in the transcript.
+Cross-model dispatch runs through the `panel` MCP tool (`pc-core-models` server); when the pool
+can't field enough distinct families, the unfilled lenses fall back to Claude sub-agents, **traced
+as such** in the transcript.
 
 ---
 
@@ -32,10 +29,8 @@ Resolve it in this order:
 3. **Trigger phrase** — only as a tie-breaker when content is genuinely unclear (`ADR this` → `tech`;
    `pitch council` → `pitch`; else `generic`).
 
-Content beats the trigger phrase: `council this: threads or asyncio for the dispatcher?` is a `tech`
-run (it should produce an ADR), even though `council this` alone would suggest `generic`. When the
-phrase and the content disagree, **say which type you picked and why in one line before Step 1**, so
-the user can redirect. If still unsure after all three, ask — one question.
+Content beats the trigger phrase. When the phrase and the content disagree, **say which type you
+picked and why in one line before Step 1**. If still unsure after all three, ask — one question.
 
 | type | for | typed output |
 |---|---|---|
@@ -45,8 +40,7 @@ the user can redirect. If still unsure after all three, ask — one question.
 
 **Once the type is resolved, read `references/type-<type>.md` in this skill's directory.** It carries
 every delta from the shared flow below: extra context to scan, the type's fourth gate check, the
-prior-art focus, how the advisor lenses are framed, the chairman's extra sections, and the output
-writer. The steps here are the 90 % that does not change.
+prior-art focus, lens framing, the chairman's extra sections, and the output writer.
 
 ---
 
@@ -55,12 +49,10 @@ writer. The steps here are the 90 % that does not change.
 1. **`panel` reachable?** If the `panel` MCP tool (`pc-core-models` server) is not in your tool list,
    you are in **full-fallback mode**: every advisor runs as a Claude sub-agent, the council has
    **zero cross-model signal at the advisor layer**, and Step 6 (chairman cross-check) stops being
-   optional — it is then the *only* cross-model input and must run. Say so up front; the council is
-   still worth running, just weaker. (`adversarial` and `offline` are *not* substitutes for `panel`
+   optional — it is then the *only* cross-model input and must run. Say so up front. (`adversarial` and `offline` are *not* substitutes for `panel`
    — see Step 3 / Step 6.)
-2. **Sub-agent spawning allowed?** This skill fans out ~12 sub-agent/model calls. Run it from the
-   **main session** — a sub-agent running this skill hits sub-agent-of-sub-agent limits at the Step 3
-   fallback and Step 4. If spawning is restricted here, stop and say so.
+2. **Sub-agent spawning allowed?** Run it from the **main session** (~12 sub-agent/model calls;
+   a sub-agent hits sub-agent-of-sub-agent limits at the Step 3 fallback and Step 4). If spawning is restricted here, stop and say so.
 3. **Interactive user present?** If not (you are a sub-agent, or a scheduled run): skip the Step 1
    clarifying question (frame best-effort), and the Step 3 egress gate defaults to **withheld**
    (Claude-only) unless the invoking context explicitly pre-approved egress.
@@ -69,8 +61,7 @@ writer. The steps here are the 90 % that does not change.
 
 ## When to run — the gate
 
-The council costs ~12 sub-agent/model calls plus one to two minutes, roughly 10× a direct answer.
-Run this gate before step 1.
+The council costs ~12 sub-agent/model calls, roughly 10× a direct answer. Run this gate before step 1.
 
 **Gate check 1 — explicit invocation.** If the user typed `/council` or used a MANDATORY TRIGGER,
 skip the rest and go to step 1. They opted in.
@@ -95,8 +86,7 @@ look thorough.
 
 ## The five advisors
 
-Not job titles — thinking styles that create tension with each other. `references/type-<type>.md`
-reframes each one for the type's context.
+Thinking styles, not job titles. `references/type-<type>.md` reframes each for the type.
 
 1. **The Contrarian** — hunts for what's wrong, missing, or will fail. Assumes a fatal flaw and
    tries to find it.
@@ -110,9 +100,6 @@ reframes each one for the type's context.
    Catches the curse of knowledge and unspoken jargon.
 5. **The Executor** — one question only: can this be done, and what's the fastest path? Ignores
    theory.
-
-Three natural tensions: Contrarian vs Expansionist, First Principles vs Executor, Outsider keeping
-everyone honest.
 
 ---
 
@@ -176,8 +163,7 @@ five miss?
 
 ### Step 5 — chairman synthesis (this session)
 
-You are the chairman. You hold the full context and this skill's anti-"it depends" discipline — this
-is not delegated. Input: the framed question, the 5 de-anonymised responses (lens labels only, never
+You are the chairman. Not delegated. Input: the framed question, the 5 de-anonymised responses (lens labels only, never
 models), the 5 peer reviews. Produce, in this exact order:
 
 ```
@@ -204,7 +190,7 @@ Conditional Go).
 ### Step 6 — chairman cross-model check
 
 "Where the Council Agrees" measures the shared prior of the advisor models as much as the argument.
-Even with cross-model advisors, the chairman is one model. Call the `panel` tool with **a single
+The chairman is one model. Call the `panel` tool with **a single
 task** — the exact chairman prompt from step 5 (framed question + 5 responses + 5 peer reviews) —
 so one more distinct model produces its own verdict. Diff the two and append:
 
@@ -214,12 +200,11 @@ so one more distinct model produces its own verdict. Diff the two and append:
  finding; give both verdicts and name where the reasoning splits. It carries into the written output.]
 ```
 
-**Do not substitute `adversarial` for `panel` here.** `adversarial` prepends a review methodology
-and frames its output as a *critique of your reasoning*, not an independent verdict — using it would
-confound the two-chairmen diff.
+**Do not substitute `adversarial` for `panel` here** — it frames its output as a critique, not an
+independent verdict, and would confound the diff.
 
-**Blocking depends on the run.** In a normal run (`panel` fielded routed advisors), this is a
-nice-to-have: `panel` BLOCKED / every candidate failed → record "cross-model check unavailable" and
+**Blocking depends on the run.** In a normal run (`panel` fielded routed advisors), this is
+optional: `panel` BLOCKED / every candidate failed → record "cross-model check unavailable" and
 continue. In a **full-fallback run** (Preflight check 1, or every advisor fell back), this is the
 *only* cross-model signal in the whole council — do not skip it, and if it truly cannot run, say
 plainly in the output that the verdict rests on a single model end to end.
@@ -254,7 +239,7 @@ which case follow that. It carries:
    lens, which model, or whether it was a routed model at all.
 3. **The chairman sees lenses, never models** — the model↔lens mapping lives only in the transcript
    (ADR-0006: a divergence stays attributable, never confounded with a quality gap).
-4. **The chairman can disagree with the majority** — if the minority reasoning is stronger.
+4. **The chairman can disagree with the majority** if the minority reasoning is stronger.
 5. **Agreement among voices is not proof** — that is what step 6 is for. Never drop it silently; if
    it could not run, say so in the output and the transcript.
 6. **Don't council the trivial.** One right answer → just answer it.

@@ -17,18 +17,16 @@ Referenced from `SKILL.md`. Read this when taking a card in, or before declaring
 - Relaying a multi-repo card
 - Abandoning a multi-repo card
 
-A session's real capacity limit is the session itself — one card, or one `sert`-linked group of
-cards, per session. `/chantier` operationalizes this natively instead of relying on judgment:
+One card, or one `sert`-linked group of cards, per session. `/chantier` sets `/goal`:
 
 - Card's `sert: null` (a root) → `/goal` is set from **this card's own** `## Done when` line.
 - Card's `sert: <parent>` → walk up to the root card (`sert: null`) that this chain ultimately
   serves, and set `/goal` from **the root's** `## Done when` line, not the leaf's. The session may then
   freely work any card in that `sert` group — the group is the unit of session, not the single card.
 
-Consequence: a `## Done when` line must be **demonstrable in the transcript** — a test result, an exit
-code, a real diff pasted — never merely true. `/goal`'s evaluator reads only the conversation
-transcript, never a file or a command it would run itself; an assertion without the underlying
-output in the transcript fools it exactly the way an unverified sub-agent report would.
+A `## Done when` line must be **demonstrable in the transcript** — a test result, an exit code, a
+real diff pasted — never merely true. `/goal`'s evaluator reads only the transcript, never a file or
+a command it would run itself.
 
 ### Who writes the work
 
@@ -39,32 +37,25 @@ implementation in its own turn. Real code changes go to `Agent(subagent_type:
 skill relays a card to a *different* repo it doesn't already occupy). The generated prompt still
 needs `spawn-workers`'s fixed block — this repo's own conventions **probed from disk**, never
 retyped from memory (`pc_kanban_spawn_workers.py::repo_conventions_block`: test location, test
-command, gate command; a 2026-09-20 witness run measured exactly what a hand-typed version of this
-missed) — plus the card's absolute path and `## Done when` as the generated block. The agent
+command, gate command) — plus the card's absolute path and `## Done when` as the generated block. The agent
 inherits nothing from this session's context.
 
 The loop this closes: worker → hand-back → review (below) → renvoi if KO, routed per `chantier`
 SKILL.md step 8 → acceptance → gates/tests green → `pc-git:commit`/`commit-and-pr` → card closed.
 The session that dispatched the worker never writes the implementation itself and never commits
-mid-loop — a commit outside the `commit`/`commit-and-pr` fork skips the gitmoji/commit-message
-convention those forks load. Two renvois maximum: a worker that misses the same point twice on the
-same card is a brief problem, not a work problem — stop and bring it to the user rather than trying
-a third time.
+mid-loop — a commit outside the `commit`/`commit-and-pr` fork skips the gitmoji convention those
+forks load. Two renvois maximum: a worker that misses the same point twice on the same card is a
+brief problem — stop and bring it to the user rather than trying a third time.
 
 **Carve-out — a single mechanical fix stays in-session.** A narrow regex widened by one
 alternative, a docstring correction, a single-file caller update with no design decision left open
-— bounded the same way `chantier` SKILL.md's own "obviously mechanical" test is (a doc typo, a
-rename, a one-line config change). Not the same rule as step 6's dispatch decision (that one picks
-between an existing skill and building a new one when none fits; `card-worker` already exists and
-already covers this shape) — a separate, narrower exception: spawning an agent for a one-line fix
-costs more than it returns, so the session makes it directly instead.
+— bounded like `chantier` SKILL.md's "obviously mechanical" test (a doc typo, a rename, a one-line
+config change). Separate from step 6's dispatch decision: the session makes it directly.
 
 ### Reviewing before declaring a card done
 
-The reviewer must not be the generator — a same-model self-check inherits its own blind spots, and
-agreement among several voices of the same model is not proof of correctness either, only a
-correlated blind spot repeated. Whenever a card's work needs real judgment reviewed, not just a
-mechanical check, in this order:
+The reviewer must not be the generator, and several voices of the same model are one correlated
+blind spot. Whenever a card's work needs real judgment reviewed, in this order:
 
 1. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
    reviewer.md`), the single entry point: the caller never calls the `adversarial` MCP tool
@@ -76,9 +67,9 @@ mechanical check, in this order:
    `BLOCKED` or `ERROR`. It opens its report with `Method: adversarial (<model>)` or
    `Method: reviewer (<model>)`, the model that answered either way. Pass the reviewer its own
    frontmatter defaults (`model: sonnet`, `effort: high`) and never a `model` or an `effort`
-   above them on the `adversarial` path: the extra cost buys no second voice, since the report
-   relays that verdict as is. When the reviewer reviews alone (a claim with no diff, or `adversarial`
-   answered `BLOCKED` / `ERROR`) its own reasoning is the review, and the cap does not apply.
+   above them on the `adversarial` path: the report relays that verdict as is. When the reviewer
+   reviews alone (a claim with no diff, or `adversarial` answered `BLOCKED` / `ERROR`) the cap does
+   not apply.
 
    When the card declares `mockup:`, the hand-off also carries the mockup path (the unpacked
    folder for a `.zip`, the sibling `<zip name>/`) and the card's `mockup_fidelity` levels, an axis
@@ -93,13 +84,10 @@ Whatever this session then tells the user about the review opens with the report
 relayed verbatim before any findings — naming who answered in the full
 `provider/model · 🟦🟪🟧 tier` form, and stating why `adversarial` did not answer when the
 `Method:` is `reviewer` on a change that has a diff. It is the only trace of *how* the verdict
-was reached, and a summary that drops it presents a pool-model challenge and a solo same-model
-read as the same review.
+was reached.
 
 **Three review rounds per card at most.** A round is one reviewer pass plus the fixes it triggers.
-A reviewer reads without executing: each finding is a candidate route until replayed, and a
-criterion with no bound (open-ended input such as shell text) yields a rarer route every round.
-After the third round, a new finding is fixed in this card only when it is a regression shown by
+A reviewer reads without executing: each finding is a candidate until replayed. After the third round, a new finding is fixed in this card only when it is a regression shown by
 running it — a test or a command whose output shows the change doing worse than the base branch.
 Every other finding goes to a follow-up card (`sert:` this card), and the card closes.
 
@@ -107,63 +95,50 @@ Every other finding goes to a follow-up card (`sert:` this card), and the card c
 heuristic over open-ended input — a parser of shell text, a pattern guard, a classifier — the
 worker builds, before any review, a differential test: generated inputs run through the base
 branch and the change, every changed verdict listed. The fixes land from that list in one batch;
-the review then reads the differential's output along with the diff. On `freeze-bash-faux-positifs`
-one such pass (2 754 generated commands) surfaced in one run the 88 regressions nine review rounds
-had been finding one at a time.
+the review then reads the differential's output along with the diff.
 
 ### The review belongs in the `/goal` condition, not in an after-the-fact hope
 
-The section above is a *should* that nothing enforced — an audit of closed cards found it skipped
-on roughly half the judgment work, invisibly. So when a card's work needs judgment review, the
-review goes **into the `/goal` condition itself**, set when the card is taken (`chantier` SKILL.md
-step 7): the harness-native Stop-hook then holds the card open until the transcript shows the
-review ran. Phrase it as a transcript-verifiable state, never a promise — append to the
+When a card's work needs judgment review, the review goes **into the `/goal` condition itself**, set
+when the card is taken (`chantier` SKILL.md step 7): the Stop hook then holds the card open until the
+transcript shows the review ran. Phrase it as a transcript-verifiable state — append to the
 `## Done when`-derived condition `… and the final diff has been reviewed by `Agent(reviewer)`,
 its findings fixed or filed in a follow-up card, and the last pass's `Method:` line relayed
 verbatim to the user`. The clause carries the substance only — that the review ran and who
-answered. The checkbox and its shape stay out of it: the evaluator re-reads every clause on every
-yield, and a form clause over a card reviewed in several passes has no wording that answers every
-reading, so the Stop hook rejects work that is done.
+answered. The checkbox and its shape stay out of it: a form clause over a card reviewed in several
+passes has no wording that answers every reading, so the Stop hook rejects work that is done.
 
 The judgment/mechanical call is made at intake, before the diff exists — so **when it is unclear,
-include the clause**: a spurious clause on a card that turns out mechanical costs one
-`- [x] reviewed (n/a — mechanical)` stamp, a missing clause on judgment work is the failure this
-whole mechanism exists to stop. An *obviously* mechanical card (doc typo, rename, one-line config)
-carries no clause and is closed `- [x] reviewed (n/a — mechanical)`, so the audit can tell "nothing
-to review" from "review skipped".
+include the clause**: a spurious clause costs one `- [x] reviewed (n/a — mechanical)` stamp. An
+*obviously* mechanical card (doc typo, rename, one-line config) carries no clause and is closed
+`- [x] reviewed (n/a — mechanical)`.
 
 `stop_handoff.py --list-unreviewed-done` (surfaced by `/chantier`'s intake) is the retroactive
 net: `4-done` cards missing a checked `reviewed (...)` line, tagged `(no review line)` or
-`(reviewed unchecked)`, most recent first, plus a count of cards closed `(n/a — mechanical)` so that
-escape hatch's rate stays visible. It reaches `4-done` only — a card folded to `_ARCHIVE/` leaves
-the net. Not a gate — a card is never blocked from `4-done` — just the end of the silence.
+`(reviewed unchecked)`, most recent first, plus a count of cards closed `(n/a — mechanical)`. It
+reaches `4-done` only — a card folded to `_ARCHIVE/` leaves the net. Not a gate — a card is never
+blocked from `4-done`.
 
 ### Making the review visible on the card
 
-Not every card goes through the section above — a purely mechanical change has nothing for a
-reviewer to catch, and stamping one on every card regardless would turn a real judgment call into a
-box-ticking ritual. When a card's work *did* need real judgment reviewed, make it visible on the
-card itself: immediately above the `## Done when` line (already present by this point — it was set at
-selection), add `- [ ] reviewed (method)`, `method` the reviewer's own `Method:` line
+When a card's work *did* need real judgment reviewed, make it visible on the card: immediately above
+the `## Done when` line, add `- [ ] reviewed (method)`, `method` the reviewer's own `Method:` line
 (`adversarial`, or `reviewer` when it reviewed by itself) or `self-degraded` — or
-`n/a — mechanical` for a mechanical card that had nothing for a reviewer to catch. Several passes
+`n/a — mechanical` for a mechanical card. Several passes
 still make one line: the final pass first, then the earlier ones, each `reviewer` pass on a diff
 followed by why `adversarial` did not answer — e.g. `- [x] reviewed (reviewer (anthropic/sonnet ·
 🟪 sonnet), adversarial timed out; adversarial (<provider/model · tier>) ×2)`.
 Check it — `- [x] reviewed (…)` — once the review above is done, before declaring the card done.
 
 Added by the session doing the work, never by `/chantier`'s intake (step 7). This checkbox is
-descriptive, not a new gate: the review itself stays mandatory per the section above whenever real
-judgment is involved, independent of whether the checkbox is present. What is *not* enforced is the
-checkbox's own bookkeeping — no script blocks completion on a missing box. An omitted checkbox on a
-`4-done` card is surfaced by `--list-unreviewed-done`, so the silence is visible even though it is
-not blocking; the fix is one line (`reviewed (<method>)` or `reviewed (n/a — mechanical)`), not a
-re-review.
+descriptive, not a gate: the review stays mandatory whenever real judgment is involved, and no script
+blocks completion on a missing box. An omitted checkbox on a `4-done` card is surfaced by
+`--list-unreviewed-done`; the fix is one line (`reviewed (<method>)` or `reviewed (n/a —
+mechanical)`), not a re-review.
 
 ### Proposing the next card, once the card is done
 
-Closing a card is not the end of the session's job — the next card does not pick itself. Once
-the `## Done when` state is verified, propose candidate cards for `2-selected-for-dev`; never move
+Once the `## Done when` state is verified, propose candidate cards for `2-selected-for-dev`; never move
 one there without an explicit OK in the same exchange — the commitment column stays a human
 decision (the `kanban-proactivity` rule).
 
@@ -173,8 +148,7 @@ scoping first, never proposed directly), filtered and ordered:
 1. **Exclude** any card whose `blocked_by` points at a card not yet `done` — never propose a
    blocked card, however old. A card missing `date:` is malformed; flag it instead of guessing a
    sort position. **Exception**: a `blocked_by` pointing at a card now `dropped` (§ below) is never
-   excluded this way — it goes through the obsolescence check instead, because a dead
-   blocker calls the blocked card's own premise into question, not just its availability.
+   excluded this way — it goes through the obsolescence check instead.
 2. **Sort the rest into two buckets**: cards whose `blocked_by` was resolved in *this same session*
    first, then everything else. Within each bucket, sort by `priority` (skill `kanban` § Card
    frontmatter) descending, `date:` ascending as tie-break at equal `priority`.
@@ -183,23 +157,19 @@ scoping first, never proposed directly), filtered and ordered:
 everything is blocked") and propose nothing; do not lower the bar to fill a slot.
 
 On explicit user OK: `mv` the chosen card into `2-selected-for-dev`. On silence or "not now": do
-nothing — the proposal is not a commitment, and repeating it unprompted next turn is not this
-skill's job either.
+nothing, and do not repeat the proposal unprompted.
 
 ### Flagging cards the closed card just made obsolete
 
-The same moment — the closed card's own subject is now known in full — is the cheapest point to
-catch another open card whose premise it just erased. List every other open card (`0-ideas/`,
-`1-todo/`, `2-selected-for-dev/`) **in the same chantier** with the opening of its goal, not just
-its title:
+List every other open card (`0-ideas/`, `1-todo/`, `2-selected-for-dev/`) **in the same chantier**
+with the opening of its goal, not just its title:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/open_cards_brief.py" <chantier-dir>
 ```
 
-A title alone hides the overlap — "Worker = un agent" closed without flagging "Explorer `/goal` +
-équipes d'agents", whose remaining goal it had just delivered. Read the just-closed card next to
-that listing and judge whether any is now clearly superseded. Two triggers, same proposal:
+Read the just-closed card next to that listing and judge whether any is now clearly superseded. Two
+triggers, same proposal:
 
 - **Direct supersession** — the just-closed card's own content makes another open card's need moot.
 - **Dead blocker** — a card `blocked_by` the just-closed card, where the closed card
@@ -222,10 +192,10 @@ say so plainly, append no `auto-parent` block, never invent one.
 
 Record the check on the closed card, next to its `reviewed` line:
 `- [x] obsolescence (none)`, or `- [x] obsolescence (<slug>, …)` naming the cards proposed for a
-drop. Without it, "checked, nothing found" and "never checked" look the same.
+drop.
 
 **Nothing looks obsolete** → say nothing extra in the conversation; the `obsolescence (none)` line on
-the card is the only trace, same discipline as the next-card proposal's own silence.
+the card is the only trace.
 
 ### Archiving a parent whose children are still open
 
@@ -250,16 +220,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py
 It prints `{"context_window_pct": <int|null>, "rate_limit": {"five_hour": {...}, "seven_day":
 {...}}|null}`, each field independently `null` when its own data source is unavailable (no state file —
 `pc-statusline` not installed or not rendering —, or a context value last written more than 300 s
-ago) — never an error. Both come from the state file `pc-statusline` writes on every render; the
-transcript is never read. Render the line from this output and
-the candidate card's `repos:`/`sert` against the current session's own:
+ago) — never an error. Both come from the state file `pc-statusline` writes on every render. Render
+the line from this output and the candidate card's `repos:`/`sert` against the current session's own:
 
 1. **Rate-limit override, checked first.** If a window in `rate_limit` has `triggered: true`,
    the whole line becomes a pause recommendation, naming the window and its `resets_at` — skip
    step 2 entirely. Only `five_hour` can trigger: at `≥95` % used with a reset more than 1h away.
-   `seven_day` never triggers — its reset is days away, waiting is not practicable. Do not
-   recommend "continue in session" when the account is about to get cut off regardless of context
-   headroom.
+   `seven_day` never triggers. Do not recommend "continue in session" when the account is about to
+   get cut off regardless of context headroom.
 2. **Otherwise, context-window + proximity.** `context_window_pct` — the status line's own
    `context_window.used_percentage` (`null` → omit the line entirely, nothing to base it on) against the `<40` / `≥40` band gives the default recommendation
    (continue / spawn a fresh session). The command prints that default line; when relaying it, the
@@ -277,8 +245,7 @@ the candidate card's `repos:`/`sert` against the current session's own:
   mi-travail, cache froid à la reprise
 ```
 
-Purely consultative end to end: this step never `mv`s the card, never spawns a session, never
-forces a pause — the same human decision as the proposal itself.
+Purely consultative: this step never `mv`s the card, never spawns a session, never forces a pause.
 
 ### Naming the session, at the end of the session only
 
@@ -318,7 +285,7 @@ Only after that call returns, close the response with:
 /rename <name>
 ```
 
-Add nothing past it — just the pasteable line, ready to paste as the next message.
+Add nothing past it.
 
 ### Touching a repo the card does not list
 
@@ -343,10 +310,9 @@ relays to the next once its own part of `## Done when` is reached:
   (the single slug filter). Inside cmux/wmux it opens the workspace; outside any multiplexer it
   prints the `cd … && claude …` line to run. Or, if a worker for that repo is already listed by
   `ListAgents`, `SendMessage` it a bare trigger ("take over on `<card-slug>`").
-- **Work state travels in the card's handoff block, never in the message.** The narrative handoff on
-  the `3-in-progress` card is the single source of what is done and what is left; the inter-session
-  message carries only the trigger. A relay that puts state in the message loses it the moment the
-  receiving session compacts.
+- **Work state travels in the card's handoff block, never in the message.** The handoff on the
+  `3-in-progress` card is the single source of what is done and what is left; the inter-session
+  message carries only the trigger.
 - The receiving worker runs `/pc-kanban:chantier`, finds the card already in `3-in-progress`
   (resume-directly branch), reads the handoff, and continues.
 
@@ -356,7 +322,5 @@ If a multi-repo card is dropped mid-flight (superseded, blocked, wrong approach)
 
 1. Close every spawned worker's cmux workspace — a `new-workspace` with nothing running in it is not
    auto-reaped, and an orphan named `<repo>-<slug>` misleads the next `ListAgents`.
-2. `mv` the card back to the column it came from (`2-selected-for-dev` or `1-todo`) — the column
-   folder is the card's state, nothing else to reset.
-3. Note the abandonment and why in the card's handoff block, so a later pickup does not re-derive
-   the same dead end.
+2. `mv` the card back to the column it came from (`2-selected-for-dev` or `1-todo`).
+3. Note the abandonment and why in the card's handoff block.
