@@ -3,7 +3,7 @@
 python3 -m unittest discover tests
 
 Defines "done": an empty queue is transparent (`{}`). A queued `reload-plugins`
-or `goal` returns a PreToolUse `deny` and leaves the queue intact (peek, not
+returns a PreToolUse `deny` and leaves the queue intact (peek, not
 pop), so every tool call for the rest of the turn is denied. Any other queued
 key returns an `ask` and empties the queue, so it surfaces exactly once.
 """
@@ -50,11 +50,11 @@ class TestPendingGate(unittest.TestCase):
         self.assertEqual(hso["permissionDecision"], "deny")
         self.assertIn("/reload-plugins", hso["permissionDecisionReason"])
 
-    def test_goal_is_a_deny(self):
+    def test_goal_never_denies(self):
         pua.require(self.session, "goal", "/goal done = X")
-        self.assertEqual(
-            self._run()["hookSpecificOutput"]["permissionDecision"], "deny"
-        )
+        decision = self._run().get("hookSpecificOutput", {}).get("permissionDecision")
+        self.assertNotEqual(decision, "deny")
+        self.assertFalse(gate.is_latched(self.session))
 
     def test_rename_is_an_ask(self):
         pua.require(self.session, "rename", "/rename slug")
@@ -64,11 +64,11 @@ class TestPendingGate(unittest.TestCase):
 
     def test_deny_key_wins_over_an_ask_key_in_the_same_batch(self):
         pua.require(self.session, "rename", "/rename slug")
-        pua.require(self.session, "goal", "/goal done = X")
+        pua.require(self.session, "reload-plugins", "/reload-plugins")
         hso = self._run()["hookSpecificOutput"]
         self.assertEqual(hso["permissionDecision"], "deny")
         self.assertIn("/rename slug", hso["permissionDecisionReason"])
-        self.assertIn("/goal done = X", hso["permissionDecisionReason"])
+        self.assertIn("/reload-plugins", hso["permissionDecisionReason"])
 
     def test_deny_peeks_so_every_call_of_the_turn_is_denied(self):
         pua.require(self.session, "reload-plugins", "/reload-plugins")
@@ -81,7 +81,7 @@ class TestPendingGate(unittest.TestCase):
         )
 
     def test_deny_sets_the_latch_and_ask_does_not(self):
-        pua.require(self.session, "goal", "/goal X")
+        pua.require(self.session, "reload-plugins", "/reload-plugins")
         self._run()
         self.assertTrue(gate.is_latched(self.session))
         pua.clear_all(self.session)
