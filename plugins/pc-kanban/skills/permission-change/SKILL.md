@@ -41,8 +41,14 @@ bound to position 2 would call it a status when it is really the second director
 scope only (`careful`: destructive `Bash`; `deny`: the write-class tools). `freeze` also asks for a
 `Bash` command that looks like a write (`>`, `tee`, `sed -i`, `mv`/`cp`/`rm`, `git commit`…) and
 names an absolute or `~` path, a `cd` target or a `git -C` directory outside the frozen scope. It
-is a string heuristic. Three rules keep text from counting as a path:
+is a string heuristic. Four rules keep text from counting as a path:
 
+- **Only the target of a write is judged.** The command is cut at `;`, `&` and `|`; a segment
+  with no write word is not read, and in one that has it only the paths from that word on count.
+  The program, its script and its read-only arguments are never a target, even when another
+  segment of the line writes (`mv a b; bash <plugin script> <dir>`). The first absolute path of a
+  `cp`/`rsync`/`install` followed by a destination is its source, not a target. A `cd` target and
+  a `git -C` directory are still judged anywhere in the line.
 - **Text is dropped.** Heredoc bodies and quoted strings that do not start with `/` or `~` are
   ignored; the heredoc's opening line and quoted paths are not. A command whose heredoc or quote
   is never closed is analysed as written, no rule applied.

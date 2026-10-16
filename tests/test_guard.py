@@ -456,6 +456,28 @@ class TestBashWriteEscapes(unittest.TestCase):
         self.assertEqual(self.escapes(f"{script} apply --root {self.root}"), [])
         self.assertEqual(self.escapes(f"bash {script} apply --root {self.root}"), [])
 
+    def test_only_the_write_target_is_judged(self):
+        script = f"{self.abs}/plugins/x/scripts/run.sh"
+        for cmd in (
+            f"mv a.md b/ && sed -i '' 's/a/b/' b/a.md; bash {script} {self.abs} slug",
+            f"rm -f {self.root}/x; python3 {script} --root {self.root}",
+            f"python3 {script} --root {self.root} > {self.root}/out.log",
+            f"bash {script} {self.abs} | tee {self.root}/log",
+            f"cp {self.abs}/source.txt {self.root}/dest.txt",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [])
+
+    def test_write_target_outside_still_asks_in_a_compound_command(self):
+        for cmd, target in (
+            (f"echo a; rm {self.abs}/f", f"{self.abs}/f"),
+            (f"ls && python3 run.py > {self.abs}/out.log", f"{self.abs}/out.log"),
+            (f"cat a | tee {self.abs}/log", f"{self.abs}/log"),
+            (f"cp {self.root}/a {self.abs}/dest", f"{self.abs}/dest"),
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.escapes(cmd), [target])
+
     def test_real_git_apply_outside_still_asks(self):
         self.assertEqual(self.escapes(f"git -C {self.abs} apply fix.patch"), [self.abs])
         target = f"{self.abs}/pc-git"

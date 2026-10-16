@@ -416,6 +416,12 @@ _BASH_PIPE_TO_SHELL = re.compile(
     r"\|\s*(?:(?:sudo|env|time|nohup)\s+)*(?:\S*/)?\b(?:sh|bash|zsh|ksh|dash)\b"
 )
 _BASH_SEPARATOR = re.compile(r";|\n|(?<![>&])&(?!>)")
+_BASH_SEGMENT_SPLIT = re.compile(r"[;&|]")
+# A copy whose first word after the options is an absolute path followed by a destination: that
+# path is the source. `-t` / `--target-directory` puts the destination first, so it never matches.
+_BASH_COPY_SOURCE = re.compile(
+    r"(?:cp|rsync|install)\b(?:\s+-(?!t\b|-target)\S*)*\s+(?P<src>[~/]\S*)\s+\S"
+)
 _BASH_FD_DUP = re.compile(r">&\d*-?|&>>?")
 _BASH_NEUTRAL_REDIRECT = re.compile(
     r"\d*>&\d+|&>\s*/dev/null(?![\w./-])|\d*>>?\s*/dev/null(?![\w./-])"
@@ -621,11 +627,67 @@ def _names_real_directory(path: str) -> bool:
     return first is not None and os.path.isdir("/" + first)
 
 
+def _logical_lines(text: str) -> list[str]:
+    """Return `text` split into logical lines: a physical line that `_continues` joins the next.
+
+    Args:
+        text: The Bash command.
+
+    Returns:
+        The logical lines, in order.
+    """
+    lines = text.split("\n")
+    logical: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        while i < len(lines) and _continues(line):
+            line = f"{line}\n{lines[i]}"
+            i += 1
+        logical.append(line)
+    return logical
+
+
+def _write_targets(text: str) -> list[str]:
+    """Return the absolute paths `text` names as the target of a write, not as a program or input.
+
+    `text` is split at every separator. Only a segment holding a write marker is read, and only
+    from that marker on: the program, its script and its arguments before it are not targets.
+    The source of a `cp`, `rsync` or `install` is read, not written.
+
+    Args:
+        text: The Bash command, heredoc bodies and non-path quoted text already removed.
+
+    Returns:
+        The candidate target paths, in order of appearance.
+    """
+    targets: list[str] = []
+    segments = [
+        segment
+        for line in _logical_lines(text)
+        for segment in _BASH_SEGMENT_SPLIT.split(line)
+    ]
+    for segment in segments:
+        marker = _BASH_WRITE_MARKER.search(segment)
+        if marker is None:
+            continue
+        paths = _BASH_PATH.findall(segment[marker.start() :])
+        source = _BASH_COPY_SOURCE.match(segment[marker.start() :])
+        if source is not None and source["src"] in paths:
+            paths.remove(source["src"])
+        targets += paths
+    return targets
+
+
 def bash_write_escapes(command: str, freeze_dirs: list[str], root: Path) -> list[str]:
     """Return the paths a write-looking Bash `command` names outside every frozen directory.
 
     Empty when there is no freeze, no write marker, or every named path is inside a frozen
     directory or under a system prefix. Board and scratchpad carve-outs are the caller's job.
+
+    Only the target of a write is judged (see `_write_targets`): a program, its script or its
+    read-only arguments are not, even when another part of the line writes.
 
     Text is not a path: heredoc bodies and quoted strings that are text are dropped first (code
     handed to a shell, `ssh`, `-c`, `eval` or a runner is kept, see `SKILL.md`), and `N>&M` /
@@ -640,9 +702,9 @@ def bash_write_escapes(command: str, freeze_dirs: list[str], root: Path) -> list
     text = command if stripped is None else _BASH_NEUTRAL_REDIRECT.sub(" ", stripped)
     if not _BASH_WRITE_MARKER.search(text):
         return []
-    candidates = _BASH_PATH.findall(text) + [
-        "".join(m.groups(default="")) for m in _BASH_DIR_ARG.finditer(text)
-    ]
+    candidates = (
+        _BASH_PATH.findall(text) if stripped is None else _write_targets(text)
+    ) + ["".join(m.groups(default="")) for m in _BASH_DIR_ARG.finditer(text)]
     escapes: list[str] = []
     for raw in dict.fromkeys(candidates):
         path = os.path.expanduser(raw)
