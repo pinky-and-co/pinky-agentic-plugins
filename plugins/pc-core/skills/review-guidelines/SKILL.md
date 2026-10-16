@@ -1,6 +1,6 @@
 ---
 name: review-guidelines
-description: Shared review methodology — severity-labeled findings, high precision, a clear verdict, an optional adversarial stance. Use whenever reviewing code changes or a described claim/result, whether as the `reviewer` agent, the `adversarial` MCP tool, or any other reviewer. Stack-specific guidance (FastAPI, Streamlit, Snowflake, ...) is not here — invoke the matching dedicated skill for that.
+description: "Shared review methodology — severity-labeled findings, high precision, a clear verdict, an optional adversarial stance. Use whenever reviewing code changes or a described claim/result, as the `reviewer` agent, the `adversarial` MCP tool or any other reviewer. Stack-specific guidance (FastAPI, Streamlit, Snowflake…) lives in the dedicated skills."
 user-invocable: false
 ---
 

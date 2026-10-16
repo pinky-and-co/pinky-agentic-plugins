@@ -1,6 +1,6 @@
 ---
 name: export
-description: "Export selected kanban cards, their chantier context, a relevance-filtered _AGENT_LOG (exported-card slug mentions within the last 60 days, plus the secrets denylist), a repo code subtree, and a rendered guide into one zip for an agent working outside Claude Code. Moves the exported cards to 3-in-progress with an export marker. Use when the user asks to export cards or hand a job off to an external agent."
+description: "Export selected kanban cards with their chantier context, a relevance-filtered _AGENT_LOG, a repo code subtree and a rendered guide into one zip for an agent working outside Claude Code; the exported cards move to 3-in-progress with an export marker. Use when the user asks to export cards or hand a job off to an external agent."
 argument-hint: "<chantier-dir> --card <id> [--card <id> ...] --repo <path> --touched <file> [...]"
 allowed-tools: mcp__plugin_pc-delegate_pc-delegate__export_subtree, Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/export/scripts/build_export.py:*), Read
 ---

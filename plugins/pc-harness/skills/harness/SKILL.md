@@ -1,6 +1,6 @@
 ---
 name: harness
-description: Claude Code harness pitfalls measured in real sessions — writing or debugging a mod (function hooks, AbovePrompt band, Pane, Button, $.tool.check, $.session), how an installed plugin, MCP server or mod reloads after an edit, tools missing from a session (ENABLE_TOOL_SEARCH behind a third-party endpoint, Glob/Grep, LSP recommendations), and testing a plugin or a permission guard for real (permission modes, debug log, claude plugin eval). Use alongside plugin-authoring when building a mod, or when a hook, mod, MCP server or permission behaves differently than its docs suggest.
+description: "Claude Code harness pitfalls measured in real sessions: writing or debugging a mod (function hooks, AbovePrompt band, Pane, Button, $.tool.check, $.session), how an installed plugin, MCP server or mod reloads after an edit, tools missing from a session (ENABLE_TOOL_SEARCH behind a third-party endpoint, Glob/Grep, LSP), testing a plugin or permission guard for real (permission modes, debug log, claude plugin eval). Use with plugin-authoring when building a mod, or when a hook, mod, MCP server or permission behaves differently than its docs say."
 user-invocable: false
 metadata:
   source: measured in interactive and headless Claude Code sessions (2.1.283 to 2.1.288), debug logs and the mods API typings

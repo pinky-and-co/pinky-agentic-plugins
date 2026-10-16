@@ -1,7 +1,7 @@
 ---
 name: debug-brief
 argument-hint: "<behavior discrepancy> --code <src…> --data <file…> [--spec <path>] [--send [model]]"
-description: "Assemble a self-contained debug brief — a human-reported behavior discrepancy confronted against the code, an optional spec, and a sample of the real data — so a model can reason about root cause. Output is one text block to paste into an external model, or send through the panel MCP tool. Use when someone reports 'X does the wrong thing' and wants a rigorous bug/not-a-bug qualification before touching the code."
+description: "Assemble a self-contained debug brief — a reported behavior discrepancy confronted with the code, an optional spec and a sample of real data — so a model can reason about root cause; one text block to paste into an external model or send through the panel MCP tool. Use when someone reports 'X does the wrong thing' and wants a rigorous bug/not-a-bug call before touching the code."
 user-invocable: true
 allowed-tools: Read, Bash(find:*), Bash(rtk find:*), Bash(ls:*), Bash(rtk ls:*), Skill
 metadata:

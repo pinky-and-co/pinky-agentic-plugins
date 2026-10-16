@@ -1,6 +1,6 @@
 ---
 name: spawn-workers
-description: From the orchestrator session, hand a selected card to a `card-worker` Agent call per repo of its `repos:` — a generated prompt, not a cmux session on /pc-kanban:chantier. `--cmux` keeps the session path for a repo whose environment doesn't reduce to commands. Use when a selected card must be handed to its repos' workers; for a multi-repo card, pass the single next repo slug.
+description: "From the orchestrator session, hand a selected card to one `card-worker` Agent call per repo of its `repos:` with a generated prompt (not a cmux session); `--cmux` keeps the session path for a repo whose environment doesn't reduce to commands. Use when a selected card must go to its repos' workers; for a multi-repo card, pass the single next repo slug."
 argument-hint: "<chantier-id> <card-slug> [repo-slug...] [--dry-run] [--cmux] [--model <tier>] [--effort <level>] [--arbitrage <text>]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py:*), Read, Agent
 model: haiku
