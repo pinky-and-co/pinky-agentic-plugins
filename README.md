@@ -20,9 +20,10 @@ Public Claude Code plugin marketplace — generic, reusable workspace mechanics:
 </div>
 <!-- pinky:readme-badges:end -->
 
-Every plugin carries zero profile-resolved values — no product codename, no employer reference,
-nothing that only makes sense inside one org. Values that differ per repo (chat language, default
-branch, branch strategy) are read from that repo's own `.claude/settings.pinky.json`.
+No plugin carries a value specific to one repo or org — no product codename, no employer
+reference, nothing that only makes sense inside one org. Values that differ per repo (chat
+language, default branch, branch strategy) are read from that repo's own
+`.claude/settings.pinky.json`.
 
 ## Plugins
 

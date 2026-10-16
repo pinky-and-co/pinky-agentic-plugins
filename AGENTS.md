@@ -1,8 +1,8 @@
 # AGENTS.md — pinky-agentic-plugins
 
 Public marketplace of generic Claude Code plugins for the pinky-and-co suite — reusable workspace
-mechanics with zero profile-resolved values (no product codename, no employer reference, nothing
-that only makes sense inside one specific org). Anyone can install a plugin from here via
+mechanics with no value specific to one repo or org (no product codename, no employer reference,
+nothing that only makes sense inside one specific org). Anyone can install a plugin from here via
 `claude plugin marketplace add`; private, org-specific knowledge lives in separate plugin repos
 that depend on this one without duplicating it.
 
@@ -66,7 +66,7 @@ When an edit seems ignored, check what actually loaded it before refreshing anyt
 - `scripts/hooks/` is distributed from the moteur, never hand-edited here. This repo's own
   quality gates (mypy, bandit, interrogate, darglint) run against every authored `.py` under a
   plugin — `hooks/` (concern folders nested inside it included) and `skills/<name>/` alike.
-- A profile-resolved value (chat language, default branch) is never hardcoded into a public
+- A value that differs per repo (chat language, default branch) is never hardcoded into a public
   skill. Each consuming repo declares its own values in its own `.claude/settings.pinky.json`.
 - **Package by feature, not by artefact type — within the harness's own root directories.**
   `hooks/`, `skills/`, and `mcp/` are the plugin-root directories the harness itself recognises
