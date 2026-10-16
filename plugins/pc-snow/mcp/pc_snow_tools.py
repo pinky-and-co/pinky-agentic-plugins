@@ -31,6 +31,7 @@ reaches it as `Error executing tool <name>` with no cause. The server turns `PcS
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import threading
@@ -76,7 +77,11 @@ _PRIVILEGE_TEXT = re.compile(
 )
 _PRIVILEGE_ERROR_CODES = frozenset({2003, 3001})
 # Le rôle de base de données SNOWFLAKE qui couvre chaque vue : l'un ne couvre pas l'autre.
-_USAGE_ROLES = {"TASK_HISTORY": "USAGE_VIEWER", "QUERY_HISTORY": "GOVERNANCE_VIEWER"}
+_USAGE_ROLES = {
+    "TASK_HISTORY": "USAGE_VIEWER",
+    "QUERY_HISTORY": "GOVERNANCE_VIEWER",
+    "DYNAMIC_TABLE_REFRESH_HISTORY": "USAGE_VIEWER",
+}
 
 TASK_COLUMNS = [
     "NAME",
@@ -110,6 +115,25 @@ QUERY_COLUMNS = [
     "QUERY_TAG",
 ]
 QUERY_TEXT_COLUMNS = ["ERROR_MESSAGE", "QUERY_TEXT"]
+# Les seules colonnes sur lesquelles `query_history` agrège : whitelist, jamais une valeur libre
+# (un GROUP BY ne se lie pas, la colonne est validée puis interpolée).
+QUERY_GROUPABLE = (
+    "QUERY_TYPE",
+    "EXECUTION_STATUS",
+    "USER_NAME",
+    "ROLE_NAME",
+    "WAREHOUSE_NAME",
+    "ERROR_CODE",
+)
+QUERY_GROUP_COLUMNS = [
+    "GROUP_VALUE",
+    "QUERIES",
+    "RUNNING",
+    "TOTAL_ELAPSED_TIME_MS",
+    "QUEUED_OVERLOAD_TIME_MS",
+    "BYTES_SCANNED",
+    "ROWS_PRODUCED",
+]
 CREDIT_COLUMNS = [
     "WAREHOUSE_NAME",
     "START_TIME",
@@ -127,6 +151,56 @@ EVENT_COLUMNS = [
     "QUERY_ID",
 ]
 EVENT_TEXT_COLUMNS = ["MESSAGE", "ATTRIBUTES"]
+OPERATOR_COLUMNS = [
+    "QUERY_ID",
+    "STEP_ID",
+    "OPERATOR_ID",
+    "PARENT_OPERATORS",
+    "OPERATOR_TYPE",
+    "OPERATOR_STATISTICS",
+    "EXECUTION_TIME_BREAKDOWN",
+    "OPERATOR_ATTRIBUTES",
+]
+OPERATOR_VARIANT_COLUMNS = [
+    "OPERATOR_STATISTICS",
+    "EXECUTION_TIME_BREAKDOWN",
+    "OPERATOR_ATTRIBUTES",
+]
+DT_COLUMNS = [
+    "NAME",
+    "SCHEMA_NAME",
+    "DATABASE_NAME",
+    "STATE",
+    "QUERY_ID",
+    "DATA_TIMESTAMP",
+    "REFRESH_START_TIME",
+    "REFRESH_END_TIME",
+    "COMPLETION_TARGET",
+]
+DT_TEXT_COLUMNS = ["STATE_MESSAGE", "STATISTICS"]
+DT_VARIANT_COLUMNS = ["STATISTICS"]
+WH_CONFIG_COLUMNS = [
+    "NAME",
+    "STATE",
+    "TYPE",
+    "SIZE",
+    "MIN_CLUSTER_COUNT",
+    "MAX_CLUSTER_COUNT",
+    "STARTED_CLUSTERS",
+    "RUNNING",
+    "QUEUED",
+    "AUTO_SUSPEND",
+    "AUTO_RESUME",
+    "SCALING_POLICY",
+    "RESOURCE_CONSTRAINT",
+    "ENABLE_QUERY_ACCELERATION",
+    "QUERY_ACCELERATION_MAX_SCALE_FACTOR",
+    "QUERY_THROUGHPUT_MULTIPLIER",
+    "MAX_QUERY_PERFORMANCE_LEVEL",
+    "RESOURCE_MONITOR",
+    "OWNER",
+    "COMMENT",
+]
 _QUERY_ID_ATTRIBUTE = "RESOURCE_ATTRIBUTES['snow.query.id']::STRING"
 _EVENT_EXPRESSIONS = {
     "TIMESTAMP": "TIMESTAMP",
@@ -173,6 +247,42 @@ _EVENT_NOTE = (
     "LOG_LEVEL and TRACE_LEVEL let through."
 )
 _EVENT_LEVELS = ("SCHEMA", "DATABASE", "ACCOUNT")
+_OPERATOR_FRESHNESS = (
+    "GET_QUERY_OPERATOR_STATS table function: only completed queries of the past 14 days; "
+    "a query still running or older answers no row"
+)
+_OPERATOR_PRIVILEGE = (
+    "the query must be visible to the active role, exactly as in QUERY_HISTORY: "
+    "the connected user's own queries need nothing, other users' need MONITOR or OPERATE "
+    "on their warehouse or task, or MONITOR EXECUTION"
+)
+_OPERATOR_NOTE = (
+    "One row per query operator, ordered by OPERATOR_ID. The VARIANT fields "
+    "(OPERATOR_STATISTICS, EXECUTION_TIME_BREAKDOWN, OPERATOR_ATTRIBUTES) are returned "
+    "parsed, not cut. An empty result means the query is still running, is older than 14 "
+    "days, or is not visible to the active role."
+)
+_WH_CONFIG_FRESHNESS = (
+    "live configuration read (SHOW WAREHOUSES): no history, the current values"
+)
+_WH_CONFIG_PRIVILEGE = (
+    "any privilege on the warehouse (USAGE, MONITOR, OPERATE, OWNERSHIP): a warehouse the "
+    "active role cannot see is absent from the list, so an empty result does not prove the "
+    "warehouse does not exist"
+)
+_WH_CONFIG_NOTE = (
+    "RUNNING and QUEUED are the live query counts on the warehouse at read time. An empty "
+    "result means the name does not exist or the active role cannot see it; ask the user."
+)
+_DT_PRIVILEGE = (
+    "MONITOR on the dynamic table (or OWNERSHIP), plus USAGE on its database and schema; "
+    "with less, the function answers no row and no error"
+)
+_DT_NOTE = (
+    "One row per refresh, newest first. The function answers only what the active role can "
+    "monitor: an empty result may mean the privilege is missing rather than that no refresh "
+    "happened. error_only=true keeps FAILED, UPSTREAM_FAILED and CANCELLED refreshes."
+)
 _USAGE_FRESHNESS = (
     "différée (delayed): SNOWFLAKE.ACCOUNT_USAGE view, which lags the event, so the latest "
     f"executions may be missing; covers the last {ACCOUNT_USAGE_DAYS} days"
@@ -387,10 +497,11 @@ class TaskRequest:
 
 @dataclass(frozen=True)
 class QueryRequest:
-    """A validated `query_history` call."""
+    """A validated `query_history` call; `group_by` is `None` for row-level output."""
 
     query_id: str | None
     warehouse: str | None
+    group_by: str | None
     plan: RangePlan
     limit: int
     include_text: bool
@@ -414,6 +525,43 @@ class EventRequest:
     database: str
     schema: str | None
     query_id: str | None
+    plan: RangePlan
+    limit: int
+    include_text: bool
+    zone: UserZone
+
+
+@dataclass(frozen=True)
+class OperatorStatsRequest:
+    """A validated `query_operator_stats` call: one completed query, no range."""
+
+    query_id: str
+    limit: int
+    zone: UserZone
+
+
+@dataclass(frozen=True)
+class WarehouseConfigRequest:
+    """A validated `warehouse_config` call; `warehouse` is `None` for all warehouses."""
+
+    warehouse: str | None
+    limit: int
+    zone: UserZone
+
+
+@dataclass(frozen=True)
+class DynamicTableRequest:
+    """A validated `dynamic_table_refresh_history` call.
+
+    `database`/`schema`/`name` scope one dynamic table; `name_prefix` scopes several by name.
+    Exactly one of the two is set.
+    """
+
+    database: str | None
+    schema: str | None
+    name: str | None
+    name_prefix: str | None
+    error_only: bool
     plan: RangePlan
     limit: int
     include_text: bool
@@ -466,6 +614,7 @@ def plan_query_history(
     last_minutes: int | None,
     limit: int,
     include_text: bool,
+    group_by: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> QueryRequest:
     """Validate a `query_history` call: a `query_id` or a warehouse, then range, then limit."""
@@ -473,6 +622,22 @@ def plan_query_history(
         raise _ask_scope("query_history", ["query_id or warehouse"])
     if query_id and not _QUERY_ID.fullmatch(query_id.strip()):
         raise PcSnowError(f"query_id={query_id!r} is not a query id (a UUID).")
+    if group_by is not None:
+        if group_by.upper() not in QUERY_GROUPABLE:
+            raise PcSnowError(
+                f"group_by={group_by!r} is not a column query_history aggregates: "
+                f"{', '.join(QUERY_GROUPABLE)}."
+            )
+        if query_id:
+            raise PcSnowError(
+                "query_history: group_by aggregates a set of queries; it cannot be combined "
+                "with a single query_id. Drop one of the two."
+            )
+        if include_text:
+            raise PcSnowError(
+                "query_history: group_by returns aggregates, not rows; include_text has "
+                "nothing to show. Drop one of the two."
+            )
     zone = user_zone(environ)
     plan = plan_range(
         start,
@@ -486,6 +651,107 @@ def plan_query_history(
     return QueryRequest(
         query_id=query_id.strip().lower() if query_id else None,
         warehouse=_identifier("warehouse", warehouse).upper() if warehouse else None,
+        group_by=group_by.upper() if group_by else None,
+        plan=plan,
+        limit=_check_limit(limit),
+        include_text=include_text,
+        zone=zone,
+    )
+
+
+def plan_operator_stats(
+    query_id: str | None,
+    limit: int,
+    environ: Mapping[str, str] | None = None,
+) -> OperatorStatsRequest:
+    """Validate a `query_operator_stats` call: one query id, then limit; there is no range."""
+    if not query_id:
+        raise _ask_scope("query_operator_stats", ["query_id"])
+    if not _QUERY_ID.fullmatch(query_id.strip()):
+        raise PcSnowError(f"query_id={query_id!r} is not a query id (a UUID).")
+    return OperatorStatsRequest(
+        query_id=query_id.strip().lower(),
+        limit=_check_limit(limit),
+        zone=user_zone(environ),
+    )
+
+
+def plan_warehouse_config(
+    warehouse: str | None,
+    all_warehouses: bool | None,
+    limit: int,
+    environ: Mapping[str, str] | None = None,
+) -> WarehouseConfigRequest:
+    """Validate a `warehouse_config` call: one warehouse or `all_warehouses`, no range."""
+    if warehouse and all_warehouses:
+        raise PcSnowError(
+            "warehouse_config: give a warehouse or all_warehouses=true, not both. "
+            "Ask the user which one they mean."
+        )
+    if not warehouse and not all_warehouses:
+        raise PcSnowError(
+            "warehouse_config: missing required scope: warehouse or all_warehouses=true. "
+            "Ask the user which warehouse, or whether they want all of them; omitting the "
+            "name never means all, and do not infer it from the session or search for it."
+        )
+    return WarehouseConfigRequest(
+        warehouse=_identifier("warehouse", warehouse).upper() if warehouse else None,
+        limit=_check_limit(limit),
+        zone=user_zone(environ),
+    )
+
+
+def plan_dynamic_table_refresh(
+    database: str | None,
+    schema: str | None,
+    name: str | None,
+    name_prefix: str | None,
+    error_only: bool,
+    start: str | None,
+    end: str | None,
+    last_minutes: int | None,
+    limit: int,
+    include_text: bool,
+    environ: Mapping[str, str] | None = None,
+) -> DynamicTableRequest:
+    """Validate a `dynamic_table_refresh_history` call: one table or a prefix, then range, limit."""
+    by_name = any([database, schema, name])
+    if by_name and name_prefix:
+        raise PcSnowError(
+            "dynamic_table_refresh_history: give database+schema+name or name_prefix, not both. "
+            "Ask the user which one they mean."
+        )
+    if by_name and not (database and schema and name):
+        missing = [
+            label
+            for label, value in (
+                ("database", database),
+                ("schema", schema),
+                ("name", name),
+            )
+            if not value
+        ]
+        raise PcSnowError(
+            f"dynamic_table_refresh_history: a dynamic table needs database, schema and name; "
+            f"missing: {', '.join(missing)}. Ask the user for the missing values, or give "
+            "name_prefix instead."
+        )
+    if not by_name and not name_prefix:
+        raise _ask_scope(
+            "dynamic_table_refresh_history", ["database+schema+name or name_prefix"]
+        )
+    if name_prefix is not None:
+        _identifier("name_prefix", name_prefix)
+    zone = user_zone(environ)
+    plan = plan_range(
+        start, end, last_minutes, zone, accepts_query_id=False, account_usage=True
+    )
+    return DynamicTableRequest(
+        database=_identifier("database", database) if database else None,
+        schema=_identifier("schema", schema) if schema else None,
+        name=_identifier("name", name) if name else None,
+        name_prefix=name_prefix,
+        error_only=error_only,
         plan=plan,
         limit=_check_limit(limit),
         include_text=include_text,
@@ -596,13 +862,21 @@ def build_query_history_sql(
     )
 
 
-def build_account_usage_task_history_sql(include_text: bool) -> str:
-    """The `ACCOUNT_USAGE.TASK_HISTORY` statement; scope and range are bound, never joined."""
+def _usage_source(source: str) -> str:
+    """A validated `db.schema.view` name an ACCOUNT_USAGE statement is built against."""
+    if not _TABLE_NAME.fullmatch(source):
+        raise PcSnowError(f"{source!r} is not a plain database.schema.view name.")
+    return source
+
+
+def build_account_usage_task_history_sql(source: str, include_text: bool) -> str:
+    """The `TASK_HISTORY` statement over the resolved view; scope and range are bound."""
     columns = TASK_COLUMNS + (TASK_TEXT_COLUMNS if include_text else [])
-    # Seule la liste de colonnes (constantes) est interpolée ; toute valeur de l'appelant est liée.
+    # Seuls la vue résolue (validée) et la liste de colonnes (constantes) sont interpolés ;
+    # toute valeur de l'appelant est liée.
     return (
         f"SELECT {', '.join(columns)} "  # nosec B608
-        "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
+        f"FROM {_usage_source(source)} "
         "WHERE SCHEDULED_TIME >= TO_TIMESTAMP_LTZ(?, 3) "
         "AND SCHEDULED_TIME < TO_TIMESTAMP_LTZ(?, 3) "
         "AND DATABASE_NAME = ? AND SCHEMA_NAME = ? AND NAME = ? "
@@ -611,21 +885,100 @@ def build_account_usage_task_history_sql(include_text: bool) -> str:
 
 
 def build_account_usage_query_history_sql(
-    by_warehouse: bool, by_query_id: bool, include_text: bool
+    source: str, by_warehouse: bool, by_query_id: bool, include_text: bool
 ) -> str:
-    """The `ACCOUNT_USAGE.QUERY_HISTORY` statement, with the optional warehouse and id filters."""
+    """The `QUERY_HISTORY` statement over the resolved view, with the optional filters."""
     columns = QUERY_COLUMNS + (QUERY_TEXT_COLUMNS if include_text else [])
     warehouse = "AND WAREHOUSE_NAME = ? " if by_warehouse else ""
     query_id = "AND QUERY_ID = ? " if by_query_id else ""
-    # Seules la liste de colonnes (constantes) et la présence des filtres sont interpolées ; toute
-    # valeur de l'appelant est liée.
+    # Seuls la vue résolue (validée), la liste de colonnes (constantes) et la présence des filtres
+    # sont interpolés ; toute valeur de l'appelant est liée.
     return (
         f"SELECT {', '.join(columns)} "  # nosec B608
-        "FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY "
+        f"FROM {_usage_source(source)} "
         "WHERE END_TIME >= TO_TIMESTAMP_LTZ(?, 3) "
         "AND END_TIME < TO_TIMESTAMP_LTZ(?, 3) "
         f"{warehouse}{query_id}"
         "ORDER BY START_TIME DESC LIMIT ?"
+    )
+
+
+# Les agrégats d'un group_by : les requêtes RUNNING sont exclues des durées (leur END_TIME est
+# epoch 0, ce qui donnerait des sommes aberrantes) et comptées à part.
+_GROUP_SELECT = (
+    "{column} AS GROUP_VALUE, "
+    "COUNT(*) AS QUERIES, "
+    "SUM(IFF(EXECUTION_STATUS = 'RUNNING', 1, 0)) AS RUNNING, "
+    "SUM(CASE WHEN EXECUTION_STATUS <> 'RUNNING' THEN TOTAL_ELAPSED_TIME END) "
+    "AS TOTAL_ELAPSED_TIME_MS, "
+    "SUM(QUEUED_OVERLOAD_TIME) AS QUEUED_OVERLOAD_TIME_MS, "
+    "SUM(BYTES_SCANNED) AS BYTES_SCANNED, "
+    "SUM(ROWS_PRODUCED) AS ROWS_PRODUCED"
+)
+
+
+def _group_column(group_by: str) -> str:
+    """A `group_by` value already validated by the plan; revalidated before interpolation."""
+    if group_by not in QUERY_GROUPABLE:
+        raise PcSnowError(f"{group_by!r} is not a column query_history aggregates.")
+    return group_by
+
+
+def build_query_history_grouped_sql(by_warehouse: bool, group_by: str) -> str:
+    """The grouped `QUERY_HISTORY` statement; the column is whitelisted, values bound."""
+    column = _group_column(group_by)
+    function = "QUERY_HISTORY_BY_WAREHOUSE" if by_warehouse else "QUERY_HISTORY"
+    warehouse_arg = "WAREHOUSE_NAME => ?::STRING, " if by_warehouse else ""
+    # Seuls la colonne d'agrégation (whitelist), le nom de fonction (deux constantes) et la liste
+    # de colonnes (constantes) sont interpolés ; toute valeur de l'appelant est liée.
+    return (
+        f"SELECT {_GROUP_SELECT.format(column=column)} "  # nosec B608
+        f"FROM TABLE(SNOWFLAKE.INFORMATION_SCHEMA.{function}("
+        f"{warehouse_arg}"
+        "END_TIME_RANGE_START => TO_TIMESTAMP_LTZ(?, 3), "
+        "END_TIME_RANGE_END => TO_TIMESTAMP_LTZ(?, 3), "
+        f"RESULT_LIMIT => {FUNCTION_ROW_CEILING})) "
+        f"GROUP BY {column} ORDER BY QUERIES DESC LIMIT ?"
+    )
+
+
+def build_account_usage_query_grouped_sql(
+    source: str, by_warehouse: bool, group_by: str
+) -> str:
+    """The grouped `QUERY_HISTORY` statement over the resolved view."""
+    column = _group_column(group_by)
+    warehouse = "AND WAREHOUSE_NAME = ? " if by_warehouse else ""
+    # Seuls la colonne d'agrégation (whitelist), la vue résolue (validée) et la présence du
+    # filtre sont interpolés ; toute valeur de l'appelant est liée.
+    return (
+        f"SELECT {_GROUP_SELECT.format(column=column)} "  # nosec B608
+        f"FROM {_usage_source(source)} "
+        "WHERE END_TIME >= TO_TIMESTAMP_LTZ(?, 3) "
+        "AND END_TIME < TO_TIMESTAMP_LTZ(?, 3) "
+        f"{warehouse}"
+        f"GROUP BY {column} ORDER BY QUERIES DESC LIMIT ?"
+    )
+
+
+def build_warehouse_config_sql(warehouse: str | None) -> str:
+    """The `SHOW WAREHOUSES` statement for one warehouse or all; the name is a validated identifier."""
+    if warehouse is None:
+        return "SHOW WAREHOUSES"
+    return f"SHOW WAREHOUSES LIKE '{_identifier('warehouse', warehouse)}'"
+
+
+def build_credits_totals_sql(by_warehouse: bool) -> str:
+    """The `WAREHOUSE_METERING_HISTORY` sums over the whole range; no row limit."""
+    warehouse_arg = ", WAREHOUSE_NAME => ?::STRING" if by_warehouse else ""
+    # Seuls la liste de colonnes (constante) et la présence de l'argument d'entrepôt sont
+    # interpolées ; toute valeur de l'appelant est liée.
+    return (
+        "SELECT SUM(CREDITS_USED_COMPUTE) AS CREDITS_USED_COMPUTE, "  # nosec B608
+        "SUM(CREDITS_USED_CLOUD_SERVICES) AS CREDITS_USED_CLOUD_SERVICES, "
+        "SUM(CREDITS_USED) AS CREDITS_USED "
+        "FROM TABLE(SNOWFLAKE.INFORMATION_SCHEMA.WAREHOUSE_METERING_HISTORY("
+        "DATE_RANGE_START => TO_TIMESTAMP_LTZ(?, 3), "
+        f"DATE_RANGE_END => TO_TIMESTAMP_LTZ(?, 3){warehouse_arg}))"
     )
 
 
@@ -669,6 +1022,66 @@ def build_event_records_sql(by_query_id: bool, include_text: bool) -> str:
         "AND TIMESTAMP < TO_TIMESTAMP_NTZ(?, 3) "
         f"{where}"
         "ORDER BY TIMESTAMP DESC LIMIT ?"
+    )
+
+
+def build_operator_stats_sql() -> str:
+    """The `GET_QUERY_OPERATOR_STATS` statement; the query id is bound, never joined."""
+    # Seule la liste de colonnes (constantes) est interpolée ; l'identifiant de requête est lié.
+    return (
+        f"SELECT {', '.join(OPERATOR_COLUMNS)} "  # nosec B608
+        "FROM TABLE(GET_QUERY_OPERATOR_STATS(?::STRING)) "
+        "ORDER BY OPERATOR_ID LIMIT ?"
+    )
+
+
+def build_dynamic_table_refresh_sql(
+    qualified_name: str | None,
+    name_prefix: str | None,
+    error_only: bool,
+    include_text: bool,
+) -> str:
+    """The `DYNAMIC_TABLE_REFRESH_HISTORY` statement; the table and prefix are bound."""
+    columns = DT_COLUMNS + (DT_TEXT_COLUMNS if include_text else [])
+    name_arg = "NAME => ?::STRING, " if qualified_name else ""
+    prefix_arg = "NAME_PREFIX => ?::STRING, " if name_prefix else ""
+    error_arg = "ERROR_ONLY => TRUE, " if error_only else ""
+    # Seuls la liste de colonnes (constantes) et la présence des arguments sont interpolés ;
+    # toute valeur de l'appelant est liée.
+    return (
+        f"SELECT {', '.join(columns)} "  # nosec B608
+        "FROM TABLE(SNOWFLAKE.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY("
+        "DATA_TIMESTAMP_START => TO_TIMESTAMP_LTZ(?, 3), "
+        "DATA_TIMESTAMP_END => TO_TIMESTAMP_LTZ(?, 3), "
+        f"{name_arg}{prefix_arg}{error_arg}"
+        f"RESULT_LIMIT => {FUNCTION_ROW_CEILING})) "
+        "ORDER BY DATA_TIMESTAMP DESC LIMIT ?"
+    )
+
+
+def build_account_usage_dynamic_table_sql(
+    source: str,
+    by_name: bool,
+    by_prefix: bool,
+    error_only: bool,
+    include_text: bool,
+) -> str:
+    """The refresh-history statement over the resolved view, with the optional filters."""
+    columns = DT_COLUMNS + (DT_TEXT_COLUMNS if include_text else [])
+    name = "AND DATABASE_NAME = ? AND SCHEMA_NAME = ? AND NAME = ? " if by_name else ""
+    prefix = "AND NAME LIKE ? || '%' " if by_prefix else ""
+    errors = (
+        "AND STATE IN ('FAILED', 'UPSTREAM_FAILED', 'CANCELLED') " if error_only else ""
+    )
+    # Seuls la vue résolue (validée), la liste de colonnes (constantes) et la présence des filtres
+    # sont interpolés ; toute valeur de l'appelant est liée.
+    return (
+        f"SELECT {', '.join(columns)} "  # nosec B608
+        f"FROM {_usage_source(source)} "
+        "WHERE DATA_TIMESTAMP >= TO_TIMESTAMP_LTZ(?, 3) "
+        "AND DATA_TIMESTAMP < TO_TIMESTAMP_LTZ(?, 3) "
+        f"{name}{prefix}{errors}"
+        "ORDER BY DATA_TIMESTAMP DESC LIMIT ?"
     )
 
 
@@ -736,7 +1149,9 @@ def _row_dict(row: Any) -> dict[str, Any]:
 
 def _render_value(value: Any, zone: UserZone) -> Any:
     """A JSON-safe value; timestamps are rendered ISO-8601 in the user's zone with their offset."""
-    if value is None or isinstance(value, bool | int | float | str):
+    if value is None or isinstance(value, bool | int | float | str | dict | list):
+        # Les VARIANT de Snowflake (OPERATOR_STATISTICS, STATISTICS…) arrivent déjà en
+        # dict/list natifs : on les garde tels quels, le JSON de sortie les porte.
         return value
     if isinstance(value, datetime):
         aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -749,10 +1164,19 @@ def _render_value(value: Any, zone: UserZone) -> Any:
 
 
 def _shape_rows(
-    rows: Sequence[Any], columns: Sequence[str], zone: UserZone
+    rows: Sequence[Any],
+    columns: Sequence[str],
+    zone: UserZone,
+    variant_columns: Sequence[str] = (),
 ) -> tuple[list[dict[str, Any]], list[FieldTruncation]]:
-    """Keep only the allowed columns, render values, cut text and record each cut."""
+    """Keep only the allowed columns, render values, cut text and record each cut.
+
+    A `variant_columns` string holding JSON is parsed into its dict/list: the connector
+    returns VARIANT as JSON text, and these fields are the point of the tools that carry
+    them, so they are never cut at `MAX_TEXT_CHARS` the way free text is.
+    """
     wanted = set(columns)
+    variants = {c.upper() for c in variant_columns}
     shaped: list[dict[str, Any]] = []
     cuts: list[FieldTruncation] = []
     for index, row in enumerate(rows):
@@ -761,6 +1185,12 @@ def _shape_rows(
             if column not in wanted:
                 continue
             rendered = _render_value(value, zone)
+            if column in variants and isinstance(rendered, str):
+                try:
+                    rendered = json.loads(rendered)
+                except ValueError:
+                    # Pas du JSON malgré la déclaration : on garde le texte tel quel.
+                    pass
             if isinstance(rendered, str) and len(rendered) > MAX_TEXT_CHARS:
                 cuts.append(FieldTruncation(index, column, len(rendered)))
                 rendered = rendered[:MAX_TEXT_CHARS]
@@ -780,10 +1210,11 @@ def _result(
     zone: UserZone,
     notes: list[str],
     freshness: str = _FRESHNESS,
+    variant_columns: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The common result envelope: source, freshness, resolved range, bounded rows."""
     kept = list(rows)[:limit]
-    shaped, cuts = _shape_rows(kept, columns, zone)
+    shaped, cuts = _shape_rows(kept, columns, zone, variant_columns)
     return {
         "source": source,
         "fraicheur": freshness,
@@ -809,6 +1240,21 @@ def _error_text(exc: BaseException) -> str:
     """Snowflake's own message for an exception, bounded."""
     text = getattr(exc, "message", None) or getattr(exc, "msg", None) or str(exc)
     return str(text).strip()[:1000]
+
+
+_SESSION_EXPIRED_CODES = frozenset({390111, 390112, 390114})
+_SESSION_EXPIRED_TEXT = re.compile(
+    r"session (no longer exists|has expired|expired)|authentication token has expired",
+    re.IGNORECASE,
+)
+
+
+def _is_session_expired(exc: BaseException) -> bool:
+    """Whether the session died (idle timeout, token expired) and a fresh one may succeed."""
+    code = getattr(exc, "sql_error_code", None) or getattr(exc, "errno", None)
+    return code in _SESSION_EXPIRED_CODES or bool(
+        _SESSION_EXPIRED_TEXT.search(_error_text(exc))
+    )
 
 
 def _has_privilege_code(exc: BaseException) -> bool:
@@ -880,78 +1326,160 @@ def _resolve_span(run: Runner, plan: RangePlan) -> tuple[int, int]:
     return start_ms, end_ms
 
 
-def _usage_note(view: str) -> str:
-    """The note that says why the result comes from `ACCOUNT_USAGE` and what it needs."""
+def _usage_note(view: str, source: str) -> str:
+    """The note that says why the result comes from `ACCOUNT_USAGE` and where it was read."""
+    native = f"SNOWFLAKE.ACCOUNT_USAGE.{view}"
+    if source.upper() == native.upper():
+        return (
+            f"The range reaches back more than {HISTORY_DAYS} days, which INFORMATION_SCHEMA "
+            "functions do not keep: it was read from ACCOUNT_USAGE. That view is account-wide "
+            f"and delayed, and needs the SNOWFLAKE.{_USAGE_ROLES[view]} database role."
+        )
     return (
         f"The range reaches back more than {HISTORY_DAYS} days, which INFORMATION_SCHEMA "
-        "functions do not keep: it was read from ACCOUNT_USAGE. That view is account-wide and "
-        f"delayed, and needs the SNOWFLAKE.{_USAGE_ROLES[view]} database role."
+        "functions do not keep: it was read from "
+        f"{source}, a visible view discovered in place of {native} (refused; it needs the "
+        f"SNOWFLAKE.{_USAGE_ROLES[view]} database role). It is account-wide-shaped and "
+        "delayed, and may be filtered to the objects of one team or environment."
     )
 
 
 class UsageAccess:
-    """Whether the session can read each `ACCOUNT_USAGE` view, measured by a trial `SELECT`.
+    """The `ACCOUNT_USAGE`-shaped view each tool reads when the range passes the function window.
 
-    One probe per view and per process, held in memory and never written anywhere: a grant made
-    later is seen when the server restarts. Only an answer from Snowflake that carries a privilege
-    error code is kept as a denial; success is kept as granted. Any other failure — including a
-    refusal recognised by its text alone, which a proxy can produce — is raised and the next call
-    tries again.
+    Per view and per process, one answer, held in memory and never written anywhere: a grant made
+    later is seen when the server restarts. Resolution order for a view such as `QUERY_HISTORY`:
+
+    1. `SNOWFLAKE.ACCOUNT_USAGE.<view>` itself, measured by a trial `SELECT` — kept as granted
+       only on success, as denied only on a privilege error code; any other failure is raised
+       and the next call tries again.
+    2. On a denial, discovery: `SHOW VIEWS LIKE '<view>' IN ACCOUNT` lists what the role can
+       see (`SHOW` only lists visible objects, so a refused `ACCOUNT_USAGE` never appears).
+       A view whose name matches `<view>` exactly, case-insensitively, becomes the source; an
+       optional `PC_SNOW_USAGE_LOCATION=db.schema` pins the discovery to one location when
+       several views share the name (e.g. one per environment).
+    3. No candidate: the denial is raised, naming the SNOWFLAKE database role that covers the
+       view and the discovery outcome.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, environ: Mapping[str, str] | None = None) -> None:
         """Start with no answer for any view."""
         self._lock = threading.Lock()
-        self._refusals: dict[str, str | None] = {}
+        self._environ = os.environ if environ is None else environ
+        # Per view: the resolved source, or the refusal to raise again. A failure that is not
+        # a privilege answer is never kept — the next call probes again.
+        self._sources: dict[str, str | PcSnowError] = {}
 
-    def require(self, run: Runner, view: str) -> None:
-        """Probe `view` on its first call; raise the grant instruction when access is denied."""
+    def resolve(self, run: Runner, view: str) -> str:
+        """The fully qualified view `view` is read from; raise the grant instruction if none."""
         if view not in _USAGE_ROLES:
             raise PcSnowError(f"{view} is not an ACCOUNT_USAGE view this server reads.")
         with self._lock:
-            if view not in self._refusals:
-                probe = f"SELECT 1 AS PROBE FROM SNOWFLAKE.ACCOUNT_USAGE.{view} LIMIT 1"  # nosec B608
-                try:
-                    run(probe, ())
-                except PcSnowError:
-                    raise
-                except Exception as exc:
-                    if not _is_privilege_error(exc):
-                        raise
-                    refusal = _error_text(exc)
-                    if _has_privilege_code(exc):
-                        self._refusals[view] = refusal
-                    raise _usage_denied(run, view, refusal) from exc
-                self._refusals[view] = None
-            refusal_kept = self._refusals[view]
-        if refusal_kept is not None:
-            raise _usage_denied(run, view, refusal_kept)
+            if view not in self._sources:
+                self._sources[view] = self._resolve(run, view)
+            kept = self._sources[view]
+        if isinstance(kept, PcSnowError):
+            raise kept
+        return kept
+
+    def _resolve(self, run: Runner, view: str) -> str | PcSnowError:
+        """Probe the native view, then discover a same-named visible one."""
+        native = f"SNOWFLAKE.ACCOUNT_USAGE.{view}"
+        probe = f"SELECT 1 AS PROBE FROM {native} LIMIT 1"  # nosec B608
+        try:
+            run(probe, ())
+        except PcSnowError:
+            raise
+        except Exception as exc:
+            if not _is_privilege_error(exc):
+                raise
+            # Une erreur de texte seul (proxy) n'est pas conservée : l'appel suivant re-sonde.
+            cacheable = _has_privilege_code(exc)
+            denial = self._discover(run, view, _error_text(exc))
+            if isinstance(denial, PcSnowError) and not cacheable:
+                raise denial
+            return denial
+        return native
+
+    def _discover(self, run: Runner, view: str, refusal: str) -> str | PcSnowError:
+        """The one visible view named exactly `view`, pinned or unique; else the denial."""
+        rows = run(f"SHOW VIEWS LIKE '{view}' IN ACCOUNT", ())
+        candidates = []
+        for row in rows:
+            found = _row_dict(row)
+            name = str(found.get("NAME", ""))
+            if name.upper() != view.upper():
+                continue
+            candidates.append(
+                f"{found.get('DATABASE_NAME', '')}.{found.get('SCHEMA_NAME', '')}.{name}"
+            )
+        location = self._environ.get("PC_SNOW_USAGE_LOCATION", "").strip()
+        if location:
+            pinned = [
+                c for c in candidates if c.upper().startswith(location.upper() + ".")
+            ]
+            if len(pinned) == 1:
+                return pinned[0]
+            raise PcSnowError(
+                f"PC_SNOW_USAGE_LOCATION={location!r} pins no visible view named {view}: "
+                f"candidates are {', '.join(candidates) if candidates else 'none'}. "
+                "Fix or unset it."
+            )
+        if len(candidates) == 1:
+            return candidates[0]
+        return _usage_denied(run, view, refusal, candidates)
+
+    def forget(self, view: str) -> None:
+        """Drop the kept answer for `view`; the next `resolve` probes again."""
+        with self._lock:
+            self._sources.pop(view, None)
 
 
-def _usage_denied(run: Runner, view: str, refusal: str) -> PcSnowError:
+def _usage_denied(
+    run: Runner, view: str, refusal: str, candidates: list[str] | None = None
+) -> PcSnowError:
     """The refusal that names the database role covering `view`, with the roles of the session."""
     role = f"SNOWFLAKE.{_USAGE_ROLES[view]}"
+    if candidates:
+        discovery = (
+            f"Several visible views are named {view}: {', '.join(sorted(candidates))}. "
+            "Ask the user which one to read, then pin it with "
+            "PC_SNOW_USAGE_LOCATION=db.schema."
+        )
+    else:
+        discovery = f"No visible view named {view} was found either."
     return PcSnowError(
         f"Snowflake refused ACCOUNT_USAGE.{view}: {refusal}\n"
         f"The range reaches back more than {HISTORY_DAYS} days, which only ACCOUNT_USAGE holds.\n"
         f"Missing privilege: the {role} database role. ACCOUNTADMIN grants it "
         f"with GRANT DATABASE ROLE {role} TO ROLE <role>; the access to each view is probed "
         "once per process, so restart or reconnect the server afterwards.\n"
+        f"{discovery}\n"
         f"Active roles: {_active_roles(run)}"
     )
 
 
 def _read_account_usage(
-    run: Runner, usage: UsageAccess, view: str, sql: str, params: Sequence[Any]
-) -> list[Any]:
-    """Probe `view` if needed, then read it; a refusal names the role that covers it."""
-    usage.require(run, view)
+    run: Runner,
+    usage: UsageAccess,
+    view: str,
+    build_sql: Callable[[str], str],
+    params: Sequence[Any],
+) -> tuple[str, list[Any]]:
+    """Resolve the view `view` is read from, then read it; returns the source and the rows.
+
+    A refusal on the resolved view names the role that covers the native one; a discovered
+    view that fails is forgotten so the next call resolves again.
+    """
+    source = usage.resolve(run, view)
     try:
-        return run(sql, params)
+        return source, run(build_sql(source), params)
     except PcSnowError:
         raise
     except Exception as exc:
         if _is_privilege_error(exc):
+            if not source.upper().startswith("SNOWFLAKE.ACCOUNT_USAGE."):
+                usage.forget(view)
             raise _usage_denied(run, view, _error_text(exc)) from exc
         raise
 
@@ -997,15 +1525,16 @@ def task_history_on(
         ]
         columns = TASK_COLUMNS + (TASK_TEXT_COLUMNS if request.include_text else [])
         if stale:
-            rows = _read_account_usage(
+            source, rows = _read_account_usage(
                 run,
                 access,
                 "TASK_HISTORY",
-                build_account_usage_task_history_sql(request.include_text),
+                lambda src: build_account_usage_task_history_sql(
+                    src, request.include_text
+                ),
                 params,
             )
-            source = "SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY"
-            freshness, notes = _USAGE_FRESHNESS, [_usage_note("TASK_HISTORY")]
+            freshness, notes = _USAGE_FRESHNESS, [_usage_note("TASK_HISTORY", source)]
         else:
             rows = run(
                 build_task_history_sql(request.database, request.include_text), params
@@ -1027,6 +1556,57 @@ def task_history_on(
     return _guarded_execution(run, _TASK_PRIVILEGE, execute)
 
 
+def _execute_grouped(
+    run: Runner,
+    access: UsageAccess,
+    request: QueryRequest,
+    start_ms: int,
+    end_ms: int,
+    stale: bool,
+) -> dict[str, Any]:
+    """The grouped form of `query_history`: one row per `group_by` value."""
+    group_by = request.group_by
+    assert group_by is not None
+    by_warehouse = request.warehouse is not None
+    if stale:
+        params: list[Any] = [start_ms, end_ms]
+        if request.warehouse is not None:
+            params.append(request.warehouse)
+        params.append(request.limit + 1)
+        source, rows = _read_account_usage(
+            run,
+            access,
+            "QUERY_HISTORY",
+            lambda src: build_account_usage_query_grouped_sql(
+                src, by_warehouse, group_by
+            ),
+            params,
+        )
+        freshness, notes = _USAGE_FRESHNESS, [_usage_note("QUERY_HISTORY", source)]
+    else:
+        params = []
+        if request.warehouse is not None:
+            params.append(request.warehouse)
+        params += [start_ms, end_ms, request.limit + 1]
+        rows = run(build_query_history_grouped_sql(by_warehouse, group_by), params)
+        function = "QUERY_HISTORY_BY_WAREHOUSE" if by_warehouse else "QUERY_HISTORY"
+        source = f"SNOWFLAKE.INFORMATION_SCHEMA.{function}"
+        freshness, notes = _FRESHNESS, []
+    result = _result(
+        source=source,
+        plan_start_ms=start_ms,
+        plan_end_ms=end_ms,
+        rows=rows,
+        columns=QUERY_GROUP_COLUMNS,
+        limit=request.limit,
+        zone=request.zone,
+        notes=notes,
+        freshness=freshness,
+    )
+    result["grouped_by"] = request.group_by
+    return result
+
+
 def query_history_on(
     session: Any, request: QueryRequest, usage: UsageAccess | None = None
 ) -> dict[str, Any]:
@@ -1039,6 +1619,8 @@ def query_history_on(
     def execute() -> dict[str, Any]:
         """Resolve the range, then read the matching queries from the right source."""
         start_ms, end_ms, stale = _resolve_window(run, request.plan, account_usage=True)
+        if request.group_by is not None:
+            return _execute_grouped(run, access, request, start_ms, end_ms, stale)
         columns = QUERY_COLUMNS + (QUERY_TEXT_COLUMNS if request.include_text else [])
         if stale:
             params: list[Any] = [start_ms, end_ms]
@@ -1047,24 +1629,24 @@ def query_history_on(
             if request.query_id is not None:
                 params.append(request.query_id)
             params.append(request.limit + 1)
-            rows = _read_account_usage(
+            source, rows = _read_account_usage(
                 run,
                 access,
                 "QUERY_HISTORY",
-                build_account_usage_query_history_sql(
-                    by_warehouse, by_query_id, request.include_text
+                lambda src: build_account_usage_query_history_sql(
+                    src, by_warehouse, by_query_id, request.include_text
                 ),
                 params,
             )
             return _result(
-                source="SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY",
+                source=source,
                 plan_start_ms=start_ms,
                 plan_end_ms=end_ms,
                 rows=rows,
                 columns=columns,
                 limit=request.limit,
                 zone=request.zone,
-                notes=[_usage_note("QUERY_HISTORY")],
+                notes=[_usage_note("QUERY_HISTORY", source)],
                 freshness=_USAGE_FRESHNESS,
             )
         params = []
@@ -1106,14 +1688,26 @@ def credits_on(session: Any, request: CreditsRequest) -> dict[str, Any]:
     by_warehouse = request.warehouse is not None
 
     def execute() -> dict[str, Any]:
-        """Resolve the range, then read the hourly metering rows."""
+        """Resolve the range, then read the hourly metering rows and the range totals."""
         start_ms, end_ms = _resolve_span(run, request.plan)
         params: list[Any] = [start_ms, end_ms]
         if request.warehouse is not None:
             params.append(request.warehouse)
+        totals_params = list(params)
         params.append(request.limit + 1)
         rows = run(build_credits_sql(by_warehouse), params)
-        return _result(
+        totals_row = _row_dict(
+            run(build_credits_totals_sql(by_warehouse), totals_params)[0]
+        )
+        totals = {
+            key.lower(): _render_value(totals_row.get(key), request.zone)
+            for key in (
+                "CREDITS_USED_COMPUTE",
+                "CREDITS_USED_CLOUD_SERVICES",
+                "CREDITS_USED",
+            )
+        }
+        result = _result(
             source="SNOWFLAKE.INFORMATION_SCHEMA.WAREHOUSE_METERING_HISTORY",
             plan_start_ms=start_ms,
             plan_end_ms=end_ms,
@@ -1123,8 +1717,138 @@ def credits_on(session: Any, request: CreditsRequest) -> dict[str, Any]:
             zone=request.zone,
             notes=[_CREDITS_NOTE],
         )
+        result["totals"] = totals
+        return result
 
     return _guarded_execution(run, _CREDITS_PRIVILEGE, execute)
+
+
+def warehouse_config_on(
+    session: Any, request: WarehouseConfigRequest
+) -> dict[str, Any]:
+    """Run the `warehouse_config` tool on an open session."""
+    run = guarded_runner(session)
+
+    def execute() -> dict[str, Any]:
+        """Read the live configuration of the warehouse(s)."""
+        now_ms = _snowflake_now_ms(run)
+        rows = run(build_warehouse_config_sql(request.warehouse), ())
+        return _result(
+            source="SHOW WAREHOUSES",
+            plan_start_ms=now_ms,
+            plan_end_ms=now_ms,
+            rows=rows,
+            columns=WH_CONFIG_COLUMNS,
+            limit=request.limit,
+            zone=request.zone,
+            notes=[_WH_CONFIG_NOTE],
+            freshness=_WH_CONFIG_FRESHNESS,
+        )
+
+    return _guarded_execution(run, _WH_CONFIG_PRIVILEGE, execute)
+
+
+def operator_stats_on(session: Any, request: OperatorStatsRequest) -> dict[str, Any]:
+    """Run the `query_operator_stats` tool on an open session."""
+    run = guarded_runner(session)
+
+    def execute() -> dict[str, Any]:
+        """Read the query's operators; the function carries its own 14-day window."""
+        now_ms = _snowflake_now_ms(run)
+        rows = run(build_operator_stats_sql(), (request.query_id, request.limit + 1))
+        return _result(
+            source="GET_QUERY_OPERATOR_STATS",
+            plan_start_ms=now_ms,
+            plan_end_ms=now_ms,
+            rows=rows,
+            columns=OPERATOR_COLUMNS,
+            limit=request.limit,
+            zone=request.zone,
+            notes=[_OPERATOR_NOTE],
+            freshness=_OPERATOR_FRESHNESS,
+            variant_columns=OPERATOR_VARIANT_COLUMNS,
+        )
+
+    return _guarded_execution(run, _OPERATOR_PRIVILEGE, execute)
+
+
+def dynamic_table_refresh_on(
+    session: Any, request: DynamicTableRequest, usage: UsageAccess | None = None
+) -> dict[str, Any]:
+    """Run the `dynamic_table_refresh_history` tool on an open session."""
+    run = guarded_runner(session)
+    access = UsageAccess() if usage is None else usage
+    by_name = request.name is not None
+    qualified = (
+        f"{request.database}.{request.schema}.{request.name}" if by_name else None
+    )
+
+    def execute() -> dict[str, Any]:
+        """Resolve the range, then read the refreshes from the right source."""
+        start_ms, end_ms, stale = _resolve_window(run, request.plan, account_usage=True)
+        columns = DT_COLUMNS + (DT_TEXT_COLUMNS if request.include_text else [])
+        if stale:
+            params: list[Any] = [start_ms, end_ms]
+            if by_name:
+                # `plan_dynamic_table_refresh` garantit les trois non-None dès que l'un l'est.
+                assert request.database and request.schema and request.name
+                params += [
+                    request.database.upper(),
+                    request.schema.upper(),
+                    request.name.upper(),
+                ]
+            elif request.name_prefix is not None:
+                params.append(request.name_prefix.upper())
+            params.append(request.limit + 1)
+            source, rows = _read_account_usage(
+                run,
+                access,
+                "DYNAMIC_TABLE_REFRESH_HISTORY",
+                lambda src: build_account_usage_dynamic_table_sql(
+                    src,
+                    by_name,
+                    request.name_prefix is not None,
+                    request.error_only,
+                    request.include_text,
+                ),
+                params,
+            )
+            freshness, notes = (
+                _USAGE_FRESHNESS,
+                [_usage_note("DYNAMIC_TABLE_REFRESH_HISTORY", source), _DT_NOTE],
+            )
+        else:
+            params = [start_ms, end_ms]
+            if qualified is not None:
+                params.append(qualified)
+            if request.name_prefix is not None:
+                params.append(request.name_prefix)
+            params.append(request.limit + 1)
+            rows = run(
+                build_dynamic_table_refresh_sql(
+                    qualified,
+                    request.name_prefix,
+                    request.error_only,
+                    request.include_text,
+                ),
+                params,
+            )
+            source = "SNOWFLAKE.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY"
+            freshness, notes = _FRESHNESS, [_DT_NOTE]
+        return _result(
+            source=source,
+            plan_start_ms=start_ms,
+            plan_end_ms=end_ms,
+            rows=rows,
+            columns=columns,
+            limit=request.limit,
+            zone=request.zone,
+            notes=notes,
+            freshness=freshness,
+            variant_columns=DT_VARIANT_COLUMNS,
+        )
+
+    return _guarded_execution(run, _DT_PRIVILEGE, execute)
 
 
 _VISIBLE_NAMES_SHOWN = 20
@@ -1408,6 +2132,37 @@ class Connection:
             self._session = session
             return session
 
+    def reset(self) -> None:
+        """Forget the open session; the next `session()` call opens a fresh one."""
+        with self._lock:
+            session = self._session
+            self._session = None
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                # La session est déjà morte : c'est précisément pourquoi on la remplace.
+                pass
+
+
+async def _run_with_reconnect(
+    connection: Connection,
+    ask: ProfileAsker | None,
+    action: Callable[[Any], dict[str, Any]],
+) -> dict[str, Any]:
+    """Run `action` on the session; on a dead session, open a fresh one and retry once."""
+    session = await connection.session(ask)
+    try:
+        return await asyncio.to_thread(action, session)
+    except Exception as exc:
+        # `_guarded_execution` a déjà enveloppé l'erreur dans un PcSnowError ; le texte d'origine
+        # de Snowflake reste dans son message, donc la détection s'appuie aussi sur le texte.
+        if not _is_session_expired(exc):
+            raise
+        connection.reset()
+        session = await connection.session(ask)
+        return await asyncio.to_thread(action, session)
+
 
 async def task_history(
     connection: Connection,
@@ -1415,8 +2170,9 @@ async def task_history(
     request: TaskRequest,
 ) -> dict[str, Any]:
     """Open the session if needed, then run `task_history` off the event loop."""
-    session = await connection.session(ask)
-    return await asyncio.to_thread(task_history_on, session, request, connection.usage)
+    return await _run_with_reconnect(
+        connection, ask, lambda s: task_history_on(s, request, connection.usage)
+    )
 
 
 async def query_history(
@@ -1425,8 +2181,9 @@ async def query_history(
     request: QueryRequest,
 ) -> dict[str, Any]:
     """Open the session if needed, then run `query_history` off the event loop."""
-    session = await connection.session(ask)
-    return await asyncio.to_thread(query_history_on, session, request, connection.usage)
+    return await _run_with_reconnect(
+        connection, ask, lambda s: query_history_on(s, request, connection.usage)
+    )
 
 
 async def warehouse_credits(
@@ -1435,8 +2192,7 @@ async def warehouse_credits(
     request: CreditsRequest,
 ) -> dict[str, Any]:
     """Open the session if needed, then run `warehouse_credits` off the event loop."""
-    session = await connection.session(ask)
-    return await asyncio.to_thread(credits_on, session, request)
+    return await _run_with_reconnect(connection, ask, lambda s: credits_on(s, request))
 
 
 async def event_table_records(
@@ -1445,5 +2201,41 @@ async def event_table_records(
     request: EventRequest,
 ) -> dict[str, Any]:
     """Open the session if needed, then run `event_table_records` off the event loop."""
-    session = await connection.session(ask)
-    return await asyncio.to_thread(event_records_on, session, request)
+    return await _run_with_reconnect(
+        connection, ask, lambda s: event_records_on(s, request)
+    )
+
+
+async def query_operator_stats(
+    connection: Connection,
+    ask: ProfileAsker | None,
+    request: OperatorStatsRequest,
+) -> dict[str, Any]:
+    """Open the session if needed, then run `query_operator_stats` off the event loop."""
+    return await _run_with_reconnect(
+        connection, ask, lambda s: operator_stats_on(s, request)
+    )
+
+
+async def dynamic_table_refresh_history(
+    connection: Connection,
+    ask: ProfileAsker | None,
+    request: DynamicTableRequest,
+) -> dict[str, Any]:
+    """Open the session if needed, then run `dynamic_table_refresh_history` off the event loop."""
+    return await _run_with_reconnect(
+        connection,
+        ask,
+        lambda s: dynamic_table_refresh_on(s, request, connection.usage),
+    )
+
+
+async def warehouse_config(
+    connection: Connection,
+    ask: ProfileAsker | None,
+    request: WarehouseConfigRequest,
+) -> dict[str, Any]:
+    """Open the session if needed, then run `warehouse_config` off the event loop."""
+    return await _run_with_reconnect(
+        connection, ask, lambda s: warehouse_config_on(s, request)
+    )

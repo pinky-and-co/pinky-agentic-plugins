@@ -100,6 +100,9 @@ class FakeSession:
         query_rows: list[dict[str, Any]] | None = None,
         credit_rows: list[dict[str, Any]] | None = None,
         event_rows: list[dict[str, Any]] | None = None,
+        operator_rows: list[dict[str, Any]] | None = None,
+        dt_rows: list[dict[str, Any]] | None = None,
+        warehouse_rows: list[dict[str, Any]] | None = None,
         event_tables: dict[str, str | Exception] | None = None,
         fail_with: Exception | None = None,
         session_timezone: str = "Pacific/Auckland",
@@ -107,12 +110,16 @@ class FakeSession:
         usage_outcome: Exception | dict[str, Exception] | None = None,
         databases: dict[str, list[str]] | None = None,
         show_failures: dict[str, Exception] | None = None,
+        views: dict[str, list[str]] | None = None,
     ) -> None:
         """Set the data the functions hold and an optional failure for the function statement."""
         self.task_rows = task_rows or []
         self.query_rows = query_rows or []
         self.credit_rows = credit_rows or []
         self.event_rows = event_rows or []
+        self.operator_rows = operator_rows or []
+        self.dt_rows = dt_rows or []
+        self.warehouse_rows = warehouse_rows or []
         # `EVENT_TABLE` by level; an exception is what Snowflake raises for that `SHOW PARAMETERS`.
         self.event_tables = (
             {"ACCOUNT": "SNOWFLAKE.TELEMETRY.EVENTS"}
@@ -129,6 +136,9 @@ class FakeSession:
         self.databases = databases
         # What `SHOW TERSE DATABASES` / `SHOW TERSE SCHEMAS` raises, keyed by `DATABASES`/`SCHEMAS`.
         self.show_failures = show_failures or {}
+        # View name -> the `db.schema` locations `SHOW VIEWS LIKE '<name>' IN ACCOUNT` returns;
+        # `{}` (default) means no same-named view is visible.
+        self.views = views or {}
         self.closed = False
         self.session_timezone = session_timezone
         self.current_database = "SESSION_DEFAULT_DB"
@@ -154,7 +164,7 @@ class FakeSession:
                     )
                 ]
             )
-        if ".ACCOUNT_USAGE." in text:
+        if _is_usage_read(text):
             refusal = self.usage_outcome
             if isinstance(refusal, dict):
                 refusal = next(
@@ -165,6 +175,10 @@ class FakeSession:
             return _Collected(self._usage_view(text, bound))
         if self.fail_with is not None:
             raise self.fail_with
+        if text.startswith("SHOW WAREHOUSES"):
+            return _Collected(self._show_warehouses(text))
+        if text.startswith("SHOW VIEWS LIKE "):
+            return _Collected(self._show_views(text))
         if text.startswith("SHOW TERSE "):
             return _Collected(self._visible_names(text))
         if text.startswith("SHOW PARAMETERS LIKE 'event_table' IN "):
@@ -175,12 +189,44 @@ class FakeSession:
             return _Collected(self._task_function(text, bound))
         if ".WAREHOUSE_METERING_HISTORY(" in text:
             return _Collected(self._credit_function(text, bound))
+        if "GET_QUERY_OPERATOR_STATS(" in text:
+            return _Collected(self._operator_function(text, bound))
+        if ".DYNAMIC_TABLE_REFRESH_HISTORY(" in text:
+            return _Collected(self._dt_function(text, bound))
         return _Collected(self._query_function(text, bound))
+
+    def _show_warehouses(self, text: str) -> list[FakeRow]:
+        """`SHOW WAREHOUSES [LIKE '<name>']`: the warehouses this fake holds, filtered by name."""
+        like = re.search(r"LIKE '([^']*)'", text)
+        kept = self.warehouse_rows
+        if like:
+            kept = [r for r in kept if str(r["NAME"]).upper() == like.group(1).upper()]
+        return [FakeRow(r) for r in kept]
+
+    def _show_views(self, text: str) -> list[FakeRow]:
+        """`SHOW VIEWS LIKE '<name>' IN ACCOUNT`: the locations this fake holds for the name."""
+        name = re.search(r"SHOW VIEWS LIKE '([^']+)'", text)
+        assert name is not None
+        found = name.group(1)
+        return [
+            FakeRow(
+                NAME=found,
+                DATABASE_NAME=location.split(".")[0],
+                SCHEMA_NAME=location.split(".")[1],
+            )
+            for location in self.views.get(found.upper(), [])
+        ]
 
     def _result_limit(self, text: str) -> int:
         """The `RESULT_LIMIT` of the statement, or the function's default of 100."""
         found = re.search(r"RESULT_LIMIT => (\d+)", text)
         return int(found.group(1)) if found else 100
+
+    def _operator_function(self, text: str, bound: list[Any]) -> list[FakeRow]:
+        """`GET_QUERY_OPERATOR_STATS`: the query id filters, then `LIMIT` applies."""
+        query_id, limit = bound
+        kept = [r for r in self.operator_rows if r.get("QUERY_ID") == query_id]
+        return [FakeRow(r) for r in kept[:limit]]
 
     def _task_function(self, text: str, bound: list[Any]) -> list[FakeRow]:
         """`TASK_HISTORY`: the name arguments filter before `RESULT_LIMIT`, then `LIMIT` applies."""
@@ -210,6 +256,8 @@ class FakeSession:
                 and str(r["SCHEMA_NAME"]).upper() == schema
                 and str(r["NAME"]).upper() == name
             ]
+        elif ".DYNAMIC_TABLE_REFRESH_HISTORY " in text:
+            kept = self._dt_usage_rows(text, params)
         else:
             filters = params[2:]
             kept = list(self.query_rows)
@@ -219,18 +267,85 @@ class FakeSession:
             if "AND QUERY_ID = ?" in text:
                 target = filters.pop(0)
                 kept = [r for r in kept if r["QUERY_ID"] == target]
+            grouped = re.search(r"GROUP BY (\w+)", text)
+            if grouped:
+                return _group_rows(kept, grouped.group(1))[:limit]
         return [FakeRow(r) for r in kept[:limit]]
 
-    def _credit_function(self, text: str, bound: list[Any]) -> list[FakeRow]:
-        """`WAREHOUSE_METERING_HISTORY`: the optional name argument filters, then `LIMIT` applies."""
+    def _dt_function(self, text: str, bound: list[Any]) -> list[FakeRow]:
+        """`DYNAMIC_TABLE_REFRESH_HISTORY`: the name/prefix/error arguments filter, then `LIMIT`."""
         params = list(bound)
         limit = params.pop()
+        _start, _end = params[0], params[1]
+        filters = params[2:]
+        kept = list(self.dt_rows)
+        if "NAME => ?" in text:
+            qualified = filters.pop(0)
+            kept = [
+                r
+                for r in kept
+                if f"{r['DATABASE_NAME']}.{r['SCHEMA_NAME']}.{r['NAME']}".upper()
+                == qualified.upper()
+            ]
+        if "NAME_PREFIX => ?" in text:
+            prefix = filters.pop(0)
+            kept = [
+                r for r in kept if str(r["NAME"]).upper().startswith(prefix.upper())
+            ]
+        if "ERROR_ONLY => TRUE" in text:
+            kept = [
+                r
+                for r in kept
+                if r["STATE"] in ("FAILED", "UPSTREAM_FAILED", "CANCELLED")
+            ]
+        kept = kept[: self._result_limit(text)]
+        return [FakeRow(r) for r in kept[:limit]]
+
+    def _dt_usage_rows(self, text: str, params: list[Any]) -> list[FakeRow]:
+        """The `DYNAMIC_TABLE_REFRESH_HISTORY` view rows after its `WHERE` filters."""
+        _start, _end = params[0], params[1]
+        filters = params[2:]
+        kept = list(self.dt_rows)
+        if "AND DATABASE_NAME = ?" in text:
+            database, schema, name = filters
+            kept = [
+                r
+                for r in kept
+                if str(r["DATABASE_NAME"]).upper() == database
+                and str(r["SCHEMA_NAME"]).upper() == schema
+                and str(r["NAME"]).upper() == name
+            ]
+        elif "AND NAME LIKE ?" in text:
+            prefix = filters[0]
+            kept = [r for r in kept if str(r["NAME"]).upper().startswith(prefix)]
+        if "AND STATE IN (" in text:
+            kept = [
+                r
+                for r in kept
+                if r["STATE"] in ("FAILED", "UPSTREAM_FAILED", "CANCELLED")
+            ]
+        return kept
+
+    def _credit_function(self, text: str, bound: list[Any]) -> list[FakeRow]:
+        """`WAREHOUSE_METERING_HISTORY`: the optional name argument filters; sums or `LIMIT`."""
+        params = list(bound)
         name = params[2] if "WAREHOUSE_NAME => ?" in text else None
         kept = [
             r
             for r in self.credit_rows
             if name is None or str(r["WAREHOUSE_NAME"]).upper() == name
         ]
+        if "SUM(CREDITS_USED)" in text:
+            return [
+                FakeRow(
+                    CREDITS_USED_COMPUTE=sum(r["CREDITS_USED_COMPUTE"] for r in kept),
+                    CREDITS_USED_CLOUD_SERVICES=sum(
+                        r["CREDITS_USED_CLOUD_SERVICES"] for r in kept
+                    ),
+                    CREDITS_USED=sum(r["CREDITS_USED"] for r in kept),
+                )
+            ]
+        limit = params.pop()
         return [FakeRow(r) for r in kept[:limit]]
 
     def _visible_names(self, text: str) -> list[FakeRow]:
@@ -286,6 +401,9 @@ class FakeSession:
             ]
         if target is not None:
             kept = [r for r in kept if r["QUERY_ID"] == target]
+        grouped = re.search(r"GROUP BY (\w+)", text)
+        if grouped:
+            return _group_rows(kept, grouped.group(1))[:limit]
         return [FakeRow(r) for r in kept[:limit]]
 
     def close(self) -> None:
@@ -401,6 +519,7 @@ QUERY_CASE = ToolCase(
         "last_minutes",
         "limit",
         "include_text",
+        "group_by",
     ],
     stamp="START_TIME",
     account_usage=True,
@@ -454,6 +573,46 @@ CASE_IDS = [case.name for case in TOOL_CASES]
 def _is_probe(sql: str) -> bool:
     """Whether a statement is the one-row trial `SELECT` on an `ACCOUNT_USAGE` view."""
     return sql.startswith("SELECT 1 AS PROBE FROM SNOWFLAKE.ACCOUNT_USAGE.")
+
+
+_USAGE_VIEW_NAMES = ("TASK_HISTORY", "QUERY_HISTORY", "DYNAMIC_TABLE_REFRESH_HISTORY")
+
+
+def _group_rows(rows: list[dict[str, Any]], column: str) -> list[FakeRow]:
+    """The aggregates a `GROUP BY <column>` over query rows produces, as the server defines them."""
+    groups: dict[Any, list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(row.get(column), []).append(row)
+    out = []
+    for value, members in groups.items():
+        running = [r for r in members if r.get("EXECUTION_STATUS") == "RUNNING"]
+        done = [r for r in members if r.get("EXECUTION_STATUS") != "RUNNING"]
+        out.append(
+            FakeRow(
+                GROUP_VALUE=value,
+                QUERIES=len(members),
+                RUNNING=len(running),
+                TOTAL_ELAPSED_TIME_MS=sum(r.get("TOTAL_ELAPSED_TIME", 0) for r in done),
+                QUEUED_OVERLOAD_TIME_MS=sum(
+                    r.get("QUEUED_OVERLOAD_TIME", 0) for r in members
+                ),
+                BYTES_SCANNED=sum(r.get("BYTES_SCANNED", 0) for r in members),
+                ROWS_PRODUCED=sum(r.get("ROWS_PRODUCED", 0) for r in members),
+            )
+        )
+    out.sort(key=lambda r: r["QUERIES"], reverse=True)
+    return out
+
+
+def _is_usage_read(sql: str) -> bool:
+    """Whether a statement reads an ACCOUNT_USAGE-shaped view, native or discovered.
+
+    A view read is a plain `FROM <db>.<schema>.<view>` select, never a `TABLE(` function call,
+    and the probe counts as one too.
+    """
+    if _is_probe(sql) or "TABLE(" in sql:
+        return _is_probe(sql)
+    return any(f".{view} " in sql for view in _USAGE_VIEW_NAMES)
 
 
 def _task_row(
@@ -729,6 +888,65 @@ class TestConnection:
         assert session.closed is True
         assert _data_statements(session) == []
 
+    def test_a_dead_session_is_replaced_and_the_call_retried_once(self) -> None:
+        dead = FakeSession(
+            task_rows=[_task_row(1)],
+            fail_with=SqlRefused("Session no longer exists", 390112),
+        )
+        fresh = FakeSession(task_rows=[_task_row(1)])
+        sessions = iter([dead, fresh])
+
+        class RotatingBuilder(FakeBuilder):
+            """A builder that hands out the next session at each `getOrCreate()`."""
+
+            def __init__(self) -> None:
+                super().__init__(dead)
+
+            def getOrCreate(self) -> FakeSession:  # noqa: N802 — Snowpark's own name
+                self.get_or_create_calls += 1
+                return next(sessions)
+
+        builder = RotatingBuilder()
+        connection = tools.Connection(lambda: builder)
+        result = asyncio.run(
+            TASK_CASE.run(connection, None, TASK_CASE.request(last_minutes=5))
+        )
+        assert builder.get_or_create_calls == 2
+        assert dead.closed is True
+        assert result["row_count"] == 1
+        assert _data_statements(fresh) != []
+
+    def test_a_session_expired_twice_is_reported_not_retried_endlessly(self) -> None:
+        sessions = iter(
+            [
+                FakeSession(fail_with=SqlRefused("Session no longer exists", 390112)),
+                FakeSession(fail_with=SqlRefused("Session no longer exists", 390112)),
+            ]
+        )
+
+        class RotatingBuilder(FakeBuilder):
+            def getOrCreate(self) -> FakeSession:  # noqa: N802 — Snowpark's own name
+                self.get_or_create_calls += 1
+                return next(sessions)
+
+        connection = tools.Connection(lambda: RotatingBuilder())
+        with pytest.raises(tools.PcSnowError) as failed:
+            asyncio.run(
+                TASK_CASE.run(connection, None, TASK_CASE.request(last_minutes=5))
+            )
+        assert "Session no longer exists" in str(failed.value)
+
+    def test_a_privilege_refusal_is_not_taken_for_a_dead_session(self) -> None:
+        session = FakeSession(fail_with=SqlRefused("Insufficient privileges", 3001))
+        builder = FakeBuilder(session)
+        connection = tools.Connection(lambda: builder)
+        with pytest.raises(tools.PcSnowError):
+            asyncio.run(
+                TASK_CASE.run(connection, None, TASK_CASE.request(last_minutes=5))
+            )
+        assert builder.get_or_create_calls == 1
+        assert connection.is_open is True
+
     def test_the_session_timezone_is_never_read_or_set(self) -> None:
         session = FakeSession(session_timezone="Pacific/Auckland")
         for case in TOOL_CASES:
@@ -827,7 +1045,9 @@ class TestContractOfEveryTool:
             start=newest.isoformat(),
             end=(newest + timedelta(hours=1)).isoformat(),
         )
-        assert len(_data_statements(accepted)) == 1
+        # warehouse_credits lit ses totaux en plus de ses lignes : deux instructions de données.
+        expected = 2 if case.name == "warehouse_credits" else 1
+        assert len(_data_statements(accepted)) == expected
 
     def test_a_range_that_has_not_begun_is_never_sent(self, case: ToolCase) -> None:
         session = FakeSession()
@@ -1112,11 +1332,9 @@ def _probes(session: FakeSession, view: str | None = None) -> list[Statement]:
 
 
 def _usage_reads(session: FakeSession) -> list[Statement]:
-    """The statements that read an `ACCOUNT_USAGE` view for data, the probe excluded."""
+    """The statements that read an ACCOUNT_USAGE-shaped view, native or discovered."""
     return [
-        s
-        for s in session.statements
-        if ".ACCOUNT_USAGE." in s.sql and not _is_probe(s.sql)
+        s for s in session.statements if _is_usage_read(s.sql) and not _is_probe(s.sql)
     ]
 
 
@@ -1338,6 +1556,127 @@ class TestAccountUsageFallback:
             assert all(value not in s.sql for s in _usage_reads(session))
 
 
+class ProbeRefused(FakeSession):
+    """A session whose role cannot read the native ACCOUNT_USAGE views (the probe is refused),
+    but can read a same-named view discovered elsewhere."""
+
+    def _usage_view(self, text: str, bound: list[Any]) -> list[FakeRow]:
+        """Raise the ACCOUNT_USAGE denial on the probe only; discovered reads succeed."""
+        if _is_probe(text):
+            raise NO_USAGE
+        return super()._usage_view(text, bound)
+
+
+class TestUsageViewDiscovery:
+    """A refused ACCOUNT_USAGE view falls back to a same-named visible view."""
+
+    def test_the_unique_same_named_view_is_read_instead(self) -> None:
+        session = ProbeRefused(
+            query_rows=[_query_row(1)],
+            views={"QUERY_HISTORY": ["ANALYTICS_PROD.OBSERVABILITY"]},
+        )
+        result = run_tool(QUERY_CASE, session, last_minutes=TEN_DAYS_MINUTES)
+        assert result["source"] == "ANALYTICS_PROD.OBSERVABILITY.QUERY_HISTORY"
+        assert result["row_count"] == 1
+        read = _usage_reads(session)[0]
+        assert "FROM ANALYTICS_PROD.OBSERVABILITY.QUERY_HISTORY " in read.sql
+        assert any("discovered in place of" in note for note in result["notes"])
+
+    def test_the_discovery_is_cached_per_process(self) -> None:
+        session = ProbeRefused(
+            views={"QUERY_HISTORY": ["ANALYTICS_PROD.OBSERVABILITY"]}
+        )
+        connection = tools.Connection(lambda: FakeBuilder(session))
+        for _ in range(2):
+            asyncio.run(
+                QUERY_CASE.run(
+                    connection, None, QUERY_CASE.request(last_minutes=TEN_DAYS_MINUTES)
+                )
+            )
+        shows = [s for s in session.statements if s.sql.startswith("SHOW VIEWS")]
+        assert len(_probes(session)) == 1
+        assert len(shows) == 1
+
+    def test_several_candidates_are_listed_and_nothing_is_guessed(self) -> None:
+        session = FakeSession(
+            usage_outcome=NO_USAGE,
+            views={
+                "QUERY_HISTORY": [
+                    "ANALYTICS_PROD.OBSERVABILITY",
+                    "ANALYTICS_QA.OBSERVABILITY",
+                ]
+            },
+        )
+        with pytest.raises(tools.PcSnowError) as refused:
+            run_tool(QUERY_CASE, session, last_minutes=TEN_DAYS_MINUTES)
+        message = str(refused.value)
+        assert "ANALYTICS_PROD.OBSERVABILITY.QUERY_HISTORY" in message
+        assert "ANALYTICS_QA.OBSERVABILITY.QUERY_HISTORY" in message
+        assert "PC_SNOW_USAGE_LOCATION" in message
+        assert _usage_reads(session) == []
+
+    def test_the_location_variable_pins_one_of_several_candidates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PC_SNOW_USAGE_LOCATION", "ANALYTICS_QA.OBSERVABILITY")
+        session = ProbeRefused(
+            query_rows=[_query_row(1)],
+            views={
+                "QUERY_HISTORY": [
+                    "ANALYTICS_PROD.OBSERVABILITY",
+                    "ANALYTICS_QA.OBSERVABILITY",
+                ]
+            },
+        )
+        result = run_tool(QUERY_CASE, session, last_minutes=TEN_DAYS_MINUTES)
+        assert result["source"] == "ANALYTICS_QA.OBSERVABILITY.QUERY_HISTORY"
+
+    def test_a_location_that_pins_nothing_is_refused_with_the_candidates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PC_SNOW_USAGE_LOCATION", "NOWHERE.OBSERVABILITY")
+        session = FakeSession(
+            usage_outcome=NO_USAGE,
+            views={"QUERY_HISTORY": ["ANALYTICS_PROD.OBSERVABILITY"]},
+        )
+        with pytest.raises(tools.PcSnowError, match="NOWHERE"):
+            run_tool(QUERY_CASE, session, last_minutes=TEN_DAYS_MINUTES)
+
+    def test_no_candidate_falls_back_to_the_role_naming_denial(self) -> None:
+        session = FakeSession(usage_outcome=NO_USAGE)
+        with pytest.raises(tools.PcSnowError) as refused:
+            run_tool(QUERY_CASE, session, last_minutes=TEN_DAYS_MINUTES)
+        message = str(refused.value)
+        assert "SNOWFLAKE.GOVERNANCE_VIEWER" in message
+        assert "No visible view named QUERY_HISTORY" in message
+
+    def test_a_discovered_view_the_role_cannot_read_is_forgotten(self) -> None:
+        class FailingView(FakeSession):
+            def _usage_view(self, text: str, bound: list[Any]) -> list[FakeRow]:
+                if not _is_probe(text) and ".OBSERVABILITY." in text:
+                    raise NO_USAGE
+                return super()._usage_view(text, bound)
+
+        session = FailingView(
+            usage_outcome=NO_USAGE,
+            views={"QUERY_HISTORY": ["ANALYTICS_PROD.OBSERVABILITY"]},
+        )
+        connection = tools.Connection(lambda: FakeBuilder(session))
+        for _ in range(2):
+            with pytest.raises(tools.PcSnowError, match="GOVERNANCE_VIEWER"):
+                asyncio.run(
+                    QUERY_CASE.run(
+                        connection,
+                        None,
+                        QUERY_CASE.request(last_minutes=TEN_DAYS_MINUTES),
+                    )
+                )
+        # The discovered view is forgotten after its failure: each call resolves again.
+        shows = [s for s in session.statements if s.sql.startswith("SHOW VIEWS")]
+        assert len(_probes(session)) == 2
+        assert len(shows) == 2
+
+
 class TestAccessIsMeasuredPerView:
     """The role that covers one view says nothing about the other."""
 
@@ -1414,7 +1753,7 @@ class TestUsageAccessIsNotPoisoned:
     ) -> None:
         session = FakeSession()
         with pytest.raises(tools.PcSnowError, match="not an ACCOUNT_USAGE view"):
-            tools.UsageAccess().require(
+            tools.UsageAccess().resolve(
                 tools.guarded_runner(session), "X; DROP TABLE t"
             )
         assert session.statements == []
@@ -1435,7 +1774,7 @@ class TestUsageAccessIsNotPoisoned:
         def call(view: str) -> None:
             try:
                 barrier.wait()
-                usage.require(run, view)
+                usage.resolve(run, view)
             except BaseException as exc:
                 errors.append(exc)
 
@@ -1487,7 +1826,9 @@ class TestAccountUsageTasks:
         ]
 
     def test_task_view_statement_text(self) -> None:
-        assert tools.build_account_usage_task_history_sql(include_text=False) == (
+        assert tools.build_account_usage_task_history_sql(
+            "SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY", include_text=False
+        ) == (
             "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, STATE, ERROR_CODE, SCHEDULED_TIME, "
             "QUERY_START_TIME, COMPLETED_TIME, SCHEDULED_FROM, QUERY_ID, GRAPH_RUN_GROUP_ID "
             "FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY "
@@ -1498,7 +1839,9 @@ class TestAccountUsageTasks:
         )
 
     def test_task_view_statement_text_with_free_text(self) -> None:
-        assert tools.build_account_usage_task_history_sql(include_text=True) == (
+        assert tools.build_account_usage_task_history_sql(
+            "SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY", include_text=True
+        ) == (
             "SELECT NAME, DATABASE_NAME, SCHEMA_NAME, STATE, ERROR_CODE, SCHEDULED_TIME, "
             "QUERY_START_TIME, COMPLETED_TIME, SCHEDULED_FROM, QUERY_ID, GRAPH_RUN_GROUP_ID, "
             "ERROR_MESSAGE, RETURN_VALUE, QUERY_TEXT "
@@ -1544,7 +1887,10 @@ class TestAccountUsageQueries:
 
     def test_query_view_statement_text(self) -> None:
         assert tools.build_account_usage_query_history_sql(
-            by_warehouse=True, by_query_id=True, include_text=False
+            "SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY",
+            by_warehouse=True,
+            by_query_id=True,
+            include_text=False,
         ) == (
             "SELECT QUERY_ID, USER_NAME, ROLE_NAME, WAREHOUSE_NAME, WAREHOUSE_SIZE, QUERY_TYPE, "
             "EXECUTION_STATUS, ERROR_CODE, START_TIME, END_TIME, TOTAL_ELAPSED_TIME, "
@@ -1558,7 +1904,10 @@ class TestAccountUsageQueries:
 
     def test_plain_query_view_statement_text_with_free_text(self) -> None:
         assert tools.build_account_usage_query_history_sql(
-            by_warehouse=False, by_query_id=False, include_text=True
+            "SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY",
+            by_warehouse=False,
+            by_query_id=False,
+            include_text=True,
         ) == (
             "SELECT QUERY_ID, USER_NAME, ROLE_NAME, WAREHOUSE_NAME, WAREHOUSE_SIZE, QUERY_TYPE, "
             "EXECUTION_STATUS, ERROR_CODE, START_TIME, END_TIME, TOTAL_ELAPSED_TIME, "
@@ -1722,6 +2071,165 @@ class TestQueryHistory:
         )
 
 
+class TestQueryHistoryGroupBy:
+    """The aggregated form of `query_history`: one row per `group_by` value."""
+
+    def test_group_by_must_be_a_whitelisted_column(self) -> None:
+        with pytest.raises(tools.PcSnowError, match="QUERY_TYPE"):
+            run_with_session(QUERY_CASE, FakeSession(), group_by="QUERY_TEXT")
+        with pytest.raises(tools.PcSnowError, match="QUERY_TYPE"):
+            run_with_session(
+                QUERY_CASE, FakeSession(), group_by="QUERY_TYPE; DROP TABLE t"
+            )
+
+    def test_group_by_rejects_a_query_id_and_free_text(self) -> None:
+        with pytest.raises(tools.PcSnowError, match="query_id"):
+            run_tool(
+                QUERY_CASE,
+                FakeSession(),
+                query_id=TARGET_QUERY_ID,
+                group_by="QUERY_TYPE",
+            )
+        with pytest.raises(tools.PcSnowError, match="include_text"):
+            run_with_session(
+                QUERY_CASE, FakeSession(), group_by="QUERY_TYPE", include_text=True
+            )
+
+    def test_one_row_per_value_with_running_counted_apart(self) -> None:
+        rows = [
+            _query_row(1, QUERY_TYPE="SELECT", TOTAL_ELAPSED_TIME=100),
+            _query_row(2, QUERY_TYPE="SELECT", TOTAL_ELAPSED_TIME=200),
+            _query_row(3, QUERY_TYPE="INSERT", TOTAL_ELAPSED_TIME=50),
+            _query_row(
+                4,
+                QUERY_TYPE="SELECT",
+                EXECUTION_STATUS="RUNNING",
+                TOTAL_ELAPSED_TIME=-999,
+            ),
+        ]
+        session = FakeSession(query_rows=rows)
+        result = run_with_session(QUERY_CASE, session, group_by="QUERY_TYPE")
+        assert result["grouped_by"] == "QUERY_TYPE"
+        by_value = {r["GROUP_VALUE"]: r for r in result["rows"]}
+        assert by_value["SELECT"]["QUERIES"] == 3
+        assert by_value["SELECT"]["RUNNING"] == 1
+        assert by_value["SELECT"]["TOTAL_ELAPSED_TIME_MS"] == 300
+        assert by_value["INSERT"]["QUERIES"] == 1
+        assert "GROUP BY QUERY_TYPE" in session.statements[-1].sql
+
+    def test_the_column_is_whitelisted_never_bound(self) -> None:
+        session = FakeSession(query_rows=[_query_row(1)])
+        run_with_session(QUERY_CASE, session, group_by="EXECUTION_STATUS")
+        statement = session.statements[-1]
+        assert "GROUP BY EXECUTION_STATUS" in statement.sql
+        assert all("EXECUTION_STATUS" not in str(p) for p in statement.params)
+
+    def test_the_warehouse_scope_is_kept_in_the_grouped_form(self) -> None:
+        session = FakeSession(
+            query_rows=[
+                _query_row(1, warehouse="MY_WH"),
+                _query_row(2, warehouse="OTHER"),
+            ]
+        )
+        run_with_session(QUERY_CASE, session, group_by="QUERY_TYPE")
+        statement = session.statements[-1]
+        assert "QUERY_HISTORY_BY_WAREHOUSE" in statement.sql
+        assert statement.params[0] == "MY_WH"
+
+    def test_a_range_over_seven_days_groups_over_the_usage_view(self) -> None:
+        session = FakeSession(query_rows=[_query_row(1, QUERY_TYPE="SELECT")])
+        result = run_tool(
+            QUERY_CASE, session, last_minutes=TEN_DAYS_MINUTES, group_by="QUERY_TYPE"
+        )
+        assert result["source"] == "SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY"
+        assert result["grouped_by"] == "QUERY_TYPE"
+        statement = _usage_reads(session)[0]
+        assert "GROUP BY QUERY_TYPE" in statement.sql
+
+
+def _operator_row(
+    n: int, query_id: str = TARGET_QUERY_ID, **extra: Any
+) -> dict[str, Any]:
+    """One `GET_QUERY_OPERATOR_STATS` row, as the table function returns it."""
+    row = {
+        "QUERY_ID": query_id,
+        "STEP_ID": 1,
+        "OPERATOR_ID": n,
+        "PARENT_OPERATORS": None if n == 0 else [n - 1],
+        "OPERATOR_TYPE": "TableScan",
+        "OPERATOR_STATISTICS": json.dumps({"io": {"rows": n * 100}}),
+        "EXECUTION_TIME_BREAKDOWN": json.dumps({"overall_percentage": 1}),
+        "OPERATOR_ATTRIBUTES": json.dumps({"table": "MY_TABLE"}),
+    }
+    row.update(extra)
+    return row
+
+
+def _run_operator_stats(session: FakeSession, **overrides: Any) -> dict[str, Any]:
+    """Validate then run one `query_operator_stats` call through a fake-backed connection."""
+    connection = tools.Connection(lambda: FakeBuilder(session))
+    request = tools.plan_operator_stats(
+        overrides.pop("query_id", TARGET_QUERY_ID), overrides.pop("limit", 200)
+    )
+    return asyncio.run(tools.query_operator_stats(connection, None, request))
+
+
+class TestQueryOperatorStats:
+    """The operator-level drill-down of one completed query."""
+
+    def test_the_query_id_is_required_and_is_a_uuid(self) -> None:
+        with pytest.raises(tools.PcSnowError, match="query_id"):
+            tools.plan_operator_stats(None, 50)
+        with pytest.raises(tools.PcSnowError, match="UUID"):
+            tools.plan_operator_stats("not-a-uuid", 50)
+
+    def test_operators_of_the_query_are_returned_ordered_with_variants_parsed(
+        self,
+    ) -> None:
+        session = FakeSession(
+            operator_rows=[
+                _operator_row(0),
+                _operator_row(1),
+                _operator_row(0, "other-id"),
+            ]
+        )
+        result = _run_operator_stats(session)
+        assert [r["OPERATOR_ID"] for r in result["rows"]] == [0, 1]
+        assert result["rows"][1]["OPERATOR_STATISTICS"] == {"io": {"rows": 100}}
+        assert result["rows"][1]["PARENT_OPERATORS"] == [0]
+        assert result["source"] == "GET_QUERY_OPERATOR_STATS"
+
+    def test_the_query_id_is_bound_never_joined(self) -> None:
+        session = FakeSession(operator_rows=[_operator_row(0)])
+        _run_operator_stats(session)
+        statement = session.statements[-1]
+        assert TARGET_QUERY_ID not in statement.sql
+        assert statement.params == [TARGET_QUERY_ID, 201]
+
+    def test_rows_are_capped_and_more_is_flagged(self) -> None:
+        session = FakeSession(operator_rows=[_operator_row(n) for n in range(5)])
+        result = _run_operator_stats(session, limit=3)
+        assert result["row_count"] == 3
+        assert result["truncated"] is True
+
+    def test_a_privilege_refusal_names_how_the_query_becomes_visible(self) -> None:
+        session = FakeSession(
+            fail_with=SqlRefused(
+                "Insufficient privileges to operate on warehouse", 3001
+            )
+        )
+        with pytest.raises(tools.PcSnowError) as refused:
+            _run_operator_stats(session)
+        message = str(refused.value)
+        assert "MONITOR or OPERATE" in message
+        assert "ROLE_ALPHA" in message
+
+    def test_an_empty_answer_carries_the_running_or_invisible_note(self) -> None:
+        result = _run_operator_stats(FakeSession())
+        assert result["row_count"] == 0
+        assert any("still running" in note for note in result["notes"])
+
+
 class TestWarehouseCredits:
     """What only the credits tool promises."""
 
@@ -1788,7 +2296,7 @@ class TestWarehouseCredits:
             all_warehouses=True,
             last_minutes=60,
         )
-        function = session.statements[-1]
+        function = session.statements[-2]
         assert "WAREHOUSE_NAME => ?" not in function.sql
         assert function.params == [NOW_MS - 60 * 60_000, NOW_MS, 51]
         assert [r["WAREHOUSE_NAME"] for r in result["rows"]] == ["WH_A", "WH_B"]
@@ -1797,13 +2305,31 @@ class TestWarehouseCredits:
         rows = [_credit_row(0, "WH_A"), _credit_row(1, "MY_WH")]
         session = FakeSession(credit_rows=rows)
         result = run_tool(CREDITS_CASE, session, warehouse="my_wh", last_minutes=60)
-        assert session.statements[-1].params == [
+        assert session.statements[-2].params == [
             NOW_MS - 60 * 60_000,
             NOW_MS,
             "MY_WH",
             51,
         ]
         assert [r["WAREHOUSE_NAME"] for r in result["rows"]] == ["MY_WH"]
+
+    def test_totals_sum_the_whole_range_regardless_of_the_row_limit(self) -> None:
+        session = FakeSession(credit_rows=[_credit_row(n) for n in range(60)])
+        result = run_tool(CREDITS_CASE, session, last_minutes=60 * 60, limit=10)
+        assert result["row_count"] == 10
+        assert result["totals"] == {
+            "credits_used_compute": 90.0,
+            "credits_used_cloud_services": 15.0,
+            "credits_used": 105.0,
+        }
+
+    def test_the_totals_query_carries_the_warehouse_scope_and_no_limit(self) -> None:
+        session = FakeSession(credit_rows=[_credit_row(0)])
+        run_tool(CREDITS_CASE, session, last_minutes=60)
+        totals = session.statements[-1]
+        assert "SUM(CREDITS_USED)" in totals.sql
+        assert "LIMIT" not in totals.sql
+        assert totals.params == [NOW_MS - 60 * 60_000, NOW_MS, "MY_WH"]
 
     def test_the_result_says_the_function_answers_only_with_the_privilege(self) -> None:
         notes = run_with_session(CREDITS_CASE, FakeSession())["notes"]
@@ -1830,6 +2356,145 @@ class TestWarehouseCredits:
             "DATE_RANGE_END => TO_TIMESTAMP_LTZ(?, 3))) "
             "ORDER BY START_TIME DESC, WAREHOUSE_NAME LIMIT ?"
         )
+
+
+def _dt_row(
+    n: int,
+    name: str = "MY_DT",
+    schema: str = "MY_SCHEMA",
+    database: str = "MY_DB",
+    state: str = "SUCCEEDED",
+    **extra: Any,
+) -> dict[str, Any]:
+    """One `DYNAMIC_TABLE_REFRESH_HISTORY` row, newest first as the function returns it."""
+    stamp = datetime(2026, 10, 12, 13, 0, 0, tzinfo=UTC)
+    row = {
+        "NAME": name,
+        "SCHEMA_NAME": schema,
+        "DATABASE_NAME": database,
+        "STATE": state,
+        "QUERY_ID": f"refresh-{n}",
+        "DATA_TIMESTAMP": stamp,
+        "REFRESH_START_TIME": stamp,
+        "REFRESH_END_TIME": stamp,
+        "COMPLETION_TARGET": stamp,
+        "STATE_MESSAGE": None,
+        "STATISTICS": json.dumps({"numInsertedRows": n}),
+    }
+    row.update(extra)
+    return row
+
+
+def _run_dt(session: FakeSession, **overrides: Any) -> dict[str, Any]:
+    """Validate then run one `dynamic_table_refresh_history` call through a fake connection."""
+    connection = tools.Connection(lambda: FakeBuilder(session))
+    arguments = {
+        "database": "MY_DB",
+        "schema": "MY_SCHEMA",
+        "name": "MY_DT",
+        "name_prefix": None,
+        "error_only": False,
+        "start": None,
+        "end": None,
+        "last_minutes": 60,
+        "limit": 50,
+        "include_text": False,
+    }
+    arguments.update(overrides)
+    request = tools.plan_dynamic_table_refresh(**arguments)
+    return asyncio.run(tools.dynamic_table_refresh_history(connection, None, request))
+
+
+class TestDynamicTableRefreshHistory:
+    """The refresh history of dynamic tables, by name or by prefix."""
+
+    def test_scope_is_one_table_or_a_prefix_never_both_never_neither(self) -> None:
+        with pytest.raises(tools.PcSnowError, match="not both"):
+            _run_dt(FakeSession(), name_prefix="MY_")
+        with pytest.raises(tools.PcSnowError, match="missing required scope"):
+            _run_dt(FakeSession(), database=None, schema=None, name=None)
+        with pytest.raises(tools.PcSnowError, match="missing: schema"):
+            _run_dt(FakeSession(), schema=None)
+
+    def test_one_tables_refreshes_come_from_the_function_with_a_bound_name(
+        self,
+    ) -> None:
+        session = FakeSession(dt_rows=[_dt_row(0), _dt_row(1, name="OTHER_DT")])
+        result = _run_dt(session)
+        assert [r["NAME"] for r in result["rows"]] == ["MY_DT"]
+        statement = session.statements[-1]
+        assert "MY_DB" not in statement.sql
+        assert "NAME => ?::STRING" in statement.sql
+        assert statement.params[2] == "MY_DB.MY_SCHEMA.MY_DT"
+        assert result["source"] == (
+            "SNOWFLAKE.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY"
+        )
+
+    def test_a_prefix_scopes_several_tables(self) -> None:
+        session = FakeSession(
+            dt_rows=[
+                _dt_row(0),
+                _dt_row(1, name="MY_OTHER"),
+                _dt_row(2, name="SKIP_ME"),
+            ]
+        )
+        result = _run_dt(
+            session, database=None, schema=None, name=None, name_prefix="MY_"
+        )
+        assert {r["NAME"] for r in result["rows"]} == {"MY_DT", "MY_OTHER"}
+
+    def test_error_only_keeps_the_failing_states(self) -> None:
+        session = FakeSession(
+            dt_rows=[
+                _dt_row(0, state="SUCCEEDED"),
+                _dt_row(1, state="FAILED"),
+                _dt_row(2, state="UPSTREAM_FAILED"),
+                _dt_row(3, state="EXECUTING"),
+            ]
+        )
+        result = _run_dt(session, error_only=True)
+        assert {r["STATE"] for r in result["rows"]} == {"FAILED", "UPSTREAM_FAILED"}
+        assert "ERROR_ONLY => TRUE" in session.statements[-1].sql
+
+    def test_the_statistics_variant_is_parsed_when_text_is_asked(self) -> None:
+        session = FakeSession(dt_rows=[_dt_row(0)])
+        result = _run_dt(session, include_text=True)
+        assert result["rows"][0]["STATISTICS"] == {"numInsertedRows": 0}
+
+    def test_a_range_over_seven_days_falls_back_to_the_usage_view(self) -> None:
+        session = FakeSession(dt_rows=[_dt_row(0)])
+        result = _run_dt(session, last_minutes=TEN_DAYS_MINUTES)
+        assert (
+            result["source"] == "SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY"
+        )
+        assert _probes(session, "DYNAMIC_TABLE_REFRESH_HISTORY") != []
+        statement = _usage_reads(session)[0]
+        assert statement.params[2:] == ["MY_DB", "MY_SCHEMA", "MY_DT", 51]
+
+    def test_the_fallback_filters_by_prefix_and_state(self) -> None:
+        session = FakeSession(
+            dt_rows=[_dt_row(0, state="SUCCEEDED"), _dt_row(1, state="FAILED")]
+        )
+        result = _run_dt(
+            session,
+            database=None,
+            schema=None,
+            name=None,
+            name_prefix="MY_",
+            error_only=True,
+            last_minutes=TEN_DAYS_MINUTES,
+        )
+        assert [r["STATE"] for r in result["rows"]] == ["FAILED"]
+        statement = _usage_reads(session)[0]
+        assert (
+            "AND STATE IN ('FAILED', 'UPSTREAM_FAILED', 'CANCELLED')" in statement.sql
+        )
+
+    def test_rows_are_capped_and_flagged(self) -> None:
+        session = FakeSession(dt_rows=[_dt_row(n) for n in range(60)])
+        result = _run_dt(session)
+        assert result["row_count"] == 50
+        assert result["truncated"] is True
 
 
 class TestEventTableRecords:
@@ -2132,6 +2797,35 @@ class TestEventTableRecords:
         )
 
 
+class TestVariantColumns:
+    """A declared VARIANT column's JSON text is parsed into a dict/list, never cut."""
+
+    def test_variant_columns_are_parsed_into_json_not_cut(self) -> None:
+        rows = [
+            FakeRow(
+                OPERATOR_ID=0,
+                OPERATOR_STATISTICS=json.dumps({"io": {"rows": 10_000}}),
+            )
+        ]
+        shaped, cuts = tools._shape_rows(
+            rows,
+            ["OPERATOR_ID", "OPERATOR_STATISTICS"],
+            tools.user_zone({}),
+            ["OPERATOR_STATISTICS"],
+        )
+        assert shaped[0]["OPERATOR_STATISTICS"] == {"io": {"rows": 10_000}}
+        assert cuts == []
+
+    def test_a_variant_column_that_is_not_json_stays_a_string(self) -> None:
+        shaped, _cuts = tools._shape_rows(
+            [FakeRow(OPERATOR_STATISTICS="not json")],
+            ["OPERATOR_STATISTICS"],
+            tools.user_zone({}),
+            ["OPERATOR_STATISTICS"],
+        )
+        assert shaped[0]["OPERATOR_STATISTICS"] == "not json"
+
+
 class TestStatementGuard:
     """The guard every statement passes through."""
 
@@ -2182,6 +2876,16 @@ def server(_clean_environment: Path) -> Iterator[StdioMcp]:
     client.close()
 
 
+# Tools covered by a dedicated test class instead of `TOOL_CASES`: the range contract the
+# parametrized cases share does not apply to them (`query_operator_stats` has no time range).
+STANDALONE_TOOL_NAMES = [
+    "query_operator_stats",
+    "dynamic_table_refresh_history",
+    "warehouse_config",
+]
+ALL_TOOL_NAMES = CASE_IDS + STANDALONE_TOOL_NAMES
+
+
 class TestServerOverStdio:
     """The announced contract of the running server."""
 
@@ -2189,11 +2893,11 @@ class TestServerOverStdio:
         self, server: StdioMcp
     ) -> None:
         announced = server.list_tools()
-        assert sorted(t["name"] for t in announced) == sorted(CASE_IDS)
+        assert sorted(t["name"] for t in announced) == sorted(ALL_TOOL_NAMES)
         assert server.elicitation_requests == []
 
-    def test_every_server_tool_has_a_case(self, server: StdioMcp) -> None:
-        assert {t["name"] for t in server.list_tools()} == {c.name for c in TOOL_CASES}
+    def test_every_server_tool_is_covered(self, server: StdioMcp) -> None:
+        assert {t["name"] for t in server.list_tools()} == set(ALL_TOOL_NAMES)
 
     def test_each_tool_takes_exactly_its_listed_parameters(
         self, server: StdioMcp
@@ -2203,6 +2907,29 @@ class TestServerOverStdio:
             assert sorted(by_name[case.name]["inputSchema"]["properties"]) == sorted(
                 case.expected_params
             )
+        assert sorted(by_name["query_operator_stats"]["inputSchema"]["properties"]) == [
+            "limit",
+            "query_id",
+        ]
+        assert sorted(
+            by_name["dynamic_table_refresh_history"]["inputSchema"]["properties"]
+        ) == [
+            "database",
+            "end",
+            "error_only",
+            "include_text",
+            "last_minutes",
+            "limit",
+            "name",
+            "name_prefix",
+            "schema",
+            "start",
+        ]
+        assert sorted(by_name["warehouse_config"]["inputSchema"]["properties"]) == [
+            "all_warehouses",
+            "limit",
+            "warehouse",
+        ]
 
     def test_no_tool_takes_a_connection_a_profile_an_account_or_sql(
         self, server: StdioMcp

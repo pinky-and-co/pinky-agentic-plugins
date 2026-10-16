@@ -166,7 +166,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     Bound it with `or stop after <N> turns` (20 unless the card says otherwise).
 
     **Review clause.** If the work needs judgment reviewed (anything beyond a purely mechanical
-    change, per `finishing-a-card.md` § "Reviewing before declaring the card done"), append `… and
+    change, per `finishing-a-card.md` § "Reviewing before declaring a card done"), append `… and
     the final diff has been reviewed by `Agent(reviewer)`, its findings fixed or filed in a
     follow-up card, and the last pass's `Method:` line relayed verbatim to the user`. Substance
     only — never the `reviewed (…)` box. Decided pre-work from `## Done when` and `requirements:`;
