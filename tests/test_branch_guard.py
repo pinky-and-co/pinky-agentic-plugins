@@ -53,9 +53,15 @@ class TestIsUnguarded(unittest.TestCase):
     def test_documentation_paths_are_unguarded(self):
         for path in (
             "docs/how-to/x.md",
+            "docs/spec.docx",
+            "docs/budget.xlsx",
+            "docs/deck.pptx",
+            "docs/schema.pdf",
+            "docs/img/flow.png",
             "README.md",
             "plugins/pc-statusline/README.md",
             "plugins/pc-statusline/docs/usage.md",
+            "plugins/pc-statusline/docs/img/shot.svg",
             ".claude-plugin/marketplace.json",
             "plugins/pc-craft/.claude-plugin/plugin.json",
         ):
@@ -70,6 +76,11 @@ class TestIsUnguarded(unittest.TestCase):
             ".claude-plugin/other.json",
             ".hidden/script.py",
             "notes.md",
+            "docs/build.py",
+            "docs/Makefile",
+            "docs/hooks/evil.sh",
+            "plugins/pc-statusline/docs/gen.py",
+            "docs/notes.md.bak",
         ):
             with self.subTest(path=path):
                 self.assertFalse(bg.is_unguarded(path))
