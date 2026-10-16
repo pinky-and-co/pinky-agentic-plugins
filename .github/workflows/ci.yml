@@ -36,15 +36,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Une PR dont TOUS les fichiers sont de la documentation ne change rien que les tests lisent :
+      # installation, audit et tests sautent (`if` sur chaque étape), pendant que le JOB tourne et
+      # se rapporte — un check `ci` requis qui n'apparaît jamais bloque la fusion pour toujours
+      # (pas de `paths:` sur `pull_request`, pas de `if:` sur le job). La liste se lit sur la PR
+      # ENTIÈRE (base...head), jamais sur le dernier commit : du code suivi d'un commit de doc reste
+      # une PR de code. Un renommage compte deux fois (ancien et nouveau nom) : du code déplacé vers
+      # `docs/` n'est pas de la documentation. Au-delà de 300 fichiers l'API tronque sa liste, et un
+      # appel en échec n'en donne aucune : dans les deux cas les tests tournent. Sous `docs/`, seules
+      # les extensions de documentation comptent — un script ou une config rangés là pilotent un
+      # comportement. Liste dupliquée exprès (branch_paths.sh de pc-git, prek.yml.tpl) : une
+      # divergence ne coûte qu'un run de trop, jamais un trou. Un `push` lance toujours les tests.
+      - name: Détecter une PR de documentation seule
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          docs_only=false
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            files=$(gh api "repos/$REPO/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)' 2>/dev/null || true)
+            total=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
+            if [ -n "$files" ] && [ "$total" -lt 300 ] \
+              && ! grep -qvE '^(README\.md|AGENTS\.md|CLAUDE\.md|LICENSE|(plugins/[^/]+/)?(README\.md|docs/.+\.(md|rst|txt|docx|xlsx|pptx|pdf|png|jpg|jpeg|gif|svg)))$' <<<"$files"; then
+              docs_only=true
+            fi
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "PR de documentation seule : $docs_only"
+
       - name: Set up Python 3.12
+        if: steps.scope.outputs.docs_only != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install uv
+        if: steps.scope.outputs.docs_only != 'true'
         uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         # `--locked`, pas `--frozen` : échoue si `uv.lock` est désynchronisé du `pyproject.toml`
         # (dépendance ajoutée sans relancer `uv lock`) au lieu d'installer un lock potentiellement
         # obsolète en silence — `pip install` ignorait totalement `uv.lock` (chantier 0024).
@@ -59,6 +95,7 @@ jobs:
         run: uv sync --locked --no-sources --group dev
 
       - name: Audit dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         # `uv run pip-audit`/`uvx pip-audit` seuls auditent un env d'outil ISOLÉ (~29 paquets de
         # pip-audit lui-même), jamais les deps du projet — un scan vert qui ne prouve rien (mesuré
         # sur pinky-core, chantier 0024). L'export force pip-audit à lire le VRAI arbre résolu.
@@ -71,11 +108,13 @@ jobs:
           uvx pip-audit --disable-pip --no-deps -r /tmp/pip-audit-requirements.txt
 
       - name: Tests
+        if: steps.scope.outputs.docs_only != 'true'
         # Commande surchargeable : `pytest` ne convient qu'aux repos dont la suite est en Python.
         # PILOT teste ses calculs monétaires en JavaScript — un `pytest` y sort « aucun test
         # collecté », et la commande n'est même pas installée. Cette étape existe en plus du hook
         # `run-tests` parce que celui-ci est filtré sur `files: ^(src|tests)/` : une PR qui ne
-        # touche que la doc le saute, et la suite ne tournerait alors nulle part.
+        # touche que la doc le saute, et la suite ne tourne alors volontairement nulle part (voir la
+        # détection de PR de documentation seule, plus haut).
         # `uv run`, pas la commande nue : depuis `uv sync --locked` (chantier 0024), les paquets
         # vivent dans le venv géré par uv, plus dans le Python système comme avec `pip install` —
         # un `pytest` nu sort "command not found" (mesuré en CI réelle, Linux et Windows).
