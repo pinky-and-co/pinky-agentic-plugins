@@ -12,11 +12,9 @@ allowed-tools: Bash(git diff:*), Bash(git -C * diff*), Bash(rtk git -C * diff*),
 
 The judgment already happened: someone made this change **for real**, on one target, at full tier.
 Your job is the repetition, not the decision. If you find yourself deciding what the change should
-be, stop and report — the pattern is not ready, and inventing it here produces N slightly different
-answers at N different moments.
+be, stop and report — the pattern is not ready.
 
-You run forked on `haiku` for exactly that reason. Cheap is correct here, because nothing is being
-decided.
+You run forked on `haiku` because nothing is being decided.
 
 ## Step 1 — Read the pattern
 
@@ -46,16 +44,16 @@ For each target:
 2. Apply the equivalent edit, substituting only what Step 1 identified as target-specific.
 3. Re-read what you wrote if the edit was structural.
 
-**Three things you never do**, because each one turns a mechanical pass into a silent mess:
+**Two things you never do:**
 
-- **Never `git apply` the witness diff blindly.** Line numbers and surrounding content differ; a
-  patch that applies cleanly to the wrong place is worse than one that fails.
-- **Never fix anything else you notice.** Out-of-pattern problems get reported, not repaired. One
-  pass, one change.
-- ~~**Never commit.**~~ **New:** Commit and open a PR/MR for each successful target (✅ or ⚠️).
-  Invoke `bulk_commit.sh apply` once per target with a commit message derived from the pattern
-  (e.g., the witness's commit message, or a generic convention message). Capture the PR/MR URL
-  from the script's `=== RESULTS` block (column `pr_url`). On failure or `❌` states, no commit.
+- **Never `git apply` the witness diff blindly.** A patch that applies cleanly to the wrong place is
+  worse than one that fails.
+- **Never fix anything else you notice.** Out-of-pattern problems get reported, not repaired.
+
+Commit and open a PR/MR for each successful target (✅ or ⚠️): invoke `bulk_commit.sh apply` once
+per target with a commit message derived from the pattern (the witness's commit message, or a
+generic convention message). Capture the PR/MR URL from the script's `=== RESULTS` block (column
+`pr_url`). On failure or `❌` states, no commit.
 
 ## Step 2 (continued) — Commit and open PR/MR (if applied)
 
@@ -92,9 +90,8 @@ For each target where the pattern **was successfully applied** (✅ or ⚠️):
      --messages <temp-file>
    ```
    - **`--root`** must be a workspace root (a folder containing multiple git repos as direct
-     subdirectories). Use `${CLAUDE_PROJECT_DIR}`, which is set by the Claude Code harness.
-   - **`--repo`** is the basename of the target repo (the folder name, e.g., `pinky-core`, not the
-     full path).
+     subdirectories): use `${CLAUDE_PROJECT_DIR}`.
+   - **`--repo`** is the basename of the target repo (e.g., `pinky-core`, not the full path).
 
 5. **Parse the `=== RESULTS` block** from the script's output. Each line is tab-separated:
    `<repo>\t<state>\t<pr_url_or_dash>`, where `state` ∈ {`pushed-pr`, `pushed-nopr`,
@@ -109,8 +106,7 @@ For each target where the pattern **was successfully applied** (✅ or ⚠️):
 
 ## Step 3 — Report, per target (pattern outcome + script outcome)
 
-Report **two dimensions** per target: did the pattern apply, and did the commit/PR succeed. One
-line each, keeping states distinct:
+Report **two dimensions** per target: did the pattern apply, and did the commit/PR succeed:
 
 **Pattern outcome** (from Step 2):
 
@@ -164,9 +160,6 @@ Each one signals distinct human actions:
 - `failed` / `skipped` → retry with fixes
 - `❌ / ⏭️` → legitimate, no action needed
 
-A run that claims success while hiding a `commit-nopush` or `pushed-prfailed` is worse than one that
-reports it explicitly.
-
 ## Step 4 — Aggregate PR/MR URLs
 
 After reporting all targets, aggregate the PR/MR URLs from step 2 (continued) for visibility:
@@ -178,9 +171,8 @@ After reporting all targets, aggregate the PR/MR URLs from step 2 (continued) fo
 …
 ```
 
-This list appears in **two places** (doublet intentional):
-1. **This terminal report** (the skill's output) — for immediate visibility in the session.
-2. **`_AGENT_LOG/YYYY-MM-DD_<session>.md`** — auto-written by the harness Stop hook, durable and queryable for audits.
+This list appears in **two places**:
+1. **This terminal report** (the skill's output).
+2. **`_AGENT_LOG/YYYY-MM-DD_<session>.md`** — auto-written by the harness Stop hook.
 
-A target that failed commit/push/PR has `state` = `failed` and `url` = `-` (never omitted). This
-helps distinguish "no PR opened" (explicit) from "no PR listed" (silent data loss).
+A target that failed commit/push/PR has `state` = `failed` and `url` = `-` (never omitted).

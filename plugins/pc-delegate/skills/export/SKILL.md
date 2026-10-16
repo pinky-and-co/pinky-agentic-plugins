@@ -1,6 +1,6 @@
 ---
 name: export
-description: "Export selected kanban cards, their chantier context, a relevance-filtered _AGENT_LOG (exported-card slug mentions within the last 60 days, plus the secrets denylist), a repo code subtree, and a rendered guide into one zip for an agent working outside Claude Code. Moves the exported cards to 3-in-progress with an export marker. Use when the user asks to export cards or hand a job off to an external agent."
+description: "Export selected kanban cards with their chantier context, a relevance-filtered _AGENT_LOG, a repo code subtree and a rendered guide into one zip for an agent working outside Claude Code; the exported cards move to 3-in-progress with an export marker. Use when the user asks to export cards or hand a job off to an external agent."
 argument-hint: "<chantier-dir> --card <id> [--card <id> ...] --repo <path> --touched <file> [...]"
 allowed-tools: mcp__plugin_pc-delegate_pc-delegate__export_subtree, Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/export/scripts/build_export.py:*), Read
 ---
@@ -13,9 +13,9 @@ From the selected cards' own content (and, when relevant, `git status`/`git diff
 repo), name the files the external agent actually needs to see or edit — plus any hygiene hook or
 test that targets one of them (a `repo: local` hook whose own script is a file in the repo and
 whose `files:` pattern matches an edited file, the test module covering an edited one). A hook with
-no file of its own (a third-party one like `trailing-whitespace`) has nothing to add here. This is
-the one list passed to `export_subtree` below (so its own direct imports resolve the same way) and
-later to `--repo-file`. This is a judgment call — never guess silently; if it is unclear, ask.
+no file of its own (a third-party one like `trailing-whitespace`) adds nothing. This is the one list
+passed to `export_subtree` below and later to `--repo-file`. It is a judgment call — never guess
+silently; if it is unclear, ask.
 
 ## Step 2 — Compute the subtree
 
@@ -51,6 +51,5 @@ the zip ships without `_AGENT_LOG` and the script prints an explicit line saying
 ## Step 4 — Hand off
 
 `build_export.py` prints a ready-to-paste prompt for the external agent's chat, after the zip is
-written — hand that to the user as-is alongside the zip path. Nothing beyond this is this skill's
-job — sending the zip, and reintegrating what comes back (the `reintegrate` skill, same plugin), are
-separate, explicit steps.
+written — hand that to the user as-is alongside the zip path. Sending the zip, and reintegrating what
+comes back (the `reintegrate` skill, same plugin), are separate, explicit steps.

@@ -11,10 +11,8 @@ metadata:
 
 # SQL → Snowpark
 
-Translate a Snowflake SQL query into Snowpark Python. The hard part — the SQL↔Snowpark mapping and
-the gotchas — lives in the `snowpark` knowledge skill; this is the thin driver that reads it and
-applies it to *your* query. Migrating SQL to Snowpark is common and error-prone; the reference is
-what keeps the translation correct.
+Translate a Snowflake SQL query into Snowpark Python. The SQL↔Snowpark mapping and the gotchas live
+in the `snowpark` knowledge skill; this thin driver reads it and applies it to *your* query.
 
 ## Arguments
 
@@ -38,8 +36,7 @@ specifically:
 - **`## Canonical vs deprecated method names`** — snake_case API (camelCase is banned /
   hook-enforced).
 
-Do **not** restate the mapping table back to the user — apply it. The reference is the single
-source.
+Do **not** restate the mapping table back to the user — apply it.
 
 ## Steps
 
@@ -62,4 +59,3 @@ source.
 - Provider/instance-specific orchestration (a fixed SP template, a repo layout, a post-migration
   README step) is **not** part of this generic skill — wrap that in a private profile skill if you
   need it.
-- The inverse (`snowpark-to-sql`) reads the same reference in reverse; both drivers stay thin.

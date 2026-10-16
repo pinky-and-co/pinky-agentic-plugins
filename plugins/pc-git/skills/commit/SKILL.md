@@ -11,25 +11,23 @@ allowed-tools: Bash(test -e:*), Bash(jq:*), Bash(rtk jq:*), Bash(find:*), Bash(r
 # Commit — gitmoji convention
 
 Being invoked is the confirmation. Analyse the diff and commit — do not propose and wait, just do
-it. (A different trigger — the agent noticing a dirty tree unprompted, end of session — proposes
-first per the workspace's commit-proactivity policy; that path never reaches this skill body until
-consent already exists.)
+it.
 
 ## Step 1 — Identify the target(s)
 
 `args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
-at all means no argument was passed** — that is the normal, expected shape for a bare invocation,
-not missing information. Go straight to step 4 below; never ask for one instead.
+means no argument was passed** — the normal shape for a bare invocation. Go straight to step 4
+below; never ask for one.
 
 The target passed to Step 2 is **always an absolute worktree root**, never a bare name. Resolve it
 in this order:
 
 1. **An absolute repo path** (starts with `/`) → checked first. Combined with `--all`, or with any
-   other repo name or path, stop with a plain error before any tool call — a path is never mixed
-   with another target. Otherwise the path must be exactly a repo's own directory: run
-   `test -e "<path>/.git"` (quote the path). If it fails — a subdirectory of a repo, or a directory
-   that merely contains repos, is not a repo path — say so plainly and stop, never guess another
-   repo. Then that path is the target: go to Step 2 with it and never run the bulk script.
+   other repo name or path, stop with a plain error before any tool call. Otherwise the path must be
+   exactly a repo's own directory: run `test -e "<path>/.git"` (quote the path). If it fails — a
+   subdirectory of a repo, or a directory that merely contains repos, is not a repo path — say so
+   plainly and stop, never guess another repo. Then that path is the target: go to Step 2 with it
+   and never run the bulk script.
 2. **`--all`, or an argument naming several repos** → the bulk branch below.
 3. **An argument naming one repo** → resolve the name to a path via the same sweep the bulk branch
   uses (below): the candidate whose basename matches the argument. No match → say so, stop. Then go
@@ -44,10 +42,8 @@ in this order:
     the target — no question. Go to Step 2 with that path.
    - **Nonzero exit** → `${CLAUDE_PROJECT_DIR}` is not inside any git repo (orchestrator / workspace
      layout). **Hard-fail before any state-changing call**: report that a target is required (a repo
-    name or `--all`) and stop. Do not prompt for it — this skill runs `context: fork`; a question
-    here has no channel back, the fork has already returned. On a mounted-board orchestrator
-    session this hard-fail is the second line behind `orchestrator_freeze.py`, which already
-    freezes such a session out of the repos; no code dependency is asserted between the two.
+    name or `--all`) and stop. Do not prompt for it — this skill runs `context: fork`, a question
+    has no channel back.
 
 **Bulk branch.** Discover the dirty repos with the script, read-only — never a hand-written
 `rg`/`find` block or a shell loop (an `if`/`for` block matches no allowed command and asks for a
@@ -71,11 +67,10 @@ EOF
 
 Messages go in on **standard input** (`--messages -` plus a `<<'EOF'` heredoc) — never write a message file: a file under `/tmp` is outside the working directory and asks for a permission, and neither `cat > file` nor `printf > file` is allowed.
 
-The plan groups repos by **diff fingerprint** — the common case for `--all` is one identical
-distribution across many repos, so N repos share one diff and need one message. Write one
+The plan groups repos by **diff fingerprint**: N repos sharing one diff need one message. Write one
 tab-separated `<fingerprint><TAB><message>` line per group (Step 2's convention still applies to
 the wording), then apply. `--no-pr` because this skill stops at the commit; `commit-and-pr`
-is the one that opens the PR/MR.
+opens the PR/MR.
 
 Reproduce the script's `=== RESULTS` block verbatim (one `<repo>\t<state>\t-` line per repo;
 `--no-pr` so `pr_url` is always `-`), keeping `commit-nopush` distinct from `failed` — the first
@@ -93,9 +88,8 @@ When a repo reached `pushed-nopr`, the script also prints a `=== FILES` … `===
   directory pattern silently swallows files the repo versions on purpose.
 3. **Read** `${CLAUDE_PLUGIN_ROOT}/skills/commit-convention/SKILL.md` — it is the source of truth for
   the emoji/type table and the breaking-change format.
-4. Trust your own judgment on grouping and message wording, same as you would writing prose — you
-  write better commit messages than a manually-specified rule would produce. Genuinely unrelated
-  changes still deserve separate commits; that's a normal editorial call, not a special procedure.
+4. Trust your own judgment on grouping and message wording. Genuinely unrelated changes still
+  deserve separate commits.
 5. **Hook status** → if `bulk_commit.sh plan` reports:
     - `❌ pre-commit failure` -> analyze logs, fix syntax/lint errors, and restart `plan`.
     - `⚠️  missing pre-commit hooks` -> check repo criticality. For POCs/Assets, ignore. For Production, alert user and suggest adding security hooks.
@@ -111,7 +105,6 @@ When a repo reached `pushed-nopr`, the script also prints a `=== FILES` … `===
 
   The script prints the session's model line (`Co-Authored-By: Claude Sonnet 5 <...>`, or
   `Claude Code (<model>)` for a non-Anthropic model) and, only when
-  `$CLAUDE_CODE_BRIDGE_SESSION_ID` is set, the `Claude-Session` line — no broken URL on an empty
-  variable. If the session cannot be read it prints the neutral `Co-Authored-By: Claude` line:
-  use what it prints, whatever it is. Report `<emoji> <subject>` (+ file list) and the branch you
+  `$CLAUDE_CODE_BRIDGE_SESSION_ID` is set, the `Claude-Session` line. If the session cannot be read
+  it prints the neutral `Co-Authored-By: Claude` line: use what it prints, whatever it is. Report `<emoji> <subject>` (+ file list) and the branch you
   committed on.

@@ -9,7 +9,7 @@ metadata:
 
 # Cortex — Snowflake AI
 
-Snowflake Cortex covers two capability families: AI SQL/Snowpark functions (extraction, classification, filtering, summarization, embeddings, completion) and the managed Cortex Search service (hybrid vector + lexical RAG, embeddings and index fully managed by Snowflake).
+Two capability families: AI SQL/Snowpark functions (extraction, classification, filtering, summarization, embeddings, completion) and the managed Cortex Search service (hybrid vector + lexical RAG).
 
 Stack: Snowpark Python (stored procedures, serverless tasks) + Snowflake Python Core (deployment).
 

@@ -8,11 +8,13 @@ instead of a notification that scrolls away while the agent keeps working.
 
 Two strengths, keyed on *which* action is pending:
 
-- **`deny`** for `reload-plugins` and `goal`. The permission `ask` UI only
+- **`deny`** for `reload-plugins` only. The permission `ask` UI only
   offers yes/no — the user cannot type the slash command into it — so an
   `ask` here is answered "yes", the agent runs the turn on the stale plugin
-  set / with no goal, and the command typed afterwards waits for the turn to
-  end. `deny` instead forces the turn to end now. The key is **peeked, not
+  set, and the command typed afterwards waits for the turn to end. `deny`
+  instead forces the turn to end now. A `/goal` never denies: a locked turn
+  feeds the goal's own Stop hook, which relaunches a turn that can only
+  repeat the request. The key is **peeked, not
   popped**, so every tool call for the rest of the turn is denied too. To not
   wedge the session forever, a deny drops a latch file; the `UserPromptSubmit`
   hook (clear_pending_queue.py) sees the latch and empties the queue on the
@@ -36,7 +38,7 @@ from pending_user_action import pending, surface
 
 # Clés dont l'action en attente, non faite, rend la suite du tour fausse et
 # pas seulement mal informée — voir le docstring du module.
-DENY_KEYS = frozenset({"reload-plugins", "goal"})
+DENY_KEYS = frozenset({"reload-plugins"})
 
 
 def _latch_path(session_id: str) -> Path:

@@ -1,6 +1,6 @@
 ---
 name: improve
-description: "Surface architectural friction in a codebase and propose deepening opportunities — shallow modules, scattered locality, hidden seams — using the deletion test. Writes an HTML report, then grills the candidate the user picks. Use when asked to review a repo's design, find refactor opportunities, or assess module depth. Not a bug hunt (use a review skill) and not a style pass."
+description: "Surface architectural friction in a codebase and propose deepening opportunities (shallow modules, scattered locality, hidden seams) using the deletion test; writes an HTML report, then grills the candidate the user picks. Use when asked to review a repo's design, find refactor opportunities or assess module depth. Not a bug hunt, not a style pass."
 user-invocable: true
 allowed-tools: Read, Write, Edit, Bash(rg:*), Bash(rtk rg:*), Bash(find:*), Bash(rtk find:*), Bash(ls:*), Bash(rtk ls:*), Bash(git rev-parse:*), Bash(git -C * rev-parse*), Bash(date:*), Bash(basename:*)
 metadata:
@@ -11,8 +11,7 @@ metadata:
 # Improve
 
 Find where a codebase's design works against its callers, and propose changes that concentrate
-complexity instead of scattering it. The verdict is per-candidate and evidence-backed — not a
-vague "this could be cleaner".
+complexity instead of scattering it. The verdict is per-candidate and evidence-backed.
 
 ## Vocabulary — use these terms exactly
 

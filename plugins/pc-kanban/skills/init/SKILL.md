@@ -7,28 +7,25 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/init/scripts/pc_kanban_
 
 # init — scaffold a board, declare it, grant it
 
-Every other `pc-kanban` skill assumes `_KANBAN/` already exists. This one creates it — the one time
-a workspace has none yet.
+Every other `pc-kanban` skill assumes `_KANBAN/` exists; this one creates it.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/init/scripts/pc_kanban_init.py" [--workspace <path>]
 ```
 
-`--workspace` defaults to the current directory — generic, no repo-specific default baked in.
+`--workspace` defaults to the current directory.
 
 ## What it does
 
 1. Creates `_KANBAN/` at the resolved root if absent.
 2. Nests `_AGENT_LOG/` under it — folding in a pre-existing sibling `_AGENT_LOG/` first
-   (`pc_kanban_migrate_agent_log.py`), so a workspace never migrated ends up with its journal split
-   across two directories.
+   (`pc_kanban_migrate_agent_log.py`).
 3. Creates `INDEX.md` if absent: a minimal `## Board` table (legend + header, one dormant row per
-   `CHANTIER{NNNN}-<slug>/` directory already on disk so an existing chantier is never rendered
-   invisible by an empty table). Everything else a hand-maintained `INDEX.md` accretes over time —
-   conventions, product topology — is this workspace's own prose, not scaffolded here.
+   `CHANTIER{NNNN}-<slug>/` directory already on disk). Everything else is the workspace's own
+   prose, not scaffolded here.
 4. Ensures `kanban_boards[<root>]` exists in `~/.claude/settings.pinky.json` — an empty list on a
-   fresh root, left untouched if already present. `model_pool`/`keys` and every other top-level key
-   are read back untouched.
+   fresh root, left untouched if already present. Every other top-level key (`model_pool`,
+   `keys`, …) is read back untouched.
 5. Grants native access to `<root>/_KANBAN` and every board already listed in `kanban_boards[<root>]`
    — `permissions.additionalDirectories` in `~/.claude/settings.json`, union only, every other
    top-level key (`hooks`, `enabledPlugins`, `model`, …) read back untouched.

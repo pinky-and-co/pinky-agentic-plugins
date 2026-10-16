@@ -7,10 +7,9 @@ user-invocable: false
 # Branch workflow
 
 A repo's actual strategy is declared in its own `.claude/settings.pinky.json` (`branch_workflow` key) —
-this skill is the generic reference, not the source of truth for any specific repo. The caller
-(`commit-and-pr`) already resolves that value deterministically before invoking this skill; use
-this table only to interpret what the resolved strategy name means, never to re-derive it from
-branch names or from CLAUDE.md prose.
+this skill is the generic reference. The caller (`commit-and-pr`) already resolves that value
+before invoking this skill; use the table only to interpret the resolved strategy name, never to
+re-derive it from branch names or from CLAUDE.md prose.
 
 ## Naming conventions
 
@@ -31,10 +30,8 @@ branch names or from CLAUDE.md prose.
 
 ## Guard — is a feature branch required before committing
 
-Any skill about to `git add`/`git commit` applies this before staging anything. This is the one
-enforcement point that actually has teeth: GitHub branch protection ("require PR before merge") is
-a paid feature on a private org repo, so server-side rejection of a direct push cannot be assumed —
-this guard is what stands in for it.
+Any skill about to `git add`/`git commit` applies this before staging anything. Server-side
+rejection of a direct push cannot be assumed — this guard stands in for it.
 
 1. `git branch --show-current` — the current branch.
 2. Is it one of the strategy's **permanent branches** (the table above, resolved strategy from
@@ -53,8 +50,7 @@ this guard is what stands in for it.
 ## Choosing a base branch for a PR — decision order
 
 1. Use the strategy name the caller already resolved from `.claude/settings.pinky.json`
-   (`resolve_policy.py branch_workflow`) — that's authoritative; use the "PR base" column above
-   for the named strategy, don't re-derive it from branch names or CLAUDE.md.
+   (`resolve_policy.py branch_workflow`) — authoritative; take the "PR base" column above for it.
 2. Nothing resolved (empty value) → do not guess. Ask, or default to proposing the PR against the
    branch the feature branch was created from (`git merge-base` if unclear), and flag the missing
    `.claude/settings.pinky.json` declaration so it can be added.

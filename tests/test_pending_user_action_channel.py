@@ -94,11 +94,10 @@ class PendingActionChannelCase(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
-    def test_goal_queued_by_the_vendored_cli_reaches_the_autodiscovery_gate(self):
+    def test_goal_queued_by_the_vendored_cli_never_locks_the_tools(self):
         self._require_via_skill_cli("goal", "/goal done = X", surfaced=True)
-        hso = self._pre_tool_use()["hookSpecificOutput"]
-        self.assertEqual(hso["permissionDecision"], "deny")
-        self.assertIn("/goal done = X", hso["permissionDecisionReason"])
+        hso = self._pre_tool_use().get("hookSpecificOutput", {})
+        self.assertNotEqual(hso.get("permissionDecision"), "deny")
 
     def test_repro_a_clean_stop_after_goal_does_not_wrongly_deny_the_next_turn(self):
         # chantier arrête son tour juste après avoir mis "goal" en file, --surfaced — aucun
@@ -169,23 +168,26 @@ class ChantierSkillWiringCase(unittest.TestCase):
         self.assertNotIn("require rename", self.text)
         self.assertNotIn("**Session name.**", self.text)
 
-    def test_goal_path_queues_goal_alone_surfaced(self):
-        section = self._section("Once `<condition>` is fully resolved", "8. Execute")
-        self.assertIn(f"{_CLI} require goal '/goal <condition>' --surfaced", section)
-        self.assertNotIn("require rename", section)
+    def test_the_skill_never_queues_a_goal(self):
+        self.assertNotIn("require goal", self.text)
+        self.assertNotIn("--surfaced", self.text)
 
     def test_review_clause_requires_the_method_line_relay(self):
-        section = self._section("**Review clause.**", "**Escape clause.**")
+        section = self._section("**Review clause.**", "**Amending the condition.**")
         flat = " ".join(section.split())
         self.assertIn("the final diff has been reviewed by", flat)
         self.assertIn("the last pass's `Method:` line relayed verbatim", flat)
         self.assertNotIn("when the first line", section)
         self.assertNotIn("box checked on the card`", flat)
 
-    def test_no_waiver_branch_an_amendment_is_a_new_goal_line(self):
+    def test_an_amendment_proves_impossibility_and_locks_nothing(self):
         self.assertNotIn("**Waiver clause.**", self.text)
-        section = self._section("**Amending the condition.**", "`/goal clear`")
-        self.assertIn("require goal '/goal <amended condition>' --surfaced", section)
+        self.assertNotIn("**Escape clause.**", self.text)
+        section = self._section("**Amending the condition.**", "8. Execute")
+        flat = " ".join(section.split())
+        self.assertIn("impossible", flat)
+        self.assertIn("plain text", flat)
+        self.assertNotIn("require goal", flat)
 
 
 class FinishingCardRenameCase(unittest.TestCase):

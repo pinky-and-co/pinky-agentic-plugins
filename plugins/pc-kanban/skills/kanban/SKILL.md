@@ -31,8 +31,7 @@ A card is a deliverable worth a multi-session handoff, never a micro-step (those
 (`mv` between column directories), through `4-done` only when the card needs an ADR first.
 
 A card's slug — its file name without `.md`, the identifier the commands take — is at most 30
-characters, so `/board` shows it whole. The `card-discipline` hook asks when a new card exceeds it;
-existing cards are not renamed.
+characters. The `card-discipline` hook asks when a new card exceeds it; existing cards are not renamed.
 
 ## The board's own table (`INDEX.md`)
 
@@ -40,9 +39,9 @@ existing cards are not renamed.
 
 **The status cell is the icon alone** — its legend is at the top of `INDEX.md`. The only text a
 cell may carry is the blocker's chantier number, next to the blocked icon. No pointer, no
-parenthetical, no PR / hash / date — that detail is in the chantier's story and cards, and a
-session that needs it opens the folder. A cell that has grown a clause is over-cap by definition;
-`stop_handoff.py --list-chantiers` truncates at 200 chars at read time, the fix is at write time.
+parenthetical, no PR / hash / date — that detail lives in the chantier's story and cards. A cell
+that has grown a clause is over-cap; `stop_handoff.py --list-chantiers` truncates at 200 chars at
+read time, the fix is at write time.
 
 ## The story file
 
@@ -67,8 +66,7 @@ Archiving or dropping the card takes all three with it; nothing is retired from 
 
 ## Card frontmatter
 
-YAML, one card = one file. The body stays markdown prose (`## Done when`, `## Why`, narrative
-handoff); frontmatter carries only what a script or a hook needs to resolve without parsing prose.
+YAML, one card = one file. Frontmatter carries only what a script or a hook resolves without parsing prose.
 
 ```yaml
 ---
@@ -85,7 +83,7 @@ blocked_by: <card-slug> | null         # a hard dependency, never a mere orderin
 ---
 ```
 
-The card's state **is** its column folder — there is no `status:` field to keep in sync. The
+The card's state **is** its column folder — there is no `status:` field. The
 mapping is bijective (`0-ideas` ↔ idea, `1-todo` ↔ todo, `2-selected-for-dev` ↔ selected,
 `3-in-progress` ↔ in-progress, `4-done` ↔ done); the board shows a card's state from its
 folder name. A blocked card is not a state — it lives in `blocked_by:` plus a rendered badge.
@@ -113,8 +111,7 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
 
 - **`model`** — a floor, never a ceiling: the minimum a session needs before taking this card.
   A direct model alias (`haiku`/`sonnet`/`opus`/`fable`), never a tier name to resolve through a
-  mapping table — the alias already floats to the latest release of that name natively, so there is
-  nothing to keep in sync. Mandatory from `selected` onward; missing on a selected card → propose
+  mapping table. Mandatory from `selected` onward; missing on a selected card → propose
   one and say why, never guess silently. A heterogeneous card tiers its bulk on `model:` and
   overrides outlier checklist items inline (`- [ ] (opus) arbitrate the placement`).
 
@@ -125,8 +122,8 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
 
 - **`mockup`** / **`mockup_fidelity`** — optional; a card whose rendering was mocked up (HTML POC,
   screenshot, design) names the mockup as an absolute or `~/` path to a file, a folder or a `.zip`.
-  The mockup is a throwaway working document that lives where it was dropped (`_TEMP/` included);
-  the delivered work becomes the reference at closure. `mockup_fidelity` is a list of `axe=niveau`
+  The mockup is a throwaway that lives where it was dropped (`_TEMP/` included); the delivered work
+  becomes the reference at closure. `mockup_fidelity` is a list of `axe=niveau`
   items, one flat key. Axes: `layout` (zones, order, heights, button rows), `design` (colour, font,
   icons), `content` (texts, labels), `behavior` (keyboard, hover, states, search). Levels: `strict`
   (reproduce identically), `guided` (follow the intent, justify every deviation in the report),
@@ -141,23 +138,19 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   `--cmux`. The review before closing receives the same path and levels (`finishing-a-card.md`).
 
 - **`repos`** — the repo-scope a session needs for this card, as `org/repo` slugs derived from each
-  repo's `git remote get-url origin` — never a bare directory name. A name collides across orgs (see
-  § Orgs below); the remote does not. Normalize with
-  `sed -E 's#^(git@|https://|http://)[^:/]+[:/]##; s#\.git$##'` — covers SSH and HTTPS on any forge,
-  host-agnostic. `/chantier`, on taking the card into `3-in-progress`, resolves each slug to an
+  repo's `git remote get-url origin` — never a bare directory name (names collide across orgs). Normalize with
+  `sed -E 's#^(git@|https://|http://)[^:/]+[:/]##; s#\.git$##'`. `/chantier`, on taking the card into `3-in-progress`, resolves each slug to an
   absolute path (`skills/chantier/scripts/resolve_repos.sh`, bounded `find` for `.git` + remote match
   — 0 or >1 candidates is reported, never guessed) and calls `permission-change freeze` with the
   results — write access is confined to these repos for the session's duration, PLUS every kanban
   board root (`stop_handoff.py --list-kanbans`, itself multi-board aware) so the session can still
-  maintain cards/handoffs while frozen — deliberately write-only, never a read restriction (an
-  installer tracking its own architecture decisions may want to record why). `[]`/omitted →
+  maintain cards/handoffs while frozen — write-only, never a read restriction. `[]`/omitted →
   kanban-only work, no repo touched.
 
 - **`sert`** — what this card serves, a card slug (filename without `.md`) or `null`. Mandatory
   from `idea` onward. `null` marks an autonomous root — the objective itself, not a step toward one.
-  A card serving two objectives is not a case this schema handles; split it. This field makes the
-  critical path a render off the board instead of a hand-maintained list: nothing enumerates what a
-  parent needs, every child declares what it serves.
+  A card serving two objectives is not a case this schema handles; split it. Nothing enumerates what a
+  parent needs; every child declares what it serves.
 
 - **`requirements`** — the requirement ids this card traces to, as a list; `[]` or omitted = none. Orthogonal to `sert`: `sert` is card-to-card filiation (critical
   path), `requirements` is card-to-requirement traceability, and a card may trace to several
@@ -166,12 +159,9 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   criterion — this card or another — never invent an id. `move-card select` refuses an id defined
   nowhere.
 
-  **A chantier earns its requirements when it is reopened, never in a campaign.** Backfilling this
-  field across a sleeping chantier assumes its requirements are already stated; where they are not,
-  that is not a migration but the product work of writing the spec — and a table written for
-  work nobody is doing goes stale before it is read. So the requirements come from the interview that
-  reopens the chantier (skill `grill`), and its cards are backfilled in the same session, while the
-  content is loaded. Leave the field omitted until then; omitted and `[]` mean the same thing.
+  **A chantier earns its requirements when it is reopened, never in a campaign.** The requirements
+  come from the interview that reopens the chantier (skill `grill`), and its cards are backfilled in
+  the same session. Leave the field omitted until then; omitted and `[]` mean the same thing.
 
   What a requirement has to be for the trace to mean anything — id format, the five families, the
   four invariants, the table's columns — is the § Requirements of this skill. See
@@ -179,13 +169,11 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   a card's table.
 
 - **`blocked_by`** — a hard dependency only, never a preference. Position inside
-  `2-selected-for-dev` already carries ordering preference; conflating the two loses the distinction
-  between "blocked" and "not yet prioritized".
+  `2-selected-for-dev` already carries ordering preference.
 
 ## Handoff — two layers
 
-- **Narrative (yours).** Prose in the in-progress card — state, decisions, next step. Your job, and
-  the part that matters.
+- **Narrative (yours).** Prose in the in-progress card — state, decisions, next step.
 - **Auto block (the `Stop`/`SessionEnd` hook).** `stop_handoff.py` maintains a managed
   `<!-- auto-handoff:start … end -->` block at the bottom of in-progress cards whose `repos:` (or
   legacy `**Repos:**`) matches the session's repo, with the mechanical state (branch, uncommitted
@@ -213,8 +201,7 @@ on a parent card; if the render is wrong, a child's `sert` value is wrong, fix t
 `sert` has a second, orthogonal use: at intake (`/chantier` step 7, first move into
 `3-in-progress`), a non-null `sert` whose parent is `done` or already archived gets its
 `## Done when` / `## Why` appended to the child as a managed block — content, not just grouping. See
-`chantier`'s SKILL.md § step 7 for the mechanism; this section only flags that the field now
-carries both.
+`chantier`'s SKILL.md § step 7.
 
 ## DRY across cards
 
@@ -226,8 +213,7 @@ link, in the same edit.
 
 **Wherever a `_KANBAN/` root sits on a drive shared with other people, it is a replication
 boundary** — everything inside it lands on every machine that mounts it. **No secret goes anywhere
-inside a shared root**; secrets stay outside (local-only / `.env`). Wherever this applies at all, it
-is not negotiable by convenience.
+inside a shared root**; secrets stay outside (local-only / `.env`).
 
 See [references/multi-board.md](references/multi-board.md) for how several boards are mounted and
 discovered — read it on a workspace that mounts more than one.
@@ -238,16 +224,14 @@ discovered — read it on a workspace that mounts more than one.
 org. A board still on the pre-nesting layout (a real sibling `_AGENT_LOG/` next to `_KANBAN/`, no
 nested one yet) needs a one-time run of `hooks/agent-log-migration/pc_kanban_migrate_agent_log.py
 --kanban <path-to-_KANBAN>` — `agent_log_dir()` (`stop_handoff.py`) resolves the sibling in the
-meantime, so nothing breaks before that run, but the migration itself never happens on its own.
+meantime, but the migration never happens on its own.
 What a session did, cross-chantier, that no single card's handoff would hold. One file per
 `(date, agent)`, append-only, filename `YYYY-MM-DD_<tool>-<agent-identity>.md`. `<agent-identity>` is
-`git config user.name` (already declared for real reasons, no separate value to maintain). `<tool>`
+`git config user.name`. `<tool>`
 names which agentic tool wrote the entry — needed because more than one tool can share the same git
 identity and write to the same log. **Derive it from the running tool's own environment, never
 hardcode one tool's name**: for Claude Code, `$AI_AGENT` (e.g. `claude-code_2-1-261_agent` → the
-segment before the first `_`); another tool exposes its own equivalent variable. The log is shared
-by every agentic tool that works on the board — a skill that only ever wrote `claude-code-` would
-silently mislabel every entry from any other tool. Read the recent entries at
+segment before the first `_`); another tool exposes its own equivalent variable. Read the recent entries at
 session start alongside the board; write into the org whose board carries the chantier worked on.
 Never log secrets, credentials or internal URLs.
 
