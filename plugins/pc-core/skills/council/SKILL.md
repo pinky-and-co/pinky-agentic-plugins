@@ -129,7 +129,7 @@ advisor's prompt **except the Outsider's** (Step 3).
 **Egress gate — the framed question + prior art carry workspace context off the machine.**
 
 - If the subject falls in a scope the workspace treats as sensitive (employer-derived material,
-  personal data, anything the profile marks confidential) → **do not route**. Run all 5 lenses as
+  personal data, anything the workspace's own instructions mark confidential) → **do not route**. Run all 5 lenses as
   Claude sub-agents. Note "egress: withheld (sensitive scope)" in the transcript. Do not ask.
 - Otherwise → ask the user once: *"The council will send the framed question to third-party model
   providers in the pool (`panel` tool). OK to proceed, or run Claude-only?"* Refusal → all 5 lenses

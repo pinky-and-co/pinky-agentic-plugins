@@ -1,19 +1,17 @@
 # pc-statusline
 
-A multi-line status line for Claude Code: a main-session dashboard and a per-subagent row. Pure
-rendering — it reads the JSON the harness sends on stdin and prints; it holds no profile-resolved
-value (no language, no name, no path baked in).
+A multi-line status line for Claude Code: a main-session dashboard and a per-subagent row. It reads
+the JSON the harness sends on stdin and prints; nothing is baked in (no language, no name, no
+path). The only other moving part is a hook that keeps a quota cache fresh on a non-Anthropic
+provider (see below).
 
 ## What it shows
 
-**Main session** (`scripts/statusline.py`) — four core rows, the first of which turns into a
-`⚠ RATE LIMIT` banner above 90 % usage, plus a fifth Headroom row while its proxy is up:
-
-1. Claude Code version (and, above 90 %, a `⚠ RATE LIMIT` banner with reset times)
-1. model · effort · fast/normal · advisor model (when `--advisor` is active) · thinking · output style
-1. session id · start time · subagent count
-1. context-window bar + % · cache-hit rate · session cost (API-equivalent)
-1. Headroom's net effect — only while its proxy is up (see below)
+**Main session** (`scripts/statusline.py`) — a few rows of session state: the working folder and
+git branch, the model with its effort and output style, the context window, the cache-hit rate,
+the session cost (API-equivalent), the subagent count and the usage-limit projection. The set of
+rows and their order follow what the harness provides and are not a contract. A Headroom row
+joins them while its proxy is up (see below).
 
 Rows are spaced with an invisible braille-blank line (the host collapses truly empty rows). The
 right-hand column is placed from content width, not the terminal edge — a width read from `COLUMNS`
@@ -54,6 +52,15 @@ available width.
 Both entry points share `scripts/_common.py` (ANSI palette, Windows/UTF-8 stdout setup, the bar
 renderer). The deliberately divergent helpers — wide-char width, colour thresholds, empty-value
 placeholders — stay per script.
+
+### Quota on a non-Anthropic provider
+
+The harness only sends `rate_limits` for a claude.ai subscription. On another provider, the
+plugin's hooks (`hooks/quota_refresh.py`, on session start, prompt, tool use and stop) fetch that
+provider's own quota into a local cache, and the status line rebuilds the same limit projection
+from it. The render path never touches the network, the token only ever goes to the provider's
+own host, and on Anthropic the hook does nothing. Support for a provider is one entry in
+`scripts/_quota.py`.
 
 ## Requirements
 

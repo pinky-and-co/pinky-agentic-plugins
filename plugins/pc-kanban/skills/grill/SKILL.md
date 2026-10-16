@@ -139,7 +139,7 @@ and rewrite what fails:
 
 | What you wrote | Why it fails | Rewrite as |
 |---|---|---|
-| "X is distributed publicly, **without** any profile-resolved value" | two considerations joined — not atomic | two requirements, one per consideration |
+| "X is distributed publicly, **without** any repo-specific value" | two considerations joined — not atomic | two requirements, one per consideration |
 | "the interface must be clean and responsive" | no measurable criterion | a threshold with its range, or a named test |
 | "must react quickly" | vague adverb | a number and a unit |
 | "must never fail" | unreachable absolute | the cases actually covered, listed |
