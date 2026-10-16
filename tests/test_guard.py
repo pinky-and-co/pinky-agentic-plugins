@@ -451,6 +451,16 @@ class TestBashWriteEscapes(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(self.escapes(cmd), [])
 
+    def test_git_inside_a_path_is_not_a_git_command(self):
+        script = f"{self.abs}/pc-git/hooks/branch-policy/bulk_commit.sh"
+        self.assertEqual(self.escapes(f"{script} apply --root {self.root}"), [])
+        self.assertEqual(self.escapes(f"bash {script} apply --root {self.root}"), [])
+
+    def test_real_git_apply_outside_still_asks(self):
+        self.assertEqual(self.escapes(f"git -C {self.abs} apply fix.patch"), [self.abs])
+        target = f"{self.abs}/pc-git"
+        self.assertEqual(self.escapes(f"git -C {target} commit -am x"), [target])
+
     def test_quoted_directory_target_outside_asks(self):
         for cmd, target in (
             ("cd '../outside' && echo x > f", "../outside"),

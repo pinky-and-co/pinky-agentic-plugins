@@ -356,20 +356,28 @@ _BASH_WRITE_HEAD = (
     r"\b(?:mv|cp|rm|touch|mkdir|ln|install|rsync|truncate|unlink)\b|"
     r"\bos\.(?:remove|rename|replace|rmdir|makedirs)\b|\bshutil\.(?:copy\w*|move|rmtree)\b|"
 )
+# `git` seulement en position de commande, jamais au milieu d'un nom de chemin.
+_BASH_GIT_WORD = r"(?<![\w./-])git\b"
 _BASH_GIT_VERB = (
     r"\b(?:commit|checkout|switch|restore|apply|add|reset|merge|rebase|push)\b"
 )
 # Search form: the gap never crosses another `git`, so a start stops at the next one and the scan
 # is linear. A verb reached from an earlier `git` is reached from the last one too.
 _BASH_WRITE_MARKER = re.compile(
-    _BASH_WRITE_HEAD + r"\bgit\b(?:(?!\bgit\b)[^\n;|&])*?" + _BASH_GIT_VERB
+    _BASH_WRITE_HEAD
+    + _BASH_GIT_WORD
+    + r"(?:(?!"
+    + _BASH_GIT_WORD
+    + r")[^\n;|&])*?"
+    + _BASH_GIT_VERB
 )
 # A quoted string that opens with a write command (`rm …`, `sudo git commit …`) is code handed to a
 # wrapper (`watch`, `parallel`, `<<<`), not text. Anchored: one match per string.
 _BASH_WRITE_COMMAND = re.compile(
     r"\s*(?:\b(?:sudo|env|nohup|time)\b\s+)*(?:"
     + _BASH_WRITE_HEAD
-    + r"\bgit\b[^\n;|&]*?"
+    + _BASH_GIT_WORD
+    + r"[^\n;|&]*?"
     + _BASH_GIT_VERB
     + ")"
 )
