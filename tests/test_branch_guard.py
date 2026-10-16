@@ -47,6 +47,37 @@ class TestRelativeTarget(unittest.TestCase):
             self.assertEqual(bg.relative_target("src/app.py", root), "src/app.py")
 
 
+class TestIsUnguarded(unittest.TestCase):
+    """The real `branch_paths.sh` list — the function under test is the shell glob match."""
+
+    def test_documentation_paths_are_unguarded(self):
+        for path in (
+            "docs/how-to/x.md",
+            "README.md",
+            "plugins/pc-statusline/README.md",
+            "plugins/pc-statusline/docs/usage.md",
+            ".claude-plugin/marketplace.json",
+            "plugins/pc-craft/.claude-plugin/plugin.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(bg.is_unguarded(path))
+
+    def test_behavior_carrying_paths_stay_guarded(self):
+        for path in (
+            "plugins/pc-core/skills/council/SKILL.md",
+            "agentic-harness/rules/pc-core/adr.md",
+            "plugins/pc-craft/.claude-plugin/hooks.json",
+            ".claude-plugin/other.json",
+            ".hidden/script.py",
+            "notes.md",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(bg.is_unguarded(path))
+
+    def test_profile_yaml_is_no_longer_exempt(self):
+        self.assertFalse(bg.is_unguarded("profile.yaml"))
+
+
 class TestCurrentBranch(unittest.TestCase):
     def test_reads_current_branch(self):
         with tempfile.TemporaryDirectory() as tmp:

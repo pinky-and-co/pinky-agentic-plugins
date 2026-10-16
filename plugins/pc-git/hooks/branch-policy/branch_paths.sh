@@ -8,8 +8,12 @@
 #   exit 0 = unguarded (direct commit allowed), exit 1 = guarded (needs a feature branch).
 # Library mode (bash callers): source this file, then call is_unguarded "<path>".
 
-# Only specific top-level filenames are exempt, never a blanket `*.md` — a markdown file can be a
-# rule source that drives agent behavior (e.g. agentic-harness/rules/*.md), not just documentation.
+# Only named files and anchored documentation paths are exempt — never a blanket `*.md`, and no
+# `.*/*` glob over hidden directories (`.github/` and `.claude/` are the two named exceptions): a
+# markdown file can be a rule source that drives agent behavior (e.g. agentic-harness/rules/*.md,
+# a SKILL.md), not just documentation. A plugin's `plugin.json` and the marketplace manifest are
+# named one by one, never through a `.claude-plugin/*` glob: besides descriptions they also carry
+# `dependencies` and `version`, which change what gets installed.
 #
 # uv.lock stays unguarded: a ~2000-line generated file, never hand-written, regenerated only by
 # `uv lock`/`uv sync` — equivalent to a local artifact, not source code carrying a decision. A PR
@@ -19,8 +23,10 @@
 # ("generated file") anyway. Dropping the branch requirement sacrifices no real protection.
 UNGUARDED_GLOBS=(
     'docs/*' 'README.md' 'AGENTS.md' 'CLAUDE.md' 'LICENSE' '.github/*' '.claude/*'
-    'pyproject.toml' '.pre-commit-config.yaml' 'profile.yaml' '.darglint'
+    'pyproject.toml' '.pre-commit-config.yaml' '.darglint'
     '.gitignore' '.editorconfig' 'scripts/hooks/*' '.gitleaks.toml' 'uv.lock'
+    'plugins/*/README.md' 'plugins/*/docs/*'
+    '.claude-plugin/marketplace.json' 'plugins/*/.claude-plugin/plugin.json'
 )
 
 is_unguarded() {
