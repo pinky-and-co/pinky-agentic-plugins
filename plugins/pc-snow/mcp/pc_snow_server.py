@@ -110,6 +110,7 @@ async def query_history(
     last_minutes: int | None = None,
     limit: int = 50,
     include_text: bool = False,
+    group_by: str | None = None,
     *,
     ctx: Context,
 ) -> dict[str, Any]:
@@ -118,14 +119,14 @@ async def query_history(
     Scope, to ask the user and never guess: a query_id, or a warehouse with a range. A query_id
     alone searches the whole 7-day window. Other users' queries need MONITOR or OPERATE on the
     warehouse or task. Range: start and end (ISO-8601, no offset = the user's timezone), or
-    last_minutes (at most 525600), never both. Starting over 7 days ago reads ACCOUNT_USAGE
-    instead (delayed, 365 days; needs SNOWFLAKE.GOVERNANCE_VIEWER, the error names it). Timestamps
-    carry their offset (authoritative). limit: 1..200 rows (default 50), newest first. Query text
-    and error messages need include_text=true. Returns source, fraicheur, range, rows.
+    last_minutes (at most 525600), never both. Over 7 days ago reads ACCOUNT_USAGE (delayed, 365
+    days; needs SNOWFLAKE.GOVERNANCE_VIEWER, the error names it). limit: 1..200 rows (50), newest
+    first; query text needs include_text=true. group_by (QUERY_TYPE, EXECUTION_STATUS, USER_NAME,
+    ROLE_NAME, WAREHOUSE_NAME, ERROR_CODE) returns aggregates, never with query_id or include_text.
     """
     try:
         request = pc_snow_tools.plan_query_history(
-            query_id, warehouse, start, end, last_minutes, limit, include_text
+            query_id, warehouse, start, end, last_minutes, limit, include_text, group_by
         )
         return await pc_snow_tools.query_history(
             connection, _profile_asker(ctx), request
@@ -151,9 +152,9 @@ async def warehouse_credits(
     all_warehouses=true; omitting the name never means all. Needs ACCOUNTADMIN or MONITOR USAGE;
     without either, Snowflake answers no row and no error (measured), which the notes say.
     Range: start and end (ISO-8601, no offset = the user's timezone), or last_minutes (at most
-    10079), never both. Timestamps carry their offset (authoritative); `timezone` is the
-    PC_SNOW_TIMEZONE name, else the system abbreviation.
-    limit: 1..200 hourly rows (default 50), newest first. Returns source, fraicheur, range, rows.
+    10079), never both. limit: 1..200 hourly rows (default 50), newest first; `totals` sums the
+    three credit kinds over the whole range, whatever the limit. Returns source, fraicheur,
+    range, rows.
     """
     try:
         request = pc_snow_tools.plan_credits(
@@ -193,6 +194,104 @@ async def event_table_records(
             database, schema, query_id, start, end, last_minutes, limit, include_text
         )
         return await pc_snow_tools.event_table_records(
+            connection, _profile_asker(ctx), request
+        )
+    except pc_snow_tools.PcSnowError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@m.tool()
+async def warehouse_config(
+    warehouse: str | None = None,
+    all_warehouses: bool = False,
+    limit: int = 200,
+    *,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Live configuration of warehouses, from SHOW WAREHOUSES: size, auto_suspend, clustering, queue.
+
+    Required scope, to ask the user and never guess: a warehouse (plain identifier), or
+    all_warehouses=true; omitting the name never means all. No range: current values only.
+    Covers STATE, TYPE, SIZE, cluster counts, RUNNING and QUEUED (live query counts),
+    AUTO_SUSPEND, AUTO_RESUME, SCALING_POLICY, RESOURCE_CONSTRAINT, query acceleration,
+    QUERY_THROUGHPUT_MULTIPLIER, RESOURCE_MONITOR, OWNER, COMMENT.
+    A warehouse the role cannot see is absent: an empty result does not prove non-existence.
+    limit: 1..200 rows (default 200). Returns source, fraicheur, rows.
+    """
+    try:
+        request = pc_snow_tools.plan_warehouse_config(warehouse, all_warehouses, limit)
+        return await pc_snow_tools.warehouse_config(
+            connection, _profile_asker(ctx), request
+        )
+    except pc_snow_tools.PcSnowError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@m.tool()
+async def query_operator_stats(
+    query_id: str | None = None,
+    limit: int = 200,
+    *,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Per-operator statistics of one completed query, from GET_QUERY_OPERATOR_STATS.
+
+    Required scope, to ask the user and never guess: query_id (a UUID). No range: the function
+    covers only completed queries of the past 14 days; a query still running or older answers
+    no row, and the notes say so. Visibility follows QUERY_HISTORY rules: the connected user's
+    own queries need no privilege, other users' need MONITOR or OPERATE on their warehouse or
+    task, or MONITOR EXECUTION. limit: 1..200 operators (default 200), ordered by OPERATOR_ID;
+    `truncated` flags more. The VARIANT fields (OPERATOR_STATISTICS, EXECUTION_TIME_BREAKDOWN,
+    OPERATOR_ATTRIBUTES) are returned parsed, not cut. Returns source, fraicheur, rows.
+    """
+    try:
+        request = pc_snow_tools.plan_operator_stats(query_id, limit)
+        return await pc_snow_tools.query_operator_stats(
+            connection, _profile_asker(ctx), request
+        )
+    except pc_snow_tools.PcSnowError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+@m.tool()
+async def dynamic_table_refresh_history(
+    database: str | None = None,
+    schema: str | None = None,
+    name: str | None = None,
+    name_prefix: str | None = None,
+    error_only: bool = False,
+    start: str | None = None,
+    end: str | None = None,
+    last_minutes: int | None = None,
+    limit: int = 50,
+    include_text: bool = False,
+    *,
+    ctx: Context,
+) -> dict[str, Any]:
+    """Refreshes of dynamic tables, from INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY (7 days).
+
+    Required scope, to ask the user and never guess: database+schema+name (one table) or
+    name_prefix (several); one form, never both. Range: start and end (ISO-8601, no offset =
+    the user's timezone), or last_minutes (at most 525600), never both. Starting over 7 days
+    ago reads ACCOUNT_USAGE instead (delayed; needs SNOWFLAKE.USAGE_VIEWER, the error names
+    it). error_only keeps FAILED, UPSTREAM_FAILED and CANCELLED. limit: 1..200 rows (default
+    50), newest first. State messages and the STATISTICS variant need include_text=true;
+    STATISTICS is parsed, not cut. Returns source, fraicheur, range, rows.
+    """
+    try:
+        request = pc_snow_tools.plan_dynamic_table_refresh(
+            database,
+            schema,
+            name,
+            name_prefix,
+            error_only,
+            start,
+            end,
+            last_minutes,
+            limit,
+            include_text,
+        )
+        return await pc_snow_tools.dynamic_table_refresh_history(
             connection, _profile_asker(ctx), request
         )
     except pc_snow_tools.PcSnowError as exc:
