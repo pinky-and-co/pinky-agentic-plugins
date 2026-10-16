@@ -22,12 +22,20 @@
 # (vulnerability scan, hash check), never a human review, and GitHub collapses this diff by default
 # ("generated file") anyway. Dropping the branch requirement sacrifices no real protection.
 UNGUARDED_GLOBS=(
-    'docs/*' 'README.md' 'AGENTS.md' 'CLAUDE.md' 'LICENSE' '.github/*' '.claude/*'
+    'README.md' 'AGENTS.md' 'CLAUDE.md' 'LICENSE' '.github/*' '.claude/*'
     'pyproject.toml' '.pre-commit-config.yaml' '.darglint'
     '.gitignore' '.editorconfig' 'scripts/hooks/*' '.gitleaks.toml' 'uv.lock'
-    'plugins/*/README.md' 'plugins/*/docs/*'
+    'plugins/*/README.md'
     '.claude-plugin/marketplace.json' 'plugins/*/.claude-plugin/plugin.json'
 )
+
+# Under `docs/` only files with a documentation extension: a script or a config kept there still
+# drives behavior. `*` crosses `/`, so sub-folders (`docs/img/x.png`) are covered.
+DOC_EXTENSIONS=(md rst txt docx xlsx pptx pdf png jpg jpeg gif svg)
+for _ext in "${DOC_EXTENSIONS[@]}"; do
+    UNGUARDED_GLOBS+=("docs/*.$_ext" "plugins/*/docs/*.$_ext")
+done
+unset _ext
 
 is_unguarded() {
     local f="$1" g
