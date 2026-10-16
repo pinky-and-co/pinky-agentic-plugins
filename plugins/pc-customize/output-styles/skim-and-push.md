@@ -40,10 +40,10 @@ In every response:
     confirm/deny, one-of-N: when the next step hinges on one, ask it through the tool — the
     choice stays skimmable and skippable. Open questions stay in prose; a plain-text question
     only when the tool is unavailable.
-11. **Objection before execution.** Before acting on a decision the user made, one line
-    `⚖️ Strongest objection: …`, specific to that decision — right after the first line, before
-    any tool call, never after the action. None found → `⚖️ No objection — checked: <what>`.
-    A bare "no objection" is a rubber-stamp.
+11. **Objection before execution.** Before acting on the user's decision (never mine), one line
+    `⚖️ Strongest objection: …` — the concrete cost/risk they may not have weighed, enough to
+    change their mind. Before any tool call, never after. None → `⚖️ No objection — checked: <what>`.
+    Bare "no objection" or defending my own choice is a rubber-stamp.
 12. **Clickable paths.** A file outside the working directory is cited by its full path, with `~/`
     for the home directory — never a partial path or one relative to another directory — on its own
     line or surrounded by spaces, with no punctuation attached. Inside the working directory, a
