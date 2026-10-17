@@ -862,16 +862,40 @@ async function openFile($: EngineInterface, path: string, line: number) {
 // How card_ops is told which card: `<id>/<slug>` when the chantier has an id, since the slug alone can repeat across chantiers.
 const cardRef = (card: BoardCard) => (card.chantier_id === null ? card.slug : `${card.chantier_id}/${card.slug}`)
 
-// What the card ops script prints, or its refusal, in the pane; the board is read again either way.
-async function runOp($: EngineInterface, verb: Verb, slug: string, reason?: string) {
+// The line a closure fills into the prompt box with: what was closed and the follow-up the model runs. The closing
+// sequence's own output is not pasted — the model regenerates it.
+const PAST_TENSE: Record<'archive' | 'drop', string> = { archive: 'archived', drop: 'dropped' }
+export function buildFollowUpLine(ref: string, verb: 'archive' | 'drop'): string {
+  return `${ref} ${PAST_TENSE[verb]} from the board pane — run the closing sequence (obsolescence check, next-card proposal, session reco); the pane did not capture its output.`
+}
+
+// The user is the notification channel after a closure from the pane: the follow-up line goes into the prompt box
+// by append, and only the user's sending it starts a turn — never a submit, never a session append. A fill the box
+// refuses (a dialog open, no box) changes nothing: the notice alone carries the result.
+async function followUp($: EngineInterface, ref: string, verb: 'archive' | 'drop') {
+  // The leading newline is constant on purpose — reading the box to trim it would reintroduce the race.
+  const text = `\n${buildFollowUpLine(ref, verb)}`
   try {
-    const done = await script($, CARD_OPS, ['--', verb, slug, ...(reason === undefined ? [] : [reason])])
+    await $.prompt.fill({ text, mode: 'append' })
+  } catch {
+    // the notice alone carries the result
+  }
+}
+
+// What the card ops script prints, or its refusal, in the pane; the board is read again either way. `ref` is what
+// card_ops is told: `<id>/<slug>` when the chantier has an id, else the bare slug.
+async function runOp($: EngineInterface, verb: Verb, ref: string, reason?: string) {
+  try {
+    const done = await script($, CARD_OPS, ['--', verb, ref, ...(reason === undefined ? [] : [reason])])
     const ok = done.exitCode === 0
     const text = trimNotice((ok ? done.stdout : `${done.stderr}${done.stdout}`).trim() || (ok ? `${verb} done.` : `${verb} refused.`))
     await set($, s => ({ ...s, notice: { kind: ok ? 'info' : 'error', text }, isDropping: ok ? false : s.isDropping }))
     await load($)
     // A selected card stays open in its new column; an archived or dropped one is gone from the board.
-    if (ok && verb !== 'select') await set($, s => ({ ...s, screen: 'list', cardKey: null, cursor: 0 }))
+    if (ok && verb !== 'select') {
+      await set($, s => ({ ...s, screen: 'list', cardKey: null, cursor: 0 }))
+      await followUp($, ref, verb)
+    }
   } catch (error) {
     await set($, s => ({ ...s, notice: { kind: 'error', text: `${verb} failed: ${trimNotice(String(error))}` } }))
   }
