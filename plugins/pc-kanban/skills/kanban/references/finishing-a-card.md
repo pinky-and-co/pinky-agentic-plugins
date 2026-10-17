@@ -89,7 +89,8 @@ was reached.
 **Three review rounds per card at most.** A round is one reviewer pass plus the fixes it triggers.
 A reviewer reads without executing: each finding is a candidate until replayed. After the third round, a new finding is fixed in this card only when it is a regression shown by
 running it — a test or a command whose output shows the change doing worse than the base branch.
-Every other finding goes to a follow-up card (`sert:` this card), and the card closes.
+Every other finding is written as an accepted limit in the card's `## Decisions`, and the card
+closes — no follow-up card unless the user asks for one.
 
 **A heuristic gets its differential test before the first round.** When the card changes a
 heuristic over open-ended input — a parser of shell text, a pattern guard, a classifier — the
@@ -102,9 +103,9 @@ the review then reads the differential's output along with the diff.
 When a card's work needs judgment review, the review goes **into the `/goal` condition itself**, set
 when the card is taken (`chantier` SKILL.md step 7): the Stop hook then holds the card open until the
 transcript shows the review ran. Phrase it as a transcript-verifiable state — append to the
-`## Done when`-derived condition `… and the final diff has been reviewed by `Agent(reviewer)`,
-its findings fixed or filed in a follow-up card, and the last pass's `Method:` line relayed
-verbatim to the user`. The clause carries the substance only — that the review ran and who
+`## Done when`-derived condition the review clause of `chantier` SKILL.md step 7 (re-review until a
+round triggers no fix, three rounds at most; each last-round finding fixed, refuted by a quoted
+measurement or written as an accepted limit in the card). The clause carries the substance only — that the review ran and who
 answered. The checkbox and its shape stay out of it: a form clause over a card reviewed in several
 passes has no wording that answers every reading, so the Stop hook rejects work that is done.
 

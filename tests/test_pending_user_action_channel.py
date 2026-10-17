@@ -173,20 +173,36 @@ class ChantierSkillWiringCase(unittest.TestCase):
         self.assertNotIn("--surfaced", self.text)
 
     def test_review_clause_requires_the_method_line_relay(self):
-        section = self._section("**Review clause.**", "**Amending the condition.**")
+        section = self._section("**Review clause.**", "**Waiver clause.**")
         flat = " ".join(section.split())
-        self.assertIn("the final diff has been reviewed by", flat)
+        self.assertIn(
+            "until a round triggers no fix or a third round has run",
+            flat,
+        )
+        self.assertIn("refuted by a measurement quoted in the transcript", flat)
+        self.assertIn("written as an accepted limit in the card's `## Decisions`", flat)
+        self.assertIn("never a new card", flat)
+        self.assertNotIn("follow-up card", flat)
         self.assertIn("the last pass's `Method:` line relayed verbatim", flat)
         self.assertNotIn("when the first line", section)
         self.assertNotIn("box checked on the card`", flat)
 
-    def test_an_amendment_proves_impossibility_and_locks_nothing(self):
-        self.assertNotIn("**Waiver clause.**", self.text)
+    def test_the_waiver_clause_covers_only_a_clause_false_by_construction(self):
         self.assertNotIn("**Escape clause.**", self.text)
+        section = self._section("**Waiver clause.**", "**Amending the condition.**")
+        flat = " ".join(section.split())
+        self.assertIn("shown false by construction", flat)
+        self.assertIn("waived that clause or amended it", flat)
+
+    def test_an_amendment_needs_no_line_to_paste(self):
         section = self._section("**Amending the condition.**", "8. Execute")
         flat = " ".join(section.split())
-        self.assertIn("impossible", flat)
-        self.assertIn("plain text", flat)
+        self.assertIn("the exact text of the amended clause", flat)
+        self.assertIn("no line to paste", flat)
+        self.assertIn("`tmux`", flat)
+        self.assertIn("never from `installPath`", flat)
+        self.assertIn("Never propose `/goal clear`", flat)
+        self.assertNotIn("for the user to paste", flat)
         self.assertNotIn("require goal", flat)
 
 

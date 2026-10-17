@@ -167,17 +167,34 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 
     **Review clause.** If the work needs judgment reviewed (anything beyond a purely mechanical
     change, per `finishing-a-card.md` § "Reviewing before declaring a card done"), append `… and
-    the final diff has been reviewed by `Agent(reviewer)`, its findings fixed or filed in a
-    follow-up card, and the last pass's `Method:` line relayed verbatim to the user`. Substance
-    only — never the `reviewed (…)` box. Decided pre-work from `## Done when` and `requirements:`;
-    unclear → include it. Obviously mechanical (doc typo, rename, one-line config) → no clause,
-    closed with `- [x] reviewed (n/a — mechanical)`.
+    the diff has been reviewed by `Agent(reviewer)`, re-reviewed after each round of fixes until a
+    round triggers no fix or a third round has run (fixes after the third round need no re-review),
+    each finding of the last round fixed in this card, refuted by a measurement quoted in the
+    transcript, or written as an accepted limit in the card's `## Decisions`, and the last pass's
+    `Method:` line relayed verbatim to the user`. A finding on the card's subject that its
+    requirements miss gets a requirement in this card and is worked here — never a new card. Substance only — never the `reviewed (…)` box. Decided pre-work from
+    `## Done when` and `requirements:`; unclear → include it. Obviously mechanical (doc typo,
+    rename, one-line config) → no clause, closed with `- [x] reviewed (n/a — mechanical)`.
 
-    **Amending the condition.** A condition the work shows impossible or wrong is neither retried nor
-    locked behind a tool: say in the transcript why it cannot hold, with the evidence (the evaluator
-    then returns "impossible" and clears the goal itself), and give the amended line as plain text
-    for the user to paste. Keep working on what the amendment does not change. A user decision under
-    an active goal goes through `AskUserQuestion`. The user stops a goal with `/goal clear`.
+    **Waiver clause.** Always append, before the turn bound: `… OR a clause of this condition was
+    shown false by construction, the evidence quoted in the transcript, and the user, asked through
+    `AskUserQuestion`, waived that clause or amended it — the amended clause then holding`. The
+    evaluator honours it only for a clause that cannot hold (a tool that answers empty, a check
+    that cannot run here), never for one the agent could still meet (a re-review, a commit split).
+
+    **Amending the condition.** The evaluator judges the stored condition alone; only the user
+    typing a new `/goal` changes it, and every yield before that re-fires the Stop hook.
+    - A clause false by construction → one `AskUserQuestion`: the evidence quoted, the exact text of
+      the amended clause in the question, only user decisions as options (waive / amend with this
+      text). The answer meets the Waiver clause; no line to paste.
+    - A clause the agent could meet → meet it. A clause is user-only only once tried: a typed slash
+      command with local, reversible effects runs in a throwaway `claude` session the agent drives
+      in `tmux` (`send-keys`, then `capture-pane`); an outward-facing one (push, PR, publish) stays
+      a user decision through `AskUserQuestion`. Where a plugin component runs from is read from the
+      repo's AGENTS.md table, never from `installPath`.
+    - A doable clause the user decides to drop → the user types the new `/goal`; offer that line
+      once, inside the `AskUserQuestion` that collects the decision. Never propose `/goal clear`:
+      the evaluator reads it as abandoning the goal.
 
     Close the response with the `/goal` block above as plain text: nothing past it.
 8. Execute the card's work. If the grill gate routed to `pc-kanban:grill`, run it first, then
@@ -192,7 +209,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   missing evidence (a test not re-run, a background output not read back) is met by producing it. A
   rejection on form (a line's shape, which of several passes a sentence names) is not a defect of the
   work: never edit a card, commit or artefact only to satisfy it. The second rejection on the same
-  clause stops the loop: one `AskUserQuestion` offering the amended `/goal` line. The card leaves
+  clause stops the loop: route it through step 7 **Amending the condition**. The card leaves
   `3-in-progress/` only once the transcript meets the condition.
   **Routing a renvoi.** Every message to a kept worker (review finding, failing test, user feedback)
   is routed by the nature of the retouche, never by the worker's context size. Rows are read top to
