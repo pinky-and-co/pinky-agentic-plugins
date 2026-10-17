@@ -318,6 +318,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   ├── pc_kanban_pending_user_action.py
 │   │   │   │   │   ├── pc_kanban_plugin_scope_lib.py
 │   │   │   │   │   ├── resolve_repos.sh
+│   │   │   │   │   ├── split_goal.py
 │   │   │   │   │   └── story_view.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── grill/
@@ -601,6 +602,7 @@ pinky-agentic-plugins/
 │   ├── test_review_complexity.py
 │   ├── test_secret_patterns.py
 │   ├── test_settings_commit_nudge.py
+│   ├── test_split_goal.py
 │   ├── test_statusline.py
 │   ├── test_statusline_common.py
 │   ├── test_stop_handoff.py
