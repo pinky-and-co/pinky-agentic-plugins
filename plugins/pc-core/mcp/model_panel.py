@@ -38,6 +38,7 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import call_scope
 import model_adversarial as ma
 
 ADVISOR_TIERS = frozenset({"sonnet", "opus"})
@@ -221,7 +222,9 @@ def run_panel(
         return _dispatch_one(entry, prompt, timeout, tools, env)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(entries)) as pool:
-        for slot, res in enumerate(pool.map(worker, entries, prompts), start=1):
+        for slot, res in enumerate(
+            pool.map(call_scope.bind(worker), entries, prompts), start=1
+        ):
             if res.reason is None and res.answer is not None:
                 answers.append(
                     Answer(

@@ -18,15 +18,19 @@ install step for the plugin installer beyond having `uv`.
 
 from __future__ import annotations
 
+import functools
 import random
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, TypeVar
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import anyio.to_thread
+import call_scope
 import model_adversarial
 import model_offline
 import model_panel
@@ -36,8 +40,40 @@ from mcp.server import MCPServer
 
 m = MCPServer("pc-core-models")
 
+_T = TypeVar("_T")
 
-@m.tool()
+
+def _tool(fn: Callable[..., _T]) -> Callable[..., _T]:
+    """Register `fn` as a tool of this server whose `pi` processes die with their call.
+
+    The tool is served by an async wrapper that runs `fn` in a worker thread under its own
+    `call_scope.CallScope`, and stops waiting for that thread as soon as the call is cancelled.
+    The scope then kills every `pi` the call started and lets it start no other. `fn` itself is
+    returned unchanged, so it stays a plain function for a direct caller.
+
+    Args:
+        fn: the tool's implementation.
+
+    Returns:
+        `fn`.
+    """
+
+    @functools.wraps(fn)
+    async def served(**kwargs: Any) -> Any:
+        scope = call_scope.CallScope()
+        try:
+            return await anyio.to_thread.run_sync(
+                functools.partial(call_scope.run_in, scope, fn, **kwargs),
+                abandon_on_cancel=True,
+            )
+        finally:
+            scope.cancel()
+
+    m.add_tool(served)
+    return fn
+
+
+@_tool
 def offline(
     task: str,
     files: list[str] | None = None,
@@ -72,7 +108,7 @@ def offline(
     return f"[offline] {resolved_model} · {dur:.0f}s → {out}"
 
 
-@m.tool()
+@_tool
 def adversarial(
     task: str,
     files: list[str] | None = None,
@@ -195,7 +231,7 @@ def adversarial(
     )
 
 
-@m.tool()
+@_tool
 def panel(
     tasks: list[str],
     models: list[str] | None = None,
@@ -232,7 +268,7 @@ def panel(
     return f"{model_panel.format_panel(response, len(tasks))}\n\n[raw: {model_sanitize.raw_log_path()}]"
 
 
-@m.tool()
+@_tool
 def pool_check(provider: str | None = None, names: list[str] | None = None) -> str:
     """Send a one-line prompt to every `model_pool` entry through `pi`, with no tools, and report
     which answer: one line per entry with its latency, or the provider's own error (bad key, rate

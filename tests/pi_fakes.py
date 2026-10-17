@@ -140,3 +140,59 @@ class PiPopen(unittest.mock.MagicMock):
             None,
             self.wait_timeouts,
         )
+
+
+class FakeMlxProcess:
+    """What `Popen` returns for `call_mlx`: a process whose `communicate` hands back canned text."""
+
+    def __init__(
+        self,
+        stdout: str,
+        stderr: str,
+        returncode: int,
+        communicate_error: subprocess.TimeoutExpired | None,
+    ) -> None:
+        """Hold the canned run.
+
+        Args:
+            stdout: what the process printed.
+            stderr: what it wrote to its error stream.
+            returncode: its exit status.
+            communicate_error: raised by the first `communicate` only, to play a run past its timeout.
+        """
+        self._streams = (stdout, stderr)
+        self.returncode = returncode
+        self.pid = 0  # never a real group: the kill signals only a positive pid
+        self._communicate_error = communicate_error
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        """Return the canned streams, or play the canned timeout once."""
+        error, self._communicate_error = self._communicate_error, None
+        if error is not None:
+            raise error
+        return self._streams
+
+    def kill(self) -> None:
+        """Nothing to kill."""
+
+
+class MlxPopen(unittest.mock.MagicMock):
+    """A `Popen` replacement for the `call_mlx` tests. Its `return_value` / `side_effect` items are
+    the outcome of one call: an object with `stdout`, `stderr` and `returncode`, a
+    `CalledProcessError` (a process that failed), a `TimeoutExpired` (raised by `communicate`), or
+    any other exception (raised when spawning).
+    """
+
+    def _get_child_mock(self, **kwargs: Any) -> unittest.mock.MagicMock:
+        """Children are plain mocks, not another process factory."""
+        return unittest.mock.MagicMock(**kwargs)
+
+    def _execute_mock_call(self, *args: Any, **kwargs: Any) -> FakeMlxProcess:
+        """Turn the configured outcome into a finished process."""
+        try:
+            outcome = super()._execute_mock_call(*args, **kwargs)
+        except subprocess.TimeoutExpired as e:
+            return FakeMlxProcess("", "", 0, e)
+        except subprocess.CalledProcessError as e:
+            return FakeMlxProcess(e.output or "", e.stderr or "", e.returncode, None)
+        return FakeMlxProcess(outcome.stdout, outcome.stderr, outcome.returncode, None)

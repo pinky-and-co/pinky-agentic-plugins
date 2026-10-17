@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for `model_offline.py` — MLX-SERVE via `pi`, zero cloud egress.
 
-Mocks only `subprocess.run` (the outside boundary — the `pi` binary); never a function internal to
+Mocks only `subprocess.Popen` (the outside boundary — the `pi` binary); never a function internal to
 the module under test.
 """
 
@@ -13,6 +13,8 @@ import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
+
+from pi_fakes import MlxPopen
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
 import model_offline as mo  # noqa: E402
@@ -82,7 +84,7 @@ class TestIsOutOfMemory(unittest.TestCase):
 class TestCallMlx(unittest.TestCase):
     """`call_mlx` must build the exact `pi` command `run_pool`'s cli branch already uses."""
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_command_shape_and_stdout(self, mock_run):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="the answer", stderr="", returncode=0
@@ -103,10 +105,10 @@ class TestCallMlx(unittest.TestCase):
                 "do the task",
             ],
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=120,
-            check=True,
+            start_new_session=True,
         )
         self.assertEqual(result, "the answer")
 
@@ -163,7 +165,7 @@ class TestFailureHint(unittest.TestCase):
 class TestMainZeroEgress(unittest.TestCase):
     """`main()` is the real code path — never a hand-rolled duplicate of its logic."""
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_success_writes_body_to_file_prints_only_status(self, mock_run):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="SENSITIVE ANSWER BODY", stderr="", returncode=0
@@ -177,7 +179,7 @@ class TestMainZeroEgress(unittest.TestCase):
         self.assertIn(str(out_path), printed)
         self.assertEqual(out_path.read_text(encoding="utf-8"), "SENSITIVE ANSWER BODY")
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_pi_failure_never_leaks_stdout_stderr_and_exits_blocked(self, mock_run):
         mock_run.side_effect = subprocess.CalledProcessError(
             1, "pi", output="ECHOED SENSITIVE PROMPT", stderr="ALSO SENSITIVE"
@@ -190,7 +192,7 @@ class TestMainZeroEgress(unittest.TestCase):
         self.assertNotIn("ALSO SENSITIVE", printed)
         self.assertIn("BLOCKED", printed)
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_out_of_memory_failure_exits_blocked_with_hint(self, mock_run):
         mock_run.side_effect = subprocess.CalledProcessError(
             1, "pi", output="", stderr='{"error":{"type":"out_of_memory"}}'
@@ -200,7 +202,7 @@ class TestMainZeroEgress(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("out of memory", err.getvalue())
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_timeout_exits_error(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="pi", timeout=900)
         with unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as err:
@@ -208,7 +210,7 @@ class TestMainZeroEgress(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("ERROR", err.getvalue())
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_model_override_flows_into_pi_command(self, mock_run):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="ok", stderr="", returncode=0
