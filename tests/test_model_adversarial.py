@@ -7,6 +7,8 @@ fixture isolating `run_pool`'s debug log (`_isolate_pool_log`) never applies, an
 `~/.claude/debug/` file gets written under the developer's own session id.
 """
 
+import concurrent.futures
+import inspect
 import io
 import json
 import os
@@ -29,8 +31,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
 
+import call_scope
 import model_adversarial as ma
 import pi_events_view as pev
+from pc_core_stdio import PoolServer, alive
 from pi_fakes import PiPopen, pi_events
 
 MISTRAL = {
@@ -2833,6 +2837,281 @@ class TestPiEventsView:
             "",
             f"no events file {path} within 0.5s\n",
         )
+
+
+class TestCallScope(unittest.TestCase):
+    """A call's `pi` processes are tracked by its scope and refused once the call is cancelled."""
+
+    def test_no_scope_is_no_restriction(self):
+        call_scope.check()
+
+    def test_a_cancelled_scope_refuses_a_new_pi_before_it_starts(self):
+        scope = call_scope.CallScope()
+        scope.cancel()
+        with unittest.mock.patch(
+            "model_adversarial.Popen", side_effect=AssertionError("pi started")
+        ):
+            with self.assertRaises(call_scope.CallCancelled):
+                call_scope.run_in(scope, ma.call_cli, MISTRAL, "p", 30)
+
+    def test_a_pi_started_as_the_call_is_cancelled_is_killed_and_refused(self):
+        scope = call_scope.CallScope()
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(proc.kill)
+        scope.cancel()
+        with self.assertRaises(call_scope.CallCancelled):
+            scope.adopt(proc)
+        self.assertIsNotNone(proc.poll())
+
+    def test_a_refused_pi_has_its_pipes_closed(self):
+        scope = call_scope.CallScope()
+        proc = subprocess.Popen(
+            ["sleep", "30"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        self.addCleanup(proc.kill)
+        scope.cancel()
+        with self.assertRaises(call_scope.CallCancelled):
+            scope.adopt(proc)
+        self.assertTrue(proc.stdout.closed)
+        self.assertTrue(proc.stderr.closed)
+
+    def test_kill_session_takes_down_the_whole_process_group(self):
+        proc = subprocess.Popen(
+            ["sh", "-c", "sleep 30 & sleep 30"], start_new_session=True
+        )
+        self.addCleanup(proc.kill)
+        time.sleep(0.3)
+        call_scope.kill_session(proc)
+        proc.wait(timeout=5)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(proc.pid, 0)
+            except (ProcessLookupError, PermissionError):
+                # Groupe disparu : son identifiant peut déjà être celui d'un autre utilisateur.
+                return
+            time.sleep(0.05)
+        self.fail("a member of the process group survived kill_session")
+
+    def test_a_guardian_whose_pi_ended_is_reaped_and_leaves_no_zombie(self):
+        listing = Path(self.enterContext(tempfile.TemporaryDirectory())) / "ps.txt"
+
+        def children() -> dict[int, str]:
+            """The command of every child of this process, by pid (a zombie keeps its pid)."""
+            # Aucun `subprocess` entre la mort du gardien et l'assertion finale : chaque lancement
+            # y récolte les sous-processus terminés, le test verrait un gardien récolté par lui
+            # et non par le code testé. `-ww` : la commande du gardien est longue.
+            ps = os.posix_spawn(
+                "/bin/ps",
+                ["ps", "-ww", "-A", "-o", "pid=,ppid=,command="],
+                os.environ,
+                file_actions=[
+                    (
+                        os.POSIX_SPAWN_OPEN,
+                        1,
+                        str(listing),
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                        0o600,
+                    )
+                ],
+            )
+            _, status = os.waitpid(ps, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+            fields = [row.split(None, 2) for row in listing.read_text().splitlines()]
+            return {
+                int(f[0]): f[2] if len(f) > 2 else ""
+                for f in fields
+                if f[1] == str(os.getpid())
+            }
+
+        scope = call_scope.CallScope()
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(proc.kill)
+        before = set(children())
+        scope.adopt(proc)
+        guardians = [
+            pid
+            for pid, command in children().items()
+            if pid not in before and "pi_guardian" in command
+        ]
+        self.assertIn(proc.pid, children())
+        self.assertEqual(len(guardians), 1, children())
+        proc.kill()
+        proc.wait()
+
+        # Le gardien s'arrête de lui-même une fois son groupe disparu ; tant que personne ne le
+        # récolte, son pid reste dans la table des processus.
+        deadline = time.monotonic() + 5
+        while guardians[0] in children() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertNotIn(guardians[0], children())
+
+    def test_cancel_kills_only_the_processes_of_its_own_scope(self):
+        mine, other = call_scope.CallScope(), call_scope.CallScope()
+        procs = [
+            subprocess.Popen(["sleep", "30"], start_new_session=True) for _ in range(2)
+        ]
+        for proc in procs:
+            self.addCleanup(proc.kill)
+        mine.adopt(procs[0])
+        other.adopt(procs[1])
+        mine.cancel()
+        procs[0].wait(timeout=5)
+        self.assertIsNone(procs[1].poll())
+
+    def test_a_worker_thread_runs_under_the_scope_it_was_bound_in(self):
+        scope = call_scope.CallScope()
+        scope.cancel()
+
+        def in_worker_thread():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                ex.submit(call_scope.bind(call_scope.check)).result()
+
+        with self.assertRaises(call_scope.CallCancelled):
+            call_scope.run_in(scope, in_worker_thread)
+
+
+# Les quatre outils qui lancent `pi`, avec des arguments et le nombre de `pi` qu'un appel lance
+# d'un coup dans un pool de deux entrées.
+_PI_TOOLS = {
+    "adversarial": ({"task": "attack this"}, 1),
+    "panel": ({"tasks": ["a", "b"]}, 2),
+    "pool_check": ({}, 2),
+    "offline": ({"task": "summarize"}, 1),
+}
+
+
+@pytest.fixture
+def make_server(tmp_path):
+    """A factory of real `pc_core_server.py` subprocesses with a fake `pi`, all stopped at the end."""
+    pytest.importorskip("mcp")
+    servers: list[PoolServer] = []
+
+    def make(pool_size: int = 2) -> PoolServer:
+        root = tmp_path / f"server-{len(servers)}"
+        root.mkdir()
+        server = PoolServer(root, pool_size)
+        servers.append(server)
+        return server
+
+    yield make
+    for server in servers:
+        server.stop()
+
+
+class TestToolSchema:
+    """The wrapper that serves each tool must not change what a client sees of it."""
+
+    def test_each_tool_advertises_the_parameters_of_its_function(self, make_server):
+        pc_core_server = pytest.importorskip("pc_core_server")
+        advertised = {
+            tool["name"]: tool["inputSchema"] for tool in make_server().list_tools()
+        }
+
+        assert set(advertised) == set(_PI_TOOLS)
+        for name, schema in advertised.items():
+            parameters = inspect.signature(getattr(pc_core_server, name)).parameters
+            required = {n for n, p in parameters.items() if p.default is p.empty}
+            assert set(schema["properties"]) == set(parameters)
+            assert set(schema.get("required", [])) == required
+
+
+@pytest.mark.parametrize("tool", _PI_TOOLS)
+class TestClientGivingUpKillsPi:
+    """The client cancels a call or goes away: the `pi` it was waiting for must not outlive it."""
+
+    def test_a_cancelled_call_kills_each_pi_and_its_child_within_5s(
+        self, make_server, tool
+    ):
+        arguments, expected = _PI_TOOLS[tool]
+        server = make_server()
+        request = server.start_call(tool, arguments)
+        pids = [pid for pair in server.wait_launched(expected) for pid in pair]
+
+        server.cancel(request)
+
+        assert server.wait_gone(pids, 5)
+        time.sleep(0.5)
+        server.drain()
+        assert request not in server.answered
+
+    def test_a_closed_channel_kills_every_pi_and_the_server_exits(
+        self, make_server, tool
+    ):
+        arguments, expected = _PI_TOOLS[tool]
+        server = make_server()
+        server.start_call(tool, arguments)
+        pids = [pid for pair in server.wait_launched(expected) for pid in pair]
+
+        started = time.monotonic()
+        server.close_stdin()
+
+        assert server.wait_gone(pids, 5)
+        assert server.wait_exit(5 - (time.monotonic() - started))
+
+    def test_a_killed_server_leaves_no_pi_within_5s(self, make_server, tool):
+        arguments, expected = _PI_TOOLS[tool]
+        server = make_server()
+        server.start_call(tool, arguments)
+        pids = [pid for pair in server.wait_launched(expected) for pid in pair]
+
+        server.process.kill()
+
+        assert server.wait_gone(pids, 5)
+
+
+class TestCancellationScope:
+    """What a cancellation leaves alone, or never starts."""
+
+    def test_a_cancelled_adversarial_call_starts_no_pi_of_its_second_entry(
+        self, make_server
+    ):
+        server = make_server(pool_size=2)
+        request = server.start_call("adversarial", {"task": "attack this"})
+        pids = [pid for pair in server.wait_launched(1) for pid in pair]
+
+        server.cancel(request)
+
+        assert server.wait_gone(pids, 5)
+        time.sleep(1)
+        assert server.launch_count() == 1
+        assert server.wait_gone(server.all_pids(), 1)
+
+    def test_a_cancelled_pool_check_starts_no_pi_for_the_entries_still_queued(
+        self, make_server
+    ):
+        server = make_server(pool_size=ma.CHECK_WORKERS + 2)
+        request = server.start_call("pool_check", {})
+        pids = [pid for pair in server.wait_launched(ma.CHECK_WORKERS) for pid in pair]
+
+        server.cancel(request)
+
+        assert server.wait_gone(pids, 5)
+        time.sleep(1)
+        assert server.launch_count() == ma.CHECK_WORKERS
+        assert server.wait_gone(server.all_pids(), 1)
+
+    def test_cancelling_one_call_spares_another_call_and_another_session(
+        self, make_server
+    ):
+        session = make_server()
+        other_session = make_server()
+        cancelled = session.start_call("adversarial", {"task": "t", "model": "fake-0"})
+        session.start_call("adversarial", {"task": "t", "model": "fake-1"})
+        other_session.start_call("adversarial", {"task": "t", "model": "fake-0"})
+        session.wait_launched(2)
+        other_session.wait_launched(1)
+
+        session.cancel(cancelled)
+
+        assert session.wait_gone(session.pids_of("model-0"), 5)
+        time.sleep(1)
+        spared = session.pids_of("model-1") + other_session.pids_of("model-0")
+        assert len(spared) == 4
+        assert all(alive(pid) for pid in spared)
 
 
 if __name__ == "__main__":

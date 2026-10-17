@@ -76,7 +76,6 @@ import os
 import random
 import re
 import shlex
-import signal
 import stat
 import subprocess
 import sys
@@ -91,6 +90,7 @@ from subprocess import Popen
 from typing import Any, Literal, NamedTuple, TextIO, TypeVar
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
+import call_scope  # noqa: E402
 import load_secrets  # noqa: E402
 import model_sanitize  # noqa: E402
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
@@ -688,24 +688,6 @@ _PANE_TIMEOUT = 10.0
 _PIPE_DRAIN_SECONDS = 5.0
 
 
-def _kill_session(proc: Popen[str]) -> None:
-    """SIGKILL `pi` and, on POSIX where it runs in its own session (`start_new_session`), every
-    process it started — a tool's child holding its pipes goes with it.
-
-    Args:
-        proc: the `pi` process.
-    """
-    # Pas de `killpg` hors POSIX : `proc.kill()` reste atteint dans tous les cas. Jamais un pid
-    # <= 0 : `killpg(0, ...)` signalerait notre propre groupe.
-    killpg = getattr(os, "killpg", None)
-    if killpg is not None and proc.pid > 0:
-        try:
-            killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-    proc.kill()
-
-
 def _join_all(threads: list[threading.Thread], seconds: float) -> None:
     """Wait for `threads` for at most `seconds` in all, not per thread.
 
@@ -897,6 +879,8 @@ def call_cli(
             (`failure_detail` reads it); `output` carries only stdout lines that are not events.
         subprocess.TimeoutExpired: no answer within `timeout`.
         OSError: `pi` is not installed or not executable.
+        CallCancelled: the call that asked for this run was cancelled — before `pi` started, or
+            while it ran (its session is killed).
         BaseException: an interrupt (`KeyboardInterrupt`, `SystemExit`) while waiting — pi's
             session is killed first, then it is re-raised.
     """
@@ -916,6 +900,7 @@ def call_cli(
     ]
     # stdin fermé : pi lit l'entrée standard quand il en hérite une, et celle du serveur MCP est
     # le canal JSON-RPC — l'appel resterait bloqué jusqu'au timeout.
+    call_scope.check()
     proc = Popen(
         cmd,
         stdin=subprocess.DEVNULL,
@@ -927,6 +912,7 @@ def call_cli(
         errors="replace",
         start_new_session=True,
     )
+    call_scope.adopt(proc)
     if proc.stdout is None or proc.stderr is None:
         raise OSError("pi started without its output pipes")
     out_lines: list[str] = []
@@ -946,11 +932,15 @@ def call_cli(
     except BaseException:
         # Aussi KeyboardInterrupt, SystemExit : `start_new_session` a détaché pi du groupe du
         # terminal, un Ctrl-C ne l'atteindrait jamais.
-        _kill_session(proc)
+        call_scope.kill_session(proc)
         proc.wait()
         raise
     finally:
+        call_scope.release(proc)
         _join_all(pumps, _PIPE_DRAIN_SECONDS)
+    # Tué par l'annulation de l'appel : pas une réponse, et surtout pas un échec que `run_pool`
+    # classerait pour passer à l'entrée suivante.
+    call_scope.check()
     message, stray = _read_events(out_lines)
     # `aborted` comme `error` : le mode texte de pi sort en 1 pour les deux, le mode JSON en 0.
     failed_message = message is not None and message.get("stopReason") in (
@@ -1377,7 +1367,9 @@ def check_pool(
     """
     env = secret_env()
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        return list(ex.map(lambda e: _check_one(e, timeout, env), pool))
+        return list(
+            ex.map(call_scope.bind(lambda e: _check_one(e, timeout, env)), pool)
+        )
 
 
 _CHECK_MARKERS = {"ok": "✅", "failed": "❌", "skipped": "• "}

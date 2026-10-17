@@ -123,12 +123,14 @@ pinky-agentic-plugins/
 │   │   │   ├── structure_guard.py
 │   │   │   └── style_reminder.py
 │   │   ├── mcp/
+│   │   │   ├── call_scope.py
 │   │   │   ├── model_adversarial.py
 │   │   │   ├── model_offline.py
 │   │   │   ├── model_panel.py
 │   │   │   ├── model_sanitize.py
 │   │   │   ├── pc_core_server.py
 │   │   │   ├── pi_events_view.py
+│   │   │   ├── pi_guardian.py
 │   │   │   └── review_complexity.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
@@ -519,6 +521,7 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── conftest.py
 │   ├── fake_local_server.py
+│   ├── pc_core_stdio.py
 │   ├── pc_snow_live_probe.py
 │   ├── pc_snow_stdio.py
 │   ├── pi_fakes.py

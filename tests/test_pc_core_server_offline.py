@@ -12,6 +12,7 @@ import unittest.mock
 from pathlib import Path
 
 import pytest
+from pi_fakes import MlxPopen
 
 
 def _import_server():
@@ -37,7 +38,7 @@ class TestOfflineToolZeroEgress(unittest.TestCase):
             )
         )
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_success_returns_status_line_never_the_body(self, mock_run):
         server = _import_server()
         mock_run.return_value = unittest.mock.MagicMock(
@@ -48,7 +49,7 @@ class TestOfflineToolZeroEgress(unittest.TestCase):
         self.assertTrue(out.startswith("[offline]"))
         self.assertIn(str(self.out_dir / "answer.md"), out)
 
-    @unittest.mock.patch("subprocess.run")
+    @unittest.mock.patch("subprocess.Popen", new_callable=MlxPopen)
     def test_pi_failure_never_leaks_stdout_stderr(self, mock_run):
         server = _import_server()
         mock_run.side_effect = subprocess.CalledProcessError(

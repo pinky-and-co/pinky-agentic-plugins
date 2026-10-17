@@ -47,6 +47,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
+import call_scope
+
 # Le codepage console par défaut de Windows (cp1252, pas UTF-8) ne peut pas encoder les ✓/⚠ ci-dessous.
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -110,7 +112,8 @@ def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
 
     Raises `subprocess.CalledProcessError` / `subprocess.TimeoutExpired` / `OSError` on failure —
     callers classify those via `failure_hint()`, never letting `pi`'s own stdout/stderr (which may
-    echo the sensitive prompt) escape past a fixed status string.
+    echo the sensitive prompt) escape past a fixed status string. Raises `call_scope.CallCancelled`
+    when the tool call that asked for this run was cancelled; that one is not a failure to classify.
     """
     cmd = [
         "pi",
@@ -125,15 +128,30 @@ def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
     ]
     # stdin fermé : pi lit l'entrée standard dont il hérite, et celle du serveur MCP est le canal
     # JSON-RPC — l'appel resterait bloqué jusqu'au timeout.
-    res = subprocess.run(
+    call_scope.check()
+    proc = subprocess.Popen(
         cmd,
         stdin=subprocess.DEVNULL,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
-        check=True,
+        start_new_session=True,
     )
-    return res.stdout
+    call_scope.adopt(proc)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except BaseException:
+        # Aussi TimeoutExpired, KeyboardInterrupt : le groupe entier part, pas seulement pi.
+        call_scope.kill_session(proc)
+        proc.communicate()
+        raise
+    finally:
+        call_scope.release(proc)
+    # Tué par l'annulation de l'appel : pas une réponse.
+    call_scope.check()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, stdout, stderr)
+    return stdout
 
 
 def failure_hint(exc: Exception, model: str, timeout: int) -> FailureHint:
