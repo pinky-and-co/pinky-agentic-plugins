@@ -435,3 +435,38 @@ def test_a_siret_column_is_not_reported_as_a_credit_card(tmp_path):
     (finding,) = [x for x in anonymize.detect_findings([str(f)]) if x.column == "ref"]
     assert "FR_SIRET" in finding.reason
     assert "CREDIT_CARD" not in finding.reason
+
+
+@requires_model
+def test_siret_that_also_passes_as_a_card_is_named_siret_only(tmp_path):
+    """SIRETs whose 14 digits also pass the card recognizer: no CREDIT_CARD, top or `also`."""
+    sirets = ["44306184100047", "35600000000048", "73282932000074", "55210055400013"]
+    f = _csv(tmp_path / "companies.csv", [{"ref": s, "note": "x"} for s in sirets])
+    (finding,) = [x for x in anonymize.detect_findings([str(f)]) if x.column == "ref"]
+    assert "FR_SIRET" in finding.reason
+    assert "CREDIT_CARD" not in finding.reason
+
+
+@requires_model
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["44306184100047", "35600000000048", "73282932000074", "bonjour"],
+        ["44306184100047", "35600000000048", "bonjour", "hello", "salut"],
+    ],
+)
+def test_mixed_siret_column_stays_flagged_as_siret(tmp_path, values):
+    """A SIRET-heavy mixed column is still flagged, FR_SIRET on top, never CREDIT_CARD."""
+    f = _csv(tmp_path / "mixed.csv", [{"ref": v, "note": "x"} for v in values])
+    (finding,) = [x for x in anonymize.detect_findings([str(f)]) if x.column == "ref"]
+    assert finding.reason.startswith("detected FR_SIRET")
+    assert "CREDIT_CARD" not in finding.reason
+
+
+@requires_model
+def test_real_card_numbers_column_stays_credit_card(tmp_path):
+    """Genuine card numbers (not SIRET-shaped) keep the CREDIT_CARD verdict."""
+    cards = ["4111111111111111", "5500005555555559", "378282246310005"]
+    f = _csv(tmp_path / "cards.csv", [{"ref": c, "note": "x"} for c in cards])
+    (finding,) = [x for x in anonymize.detect_findings([str(f)]) if x.column == "ref"]
+    assert finding.reason.startswith("detected CREDIT_CARD")

@@ -923,6 +923,12 @@ def detect_findings(
                     and not v[: r.start].strip()
                     and not v[r.end :].strip()
                 }
+                french_id = whole & {"FR_SIRET", "FR_SIREN"}
+                if french_id:
+                    # Un SIRET Luhn-valide passe aussi pour une carte : l'entité française gagne,
+                    # et la valeur compte encore pour le seuil souple (sous son propre type).
+                    found.discard("CREDIT_CARD")
+                    found |= french_id
                 if found:
                     hit_values += 1
                 if whole:
