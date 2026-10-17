@@ -6,7 +6,7 @@
 The CLI folds a paste longer than 800 characters into ``[Pasted text #N]``, which ``/goal`` does
 not read as its condition. Each block stays under that bound, ends right after a ``; `` or a
 space so the blocks concatenate to the condition, and is printed as a fenced block under a
-``📋 Collage i/n`` title.
+``📋 Paste i/n`` title.
 
 Exit status: 0 on success, 1 when the condition needs more than 5 blocks, 2 on empty input.
 """
@@ -55,7 +55,7 @@ def render_blocks(blocks: list[str]) -> str:
         The text to relay to the user.
     """
     return "\n".join(
-        f"📋 Collage {i}/{len(blocks)} ({len(b)} caractères)\n```\n{b}\n```\n"
+        f"📋 Paste {i}/{len(blocks)} ({len(b)} characters)\n```\n{b}\n```\n"
         for i, b in enumerate(blocks, 1)
     )
 

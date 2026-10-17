@@ -40,11 +40,11 @@ retyped from memory (`pc_kanban_spawn_workers.py::repo_conventions_block`: test 
 command, gate command) — plus the card's absolute path and `## Done when` as the generated block. The agent
 inherits nothing from this session's context.
 
-The loop this closes: worker → hand-back → review (below) → renvoi if KO, routed per `chantier`
+The loop this closes: worker → hand-back → review (below) → send-back if KO, routed per `chantier`
 SKILL.md step 8 → acceptance → gates/tests green → `pc-git:commit`/`commit-and-pr` → card closed.
 The session that dispatched the worker never writes the implementation itself and never commits
 mid-loop — a commit outside the `commit`/`commit-and-pr` fork skips the gitmoji convention those
-forks load. Two renvois maximum: a worker that misses the same point twice on the same card is a
+forks load. Two send-backs maximum: a worker that misses the same point twice on the same card is a
 brief problem — stop and bring it to the user rather than trying a third time.
 
 **Carve-out — a single mechanical fix stays in-session.** A narrow regex widened by one

@@ -201,7 +201,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     EOF
     ```
     Exit 1 (more than 5 blocks) → shorten the condition and rerun; exit 2 → stop and report it.
-    Close the response with the script's output relayed verbatim — the `📋 Collage i/n` blocks,
+    Close the response with the script's output relayed verbatim — the `📋 Paste i/n` blocks,
     not one character changed — then, as plain text, nothing past it:
     ```
     🎯 Next step: activate the goal for this card — type `/goal `, paste each block in order, then Enter.
@@ -220,26 +220,26 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   work: never edit a card, commit or artefact only to satisfy it. The second rejection on the same
   clause stops the loop: route it through step 7 **Amending the condition**. The card leaves
   `3-in-progress/` only once the transcript meets the condition.
-  **Routing a renvoi.** Every message to a kept worker (review finding, failing test, user feedback)
-  is routed by the nature of the retouche, never by the worker's context size. Rows are read top to
+  **Routing a send-back.** Every message to a kept worker (review finding, failing test, user feedback)
+  is routed by the nature of the rework, never by the worker's context size. Rows are read top to
   bottom, the first match wins:
 
-  | Nature of the retouche | Lane |
+  | Nature of the rework | Lane |
   |---|---|
   | Single mechanical fix (`finishing-a-card.md` carve-out) | The session, in its own turn |
   | Depends on design reasoning that worker carries | Same worker (`SendMessage`) |
   | Localised and readable in the diff | Fresh worker: a new `Agent(subagent_type: "pc-kanban:card-worker")` |
 
   - A fresh worker runs `sonnet`/`medium`, or the card's `model:` when lower, never above it; model
-    or effort climb only after a fresh pass missed its retouche. Its prompt is the one the script
+    or effort climb only after a fresh pass missed its rework. Its prompt is the one the script
     prints (not the `spawn-workers` skill):
     `python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py"
-    <chantier-id> <card-slug> --model <m> --effort <e> --arbitrage <retouche>` — the `Agent` call
+    <chantier-id> <card-slug> --model <m> --effort <e> --arbitrage <rework>` — the `Agent` call
     takes the printed `model:`/`effort:` and prompt as printed.
   - Nature undecidable → fresh worker. A missed fresh pass goes back to the same worker or the
-    session; the two-renvois cap of `finishing-a-card.md` bounds the loop.
+    session; the two-send-back cap of `finishing-a-card.md` bounds the loop.
   - A model or effort change is always a new `Agent`; `SendMessage` takes neither.
-  - A resume or unblock message (no retouche) goes to the same worker, which alone holds its plan.
+  - A resume or unblock message (no rework) goes to the same worker, which alone holds its plan.
 
 ## Rules
 
