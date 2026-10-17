@@ -25,6 +25,11 @@ carries `"allow_dash": true`, so a value can never masquerade as a flag. `emit` 
 appended after the script; `{0}`, `{1}`... are matched tokens, `{*}` all of them, and
 `{env:NAME}` an environment variable (`CLAUDE_PROJECT_DIR` falls back to the event cwd).
 
+A token written `@<path>` (the editor's file mention) is resolved before the grammar sees it:
+joined to the event cwd, normalised, without trailing slash, so `@../repo/` becomes an absolute
+path. A bare `@` and an `@` word containing `~` stay untouched (no home expansion), and a token
+without a leading `@` is never altered.
+
 Arguments are never handed to a shell: any shell metacharacter, newline or NUL in the raw
 argument string makes it non-conforming whatever the grammar says.
 
@@ -67,6 +72,22 @@ def _tokenize(command_args: str) -> list[str] | None:
         return shlex.split(command_args)
     except ValueError:
         return None
+
+
+def _resolve_at(word: str, cwd: str) -> str:
+    """Resolve an `@<path>` mention against the event cwd.
+
+    Args:
+        word: One token from the typed arguments.
+        cwd: The event working directory.
+
+    Returns:
+        The normalised absolute path, or the word unchanged when it has no `@` prefix, is a
+        bare `@`, or contains `~`.
+    """
+    if not word.startswith("@") or word == "@" or "~" in word:
+        return word
+    return os.path.normpath(os.path.join(cwd, word[1:]))
 
 
 def _token_matches(word: str, spec: object) -> bool:
@@ -218,6 +239,7 @@ def _run(args: argparse.Namespace, event: object) -> str | None:
     cwd = str(event.get("cwd") or os.getcwd())
     if not Path(cwd).is_dir():
         return None
+    tokens = [_resolve_at(t, cwd) for t in tokens]
     argv = _select_argv(json.loads(args.grammar), tokens, cwd)
     if argv is None:
         return None
