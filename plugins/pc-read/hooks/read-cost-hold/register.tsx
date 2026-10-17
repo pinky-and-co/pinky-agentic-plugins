@@ -175,6 +175,9 @@ export const register: Register = on => {
     // le `ask` du hook et le dialogue natif s'appliquent tout de suite, sans attente.
     if (!(await $.session.surfaces()).some(s => s === 'terminal' || s === 'desktop')) return next(e)
 
+    // Une copie anonymisée par `pc-privacy` (`<nom>.anon.<ext>`) ne porte plus de donnée personnelle : rien à retenir.
+    if (e.file_path.split('/').pop()?.includes('.anon.')) return next(e)
+
     // `$.tool.check` ne voit pas le `ask` du hook Python : la lecture est retenue sauf refus du moteur ou verdict tiré
     // d'une règle des réglages, que l'accord ne lèverait pas.
     const engine = await $.tool.check({ tool: 'Read', input: { file_path: e.file_path } })

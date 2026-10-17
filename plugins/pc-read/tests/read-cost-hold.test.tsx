@@ -9,7 +9,7 @@ const VERDICT = { flagged: true, path: PATH, markitdown: true }
 const PRIVACY_ROOT = '/plugins/pc-privacy'
 
 // Stands for the engine beneath the mod: the read runs, the permission check asks, the hook script and markitdown answer.
-type Engine = { verdict?: unknown; verdictExit?: number; targetExit?: number; markitdownExit?: number; markitdownTimesOut?: boolean; surfaces?: string[]; sleepExit?: number; rule?: boolean; ruleOnAccepted?: boolean; deny?: boolean; privacy?: { published?: boolean | 'by a plugin'; stdout?: string; exit?: number; throws?: boolean } }
+type Engine = { verdict?: unknown; verdictExit?: number; targetExit?: number; markitdownExit?: number; markitdownTimesOut?: boolean; surfaces?: string[]; sleepExit?: number; rule?: boolean; ruleOnAccepted?: boolean; deny?: boolean; privacy?: { published?: boolean | 'by a plugin'; stdout?: string; exit?: number; throws?: boolean; stateThrows?: boolean } }
 function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
   on('tool.call', (_$: any, e: any) => {
     ran.push(e.file_path)
@@ -23,6 +23,7 @@ function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
   })
   // pc-privacy publishes its folder at session start; a test that does not publish it leaves the value unset.
   on('state.get', (_$: any, e: any, next: any) => {
+    if (opts.privacy?.stateThrows) throw new Error('state unavailable')
     if (e.plugin !== 'pc-privacy' || e.key !== 'root' || opts.privacy?.published === 'by a plugin') return next(e)
     return { value: opts.privacy?.published ? { value: PRIVACY_ROOT, version: 1 } : { value: undefined, version: 0 } }
   })
@@ -294,9 +295,14 @@ describe('pc-read costly-read band', () => {
   })
 
   test('a file pc-privacy does not flag is held as before', async ($, on) => {
-    engine(on, [], [], { privacy: { published: true, stdout: JSON.stringify({ flagged: false }) } })
+    const calls: any[] = []
+    engine(on, [], calls, { privacy: { published: true, stdout: JSON.stringify({ flagged: false }) } })
     const call = $.tool.call(read('t1'))
     const ui = await heldBand($)
+    // held because the guard answered, not because it was never asked
+    const asked = calls.filter(c => c.argv.some((a: string) => a.endsWith('/pii_guard.py')))
+    expect(asked.length).toBe(1)
+    expect(JSON.parse(asked[0].init.stdin)).toEqual({ tool_name: 'Read', tool_input: { file_path: PATH } })
     await ui.press({ key: 'deny' })
     await call
     await ui.unmount()
@@ -329,6 +335,27 @@ describe('pc-read costly-read band', () => {
       expect((await check($, 't1', PATH)).decision).toBe('ask') // nothing remembered, tool.check unchanged
     })
   }
+
+  test('a failing read of the shared state is treated as no pc-privacy: the read is held', async ($, on) => {
+    const calls: any[] = []
+    engine(on, [], calls, { privacy: { published: true, stateThrows: true } })
+    const call = $.tool.call(read('t1'))
+    const ui = await heldBand($)
+    expect(calls.some(c => c.argv.some((a: string) => a.endsWith('/pii_guard.py')))).toBe(false)
+    await ui.press({ key: 'deny' })
+    await call
+    await ui.unmount()
+  })
+
+  test('a copy pc-privacy anonymized is not held, and nothing is asked of any guard', async ($, on) => {
+    const ran: string[] = []
+    const calls: any[] = []
+    const copy = '/repo/docs/book.anon.xlsx'
+    engine(on, ran, calls, { privacy: { published: true } })
+    await $.tool.call(read('t1', copy)) // returns without a press: no hold
+    expect(ran).toEqual([copy])
+    expect(calls).toEqual([])
+  })
 
   test('a file the hook does not flag is not held', async ($, on) => {
     const ran: string[] = []

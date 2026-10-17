@@ -106,6 +106,16 @@ def _csv(path: Path, columns: list[str]) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def _no_verdict_store(monkeypatch) -> None:
+    """These tests compare several judgements of one file: none may be answered from the store."""
+
+    def unreadable(path, anonymize):
+        raise OSError("no verdict store in these tests")
+
+    monkeypatch.setattr(pii_guard, "_cache_key", unreadable)
+
+
 @pytest.fixture
 def presidio(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Fake the Presidio scan and record how it is called.
@@ -119,7 +129,7 @@ def presidio(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
 
     def fake(files: list[str], **kwargs: Any) -> list[anonymize.Finding]:
-        calls.append(kwargs)
+        calls.append({k: v for k, v in kwargs.items() if k != "fmt"})
         return (
             PRESIDIO_ANON_FINDINGS if kwargs.get("values_only") else PRESIDIO_FINDINGS
         )

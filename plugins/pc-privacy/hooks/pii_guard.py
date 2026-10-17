@@ -44,6 +44,8 @@ Python 3.12+. Run via ``uv run --script`` so Presidio/openpyxl resolve from the 
 
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
 import json
 import os
 import re
@@ -139,10 +141,161 @@ def _is_excluded(path: Path) -> bool:
     return expanded.is_relative_to(config_dir)
 
 
+# The verdict store holds the most recent verdicts only: an old file's verdict is cheap to rebuild.
+MAX_VERDICTS = 500
+
+
+def _store() -> Path:
+    """The verdict store, at one fixed path every caller shares (the hook and the mods' processes
+    have no common data folder): ``$XDG_CACHE_HOME/pc-privacy/verdicts.json``, else ``~/.cache``."""
+    cache = os.environ.get("XDG_CACHE_HOME") or "~/.cache"
+    return Path(cache).expanduser() / "pc-privacy" / "verdicts.json"
+
+
+# The decision gate's source: part of the verdict's identity, as it can change a clean verdict.
+GATE_SOURCE = Path(__file__).with_name("decision_gate.py")
+
+
+def _spacy_model_version(anonymize) -> str:
+    """The installed version of the spaCy model, read from package metadata without loading spaCy.
+
+    Args:
+        anonymize: The ``anonymize`` module.
+
+    Returns:
+        str: The version, or an empty string when the model is not installed.
+    """
+    try:
+        return importlib.metadata.version(anonymize.SPACY_MODEL)
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
+
+def _cache_key(path: Path, anonymize) -> str:
+    """Identify a verdict: the file's content and the guard's code, whatever the file is named.
+
+    Args:
+        path: The file judged.
+        anonymize: The ``anonymize`` module.
+
+    Returns:
+        str: The content's sha256 and the sha256 of pii_guard.py + anonymize.py +
+        decision_gate.py + ``ONE_DECISION_MODEL`` + the spaCy model's version, joined by a colon, plus ``:anon`` for an anonymized copy, which is scanned on its values alone.
+    """
+    content = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            content.update(chunk)
+    code = hashlib.sha256()
+    for source in (Path(__file__), Path(anonymize.__file__), GATE_SOURCE):
+        code.update(source.read_bytes())
+    for part in (
+        os.environ.get("ONE_DECISION_MODEL", ""),
+        _spacy_model_version(anonymize),
+    ):
+        code.update(b"\0" + part.encode())
+    return f"{content.hexdigest()}:{code.hexdigest()}" + (
+        ":anon" if ".anon." in path.name else ""
+    )
+
+
+def _load_verdicts() -> list[dict]:
+    """The stored verdicts, oldest first; empty when the store is missing or unreadable."""
+    store = _store()
+    try:
+        entries = json.loads(store.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return (
+        [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+    )
+
+
+def _remember(key: str, scanned: tuple[str, str, list[str]] | None) -> None:
+    """Store a verdict under ``key``: the key, the verdict and the column names, nothing of the
+    file's content. A store that cannot be written costs the next scan, never the call.
+
+    Args:
+        key: From :func:`_cache_key`.
+        scanned: The result of the analysis, None for a file that is not flagged.
+    """
+    store = _store()
+    entry = {
+        "key": key,
+        "flagged": scanned is not None,
+        "kind": scanned[0] if scanned else None,
+        "columns": scanned[2] if scanned else [],
+    }
+    entries = [e for e in _load_verdicts() if e.get("key") != key] + [entry]
+    try:
+        store.parent.mkdir(parents=True, exist_ok=True)
+        tmp = store.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(entries[-MAX_VERDICTS:]), encoding="utf-8")
+        tmp.replace(store)
+    except OSError:
+        pass
+
+
+def _is_verdict(entry: dict) -> bool:
+    """Whether a stored entry is well formed; a malformed one counts as absent, never as a verdict.
+
+    Args:
+        entry: An entry of the store.
+
+    Returns:
+        bool: True when ``flagged`` is a bool, ``kind`` is None, ``pii`` or ``oversize``, and
+        ``columns`` is a list of str.
+    """
+    columns = entry.get("columns")
+    return (
+        isinstance(entry.get("flagged"), bool)
+        and entry.get("kind") in (None, "pii", "oversize")
+        and isinstance(columns, list)
+        and all(isinstance(c, str) for c in columns)
+    )
+
+
+def _from_entry(path: Path, entry: dict) -> tuple[str, str, list[str]] | None:
+    """Rebuild a scan result from a stored verdict. The reasons per column are not stored, so the
+    message names the columns only.
+
+    Args:
+        path: The file judged.
+        entry: A stored verdict.
+
+    Returns:
+        The same shape as :func:`_judge`.
+    """
+    if entry.get("flagged") is not True:
+        return None
+    columns = [c for c in entry.get("columns") or [] if isinstance(c, str)]
+    if entry.get("kind") == "oversize":
+        return (
+            "oversize",
+            f"`{path.name}` was NOT fully analyzed. It may contain personal data.",
+            [],
+        )
+    named = f" Sensitive columns: {', '.join(columns)}." if columns else ""
+    return (
+        "pii",
+        f"Personal data detected in `{path.name}` — reading it puts it into the model's context "
+        f"(and whatever cloud sits behind it).{named}",
+        columns,
+    )
+
+
 def _scan(path: Path, anonymize) -> tuple[str, str] | None:
     """Classify and scan one file: ``("oversize" | "pii", message)``, or None when nothing to flag.
 
     The message carries column names and entity types only — never a sampled value.
+    """
+    judged = _judge(path, anonymize)
+    return None if judged is None else judged[:2]
+
+
+def _judge(path: Path, anonymize) -> tuple[str, str, list[str]] | None:
+    """:func:`_scan` with the sensitive column names as a third item. A content already judged by
+    this version of the guard is not scanned again.
     """
     if _is_excluded(path):
         return None  # the agent's own notes/config — never scanned
@@ -161,7 +314,40 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
             "oversize",
             f"`{path.name}` is {size // (1024 * 1024)} MB — above the {MAX_BYTES // (1024 * 1024)} MB "
             "limit of the PII scan, so it was NOT analyzed. It may contain personal data.",
+            [],
         )
+    try:
+        key = _cache_key(path, anonymize)
+    except OSError:
+        key = None
+    if key is not None:
+        for entry in reversed(_load_verdicts()):
+            if entry.get("key") == key and _is_verdict(entry):
+                return _from_entry(path, entry)
+    scanned = _analyze(path, fmt, anonymize)
+    if key is not None:
+        try:
+            unchanged = _cache_key(path, anonymize) == key
+        except OSError:
+            unchanged = False
+        if (
+            unchanged
+        ):  # a file rewritten during the scan has no verdict for the content keyed
+            _remember(key, scanned)
+    return scanned
+
+
+def _analyze(path: Path, fmt: str, anonymize) -> tuple[str, str, list[str]] | None:
+    """Scan a file that is in scope and under the size limit, with the format already decided.
+
+    Args:
+        path: The file to scan.
+        fmt: Its format, as decided by ``anonymize.detect_format``.
+        anonymize: The ``anonymize`` module.
+
+    Returns:
+        The same shape as :func:`_judge`.
+    """
     kwargs: dict = {}
     # An anonymized copy keeps its column names: only its values can still betray a leak. Its
     # pseudonyms sit too close to the decision model's threshold, so the gate is not asked.
@@ -175,7 +361,7 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
     if fmt == "text":
         kwargs["text_max_lines"] = MAX_TEXT_LINES
         kwargs["truncated"] = cut.append
-    findings = anonymize.detect_findings([str(path)], **kwargs)
+    findings = anonymize.detect_findings([str(path)], fmt=fmt, **kwargs)
     note = (
         f"Only the first {MAX_TEXT_LINES} lines of `{path.name}` were analyzed; the rest was "
         "NOT fully analyzed. It may contain personal data."
@@ -187,9 +373,10 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
             "deterministic detector found a specific column — reading it puts it into the "
             "model's context (and whatever cloud sits behind it)."
             + (f"\n{note}" if cut else ""),
+            [],
         )
     if not findings:
-        return ("oversize", note) if cut else None
+        return ("oversize", note, []) if cut else None
     listing = "\n".join(f"  - {f.column}: {f.reason}" for f in findings)
     return (
         "pii",
@@ -197,6 +384,7 @@ def _scan(path: Path, anonymize) -> tuple[str, str] | None:
         f"(and whatever cloud sits behind it):\n{listing}"
         + (f"\n{note}" if cut else "")
         + (f"\n{DECISION_MODEL_LINE}" if judged == "block" else ""),
+        [f.column for f in findings],
     )
 
 
@@ -312,11 +500,10 @@ def verdict(event: dict, anonymize) -> dict:
     if event.get("tool_name") != "Read" or not file_path:
         return {"flagged": False}
     path = Path(file_path)
-    scanned = _scan(path, anonymize)
+    scanned = _judge(path, anonymize)
     if scanned is None:
         return {"flagged": False}
-    kind = scanned[0]
-    columns = _columns(path, anonymize) if kind == "pii" else []
+    kind, _, columns = scanned
     return {
         "flagged": True,
         "kind": kind,

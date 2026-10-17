@@ -163,6 +163,9 @@ CONFIG_EXTENSIONS = {
 }
 
 # Code et documentation, jamais scannés. `.sql` volontairement absent : un dump contient du PII.
+# Préfixe du dossier où `pc-read` écrit un document converti (`read_cost.conversion_target`).
+CONVERTED_FOLDER_PREFIX = "pc-read-"
+
 CODE_EXTENSIONS = {
     ".py",
     ".pyi",
@@ -447,6 +450,9 @@ def detect_format(path: Path) -> str:
         AnonymizeError: `path` cannot be read at all.
     """
     suffix = path.suffix.lower()
+    if suffix == ".md" and path.parent.name.startswith(CONVERTED_FOLDER_PREFIX):
+        # Le Markdown produit par `pc-read` porte le contenu d'un document : de la prose à scanner.
+        return "text"
     if suffix in CONFIG_EXTENSIONS:
         return "config"
     if suffix in CODE_EXTENSIONS:
@@ -860,6 +866,7 @@ def detect_findings(
     values_only: bool = False,
     text_max_lines: int | None = None,
     truncated: Callable[[str], None] | None = None,
+    fmt: str | None = None,
 ) -> list[Finding]:
     """Run Presidio + the name heuristic over sampled values of every column/tag in `files`.
 
@@ -872,6 +879,7 @@ def detect_findings(
             heuristic and values already shaped like our pseudonyms.
         text_max_lines: Line budget for a file scanned line by line (None: no limit).
         truncated: Called with the file name when that budget cut a scan short.
+        fmt: The format the caller already decided for a single file, so it is not detected again.
 
     Returns:
         One Finding per column/tag/line judged sensitive, across all files.
@@ -880,10 +888,11 @@ def detect_findings(
         AnonymizeError: If Presidio/the spaCy model is missing, or a file cannot be read at all.
     """
     analyzer = None  # construit au premier besoin (spaCy chargé seulement si utile)
+    known_fmt = fmt if len(files) == 1 else None
     findings: list[Finding] = []
     for fp in files:
         path = Path(fp)
-        fmt = detect_format(path)
+        fmt = known_fmt if known_fmt is not None else detect_format(path)
         if fmt in _SKIP_FORMATS:
             continue
         if analyzer is None:
