@@ -196,9 +196,14 @@ such library; measured pitfalls worth knowing before reaching for it (version 2.
 - `Choice(disabled="")` does **not** disable an entry — `disabled` is truthy-checked. Use
   `disabled=True` for a row with nothing to explain (a tree's grouping node), or a non-empty string,
   which also shows in parentheses as the reason.
-- A styled/formatted-text object as a choice's `title` renders verbatim and loses the library's own
-  checked/pointer styling — keep every title a plain string; indent it yourself for a tree shape
-  (`"  " * depth + text`), there is no separate tree widget.
+- A choice's `title` accepts exactly one formatted shape: a plain **list of `(style, text)`
+  tuples** — any other formatted-text object (`prompt_toolkit`'s `FormattedText`/`ANSI`) prints as
+  its own repr (`● ANSI('…')`). A styled title renders verbatim and loses the library's own
+  checked/pointer styling, so plain strings for simple rows; indent them yourself for a tree shape
+  (`"  " * depth + text`), there is no separate tree widget. A `\n` inside a tuple's text renders
+  as a real line break, so a row can carry secondary lines (a description, a warning) under it.
+- prompt_toolkit's style grammar has **no `dim`** attribute — the dim look is
+  `fg:ansibrightblack`; a raw SGR code has no place in a style string.
 - The default `("selected", "")` style leaves the underlying prompt toolkit's reverse video in
   place — a black block on a light theme. Pass a `Style` with `noreverse` on `selected` (the
   class that carries it) — setting it on `highlighted` and `pointer` too costs nothing and keeps
