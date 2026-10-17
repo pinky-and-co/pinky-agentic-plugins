@@ -32,6 +32,8 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 COSTLY_SUFFIXES = {".pdf", ".html", ".xlsx", ".docx", ".pptx"}
+# Costly formats that can hold a dataset: the band offers the schema-and-first-rows mode for them.
+DATA_SUFFIXES = {".xlsx"}
 
 
 def target_suffix(tool_input: dict) -> str:
@@ -67,8 +69,8 @@ def verdict(event: dict) -> dict:
         event: The PreToolUse event, as the hook receives it.
 
     Returns:
-        A dict with ``flagged`` False alone, or, when flagged, the ``path`` and ``markitdown``,
-        whether the converter is on the PATH.
+        A dict with ``flagged`` False alone, or, when flagged, the ``path``, ``markitdown`` (whether
+        the converter is on the PATH) and ``data`` (whether the schema-and-first-rows mode applies).
     """
     if decide(event) is None:
         return {"flagged": False}
@@ -76,6 +78,7 @@ def verdict(event: dict) -> dict:
         "flagged": True,
         "path": event["tool_input"]["file_path"],
         "markitdown": shutil.which("markitdown") is not None,
+        "data": target_suffix(event["tool_input"]) in DATA_SUFFIXES,
     }
 
 
