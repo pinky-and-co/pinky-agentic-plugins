@@ -11,6 +11,8 @@ import {
   buildFollowUpLine,
   inlineSpans,
   listParts,
+  noticeLines,
+  noticeParts,
   packRows,
   renderMarkdown,
   ruleLine,
@@ -20,6 +22,7 @@ import {
   searchWindow,
   searchArgs,
   tableLines,
+  trimNotice,
   wrapSpans,
   displayWidth,
   initialState,
@@ -355,9 +358,9 @@ describe('board pane navigation', () => {
     const plain = cardParts(opened(c), c, LAYOUT)
     expect([plain.chrome, plain.bodyRows, plain.chrome + plain.bodyRows]).toEqual([9, 21, 30])
     expect(plain.lines.length).toBe(100)
-    // A two-line notice takes two rows from the body.
+    // A two-line notice takes three rows from the body: its two lines, plus the footer's second row the n key wraps into.
     const noted = cardParts(opened(c, { notice: { kind: 'error', text: 'one\ntwo' } }), c, LAYOUT)
-    expect([noted.chrome, noted.bodyRows]).toEqual([11, 19])
+    expect([noted.chrome, noted.bodyRows]).toEqual([12, 18])
     // The drop field replaces the footer by one hint row and holds INPUT_ROWS (3) for itself.
     const dropping = cardParts(opened(c, { isDropping: true }), c, LAYOUT)
     expect([dropping.chrome, dropping.bodyRows]).toEqual([12, 18])
@@ -385,6 +388,42 @@ describe('board pane navigation', () => {
     expect(reduce(open, { t: 'scroll', d: 10 }, LAYOUT).state.scroll).toBe(10)
     expect(reduce(open, { t: 'scroll', d: 1000 }, LAYOUT).state.scroll).toBe(100 - 21)
     expect(reduce(opened(card('a', '1-todo') as any), { t: 'scroll', d: 1000 }, LAYOUT).state.scroll).toBe(0)
+  })
+
+  test('a notice is stored whole: the band keeps its cap, n opens the full screen, j/k scroll it, n or back closes', () => {
+    const text = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')
+    const notice = { kind: 'info' as const, text }
+    const noted = { ...loaded, notice }
+    // The letter n is offered only when a notice exists, on the list and card screens; the notice screen scrolls and closes.
+    expect(hotkeys('list', 'edit', true).map(k => k.letter)).toEqual(['h', 'l', 'j', 'k', 's', 'n', 'f', 'r'])
+    expect(hotkeys('list').map(k => k.letter)).toEqual(['h', 'l', 'j', 'k', 's', 'f', 'r'])
+    expect(hotkeys('card', 'edit', true).map(k => k.letter)).toEqual(['j', 'k', 'h', 'e', 's', 'n', 'f', 'r'])
+    expect(hotkeys('story', 'edit', true).map(k => k.letter)).toEqual(['j', 'k', 'h', 'e', 'f', 'r'])
+    expect(hotkeys('notice').map(k => k.letter)).toEqual(['j', 'k', 'n'])
+    // The collapsed band is the first six lines plus the marker; the layout counts those rows, not the whole text.
+    expect(trimNotice(text)).toBe([...Array.from({ length: 6 }, (_, i) => `line ${i + 1}`), '… (+24 lines)'].join('\n'))
+    expect(noticeLines(noted)).toBe(7)
+    const c: any = card('a', '1-todo')
+    // The seven trimmed rows, plus the footer's second row the n key wraps into.
+    expect(cardParts(opened(c, { notice }), c, LAYOUT).chrome).toBe(9 + 1 + 7)
+    // n opens the full screen with the text intact, scroll clamps to its lines.
+    const onCard = reduce(opened(c, { notice }), { t: 'notice' }, LAYOUT).state
+    expect(onCard).toMatchObject({ screen: 'notice', scroll: 0, notice })
+    const parts = noticeParts(onCard, LAYOUT)
+    expect(parts.lines).toEqual(Array.from({ length: 30 }, (_, i) => `line ${i + 1}`))
+    expect(parts.chrome + parts.bodyRows).toBe(LAYOUT.rows)
+    expect(reduce(onCard, { t: 'scroll', d: 1000 }, LAYOUT).state.scroll).toBe(30 - parts.bodyRows)
+    expect(reduce(onCard, { t: 'notice' }, LAYOUT).state).toMatchObject({ screen: 'card' })
+    expect(reduce(onCard, { t: 'back' }, LAYOUT).state).toMatchObject({ screen: 'card', notice })
+    // From the list, back lands on the list; without a notice, n does nothing.
+    expect(reduce(reduce(noted, { t: 'notice' }, LAYOUT).state, { t: 'back' }, LAYOUT).state).toMatchObject({ screen: 'list' })
+    expect(reduce(loaded, { t: 'notice' }, LAYOUT).state.screen).toBe('list')
+  })
+
+  test('the expanded notice wraps a line wider than the pane instead of cutting it', () => {
+    const wide = { ...loaded, notice: { kind: 'error' as const, text: `${'x'.repeat(100)}\nsecond` } }
+    const parts = noticeParts(reduce(wide, { t: 'notice' }, LAYOUT).state, LAYOUT)
+    expect(parts.lines).toEqual(['x'.repeat(69), 'x'.repeat(31), 'second'])
   })
 
   test('the list takes the whole height: cards that fit, a count row, the footer on the last row', () => {
@@ -475,7 +514,7 @@ describe('board pane navigation', () => {
 })
 
 // Stands for the engine beneath the mod: the scripts answer from a table, the card ops script can refuse.
-type Engine = { cards?: unknown; session?: unknown; opExit?: number; opErr?: string; ran?: string[][]; cmux?: 'ok' | 'fail'; kanbanRef?: string; cmuxFail?: string; inCmux?: boolean; code?: 'ok' | 'fail' | 'throw'; open?: 'ok' | 'fail'; hits?: unknown[]; cat?: 'throw'; late?: Record<string, Promise<void>>; fillResult?: 'ok' | 'refused'; fills?: { text: string; mode?: string }[]; toModel?: string[][] }
+type Engine = { cards?: unknown; session?: unknown; opExit?: number; opErr?: string; opOut?: string; ran?: string[][]; cmux?: 'ok' | 'fail'; kanbanRef?: string; cmuxFail?: string; inCmux?: boolean; code?: 'ok' | 'fail' | 'throw'; open?: 'ok' | 'fail'; hits?: unknown[]; cat?: 'throw'; late?: Record<string, Promise<void>>; fillResult?: 'ok' | 'refused'; fills?: { text: string; mode?: string }[]; toModel?: string[][] }
 function engine(on: any, opts: Engine = {}) {
   on('process.run', async (_$: any, e: any) => {
     const [exe, script, verb] = e.argv as string[]
@@ -504,7 +543,7 @@ function engine(on: any, opts: Engine = {}) {
       return { value: { exitCode: 0, stdout: JSON.stringify(opts.session ?? IN_REPO), stderr: '' } }
     }
     if (script?.endsWith('pc_kanban_card_ops.py')) {
-      return { value: { exitCode: opts.opExit ?? 0, stdout: opts.opExit ? '' : `${verb}ed -> done`, stderr: opts.opErr ?? '' } }
+      return { value: { exitCode: opts.opExit ?? 0, stdout: opts.opExit ? '' : opts.opOut ?? `${verb}ed -> done`, stderr: opts.opErr ?? '' } }
     }
     return { value: { exitCode: 0, stdout: '[]', stderr: '' } }
   })
@@ -767,6 +806,36 @@ describe('board pane', () => {
     await ui.redraw()
     await ui.input({ key: 'drop-reason', text: '-h' })
     expect(ran.some(argv => argv.slice(-4).join('|') === '--|drop|0007/build-widget|-h')).toBe(true)
+    await ui.unmount()
+  })
+
+  test('an archive notice keeps its whole text: the band is trimmed, n expands it scrollable', async ($, on) => {
+    const opOut = ['archived -> /ws/_KANBAN/_ARCHIVE/CHANTIER0007-done/2026-10-17_ship-it.md', 'Closing sequence (finishing-a-card.md):', ...Array.from({ length: 28 }, (_, i) => `card ${i}`)].join('\n')
+    const fills: { text: string; mode?: string }[] = []
+    engine(on, { cards: [doing], opOut, fills })
+    await run($, '')
+    const ui = await mount($)
+    await ui.press({ key: 'tab-3-in-progress' })
+    await ui.press({ key: open(doing) })
+    await ui.press({ key: 'archive' })
+    await ui.redraw()
+    // Back on the list: the band keeps its cap, the follow-up line is still filled.
+    expect(await ui.find({ type: 'Text', text: '… (+24 lines)' })).toBeDefined()
+    expect(fills[0]?.text).toContain('0007/ship-it archived')
+    // n expands the notice: a line past the cap is on screen, the last one is not yet, scrolling brings it.
+    await ui.press({ key: 'hk-n' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: 'card 10' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'card 27' })).toBeUndefined()
+    for (const letter of ['j', 'k', 'n']) expect(await ui.find({ type: 'Button', key: `hk-${letter}` })).toBeDefined()
+    await ui.press({ key: 'down' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Text', text: 'card 27' })).toBeDefined()
+    // n closes back on the list (the mock board still lists the card), the notice still in its band.
+    await ui.press({ key: 'hk-n' })
+    await ui.redraw()
+    expect(await ui.find({ type: 'Button', key: open(doing) })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '… (+24 lines)' })).toBeDefined()
     await ui.unmount()
   })
 

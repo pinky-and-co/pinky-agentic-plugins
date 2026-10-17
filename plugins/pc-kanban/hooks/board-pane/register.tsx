@@ -469,6 +469,7 @@ export type Intent =
   | { t: 'open'; key?: string }
   | { t: 'back' }
   | { t: 'story' }
+  | { t: 'notice' }
   | { t: 'scroll'; d: number }
   | { t: 'refresh' }
   | { t: 'find' }
@@ -617,24 +618,38 @@ export function cardParts(s: BoardState, card: BoardCard, layout: Layout): CardP
   const segs: Seg[] = isStory ? [{ text: `[${card.chantier_id ?? '----'}]` }] : cardSegments(card, s.cards)
   const segRows = pack(segs.map(g => ({ ...g, text: fit(g.text, width) })), g => displayWidth(g.text), width, SEG_GAP)
   const actionRows = pack(cardActions(card, isStory), actionWidth, width, 1)
-  const footerRows = s.isDropping ? [] : pack(hotkeys(s.screen), hotkeyWidth, width, 2)
+  const footerRows = s.isDropping ? [] : pack(hotkeys(s.screen, 'edit', s.notice !== null), hotkeyWidth, width, 2)
   const source = isStory ? (s.storyText ?? 'Reading the story…') : card.body
   const lines = renderMarkdown(source, width, { dropTitle: true })
-  const notice = s.notice === null ? 0 : s.notice.text.split('\n').length
+  const notice = noticeLines(s)
   const footer = s.isDropping ? 1 : footerRows.length
   // title, rule, sub, badges, rule, [body], rule, navigation, actions, notice, drop field, footer.
   const chrome = title.length + 1 + 1 + segRows.length + 1 + 1 + 1 + actionRows.length + notice + (s.isDropping ? INPUT_ROWS : 0) + footer
   return { title, sub, segRows, actionRows, footerRows, lines, chrome, bodyRows: Math.max(3, layout.rows - chrome) }
 }
 
+// The notice screen (hotkey n): the whole text wrapped to the width — one place counting its rows, for the draw and the scroll clamp.
+export function noticeParts(s: BoardState, layout: Layout): { lines: string[]; footerRows: Hotkey[][]; chrome: number; bodyRows: number } {
+  const width = layout.columns - 1
+  const lines = s.notice === null ? [] : s.notice.text.split('\n').flatMap(l => wrapText(l, width))
+  const footerRows = pack(hotkeys('notice'), hotkeyWidth, width, 2)
+  // title, rule, rule(range), navigation, footer.
+  const chrome = 4 + footerRows.length
+  return { lines, footerRows, chrome, bodyRows: Math.max(3, layout.rows - chrome) }
+}
+
 function scrollMax(s: BoardState, layout: Layout): number {
+  if (s.screen === 'notice') {
+    const parts = noticeParts(s, layout)
+    return Math.max(0, parts.lines.length - parts.bodyRows)
+  }
   const card = openCard(s)
   if (card === undefined) return 0
   const parts = cardParts(s, card, layout)
   return Math.max(0, parts.lines.length - parts.bodyRows)
 }
 
-export const noticeLines = (s: BoardState) => (s.notice === null ? 0 : s.notice.text.split('\n').length)
+export const noticeLines = (s: BoardState) => (s.notice === null ? 0 : trimNotice(s.notice.text).split('\n').length)
 
 const note = (s: BoardState, kind: 'info' | 'error', text: string): BoardState => ({ ...s, notice: { kind, text } })
 
@@ -666,6 +681,10 @@ export function reduce(s: BoardState, intent: Intent, layout: Layout): { state: 
         const isOpen = (screen === 'card' || screen === 'story') && openCard(s) !== undefined
         return { state: { ...s, screen: isOpen || screen === 'list' ? screen : 'list', cursor, scroll: 0, notice: null } }
       }
+      if (s.screen === 'notice') {
+        // The card left stays addressed: back returns to it, else to the list. The notice stays — it is what the screen shows.
+        return { state: { ...s, screen: openCard(s) !== undefined ? 'card' : 'list', scroll: 0 } }
+      }
       if (s.screen === 'story') return { state: { ...s, screen: 'card', scroll: 0, notice: null } }
       const current = s.screen === 'card' ? openCard(s) : undefined
       const tab = Math.max(0, TABS.findIndex(t => t.column === current?.column))
@@ -694,8 +713,13 @@ export function reduce(s: BoardState, intent: Intent, layout: Layout): { state: 
         effect: { t: 'story', path: card.story },
       }
     }
+    case 'notice': {
+      if (s.notice === null) return { state: s }
+      if (s.screen === 'notice') return reduce(s, { t: 'back' }, layout)
+      return { state: { ...s, screen: 'notice', scroll: 0 } }
+    }
     case 'scroll':
-      return s.screen === 'card' || s.screen === 'story'
+      return s.screen === 'card' || s.screen === 'story' || s.screen === 'notice'
         ? { state: { ...s, scroll: clamp(s.scroll + intent.d, 0, scrollMax(s, layout)) } }
         : { state: s }
     case 'refresh':
@@ -743,10 +767,15 @@ async function script($: EngineInterface, relative: string, args: string[]) {
   return $.process.run(['python3', `${$.plugin.root}/${relative}`, ...args], { cwd: root })
 }
 
-// One cleaned line per line of `text`, the first MAX_NOTICE_LINES kept: the newlines are the structure of a refusal.
-function trimNotice(text: string): string {
-  const lines = text.split('\n').map(clean)
-  if (lines.length <= MAX_NOTICE_LINES) return lines.join('\n')
+// One cleaned line per line of `text`: a script's output is text the pane does not author, and the newlines are the structure of a refusal.
+function sanitizeNotice(text: string): string {
+  return text.split('\n').map(clean).join('\n')
+}
+
+// The collapsed band keeps the first MAX_NOTICE_LINES lines; the expanded screen (hotkey n) shows the whole text.
+export function trimNotice(text: string): string {
+  const lines = text.split('\n')
+  if (lines.length <= MAX_NOTICE_LINES) return text
   return [...lines.slice(0, MAX_NOTICE_LINES), `… (+${lines.length - MAX_NOTICE_LINES} lines)`].join('\n')
 }
 
@@ -762,13 +791,13 @@ async function load($: EngineInterface) {
     const parsed = cards.exitCode === 0 ? parseCards(cards.stdout) : null
     const session = repos.exitCode === 0 ? parseSession(repos.stdout) : null
     if (parsed === null || session === null) {
-      const why = trimNotice(cards.exitCode === 0 && repos.exitCode === 0 ? 'unreadable output' : `${cards.stderr}${repos.stderr}`)
+      const why = sanitizeNotice(cards.exitCode === 0 && repos.exitCode === 0 ? 'unreadable output' : `${cards.stderr}${repos.stderr}`)
       await set($, s => ({ ...s, isLoaded: true, notice: { kind: 'error', text: `Could not read the board: ${why}` } }))
       return
     }
     await set($, s => ({ ...s, cards: parsed, session, isLoaded: true }))
   } catch (error) {
-    await set($, s => ({ ...s, isLoaded: true, notice: { kind: 'error', text: `Could not read the board: ${trimNotice(String(error))}` } }))
+    await set($, s => ({ ...s, isLoaded: true, notice: { kind: 'error', text: `Could not read the board: ${sanitizeNotice(String(error))}` } }))
   }
 }
 
@@ -795,7 +824,7 @@ async function runSearch($: EngineInterface, query: string, scopes: string[], is
     await focusRing($, await read($, board))
   } catch (error) {
     if (run !== latestRun) return
-    await set($, s => ({ ...s, notice: { kind: 'error', text: `Search failed: ${trimNotice(String(error))}` } }))
+    await set($, s => ({ ...s, notice: { kind: 'error', text: `Search failed: ${sanitizeNotice(String(error))}` } }))
   }
 }
 
@@ -888,7 +917,7 @@ async function runOp($: EngineInterface, verb: Verb, ref: string, reason?: strin
   try {
     const done = await script($, CARD_OPS, ['--', verb, ref, ...(reason === undefined ? [] : [reason])])
     const ok = done.exitCode === 0
-    const text = trimNotice((ok ? done.stdout : `${done.stderr}${done.stdout}`).trim() || (ok ? `${verb} done.` : `${verb} refused.`))
+    const text = sanitizeNotice((ok ? done.stdout : `${done.stderr}${done.stdout}`).trim() || (ok ? `${verb} done.` : `${verb} refused.`))
     await set($, s => ({ ...s, notice: { kind: ok ? 'info' : 'error', text }, isDropping: ok ? false : s.isDropping }))
     await load($)
     // A selected card stays open in its new column; an archived or dropped one is gone from the board.
@@ -897,7 +926,7 @@ async function runOp($: EngineInterface, verb: Verb, ref: string, reason?: strin
       await followUp($, ref, verb)
     }
   } catch (error) {
-    await set($, s => ({ ...s, notice: { kind: 'error', text: `${verb} failed: ${trimNotice(String(error))}` } }))
+    await set($, s => ({ ...s, notice: { kind: 'error', text: `${verb} failed: ${sanitizeNotice(String(error))}` } }))
   }
 }
 
@@ -991,9 +1020,17 @@ async function open($: EngineInterface, args: string) {
 export type Hotkey = { letter: string; label: string; intent: Intent }
 
 // The letter keys of a screen: the footer draws them as Buttons, so the legend is also the control.
-export function hotkeys(screen: BoardState['screen'], mode: BoardState['searchMode'] = 'edit'): Hotkey[] {
+export function hotkeys(screen: BoardState['screen'], mode: BoardState['searchMode'] = 'edit', hasNotice = false): Hotkey[] {
   const refresh: Hotkey = { letter: 'r', label: 'refresh', intent: { t: 'refresh' } }
   const find: Hotkey = { letter: 'f', label: 'search', intent: { t: 'find' } }
+  // The full notice screen holds one text: scroll it, close it.
+  if (screen === 'notice') {
+    return [
+      { letter: 'j', label: 'down', intent: { t: 'scroll', d: 1 } },
+      { letter: 'k', label: 'up', intent: { t: 'scroll', d: -1 } },
+      { letter: 'n', label: 'close', intent: { t: 'notice' } },
+    ]
+  }
   // The search screen holds a field while editing: letters type there, so it has no letter key. Its results have them.
   if (screen === 'search') {
     return mode === 'edit'
@@ -1006,6 +1043,8 @@ export function hotkeys(screen: BoardState['screen'], mode: BoardState['searchMo
           { letter: 'r', label: 'rerun', intent: { t: 'refresh' } },
         ]
   }
+  // The letter n expands a notice into its full screen; offered where a closure lands (the list, the card).
+  const notice: Hotkey[] = hasNotice && (screen === 'list' || screen === 'card') ? [{ letter: 'n', label: 'notice', intent: { t: 'notice' } }] : []
   if (screen === 'list') {
     return [
       { letter: 'h', label: '◀ state', intent: { t: 'tabs', d: -1 } },
@@ -1013,6 +1052,7 @@ export function hotkeys(screen: BoardState['screen'], mode: BoardState['searchMo
       { letter: 'j', label: 'next', intent: { t: 'cursor', d: 1 } },
       { letter: 'k', label: 'prev', intent: { t: 'cursor', d: -1 } },
       { letter: 's', label: 'story', intent: { t: 'story' } },
+      ...notice,
       find,
       refresh,
     ]
@@ -1023,6 +1063,7 @@ export function hotkeys(screen: BoardState['screen'], mode: BoardState['searchMo
     { letter: 'h', label: 'back', intent: { t: 'back' } },
     { letter: 'e', label: 'editor', intent: { t: 'editor' } },
     ...(screen === 'card' ? [{ letter: 's', label: 'story', intent: { t: 'story' } } as Hotkey] : []),
+    ...notice,
     find,
     refresh,
   ]
@@ -1051,7 +1092,7 @@ export function listParts(s: BoardState, layout: Layout): ListParts {
   const here = tabCards(s.cards, s.session, s.tab)
   const inner = layout.columns - 4
   const heights = here.map(c => titleLines(c.title, inner).length + 1 + (blocker(c, s.cards) === null ? 0 : 1) + 2)
-  const footerRows = pack(hotkeys('list'), hotkeyWidth, layout.columns - 1, 2)
+  const footerRows = pack(hotkeys('list', 'edit', s.notice !== null), hotkeyWidth, layout.columns - 1, 2)
   const tabs = tabRows(tabCounts(s.cards, s.session), layout.columns).length
   // title, tabs, rule, then the cards, notice and footer.
   const room = Math.max(3, layout.rows - (2 + tabs + noticeLines(s) + footerRows.length))
@@ -1166,7 +1207,7 @@ export const register: Register = on => {
 
     const noticeOut = state.notice === null ? null : (
       <Box flexDirection="column">
-        {state.notice.text.split('\n').map((line, i) => (
+        {trimNotice(state.notice.text).split('\n').map((line, i) => (
           <Text key={`notice-${i}`} color={state.notice?.kind === 'error' ? 'red' : 'green'} wrap="truncate-end">{line}</Text>
         ))}
       </Box>
@@ -1174,6 +1215,32 @@ export const register: Register = on => {
     const rule = (label = '') => <Text dimColor>{ruleLine(width, label)}</Text>
 
     if (!state.isLoaded) return <Text dimColor>Reading the board…</Text>
+
+    // The full notice screen: the whole text, wrapped and scrollable — the collapsed band of the other screens keeps its cap.
+    if (state.screen === 'notice' && state.notice !== null) {
+      const parts = noticeParts(state, layout)
+      const top = clamp(state.scroll, 0, Math.max(0, parts.lines.length - parts.bodyRows))
+      const shown = parts.lines.slice(top, top + parts.bodyRows)
+      const blanks = parts.bodyRows - shown.length
+      const range = parts.lines.length > parts.bodyRows ? `${top + 1}–${top + shown.length} / ${parts.lines.length}` : ''
+      return (
+        <Box flexDirection="column">
+          <Text bold color="magenta" wrap="truncate-end">Notice</Text>
+          {rule()}
+          {shown.map((line, i) => (
+            <Text key={`notice-line-${top + i}`} color={state.notice?.kind === 'error' ? 'red' : 'green'} wrap="truncate-end">{line}</Text>
+          ))}
+          {blanks > 0 ? <Box height={blanks} /> : null}
+          {rule(range)}
+          <Box flexDirection="row" columnGap={1} height={1} overflow="hidden">
+            {press('back', '← back', go({ t: 'back' }))}
+            {press('up', '▲', go({ t: 'scroll', d: -PAGE }))}
+            {press('down', '▼', go({ t: 'scroll', d: PAGE }))}
+          </Box>
+          {parts.footerRows.map((row, r) => keysRow(row, r))}
+        </Box>
+      )
+    }
 
     // Story and card screens share a scrolling body.
     if (state.screen === 'card' || state.screen === 'story') {

@@ -27,7 +27,7 @@ export type SearchResult = {
   truncated: boolean
 }
 
-export type Screen = 'list' | 'card' | 'story' | 'search'
+export type Screen = 'list' | 'card' | 'story' | 'search' | 'notice'
 
 // The search screen's two modes: the query field, or the listed results with a cursor.
 export type SearchMode = 'edit' | 'results'
