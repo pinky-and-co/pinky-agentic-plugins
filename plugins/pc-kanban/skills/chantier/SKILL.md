@@ -156,11 +156,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     root card (`sert: null`) and use **its** line — the session may work any card of that group. No
     resolvable root (orphan, cycle) → say so, no `/goal` block, skip the rest of this bullet.
 
-    `/goal` is parsed by the CLI before the turn and cannot run from a skill: end the response with
-    ```
-    🎯 Next step: activate the goal for this card.
-    /goal <condition>
-    ```
+    `/goal` is parsed by the CLI before the turn and cannot run from a skill: the user types it.
     `<condition>` is one measurable end state, the check that proves it and the constraints that
     matter, phrased so the transcript can demonstrate it: the evaluator reads only the transcript.
     Bound it with `or stop after <N> turns` (20 unless the card says otherwise).
@@ -196,7 +192,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
       once, inside the `AskUserQuestion` that collects the decision. Never propose `/goal clear`:
       the evaluator reads it as abandoning the goal.
 
-    Close the response with the `/goal` block above as plain text: nothing past it.
+    **Delivery.** The CLI folds a paste over 800 characters into `[Pasted text #N]`, which `/goal`
+    does not take as its condition. Pipe the finished condition (clauses and turn bound included)
+    through the splitter:
+    ```bash
+    python3 "${CLAUDE_SKILL_DIR}/scripts/split_goal.py" <<'EOF'
+    <condition>
+    EOF
+    ```
+    Exit 1 (more than 5 blocks) → shorten the condition and rerun; exit 2 → stop and report it.
+    Close the response with the script's output relayed verbatim — the `📋 Collage i/n` blocks,
+    not one character changed — then, as plain text, nothing past it:
+    ```
+    🎯 Next step: activate the goal for this card — type `/goal `, paste each block in order, then Enter.
+    ```
 8. Execute the card's work. If the grill gate routed to `pc-kanban:grill`, run it first, then
   set the goal (step 7 **Goal**) from the converged `## Done when`. A worker session delegates real
   code changes to `Agent(subagent_type: "pc-kanban:card-worker")`, then reviews, fixes findings and
