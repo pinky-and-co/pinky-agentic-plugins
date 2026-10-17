@@ -8,6 +8,7 @@ import {
   cardKey,
   cardParts,
   cardSegments,
+  buildFollowUpLine,
   inlineSpans,
   listParts,
   packRows,
@@ -474,7 +475,7 @@ describe('board pane navigation', () => {
 })
 
 // Stands for the engine beneath the mod: the scripts answer from a table, the card ops script can refuse.
-type Engine = { cards?: unknown; session?: unknown; opExit?: number; opErr?: string; ran?: string[][]; cmux?: 'ok' | 'fail'; kanbanRef?: string; cmuxFail?: string; inCmux?: boolean; code?: 'ok' | 'fail' | 'throw'; open?: 'ok' | 'fail'; hits?: unknown[]; cat?: 'throw'; late?: Record<string, Promise<void>> }
+type Engine = { cards?: unknown; session?: unknown; opExit?: number; opErr?: string; ran?: string[][]; cmux?: 'ok' | 'fail'; kanbanRef?: string; cmuxFail?: string; inCmux?: boolean; code?: 'ok' | 'fail' | 'throw'; open?: 'ok' | 'fail'; hits?: unknown[]; cat?: 'throw'; late?: Record<string, Promise<void>>; fillResult?: 'ok' | 'refused'; fills?: { text: string; mode?: string }[]; toModel?: string[][] }
 function engine(on: any, opts: Engine = {}) {
   on('process.run', async (_$: any, e: any) => {
     const [exe, script, verb] = e.argv as string[]
@@ -508,6 +509,15 @@ function engine(on: any, opts: Engine = {}) {
     return { value: { exitCode: 0, stdout: '[]', stderr: '' } }
   })
   on('env.get', () => ({ value: opts.inCmux === true ? 'surface:1' : undefined }))
+  on('prompt.fill', (_$: any, e: any) => {
+    opts.fills?.push({ text: e.text, mode: e.mode })
+    // The hook protocol of prompt.fill: the answer is the result itself, not a { value } wrapper.
+    return opts.fillResult === 'refused' ? { isFilled: false, refusal: 'dialog' as const } : { isFilled: true }
+  })
+  // The roads to the model a closure must never take; recorded so a test can prove none fired.
+  // No return shape — unreachable: a fired one already fails the toModel assertion.
+  on('prompt.submit', (_$: any, e: any) => { opts.toModel?.push(['prompt.submit', e.text]) })
+  on('session.append', (_$: any, e: any) => { opts.toModel?.push(['session.append', e.text]) })
   on('session.start', (_$: any, e: any) => ({ cwd: e.cwd }))
   on('session.root', () => ({ value: ROOT }))
   on('command.register', () => ({ value: { command: 'board' } }))
@@ -1049,5 +1059,98 @@ describe('board pane', () => {
     expect(out.text).toBe('Board pane opened.')
     expect(ran.some(argv => argv.includes('search') && argv.includes('widget'))).toBe(true)
     expect(((await run($, 'search')) as any).text).toBe('Usage: /board  or  /board search <text>')
+  })
+})
+
+describe('board pane closing a card', () => {
+  const doing = card('ship-it', '3-in-progress', {}, { title: 'Ship it' })
+  const todo = card('build-widget', '1-todo', {}, { title: 'Build the widget' })
+  // Opens the in-progress card and archives it from the button.
+  const archive = async (ui: any) => {
+    await ui.press({ key: 'tab-3-in-progress' })
+    await ui.press({ key: open(doing) })
+    await ui.press({ key: 'archive' })
+    await ui.redraw()
+  }
+
+  test('the follow-up line names the closed card, the verb and the follow-up the model runs', () => {
+    expect(buildFollowUpLine('0007/ship-it', 'archive')).toBe(
+      '0007/ship-it archived from the board pane — run the closing sequence (obsolescence check, next-card proposal, session reco); the pane did not capture its output.',
+    )
+    expect(buildFollowUpLine('lone', 'drop')).toBe(
+      'lone dropped from the board pane — run the closing sequence (obsolescence check, next-card proposal, session reco); the pane did not capture its output.',
+    )
+  })
+
+  test('an archive from the button fills the box once, appended; nothing reaches the model on its own', async ($, on) => {
+    const fills: { text: string; mode?: string }[] = []
+    const toModel: string[][] = []
+    engine(on, { cards: [doing], fills, toModel })
+    await run($, '')
+    const ui = await mount($)
+    await archive(ui)
+    expect(fills).toEqual([{ text: `\n${buildFollowUpLine('0007/ship-it', 'archive')}`, mode: 'append' }])
+    expect(toModel).toEqual([])
+    await ui.unmount()
+  })
+
+  test('a drop through the reason field fills the box the same way; nothing reaches the model on its own', async ($, on) => {
+    const fills: { text: string; mode?: string }[] = []
+    const toModel: string[][] = []
+    engine(on, { cards: [doing], fills, toModel })
+    await run($, '')
+    const ui = await mount($)
+    await ui.press({ key: 'tab-3-in-progress' })
+    await ui.press({ key: open(doing) })
+    await ui.press({ key: 'drop' })
+    await ui.input({ key: 'drop-reason', text: 'superseded' })
+    expect(fills).toEqual([{ text: `\n${buildFollowUpLine('0007/ship-it', 'drop')}`, mode: 'append' }])
+    expect(toModel).toEqual([])
+    await ui.unmount()
+  })
+
+  test('a select fills nothing and nothing reaches the model', async ($, on) => {
+    const fills: { text: string; mode?: string }[] = []
+    const toModel: string[][] = []
+    engine(on, { cards: [todo], fills, toModel })
+    await run($, '')
+    const ui = await mount($)
+    await ui.press({ key: 'tab-1-todo' })
+    await ui.press({ key: open(todo) })
+    await ui.press({ key: 'select' })
+    expect(fills).toEqual([])
+    expect(toModel).toEqual([])
+    await ui.unmount()
+  })
+
+  test('the fill is always append-mode, never replace — a draft the engine holds survives by contract', async ($, on) => {
+    const fills: { text: string; mode?: string }[] = []
+    const toModel: string[][] = []
+    engine(on, { cards: [doing], fills, toModel })
+    await run($, '')
+    const ui = await mount($)
+    await archive(ui)
+    // The leading newline lands the line on its own row after whatever the box already holds, empty box included.
+    expect(fills).toEqual([{ text: `\n${buildFollowUpLine('0007/ship-it', 'archive')}`, mode: 'append' }])
+    expect(toModel).toEqual([])
+    await ui.unmount()
+  })
+
+  test('a fill the box refuses leaves the notice alone with the result; the board is read again', async ($, on) => {
+    const fills: { text: string; mode?: string }[] = []
+    const ran: string[][] = []
+    engine(on, { cards: [doing], fillResult: 'refused', fills, ran })
+    await run($, '')
+    const ui = await mount($)
+    await ui.press({ key: 'tab-3-in-progress' })
+    await ui.press({ key: open(doing) })
+    const before = ran.filter(argv => argv[2] === 'cards').length
+    await ui.press({ key: 'archive' })
+    await ui.redraw()
+    // The fill was attempted and refused; the notice alone carries the result.
+    expect(fills).toHaveLength(1)
+    expect(ran.filter(argv => argv[2] === 'cards').length).toBe(before + 1)
+    expect(await ui.find({ type: 'Text', text: '--ed -> done' })).toBeDefined()
+    await ui.unmount()
   })
 })
