@@ -37,7 +37,7 @@ def test_short_condition_is_one_block() -> None:
     result = _run("done when tests pass\n")
     assert result.returncode == 0
     assert result.stdout == (
-        "📋 Collage 1/1 (20 caractères)\n```\ndone when tests pass\n```\n"
+        "📋 Paste 1/1 (20 characters)\n```\ndone when tests pass\n```\n"
     )
 
 
@@ -64,7 +64,7 @@ def test_oversized_clause_is_cut_at_a_space() -> None:
 
 def test_newlines_inside_the_condition_become_spaces() -> None:
     result = _run("a ;\nb\n")
-    assert result.stdout == "📋 Collage 1/1 (5 caractères)\n```\na ; b\n```\n"
+    assert result.stdout == "📋 Paste 1/1 (5 characters)\n```\na ; b\n```\n"
 
 
 def test_more_than_five_blocks_is_refused() -> None:
