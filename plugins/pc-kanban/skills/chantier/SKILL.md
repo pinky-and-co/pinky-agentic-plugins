@@ -169,9 +169,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     change, per `finishing-a-card.md` § "Reviewing before declaring a card done"), append `… and
     the diff has been reviewed by `Agent(reviewer)`, re-reviewed after each round of fixes until a
     round triggers no fix or a third round has run (fixes after the third round need no re-review),
-    each finding of the last round fixed, filed in a follow-up card or refuted by a measurement
-    quoted in the transcript, and the last pass's `Method:` line relayed
-    verbatim to the user`. Substance only — never the `reviewed (…)` box. Decided pre-work from
+    each finding of the last round fixed in this card, refuted by a measurement quoted in the
+    transcript, or written as an accepted limit in the card's `## Decisions`, and the last pass's
+    `Method:` line relayed verbatim to the user`. A finding on the card's subject that its
+    requirements miss gets a requirement in this card and is worked here — never a new card. Substance only — never the `reviewed (…)` box. Decided pre-work from
     `## Done when` and `requirements:`; unclear → include it. Obviously mechanical (doc typo,
     rename, one-line config) → no clause, closed with `- [x] reviewed (n/a — mechanical)`.
 

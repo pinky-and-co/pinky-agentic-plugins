@@ -180,6 +180,9 @@ class ChantierSkillWiringCase(unittest.TestCase):
             flat,
         )
         self.assertIn("refuted by a measurement quoted in the transcript", flat)
+        self.assertIn("written as an accepted limit in the card's `## Decisions`", flat)
+        self.assertIn("never a new card", flat)
+        self.assertNotIn("follow-up card", flat)
         self.assertIn("the last pass's `Method:` line relayed verbatim", flat)
         self.assertNotIn("when the first line", section)
         self.assertNotIn("box checked on the card`", flat)

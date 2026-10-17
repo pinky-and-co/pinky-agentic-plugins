@@ -5,14 +5,15 @@ It replaces a ticketing tool and only works because **the agent maintains it rel
 stays the decider, the clerical layer is automated. See the `kanban` skill for the mechanics
 (columns, dating, tier, filiation, cross-agent log).
 
-Do not wait for "create a card" or "move it to done". Surface the board update as part of the work:
+Do not wait for "move it to done". Surface the board update as part of the work:
 
 - **Capture → card.** A card exists for a reader who was not in this conversation — a later
   session, or a worker the orchestrator hands it to. What is surfaced and handled right here
-  crosses no session boundary: no card. What is still open when this session ends is a card,
-  side-quests included; write it without being asked. If it shares the subject of a card in
-  progress, make it a `sert` child of that card instead of a new root. Its slug (file name without
-  `.md`) is at most 30 characters; the `card-discipline` hook asks beyond that.
+  crosses no session boundary: no card. What touches the subject of a card in progress stays in
+  that card (a requirement, a step, an accepted limit in `## Decisions`), never a new card.
+  Anything else still open when the session ends is proposed in one line; the card is written only
+  once the user says so. Its slug (file name without `.md`) is at most 30 characters; the
+  `card-discipline` hook asks beyond that.
 - **Select → commit.** The commitment column is a user decision by default; the agent may *propose*
   a selection, never select unasked.
 - **Progress → move.** Taking a card in goes through the `chantier` skill (its step 7,

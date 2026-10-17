@@ -46,6 +46,13 @@ class TestKanbanProactivityHook(unittest.TestCase):
     def test_rule_states_the_card_slug_limit(self):
         self.assertIn("at most 30 characters", _RULE.read_text(encoding="utf-8"))
 
+    def test_rule_never_writes_a_card_unasked(self):
+        flat = " ".join(_RULE.read_text(encoding="utf-8").split())
+        self.assertIn("stays in that card", flat)
+        self.assertIn("the card is written only once the user says so", flat)
+        self.assertNotIn("write it without being asked", flat)
+        self.assertNotIn('"create a card"', flat)
+
     def test_rule_says_to_take_a_card_in_place_when_the_skill_is_loaded(self):
         self.assertIn("in place when already loaded", _RULE.read_text(encoding="utf-8"))
 
