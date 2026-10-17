@@ -435,6 +435,10 @@ pinky-agentic-plugins/
 │   │   │   ├── hooks.json
 │   │   │   └── read_cost.py
 │   │   ├── skills/
+│   │   │   ├── data-schema/
+│   │   │   │   ├── scripts/
+│   │   │   │   │   └── data_schema.py
+│   │   │   │   └── SKILL.md
 │   │   │   └── document-to-md/
 │   │   │       └── SKILL.md
 │   │   ├── tests/
@@ -542,6 +546,7 @@ pinky-agentic-plugins/
 │   ├── test_close_cards.py
 │   ├── test_commit_trailer.py
 │   ├── test_dangerous_bash_ask.py
+│   ├── test_data_schema.py
 │   ├── test_detect_findings.py
 │   ├── test_detect_format.py
 │   ├── test_direct_command_hooks.py

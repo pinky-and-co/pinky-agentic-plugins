@@ -9,7 +9,7 @@ const VERDICT = { flagged: true, path: PATH, markitdown: true }
 const PRIVACY_ROOT = '/plugins/pc-privacy'
 
 // Stands for the engine beneath the mod: the read runs, the permission check asks, the hook script and markitdown answer.
-type Engine = { verdict?: unknown; verdictExit?: number; targetExit?: number; markitdownExit?: number; markitdownTimesOut?: boolean; surfaces?: string[]; sleepExit?: number; rule?: boolean; ruleOnAccepted?: boolean; deny?: boolean; privacy?: { published?: boolean | 'by a plugin'; stdout?: string; exit?: number; throws?: boolean } }
+type Engine = { verdict?: unknown; verdictExit?: number; targetExit?: number; markitdownExit?: number; markitdownTimesOut?: boolean; schemaExit?: number; surfaces?: string[]; sleepExit?: number; rule?: boolean; ruleOnAccepted?: boolean; deny?: boolean; privacy?: { published?: boolean | 'by a plugin'; stdout?: string; exit?: number; throws?: boolean; stateThrows?: boolean } }
 function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
   on('tool.call', (_$: any, e: any) => {
     ran.push(e.file_path)
@@ -23,6 +23,7 @@ function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
   })
   // pc-privacy publishes its folder at session start; a test that does not publish it leaves the value unset.
   on('state.get', (_$: any, e: any, next: any) => {
+    if (opts.privacy?.stateThrows) throw new Error('state unavailable')
     if (e.plugin !== 'pc-privacy' || e.key !== 'root' || opts.privacy?.published === 'by a plugin') return next(e)
     return { value: opts.privacy?.published ? { value: PRIVACY_ROOT, version: 1 } : { value: undefined, version: 0 } }
   })
@@ -34,10 +35,13 @@ function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
     }
     if (e.argv[0] === 'python3' && e.argv.includes('--verdict')) {
       const asked = JSON.parse(e.init.stdin).tool_input.file_path // the verdict follows the file the mod asked about
-      return { value: { exitCode: opts.verdictExit ?? 0, stdout: JSON.stringify(opts.verdict ?? { ...VERDICT, path: asked }), stderr: '' } }
+      return { value: { exitCode: opts.verdictExit ?? 0, stdout: JSON.stringify(opts.verdict ?? { ...VERDICT, path: asked, data: asked.endsWith('.xlsx') }), stderr: '' } }
     }
     if (e.argv[0] === 'python3' && e.argv.includes('--target')) {
       return { value: { exitCode: opts.targetExit ?? 0, stdout: JSON.stringify({ markdown: MARKDOWN }), stderr: '' } }
+    }
+    if (e.argv.some((a: string) => a.endsWith('/data_schema.py'))) {
+      return { value: { exitCode: opts.schemaExit ?? 0, stdout: '', stderr: '' } }
     }
     if (e.argv[0] === 'markitdown') {
       if (opts.markitdownTimesOut) throw new Error('timed out')
@@ -80,7 +84,7 @@ describe('pc-read costly-read band', () => {
     await ui.unmount()
   })
 
-  for (const name of ['report.pdf', 'book.xlsx']) {
+  for (const name of ['report.pdf']) {
     test(`shows ${name} with convert, read as-is and deny, in that order`, async ($, on) => {
       const path = `/repo/docs/${name}`
       engine(on, [], [], { verdict: { ...VERDICT, path } })
@@ -94,6 +98,50 @@ describe('pc-read costly-read band', () => {
       await ui.unmount()
     })
   }
+
+  test('shows an .xlsx with the schema button too, and no other format does', async ($, on) => {
+    const path = '/repo/docs/book.xlsx'
+    engine(on, [], [], { verdict: { ...VERDICT, path, data: true } })
+    const call = $.tool.call(read('t1', path))
+    const ui = await heldBand($, 'book.xlsx')
+    const buttons = await ui.findAll({ type: 'Button' })
+    expect(buttons.map((b: any) => b.key)).toEqual(['convert', 'schema', 'allow', 'deny'])
+    expect(buttons.map((b: any) => b.props.label)).toEqual(['⎘ convert to Markdown', '▤ schema + first rows', '✔︎ read as-is', '✘ deny'])
+    await ui.press({ key: 'deny' })
+    await call
+    await ui.unmount()
+  })
+
+  test('schema runs the data-schema script into the target folder, then refuses the read naming its output', async ($, on) => {
+    const path = '/repo/docs/book.xlsx'
+    const ran: string[] = []
+    const calls: any[] = []
+    engine(on, ran, calls, { verdict: { ...VERDICT, path, data: true }, privacy: { published: true, stdout: JSON.stringify({ flagged: false }) } })
+    const call = $.tool.call(read('t1', path))
+    const ui = await heldBand($, 'book.xlsx')
+    await ui.press({ key: 'schema' })
+    const r: any = await call
+    const script = calls.find(c => c.argv.some((a: string) => a.endsWith('/data_schema.py')))
+    expect(script.argv.slice(0, 3)).toEqual(['uv', 'run', '--script'])
+    expect(script.argv.slice(4)).toEqual(['--privacy-root', PRIVACY_ROOT, '--out', MARKDOWN, '--', path])
+    expect(calls.some(c => c.argv.includes('--discard'))).toBe(false)
+    expect(r.deny).toContain(`read ${MARKDOWN} instead`)
+    expect(ran).toEqual([])
+    await ui.unmount()
+  })
+
+  test('a failing schema script refuses the read without a path and removes the folder', async ($, on) => {
+    const path = '/repo/docs/book.xlsx'
+    const calls: any[] = []
+    engine(on, [], calls, { verdict: { ...VERDICT, path, data: true }, schemaExit: 2 })
+    const call = $.tool.call(read('t1', path))
+    const ui = await heldBand($, 'book.xlsx')
+    await ui.press({ key: 'schema' })
+    const r: any = await call
+    expect(r.deny).toBe(`The user asked for the schema and first rows of ${path} but it failed. Tell them and ask what to do instead.`)
+    expect(calls.some(c => c.argv.includes('--discard'))).toBe(true)
+    await ui.unmount()
+  })
 
   test('holds the read until the person answers', async ($, on) => {
     const ran: string[] = []
@@ -294,9 +342,14 @@ describe('pc-read costly-read band', () => {
   })
 
   test('a file pc-privacy does not flag is held as before', async ($, on) => {
-    engine(on, [], [], { privacy: { published: true, stdout: JSON.stringify({ flagged: false }) } })
+    const calls: any[] = []
+    engine(on, [], calls, { privacy: { published: true, stdout: JSON.stringify({ flagged: false }) } })
     const call = $.tool.call(read('t1'))
     const ui = await heldBand($)
+    // held because the guard answered, not because it was never asked
+    const asked = calls.filter(c => c.argv.some((a: string) => a.endsWith('/pii_guard.py')))
+    expect(asked.length).toBe(1)
+    expect(JSON.parse(asked[0].init.stdin)).toEqual({ tool_name: 'Read', tool_input: { file_path: PATH } })
     await ui.press({ key: 'deny' })
     await call
     await ui.unmount()
@@ -329,6 +382,27 @@ describe('pc-read costly-read band', () => {
       expect((await check($, 't1', PATH)).decision).toBe('ask') // nothing remembered, tool.check unchanged
     })
   }
+
+  test('a failing read of the shared state is treated as no pc-privacy: the read is held', async ($, on) => {
+    const calls: any[] = []
+    engine(on, [], calls, { privacy: { published: true, stateThrows: true } })
+    const call = $.tool.call(read('t1'))
+    const ui = await heldBand($)
+    expect(calls.some(c => c.argv.some((a: string) => a.endsWith('/pii_guard.py')))).toBe(false)
+    await ui.press({ key: 'deny' })
+    await call
+    await ui.unmount()
+  })
+
+  test('a copy pc-privacy anonymized is not held, and nothing is asked of any guard', async ($, on) => {
+    const ran: string[] = []
+    const calls: any[] = []
+    const copy = '/repo/docs/book.anon.xlsx'
+    engine(on, ran, calls, { privacy: { published: true } })
+    await $.tool.call(read('t1', copy)) // returns without a press: no hold
+    expect(ran).toEqual([copy])
+    expect(calls).toEqual([])
+  })
 
   test('a file the hook does not flag is not held', async ($, on) => {
     const ran: string[] = []
@@ -397,8 +471,9 @@ describe('pc-read costly-read band', () => {
   })
 
   test('parses the verdict, and rejects what it cannot trust', () => {
-    expect(parseVerdict(JSON.stringify(VERDICT))).toEqual({ path: PATH, convert: true })
-    expect(parseVerdict(JSON.stringify({ ...VERDICT, markitdown: false }))).toEqual({ path: PATH, convert: false })
+    expect(parseVerdict(JSON.stringify(VERDICT))).toEqual({ path: PATH, convert: true, data: false })
+    expect(parseVerdict(JSON.stringify({ ...VERDICT, markitdown: false }))).toEqual({ path: PATH, convert: false, data: false })
+    expect(parseVerdict(JSON.stringify({ ...VERDICT, data: true }))).toEqual({ path: PATH, convert: true, data: true })
     expect(parseVerdict(JSON.stringify({ ...VERDICT, markitdown: 'yes' }))).toBeNull()
     expect(parseVerdict(JSON.stringify({ flagged: false }))).toBeNull()
     expect(parseVerdict(JSON.stringify({ ...VERDICT, path: 1 }))).toBeNull()

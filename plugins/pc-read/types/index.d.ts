@@ -4,6 +4,8 @@ export type HeldRead = {
   path: string
   // `markitdown` is on the PATH: a conversion is proposable.
   convert: boolean
+  // Un classeur de données : son schéma et ses premières lignes sont proposables.
+  data: boolean
 }
 
 declare module 'claude-code' {

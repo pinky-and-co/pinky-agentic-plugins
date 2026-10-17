@@ -75,8 +75,17 @@ class TestVerdict(unittest.TestCase):
         with mock.patch.object(rc.shutil, "which", return_value="/bin/markitdown"):
             self.assertEqual(
                 rc.verdict(self.PDF),
-                {"flagged": True, "path": "/docs/report.pdf", "markitdown": True},
+                {
+                    "flagged": True,
+                    "path": "/docs/report.pdf",
+                    "markitdown": True,
+                    "data": False,
+                },
             )
+
+    def test_only_a_workbook_offers_the_data_mode(self):
+        book = {"tool_name": "Read", "tool_input": {"file_path": "/docs/b.xlsx"}}
+        self.assertIs(rc.verdict(book)["data"], True)
 
     def test_missing_converter_is_reported(self):
         with mock.patch.object(rc.shutil, "which", return_value=None):

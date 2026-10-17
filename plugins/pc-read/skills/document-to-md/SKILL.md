@@ -1,6 +1,6 @@
 ---
 name: document-to-md
-description: Read a heavy or binary local document — .docx, .pptx, .xlsx, .html, or a text-only .pdf — by converting it to Markdown first. Use whenever the user points at such a file on disk. Not for remote URLs, and not for spreadsheets that hold data rather than prose.
+description: Read a heavy or binary local document — .docx, .pptx, .xlsx, .html, or a text-only .pdf — by converting it to Markdown first. Use whenever the user points at such a file on disk. Not for remote URLs, and not for spreadsheets that hold data rather than prose (use data-schema).
 argument-hint: "<path-to-document>"
 allowed-tools: Bash(command -v markitdown:*), Bash(mktemp:*), Bash(markitdown:*), Read
 ---
@@ -16,11 +16,11 @@ Runs in the calling session on purpose — no fork: **you** must end up holding 
 | `.docx` `.pptx` `.xlsx` `.html` | **convert** — these cannot be read natively at all |
 | text-only `.pdf` | **convert** — native read works, Markdown is just lighter |
 | scanned / visual / layout-critical `.pdf` | **`Read` directly** — conversion mangles tables and OCRs scans |
-| `.csv` `.parquet`, or an `.xlsx` holding *data* | **neither** — see the carve-out below |
+| `.csv` `.parquet`, or an `.xlsx` holding *data* | **neither** — `pc-read:data-schema`, see the carve-out below |
 
 **The carve-out that matters: a document to read is not a dataset to query.** An `.xlsx` of specs or
 a data dictionary is prose, so it converts. An `.xlsx`/`.csv`/`.parquet` of *rows* must not be
-flattened into Markdown prose — query it (DuckDB, or `pinky dump` on this instance).
+flattened into Markdown prose — read its columns, types and first rows with the `data-schema` skill (`pc-read:data-schema`), then query it (DuckDB).
 
 ## Step 2 — Check the tool exists, then convert
 

@@ -10,6 +10,7 @@ const MAX_REMEMBERED = 50
 const SCAN_TIMEOUT_MS = 55_000
 // Une conversion de PDF lourd dépasse les 30 s par défaut d'un appel `$`.
 const CONVERT_TIMEOUT_MS = 300_000
+const SCHEMA_SCRIPT = 'skills/data-schema/scripts/data_schema.py'
 const INSTALL = "uv tool install 'markitdown[all]'"
 // Séquences ANSI, puis caractères de contrôle, de format (bidi) et séparateurs de ligne : le chemin vient du modèle
 // dont la lecture est jugée.
@@ -19,6 +20,7 @@ const UNSAFE = /\x1b\[[0-9;?]*[ -/]*[@-~]|[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu
 const MARKS = {
   read: { icon: '⚠︎', color: 'yellow' },
   convert: { icon: '⎘', color: 'cyan' },
+  schema: { icon: '▤', color: 'magenta' },
   allow: { icon: '✔︎', color: 'green' },
   deny: { icon: '✘', color: 'red' },
 } as const
@@ -45,9 +47,9 @@ export function parseVerdict(stdout: string): Omit<HeldRead, 'id' | 'file'> | nu
   } catch {
     return null
   }
-  const v = (data ?? {}) as { flagged?: unknown; path?: unknown; markitdown?: unknown }
+  const v = (data ?? {}) as { flagged?: unknown; path?: unknown; markitdown?: unknown; data?: unknown }
   if (v.flagged !== true || typeof v.path !== 'string' || typeof v.markitdown !== 'boolean') return null
-  return { path: v.path, convert: v.markitdown }
+  return { path: v.path, convert: v.markitdown, data: v.data === true }
 }
 
 async function verdictOf($: EngineInterface, path: string) {
@@ -81,6 +83,44 @@ async function privacyDecides($: EngineInterface, path: string): Promise<boolean
   }
 }
 
+// Le dossier publié par `pc-privacy`, ou `null` s'il est absent ou illisible.
+async function publishedPrivacyRoot($: EngineInterface): Promise<string | null> {
+  try {
+    const root = (await $.state.get(privacyRoot)).value
+    return typeof root === 'string' && root !== '' ? root : null
+  } catch {
+    return null
+  }
+}
+
+// Le chemin du Markdown du schéma et des premières lignes ; `null` si le dossier cible ne se crée pas ou si le script
+// échoue (le dossier est alors retiré). Le script redemande lui-même son verdict à `pc-privacy` : le verdict déjà rendu
+// est en cache, et une garde en échec lui fait taire les lignes.
+async function schemaTo($: EngineInterface, path: string): Promise<string | null> {
+  let markdown: string | null = null
+  try {
+    const made = await $.process.run(['python3', `${$.plugin.root}/hooks/read_cost.py`, '--target', path])
+    if (made.exitCode !== 0) return null
+    const target = (JSON.parse(made.stdout) as { markdown?: unknown }).markdown
+    if (typeof target !== 'string' || target === '') return null
+    markdown = target
+    const root = await publishedPrivacyRoot($)
+    const argv = ['uv', 'run', '--script', `${$.plugin.root}/${SCHEMA_SCRIPT}`, ...(root === null ? [] : ['--privacy-root', root]), '--out', markdown, '--', path]
+    const done = await $.process.run(argv, { timeoutMs: SCAN_TIMEOUT_MS + CONVERT_TIMEOUT_MS })
+    if (done.exitCode === 0) return markdown
+  } catch {
+    // échec ou délai dépassé : même sortie que l'échec ci-dessous
+  }
+  if (markdown !== null) {
+    try {
+      await $.process.run(['python3', `${$.plugin.root}/hooks/read_cost.py`, '--discard', markdown])
+    } catch {
+      // le dossier reste dans le répertoire temporaire du système
+    }
+  }
+  return null
+}
+
 // Le chemin du Markdown produit ; `null` si le dossier cible ne se crée pas ou si `markitdown` échoue (le dossier est
 // alors retiré : seul un Markdown produit reste sur disque).
 async function convertTo($: EngineInterface, path: string): Promise<string | null> {
@@ -107,7 +147,7 @@ async function convertTo($: EngineInterface, path: string): Promise<string | nul
   return null
 }
 
-type Choice = 'convert' | 'allow' | 'deny'
+type Choice = 'convert' | 'schema' | 'allow' | 'deny'
 const decisions = new Map<string, Choice>()
 const accepted = new Map<string, string>()
 
@@ -175,6 +215,9 @@ export const register: Register = on => {
     // le `ask` du hook et le dialogue natif s'appliquent tout de suite, sans attente.
     if (!(await $.session.surfaces()).some(s => s === 'terminal' || s === 'desktop')) return next(e)
 
+    // Une copie anonymisée par `pc-privacy` (`<nom>.anon.<ext>`) ne porte plus de donnée personnelle : rien à retenir.
+    if (e.file_path.split('/').pop()?.includes('.anon.')) return next(e)
+
     // `$.tool.check` ne voit pas le `ask` du hook Python : la lecture est retenue sauf refus du moteur ou verdict tiré
     // d'une règle des réglages, que l'accord ne lèverait pas.
     const engine = await $.tool.check({ tool: 'Read', input: { file_path: e.file_path } })
@@ -193,6 +236,14 @@ export const register: Register = on => {
     if (choice === 'allow') {
       remember(e.tool_use_id, e.file_path) // le chemin tel que le moteur le verra, pas sa forme normalisée
       return next(e)
+    }
+
+    if (choice === 'schema') {
+      const summary = await schemaTo($, verdict.path)
+      if (summary === null) {
+        return { deny: `The user asked for the schema and first rows of ${clean(verdict.path)} but it failed. Tell them and ask what to do instead.` }
+      }
+      return { deny: `The user chose to read the schema and first rows of ${clean(verdict.path)}: read ${summary} instead (column types and at most 5 rows per sheet; query the file for more).` }
     }
 
     const markdown = await convertTo($, verdict.path)
@@ -234,6 +285,7 @@ export const register: Register = on => {
         <Text wrap="truncate-end">{one.convert ? 'a native read loads the whole file into context' : `markitdown is not installed: ${INSTALL}`}</Text>
         <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={1}>
           {one.convert && choice('convert', MARKS.convert, 'convert to Markdown', '1', 'convert')}
+          {one.data && choice('schema', MARKS.schema, 'schema + first rows', '3', 'schema')}
           {choice('allow', MARKS.allow, 'read as-is', '2', 'allow')}
           {choice('deny', MARKS.deny, 'deny', '0', 'deny')}
         </Box>

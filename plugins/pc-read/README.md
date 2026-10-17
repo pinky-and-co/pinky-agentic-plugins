@@ -20,6 +20,15 @@ path); a `.pdf` or `.html` reads natively, markup included, and the saving there
 - `skills/document-to-md/` converts a document with `markitdown` and reads the Markdown, in the
   calling session. Without `markitdown` it falls back to `Read` and says how to install it.
 
+## Data files
+
+The `data-schema` skill (`skills/data-schema/scripts/data_schema.py`, `uv run --script`, PEP 723
+dependencies) prints the sheets, the columns with their type and at most 5 rows per sheet of a
+`.xlsx`, `.csv` or `.parquet`. The sample does not go through `Read`, so the script asks
+`pc-privacy`'s `pii_guard.py --verdict` first (the folder given by `--privacy-root`, else the
+`pc-privacy` entry of `installed_plugins.json`): a flagged file, or a guard that fails, times out or
+answers something else than JSON, gives the schema alone; no `pc-privacy` gives the sample.
+
 ## Read band
 
 For a `Read` the hook flags, a mod (`hooks/read-cost-hold/register.tsx`, written for the Claude Code
@@ -31,6 +40,9 @@ format (the first press wins):
   `Read` naming the Markdown file; the next read is of that file, whose suffix is not costly. Hidden
   when `markitdown` is not on the PATH: the band then says how to install it
   (`uv tool install 'markitdown[all]'`). A conversion that fails refuses the `Read` and says so.
+- `▤ schema + first rows` (`3`), for a `.xlsx` only: runs the `data-schema` script into a fresh private
+  folder, then refuses the `Read` naming that Markdown (column types and at most 5 rows per sheet).
+  The `.csv` and `.parquet` formats are not held by the band; they use the skill directly.
 - `✔︎ read as-is` (`2`) lifts the hook's `ask` for this call only: the same file read again is held
   again.
 - `✘ deny` (`0`) refuses the `Read`; Claude asks what to do instead.
