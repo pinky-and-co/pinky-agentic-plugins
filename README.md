@@ -114,6 +114,12 @@ pinky-agentic-plugins/
 │   │   │       ├── run.py
 │   │   │       └── standalone.py
 │   │   ├── hooks/
+│   │   │   ├── subagent-routing/
+│   │   │   │   ├── classify.py
+│   │   │   │   ├── grid.json
+│   │   │   │   ├── journal.py
+│   │   │   │   ├── register.tsx
+│   │   │   │   └── tiers.ts
 │   │   │   ├── hooks.json
 │   │   │   ├── inject_policies.py
 │   │   │   ├── keychain.py
@@ -145,7 +151,12 @@ pinky-agentic-plugins/
 │   │   │   │   └── SKILL.md
 │   │   │   └── review-guidelines/
 │   │   │       └── SKILL.md
-│   │   └── README.md
+│   │   ├── tests/
+│   │   │   └── subagent-routing.test.tsx
+│   │   ├── types/
+│   │   │   └── index.d.ts
+│   │   ├── README.md
+│   │   └── tsconfig.json
 │   ├── pc-craft/
 │   │   └── skills/
 │   │       ├── code-conventions/
@@ -296,6 +307,8 @@ pinky-agentic-plugins/
 │   │   │   │   └── card_discipline.py
 │   │   │   ├── card-ops/
 │   │   │   │   └── pc_kanban_card_ops.py
+│   │   │   ├── card-routing/
+│   │   │   │   └── pc_kanban_card_routing.py
 │   │   │   ├── guard-state/
 │   │   │   │   ├── pc_kanban_guard_env_hook.py
 │   │   │   │   ├── pc_kanban_guard_session_hook.py
@@ -569,6 +582,7 @@ pinky-agentic-plugins/
 │   ├── test_orchestrator_freeze.py
 │   ├── test_pc_core_server_offline.py
 │   ├── test_pc_kanban_card_ops.py
+│   ├── test_pc_kanban_card_routing.py
 │   ├── test_pc_kanban_init.py
 │   ├── test_pc_kanban_migrate_agent_log.py
 │   ├── test_pc_kanban_requirement_rows.py
@@ -608,6 +622,7 @@ pinky-agentic-plugins/
 │   ├── test_stop_handoff.py
 │   ├── test_story_view.py
 │   ├── test_structure_guard.py
+│   ├── test_subagent_routing_classify.py
 │   ├── test_subagent_statusline.py
 │   ├── test_subtree.py
 │   └── test_sync_plugin_scope.py

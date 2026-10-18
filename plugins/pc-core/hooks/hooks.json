@@ -1,5 +1,5 @@
 {
-  "description": "Injects per-repo resolved policies (language, branch) before every write, surfaces the just-edited file's own checker findings, reinforces a custom output style every turn — see inject_policies.py, post_edit_lint.py, structure_guard.py, style_reminder.py",
+  "description": "Injects per-repo resolved policies (language, branch) before every write, surfaces the just-edited file's own checker findings, reinforces a custom output style every turn — see inject_policies.py, post_edit_lint.py, structure_guard.py, style_reminder.py. A mod (subagent-routing/register.tsx) holds each Agent call whose model the session chooses, proposes the model and effort a classifier ranks for its task in a band above the prompt, and lets the call leave with the user's pick, or with the proposal after 60 s or where no band is drawn",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -46,5 +46,8 @@
         ]
       }
     ]
-  }
+  },
+  "modules": [
+    "./subagent-routing/register.tsx"
+  ]
 }

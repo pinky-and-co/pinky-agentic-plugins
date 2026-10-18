@@ -70,7 +70,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     A reviewed card with no ADR candidate can skip `4-done/`: the command archives straight from
     `3-in-progress/` and refuses an unchecked `reviewed` box.
 6. **Resolve `model:`, then pick the next move.**
-  - Missing `model:` on a selected/in-progress card → propose one and say why.
+  - Missing `model:` on a selected/in-progress card → run the classifier on it
+    (`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/card-routing/pc_kanban_card_routing.py" <card>`); never pick one.
   - Card `model:` stronger than the session's → call `advisor` once at framing, before writing
     anything, and say so ("card = `<model>`, session = `<current>` → advisor()"). Never ask the user
     to switch models; propose `/model` only if they ask for a session-wide change.
@@ -230,7 +231,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   | Depends on design reasoning that worker carries | Same worker (`SendMessage`) |
   | Localised and readable in the diff | Fresh worker: a new `Agent(subagent_type: "pc-kanban:card-worker")` |
 
-  - A fresh worker runs `sonnet`/`medium`, or the card's `model:` when lower, never above it; model
+  - A fresh worker runs the card's `model:`/`effort:`; model
     or effort climb only after a fresh pass missed its rework. Its prompt is the one the script
     prints (not the `spawn-workers` skill):
     `python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_workers.py"

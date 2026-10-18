@@ -528,8 +528,8 @@ def build_worker_prompt(
 
 
 def effective_model(card_model: str, requested: str | None) -> str:
-    """The model tier for the Agent call: the caller's own judgment on how briefed the card
-    already is, or the card's own `model:` frontmatter when the caller passes none.
+    """The model tier for the Agent call: the card's own `model:` (written by the classifier),
+    or the call-time `--model` replacing it.
 
     Args:
         card_model: the card's `model:` alias, or "".
