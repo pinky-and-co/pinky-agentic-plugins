@@ -18,7 +18,7 @@ Run the verb only on the user's word, never on your own initiative.
 
 | Verb | Looks in | Does |
 |---|---|---|
-| `select` | `1-todo/` | Moves to `2-selected-for-dev/` and sets `date:` — after checking that the card traces to at least one requirement defined in an open card's `## Requirements` of its chantier, has a valid `model` (and a valid `effort`, when set), a `## Done when`, and that any `blocked_by` card is done. Every unmet condition is listed. `--force` skips the requirements check only — a card that deserves no requirement of its own; the other conditions still apply. |
+| `select` | `1-todo/` | Moves to `2-selected-for-dev/` and sets `date:` — after checking that the card traces to at least one requirement defined in an open card's `## Requirements` of its chantier, has a `model` (classified and written when absent; a classifier failure refuses) valid (and a valid `effort`, when set), a `## Done when`, and that any `blocked_by` card is done. Every unmet condition is listed. `--force` skips the requirements check only — a card that deserves no requirement of its own; the other conditions still apply. |
 | `archive` | `4-done/`, `3-in-progress/` | dated archive, reviewed-box check, then the closing sequence (open cards, next-card candidates, session recommendation) — the card's requirements leave with it: move a row another open card still cites into that card first. A card carrying a durable decision needs its ADR first. |
 | `drop` | `0-ideas/` to `3-in-progress/` | `-dropped` archive, the reason appended — the card's requirements leave with it. When the need survives the card, move its `## Requirements` rows into the card taking the need over first. |
 
@@ -37,6 +37,7 @@ error. Take it from there instead of relaying it:
 - **Unknown or ambiguous slug, unknown verb** — look for the closest card name or verb the user meant
   and ask which one; never pick one yourself. An ambiguous slug is refused with the `<id>/<slug>`
   form of each match: ask which one, then run the verb with that form.
-- **`select` refused as incomplete** — propose the fix for each listed condition (a `model:` with the
-  reason, the requirements to trace, a `## Done when`) and apply it only on the user's OK, then
+- **`select` refused as incomplete** — propose the fix for each listed condition (the requirements to
+  trace, a `## Done when`; a missing `model:` is classified by `select` itself, and a classifier
+  failure is reported, not worked around by writing one) and apply it only on the user's OK, then
   select again. A blocker that is not done, or was dropped, is the user's call.

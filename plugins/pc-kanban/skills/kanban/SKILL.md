@@ -73,7 +73,7 @@ YAML, one card = one file. Frontmatter carries only what a script or a hook reso
 date: YYYY-MM-DD       # meaning is implied by the column folder — see table below
 priority: 1-5          # 1 (low) to 5 (urgent); omitted = 3
 repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-server]; [] or omitted = kanban-only
-model: haiku | sonnet | opus | fable   # the floor this work needs — never a tier label to map
+model: haiku | sonnet | opus | fable   # written by the classifier, never chosen by a session
 effort: low | medium | high | xhigh | max   # optional — how hard the worker reasons; absent = inherit the session
 mockup: /abs/path | ~/path   # optional — a file, folder or .zip holding the mocked-up rendering
 mockup_fidelity: [layout=strict, design=free]   # optional, needs mockup — axe=niveau items
@@ -109,13 +109,15 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   scales its threshold from it (`stop_handoff.py`). Independent of `sert` — a child never inherits
   its parent's `priority`, no auto-propagation.
 
-- **`model`** — a floor, never a ceiling: the minimum a session needs before taking this card.
-  A direct model alias (`haiku`/`sonnet`/`opus`/`fable`), never a tier name to resolve through a
-  mapping table. Mandatory from `selected` onward; missing on a selected card → propose
-  one and say why, never guess silently. A heterogeneous card tiers its bulk on `model:` and
+- **`model`** — the model the card's work needs, written by pc-core's routing classifier
+  (`hooks/card-routing/pc_kanban_card_routing.py`) at the end of the grill or by `select`, never
+  chosen by a session. A direct model alias (`haiku`/`sonnet`/`opus`/`fable`), never a tier name
+  to resolve through a mapping table. Mandatory from `selected` onward; `select` classifies a card
+  that has none and refuses when the classifier fails. A heterogeneous card tiers its bulk on `model:` and
   overrides outlier checklist items inline (`- [ ] (opus) arbitrate the placement`).
 
-- **`effort`** — optional, the reasoning effort a worker is asked for: `low`, `medium`, `high`,
+- **`effort`** — the reasoning effort a worker is asked for, written by the classifier with
+  `model:`, never chosen by a session: `low`, `medium`, `high`,
   `xhigh` or `max` (no `auto`). Absent = nothing imposed, the worker inherits the session's.
   `select` refuses any other value. `spawn-workers` passes it to the `Agent` call (and
   `claude --effort` on `--cmux`); `--effort` overrides it at call time.

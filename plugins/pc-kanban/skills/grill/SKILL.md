@@ -2,7 +2,7 @@
 name: grill
 description: Interview a plan, an idea or an imported brief until nothing is silently assumed, then write the result into the chantier's cards — numbered, verifiable requirements, open questions and steps, each in the card that carries it. Use before starting a chantier, to stress-test a design, or to land an external brainstorm (written elsewhere, in another tool) into the board.
 argument-hint: "[<path-to-an-existing-brief>] [free-text idea]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(rtk ls:*), Bash(find:*), Bash(rtk find:*), Bash(rg:*), Bash(rtk rg:*), Bash(git log:*), Bash(git -C * log*), Bash(rtk git -C * log*), Bash(rtk git log:*), Bash(git remote:*), Bash(git -C * remote*), Bash(command -v:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(ls:*), Bash(rtk ls:*), Bash(find:*), Bash(rtk find:*), Bash(rg:*), Bash(rtk rg:*), Bash(git log:*), Bash(git -C * log*), Bash(rtk git -C * log*), Bash(rtk git log:*), Bash(git remote:*), Bash(git -C * remote*), Bash(command -v:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/card-routing/pc_kanban_card_routing.py:*), AskUserQuestion
 ---
 
 # Grill
@@ -125,6 +125,12 @@ document), moves to `1-todo` on convergence — `date:` set to today, its `## Re
 `requirements:` listing the ids it now traces to. Never `drop` it: `kanban`'s drop mechanism is for a card confirmed
 obsolete, never for one whose own open questions the interview just closed. Document-mode input has
 no source card to move.
+
+**`model:`/`effort:`, at convergence.** For each card written or moved, run
+`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/card-routing/pc_kanban_card_routing.py" <card>`: the pc-core
+classifier reads the card and the script sets `model:`/`effort:` in its frontmatter. Never write
+them yourself, and no marker. A failure is reported as is, the card keeps what it had, and `select`
+retries later.
 
 No dated decision block, no state dump — a closed grill folds into the cards' `## Requirements` and
 `## Open questions`.

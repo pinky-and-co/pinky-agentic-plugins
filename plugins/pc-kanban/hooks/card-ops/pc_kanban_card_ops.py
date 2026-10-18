@@ -32,6 +32,9 @@ sys.path.insert(0, str(PLUGIN_ROOT / "skills" / "kanban" / "scripts"))
 import next_card_recommendation as ncr  # noqa: E402
 import open_cards_brief as ob  # noqa: E402
 
+sys.path.insert(0, str(PLUGIN_ROOT / "hooks" / "card-routing"))
+import pc_kanban_card_routing as routing  # noqa: E402
+
 sys.path.insert(0, str(PLUGIN_ROOT / "hooks" / "requirement-rows"))
 from pc_kanban_requirement_rows import READ_COLUMNS, holders  # noqa: E402
 
@@ -330,7 +333,15 @@ def select(card: Path, boards: list[Path], force: bool = False) -> int:
         The exit status; 1 when a selection condition is unmet or the target exists.
     """
     text = card.read_text(encoding="utf-8")
+    unclassified = ""
+    if field(frontmatter(text), "model") in EMPTY:
+        unclassified = routing.write_routing(card).error
+        if not unclassified:
+            text = card.read_text(encoding="utf-8")
     problems = selection_problems(card, text, boards, force)
+    if unclassified:
+        problems = [p for p in problems if not p.startswith("no valid `model:`")]
+        problems.append(f"no `model:`, and {unclassified}")
     dest = card.parent.parent / "2-selected-for-dev" / card.name
     if dest.exists():
         problems.append(f"{dest} already exists")

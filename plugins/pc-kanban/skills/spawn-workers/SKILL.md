@@ -32,7 +32,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/spawn-workers/scripts/pc_kanban_spawn_work
    --- prompt ---
    <the two-block prompt>
    ```
-   `<tier>` is `--model` when given, else the card's own `model:` frontmatter (`effective_model`).
+   `<tier>` is the card's own `model:` frontmatter, written by the classifier (`effective_model`); `--model` replaces it at call time only.
    `effort:` is `--effort` when
    given, else the card's own `effort:` (`low|medium|high|xhigh|max`); no line when neither is set. The
    prompt (`build_worker_prompt`) is two blocks:

@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "default": "logic",
+  "efforts_note": "Effort follows the cost of a wrong answer: routine work gets low, ordinary engineering logic medium, open-ended or high-stakes work high. A category is one (model, effort) pair.",
+  "categories": {
+    "routine": {
+      "model": "haiku",
+      "effort": "low",
+      "description": "everything to do is written down; the change is mechanical or repetitive (apply a known pattern, rename, shorten, archive, tests for a given function); no design choice is left; the checks are given commands"
+    },
+    "logic": {
+      "model": "sonnet",
+      "effort": "medium",
+      "description": "the goal and the decisions are settled, but the work needs reading the code, finding where to change it, and writing code and tests across several files"
+    },
+    "hard": {
+      "model": "opus",
+      "effort": "high",
+      "description": "the task itself leaves something open: an unknown cause to find, a choice between options, an unresolved trade-off, concurrency or security, or a design spanning several systems"
+    }
+  }
+}

@@ -9,6 +9,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 SCRIPT = (
     Path(__file__).parent.parent
     / "plugins"
@@ -25,6 +27,15 @@ card_ops = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(card_ops)
 
 DEFINER = "# D\n\n## Requirements\n\n| Id | P | E | C |\n|---|---|---|---|\n| PKG-0001-01 | MUST | x | y |\n"
+
+
+@pytest.fixture(autouse=True)
+def _no_classifier(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Point `select` at an absent pc-core so a card without `model:` is refused offline."""
+    monkeypatch.setenv("PC_CORE_ROOT", str(tmp_path_factory.mktemp("nocore")))
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
 
 
 def _run(board: Path, *args: str) -> subprocess.CompletedProcess[str]:
