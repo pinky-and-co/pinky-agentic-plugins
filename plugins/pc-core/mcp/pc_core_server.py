@@ -36,7 +36,6 @@ import model_adversarial
 import model_offline
 import model_panel
 import model_sanitize
-import review_complexity
 from mcp.server import MCPServer
 from mcp.server.context import DispatchContext
 
@@ -174,14 +173,12 @@ def adversarial(
     model: str | None = None,
     stack: str | None = None,
     tier: str | None = None,
-    diff: str | None = None,
     tools: list[str] | None = None,
     base: str | None = None,
     scope: Literal["all", "staged", "unstaged"] = "all",
 ) -> str:
-    """Contrarian second opinion on a change from a non-Claude model — called by the `reviewer`
-    agent, which decides whether a review needs it; a session asking for a review spawns that agent
-    rather than calling this directly.
+    """Contrarian second opinion on a change from a non-Claude model — called directly by the
+    session that asks for a review of a change.
 
     Pass the intent and what to attack as `task` (plus source files, or `base`) — a same-model
     self-check inherits its own blind spots, which is exactly what this tool exists to avoid. Tries
@@ -195,10 +192,10 @@ def adversarial(
     methodology, since the pool model cannot invoke a skill itself. Omitted → inferred from import
     markers in `files`.
 
-    Choice rule: a change with a diff always comes here — the reviewer reviews alone only a claim
-    with no diff, or when this tool answers `BLOCKED` or `ERROR`. Whatever the path (no diff given
-    to the tool, tier derived from the diff, explicit `tier`), the model is `sonnet` tier or above,
-    never `haiku`; only `model` bypasses that floor.
+    Choice rule: a change with a diff always comes here, called by the session itself; the
+    `reviewer` agent takes only a claim with no diff, or a change on which this tool answered
+    `BLOCKED` or `ERROR`. Whatever the path, the model is `sonnet` tier or above, never `haiku`;
+    only `model` bypasses that floor.
 
     `model` names a pool entry first — used as is, which also bypasses the tier floor — and
     otherwise is a model id at the built-in nvidia provider.
@@ -208,8 +205,7 @@ def adversarial(
 
     `tier` (`haiku` / `sonnet` / `opus`) routes to the cheapest pool entry at or above that
     capacity (raised to `sonnet` when lower) — free before paid — instead of the default
-    adversarial selection. `diff` (a path to a unified diff) derives that tier deterministically
-    from the change size and risk factors when `tier` is not passed explicitly.
+    adversarial selection.
 
     `tools` (pi tool names, e.g. `["read", "grep"]`) lets the model open files itself; omitted →
     no tools, the model sees only the prompt and the inlined `files`.
@@ -217,10 +213,10 @@ def adversarial(
     `base` (a branch or ref, e.g. `main`; `HEAD` for work not yet committed) makes the tool compute
     the change under review itself: everything this work changed since it forked from `base` —
     commits, staged and unstaged edits, untracked files that are not git-ignored — is appended to
-    the prompt, and so leaves the machine, and used to route the tier; the caller needs no diff
-    file. It diffs the repository of this session's project directory, and names it in its
-    messages. It takes precedence over `diff`. `scope` narrows it: `staged` (fork point → index),
-    `unstaged` (index → working tree, untracked files included), or `all` (the default).
+    the prompt, and so leaves the machine; the caller needs no diff file. It diffs the repository
+    of this session's project directory, and names it in its messages. `scope` narrows it: `staged`
+    (fork point → index), `unstaged` (index → working tree, untracked files included), or `all`
+    (the default).
     """
     files = files or []
     override = model_adversarial.resolve_model(model)
@@ -237,15 +233,8 @@ def adversarial(
             return f"[adversarial] ERROR — cannot diff against {base!r} in {repo}: {e}"
         if not diff_text.strip():
             return f"[adversarial] nothing to review — no change against {base!r} in {repo}."
-    elif diff:
-        try:
-            diff_text = Path(diff).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            diff_text = None
 
     resolved_tier = tier if tier in model_adversarial._TIER_RANK else None
-    if resolved_tier is None and diff_text:
-        resolved_tier = review_complexity.tier_for(diff_text)
 
     if override:
         named = next(

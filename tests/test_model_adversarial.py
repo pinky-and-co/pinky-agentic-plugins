@@ -1477,7 +1477,7 @@ def _server():
     return pc_core_server
 
 
-def test_adversarial_tool_with_base_reviews_the_computed_diff_and_routes_its_tier(
+def test_adversarial_tool_with_base_reviews_the_computed_diff_with_the_default_selection(
     monkeypatch,
 ):
     server = _server()
@@ -1490,15 +1490,12 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_and_routes_its_tie
         server.model_adversarial, "diff_against", lambda base, scope="all": small_diff
     )
     monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
-    monkeypatch.setattr(server.review_complexity, "tier_for", lambda d: "opus")
 
-    def fake_select(pool, tier, floor_tier="haiku", rng=None):
-        seen["tier"] = tier
+    def fake_select(pool, floor_tier="sonnet", rng=None):
+        seen["selected"] = True
         return [MISTRAL]
 
-    monkeypatch.setattr(
-        server.model_adversarial, "select_for_delegation_with_fallback", fake_select
-    )
+    monkeypatch.setattr(server.model_adversarial, "select_for_adversarial", fake_select)
 
     def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
         seen["prompt"] = prompt
@@ -1509,7 +1506,7 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_and_routes_its_tie
     out = server.adversarial(task="review this", base="main")
 
     assert out.startswith("[answered by ")
-    assert seen["tier"] == "opus"
+    assert seen["selected"]
     assert "--- DIFF against main in /work/repo ---\n" + small_diff in seen["prompt"]
 
 
@@ -1706,15 +1703,17 @@ def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
     assert isinstance(seen["rng"], random.Random)
 
 
-def _heads_served_for_a_diff(monkeypatch, tmp_path, pool, calls=20):
+def _heads_served_for_a_diff(monkeypatch, pool, calls=20):
     """The entry opening the candidate list at each of `calls` calls of the `adversarial` tool
     carrying a diff — the real selector runs, only the pool read and the model call are faked."""
     server = _server()
-    diff = tmp_path / "change.diff"
-    diff.write_text(
-        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n",
-        encoding="utf-8",
+    small_diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
     )
+    monkeypatch.setattr(
+        server.model_adversarial, "diff_against", lambda base, scope="all": small_diff
+    )
+    monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
     draws = iter(random.Random(seed) for seed in range(calls))
     heads: list[str] = []
 
@@ -1730,31 +1729,31 @@ def _heads_served_for_a_diff(monkeypatch, tmp_path, pool, calls=20):
     monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
 
     for _ in range(calls):
-        server.adversarial(task="review", diff=str(diff))
+        server.adversarial(task="review", base="main")
     return heads
 
 
 def test_adversarial_tool_with_a_diff_draws_among_entries_of_equal_priority(
-    monkeypatch, tmp_path
+    monkeypatch,
 ):
     pool = [
         _entry("ol-a", "ollama-cloud", priority=1),
         _entry("ol-b", "ollama-cloud", priority=1),
         _entry("ol-c", "ollama-cloud", priority=1),
     ]
-    heads = _heads_served_for_a_diff(monkeypatch, tmp_path, pool)
+    heads = _heads_served_for_a_diff(monkeypatch, pool)
     assert set(heads) == {"ol-a", "ol-b", "ol-c"}
 
 
 def test_adversarial_tool_with_a_diff_opens_on_the_higher_priority_entry(
-    monkeypatch, tmp_path
+    monkeypatch,
 ):
     pool = [
         _entry("ol-a", "ollama-cloud", priority=1),
         _entry("ol-b", "ollama-cloud", priority=1),
         _entry("ol-top", "ollama-cloud", priority=2),
     ]
-    heads = _heads_served_for_a_diff(monkeypatch, tmp_path, pool)
+    heads = _heads_served_for_a_diff(monkeypatch, pool)
     assert set(heads) == {"ol-top"}
 
 

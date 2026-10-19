@@ -58,8 +58,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/reintegrate/scripts/close_cards.py" covere
 Exit 0 prints the covered slugs. Exit 3 means the file is absent: the output lists this repo's
 `exported:` cards in `3-in-progress` — ask the user which of them the return covers.
 
-**Review.** Once the verify loop is green, spawn `Agent(reviewer)` (pc-core) on the diff. Skip it
-only when every change is mechanical (formatting, import order, comments-only files). A KO verdict:
+**Review.** Once the verify loop is green, call the `adversarial` MCP tool (pc-core) on the diff — `base` the branch it forks from,
+`tools: ["read", "grep"]`, `task` the covered cards' `## Why` and `## Done when`, as
+`finishing-a-card.md` § "Reviewing before declaring a card done" details; `Agent(reviewer)` only
+when it answers `BLOCKED` or `ERROR`. Skip it only when every change is mechanical (formatting, import order, comments-only files). A KO verdict:
 fix, then review again — at most 2 re-reviews, then stop and report to the user. When the review is
 OK, check the `reviewed (<method>)` box of each covered card; when the review was skipped as
 mechanical, check it as `reviewed (n/a — mechanical)`.
