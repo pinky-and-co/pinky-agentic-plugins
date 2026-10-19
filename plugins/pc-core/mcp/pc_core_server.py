@@ -18,6 +18,7 @@ install step for the plugin installer beyond having `uv`.
 
 from __future__ import annotations
 
+import contextvars
 import functools
 import random
 import subprocess
@@ -37,19 +38,65 @@ import model_panel
 import model_sanitize
 import review_complexity
 from mcp.server import MCPServer
+from mcp.server.context import DispatchContext
 
 m = MCPServer("pc-core-models")
 
 _T = TypeVar("_T")
+
+_CALL_ID = contextvars.ContextVar("pc_core_call_id", default="")
+
+#: Request ids the client sent a cancellation for — read by `served` as it unwinds, to tell a
+#: peer cancellation from a closed channel apart in the kill log.
+_PEER_CANCELLED: set[str] = set()
+
+
+def _report(line: str) -> None:
+    """One stderr line from the server: the allowlisted fields only (call id, pid, reason)."""
+    print(f"pc-core: {line}", file=sys.stderr, flush=True)
+
+
+async def _watch_calls(ctx: DispatchContext, call_next: Callable[..., Any]) -> Any:
+    """Carry each inbound message, logging the cancellations the client sends.
+
+    The request id of a `tools/call` becomes the current call id for everything the request runs
+    (the kill log names it), and a `notifications/cancelled` is reported as received before it is
+    forwarded. Anything else passes through untouched.
+
+    Args:
+        ctx: the inbound message, before validation.
+        call_next: the rest of the middleware chain, ending at the handler.
+
+    Returns:
+        What the handler returns; None for a notification.
+    """
+    if ctx.method == "notifications/cancelled":
+        call_id = str((ctx.params or {}).get("requestId", ""))
+        _PEER_CANCELLED.add(call_id)
+        _report(f"call id={call_id} cancel received")
+        return await call_next(ctx)
+    if ctx.method != "tools/call":
+        return await call_next(ctx)
+    token = _CALL_ID.set(str(ctx.request_id))
+    try:
+        return await call_next(ctx)
+    finally:
+        _CALL_ID.reset(token)
+
+
+m.middleware.append(_watch_calls)
 
 
 def _tool(fn: Callable[..., _T]) -> Callable[..., _T]:
     """Register `fn` as a tool of this server whose `pi` processes die with their call.
 
     The tool is served by an async wrapper that runs `fn` in a worker thread under its own
-    `call_scope.CallScope`, and stops waiting for that thread as soon as the call is cancelled.
-    The scope then kills every `pi` the call started and lets it start no other. `fn` itself is
-    returned unchanged, so it stays a plain function for a direct caller.
+    `call_scope.CallScope`, and stops waiting for that thread as soon as the call is cancelled —
+    by the client, by the channel closing, or by the wall-clock cap (`PC_CORE_CALL_TIMEOUT_S`):
+    a client that gives up without closing the channel sends nothing, so the cap is the only
+    trigger left, and it cancels the whole scope, not one `pi`. The scope then kills every `pi`
+    the call started, lets it start no other, and reports each kill. `fn` itself is returned
+    unchanged, so it stays a plain function for a direct caller.
 
     Args:
         fn: the tool's implementation.
@@ -60,14 +107,26 @@ def _tool(fn: Callable[..., _T]) -> Callable[..., _T]:
 
     @functools.wraps(fn)
     async def served(**kwargs: Any) -> Any:
-        scope = call_scope.CallScope()
+        scope = call_scope.CallScope(call_id=_CALL_ID.get())
+        cap = call_scope.call_timeout()
         try:
-            return await anyio.to_thread.run_sync(
-                functools.partial(call_scope.run_in, scope, fn, **kwargs),
-                abandon_on_cancel=True,
+            with anyio.move_on_after(cap):
+                return await anyio.to_thread.run_sync(
+                    functools.partial(call_scope.run_in, scope, fn, **kwargs),
+                    abandon_on_cancel=True,
+                )
+            scope.cancel("wall-cap")
+            _report(f"call id={scope.call_id} cancelled reason=wall-cap")
+            return (
+                f"[{fn.__name__}] ERROR — wall-clock cap ({cap:.0f}s) reached, "
+                "every pi of this call was killed."
             )
         finally:
-            scope.cancel()
+            # Une annulation du pair peut arriver pendant le déroulement : le motif « cancelled »
+            # se lit alors dans la ligne « cancel received » du même id.
+            peer_cancelled = scope.call_id in _PEER_CANCELLED
+            _PEER_CANCELLED.discard(scope.call_id)
+            scope.cancel("cancelled" if peer_cancelled else "closed-channel")
 
     m.add_tool(served)
     return fn
