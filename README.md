@@ -135,6 +135,8 @@ pinky-agentic-plugins/
 │   │   │   ├── model_offline.py
 │   │   │   ├── model_panel.py
 │   │   │   ├── model_sanitize.py
+│   │   │   ├── model_tier_probe.py
+│   │   │   ├── model_tools_verdict.py
 │   │   │   ├── pc_core_server.py
 │   │   │   ├── pi_events_view.py
 │   │   │   └── pi_guardian.py
@@ -577,6 +579,7 @@ pinky-agentic-plugins/
 │   ├── test_model_offline.py
 │   ├── test_model_panel.py
 │   ├── test_model_sanitize.py
+│   ├── test_model_tier_probe.py
 │   ├── test_next_card_recommendation.py
 │   ├── test_open_cards_brief.py
 │   ├── test_orchestrator_freeze.py

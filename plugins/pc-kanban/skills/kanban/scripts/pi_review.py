@@ -80,7 +80,11 @@ REVIEW_TOOLS = ["read"]
 
 def review_candidates(pool: list[dict]) -> list[dict]:
     """Cheap candidates `pi` can call with a read tool: `kind == "cli"` only, local-first."""
-    return [e for e in ma.select_for_delegation(pool, "haiku") if e["kind"] == "cli"]
+    return [
+        e
+        for e in ma.select_for_delegation(pool, "haiku", tools=REVIEW_TOOLS)
+        if e["kind"] == "cli"
+    ]
 
 
 def review_point(

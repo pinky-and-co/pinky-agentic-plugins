@@ -28,6 +28,7 @@ def _isolate_pool_log(monkeypatch, tmp_path):
     session log."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +44,7 @@ def _no_ambient_decision_gate(monkeypatch):
     """The `pii_guard` decision gate is off unless a test sets its variables — a developer who
     runs a local decision server would otherwise send every test digest to it."""
     monkeypatch.delenv("ONE_DECISION_MODEL", raising=False)
-    monkeypatch.delenv("ONE_DECISION_URL", raising=False)
+    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL", raising=False)
 
 
 @pytest.fixture(autouse=True)

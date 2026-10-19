@@ -14,8 +14,8 @@ builds the prompt the models were trained on, and returns a probability (1 = yes
 holds personal data) instead of a letter. A file is blocked when that probability reaches
 `--threshold`.
 
-The server address comes from `ONE_DECISION_URL` (default `http://127.0.0.1:11234`), on a
-loopback host only, like the gate itself. The file name is never sent. Prints file names,
+The server address comes from `decision_gate.resolve_base_url()` (the `LOCAL_INFERENCE_BASE_URL`
+variable), on a loopback host only, like the gate itself. The file name is never sent. Prints file names,
 labels, probabilities and timings only; the sampled values go to the local oMLX server, on
 this machine.
 """
@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
-import os
 import sys
 import time
 import urllib.parse
@@ -51,10 +50,11 @@ def _base() -> urllib.parse.SplitResult | None:
     """The oMLX base URL, as a loopback http(s) split or None when it is not one.
 
     Returns:
-        The parsed base URL from `ONE_DECISION_URL` or the default, or None when the host is
-        not loopback.
+        The parsed resolved base URL, or None when none resolves or the host is not loopback.
     """
-    raw = os.environ.get(decision_gate.URL_ENV) or decision_gate.DEFAULT_URL
+    raw = decision_gate.resolve_base_url()
+    if raw is None:
+        return None
     try:
         parts = urllib.parse.urlsplit(raw)
     except ValueError:
@@ -200,9 +200,8 @@ def main() -> int:
     parts = _base()
     if parts is None:
         print(
-            f"{os.environ.get(decision_gate.URL_ENV) or decision_gate.DEFAULT_URL} is not "
-            "a loopback http(s) URL: the eval sends file values, it only talks to a local "
-            "server"
+            f"{decision_gate.resolve_base_url() or 'no server address'} is not a loopback "
+            "http(s) URL: the eval sends file values, it only talks to a local server"
         )
         return 2
     try:

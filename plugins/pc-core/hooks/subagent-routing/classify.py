@@ -10,8 +10,8 @@ line `{"category", "model", "effort", "model_id", "probabilities"}`. Any failure
 as 507 when memory is short, unparsable answer, category outside the grid) prints the grid's
 default category with an `error` field and exits 0, so a caller always gets a usable routing.
 
-Server: `ONE_DECISION_URL` (loopback hosts only, default `http://127.0.0.1:11234`), redirects
-refused. Model: `--model`, else `ONE_DECISION_MODEL`, else `clef-flash-4bit`. No timeout unless
+Server: `LOCAL_INFERENCE_BASE_URL` (`http://host:port` without `/v1`, loopback hosts only, no built-in default; unset or empty means
+no server), redirects refused. Model: `--model`, else `ONE_DECISION_MODEL`, else `clef-flash-4bit`. No timeout unless
 `--timeout` is given.
 
 The grid is `grid.json` next to this file; a repo overrides it with `subagent_routing.grid` in its
@@ -41,8 +41,7 @@ GRID_PATH = Path(__file__).resolve().parent / "grid.json"
 MODELS = ("haiku", "sonnet", "opus")
 EFFORTS = ("low", "medium", "high")
 MODEL_ENV = "ONE_DECISION_MODEL"
-URL_ENV = "ONE_DECISION_URL"
-DEFAULT_URL = "http://127.0.0.1:11234"
+URL_ENV = "LOCAL_INFERENCE_BASE_URL"
 DEFAULT_MODEL = "clef-flash-4bit"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 MAX_RESPONSE_BYTES = 1_000_000
@@ -114,6 +113,15 @@ def load_grid(repo_root: Path) -> dict:
     if override is not None and valid_grid(override):
         return override
     return json.loads(GRID_PATH.read_text())
+
+
+def resolve_base_url() -> str | None:
+    """Read the local inference server address from `LOCAL_INFERENCE_BASE_URL`, no default.
+
+    Returns:
+        The variable's value, or None when it is unset or empty.
+    """
+    return os.environ.get(URL_ENV) or None
 
 
 def is_loopback(url: str) -> bool:
@@ -221,7 +229,7 @@ def classify(
     task: str,
     model: str,
     grid: dict,
-    base_url: str = DEFAULT_URL,
+    base_url: str | None,
     timeout: int | None = None,
 ) -> dict[str, Any]:
     """Classify `task` and return the routing result, falling back to the grid default.
@@ -230,7 +238,7 @@ def classify(
         task: the task text.
         model: the decision-model id.
         grid: a valid grid.
-        base_url: the oMLX server, loopback hosts only.
+        base_url: the oMLX server, loopback hosts only; None when no address could be resolved.
         timeout: seconds before giving up; None (default) means no cap.
 
     Returns:
@@ -240,7 +248,9 @@ def classify(
     category = None
     probabilities: dict[str, float] = {}
     error = None
-    if not is_loopback(base_url):
+    if base_url is None:
+        error = "no local inference server address configured"
+    elif not is_loopback(base_url):
         error = "server URL is not a loopback http(s) URL"
     else:
         try:
@@ -293,8 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.repo_root) if args.repo_root else resolve_repo_root(project, None)
     grid = load_grid(root)
     model = args.model or os.environ.get(MODEL_ENV) or DEFAULT_MODEL
-    base = os.environ.get(URL_ENV) or DEFAULT_URL
-    result = classify(sys.stdin.read(), model, grid, base, args.timeout)
+    result = classify(sys.stdin.read(), model, grid, resolve_base_url(), args.timeout)
     print(json.dumps(result))
     return 0
 

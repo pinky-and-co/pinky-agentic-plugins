@@ -141,9 +141,9 @@ goes to the model.
 | Variable | Effect |
 |---|---|
 | `ONE_DECISION_MODEL` | The local server's decision-model id (e.g. `APUS-OpenJev-v1-4B-MLX-8bit`). Unset: the gate is off |
-| `ONE_DECISION_URL` | Server address, default `http://127.0.0.1:11234`. Only `127.0.0.1`, `localhost` and `::1` are accepted |
+| `LOCAL_INFERENCE_BASE_URL` | Server address as `http://host:port`, without `/v1`, no default; unset or empty: the gate is off. Only `127.0.0.1`, `localhost` and `::1` are accepted |
 
-- **Silent fallback.** Variable unset, server unreachable, any HTTP error, or a state the server
+- **Silent fallback.** Variable unset or empty, server unreachable, any HTTP error, or a state the server
   refuses because it does not fit its context window: the gate is skipped with no message and
   Presidio decides alone, exactly as without the gate. The server is probed with a short TCP
   connection before the digest is built, and after a connection failure or a timeout the gate

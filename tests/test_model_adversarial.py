@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -159,7 +160,7 @@ class TestSelectForAdversarial(unittest.TestCase):
 
 
 class TestProviderPriority(unittest.TestCase):
-    """`priority` (higher first, default 0) orders the providers inside a round of the spread —
+    """`priority` (smallest first, absent or null last) orders the providers inside a round of the spread —
     a generous provider opens every round, without stacking its entries back to back."""
 
     def test_the_prioritised_provider_opens_each_round(self):
@@ -177,6 +178,16 @@ class TestProviderPriority(unittest.TestCase):
         self.assertEqual(
             ma.select_for_delegation(pool, task_tier="sonnet"),
             [ol_a, NV_GLM, VC_A],
+        )
+
+    def test_smallest_priority_first_then_absent_or_null(self):
+        first = _entry("p1", "ollama-cloud", priority=1)
+        second = _entry("p2", "ollama-cloud", priority=2)
+        absent = _entry("pa", "ollama-cloud")
+        null = _entry("pn", "ollama-cloud", priority=None)
+        self.assertEqual(
+            ma.spread_providers([absent, second, null, first], key=lambda e: 0),
+            [first, second, absent, null],
         )
 
     def test_priority_never_outranks_locality_or_cost(self):
@@ -206,11 +217,11 @@ class TestAdversarialRandomTie(unittest.TestCase):
         ]
         self.assertEqual(set(self._heads(pool)), {"ol-a", "ol-b", "ol-c"})
 
-    def test_a_higher_priority_entry_opens_every_draw(self):
+    def test_the_smallest_priority_entry_opens_every_draw(self):
         pool = [
-            _entry("ol-a", "ollama-cloud", priority=1),
-            _entry("ol-b", "ollama-cloud", priority=1),
-            _entry("ol-top", "ollama-cloud", priority=2),
+            _entry("ol-a", "ollama-cloud", priority=2),
+            _entry("ol-b", "ollama-cloud", priority=2),
+            _entry("ol-top", "ollama-cloud", priority=1),
         ]
         self.assertEqual(set(self._heads(pool)), {"ol-top"})
 
@@ -1210,6 +1221,52 @@ class TestEntryTimeout(unittest.TestCase):
         self.assertEqual(run.wait_timeouts[0], 300)
         self.assertEqual(result.detail, "no answer within 300s")
 
+    def test_check_pool_tools_gives_twenty_seconds_per_step(self):
+        seen = {}
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            seen[entry["name"]] = timeout
+            return ""
+
+        with unittest.mock.patch.object(ma, "call_cli", fake_call_cli):
+            ma.check_pool([MISTRAL, {**GLM, "timeout": 90}], tools=True)
+        self.assertEqual(seen, {"mistral-medium-3.5": 240, "glm-5-2": 90})
+
+    def test_check_pool_tools_serialises_one_provider_and_overlaps_providers(self):
+        spans = {}
+        lock = threading.Lock()
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            start = time.monotonic()
+            time.sleep(0.2)
+            with lock:
+                spans[entry["name"]] = (start, time.monotonic())
+            return ""
+
+        with unittest.mock.patch.object(ma, "call_cli", fake_call_cli):
+            ma.check_pool([GLM, KIMI, MISTRAL], tools=True)
+        (g0, g1), (k0, k1), (m0, m1) = (
+            spans["glm-5-2"],
+            spans["kimi-k2.6"],
+            spans["mistral-medium-3.5"],
+        )
+        self.assertTrue(g1 <= k0 or k1 <= g0)
+        self.assertTrue(m0 < g1 and g0 < m1)
+
+    def test_check_pool_ping_keeps_same_provider_in_parallel(self):
+        starts = []
+        gate = threading.Barrier(2, timeout=5)
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            starts.append(timeout)
+            gate.wait()
+            return "OK"
+
+        with unittest.mock.patch.object(ma, "call_cli", fake_call_cli):
+            results = ma.check_pool([GLM, KIMI])
+        self.assertEqual(starts, [60, 60])
+        self.assertEqual([r.status for r in results], ["ok", "ok"])
+
 
 class TestFilterPool(unittest.TestCase):
     def test_no_filter_keeps_the_whole_pool(self):
@@ -1242,7 +1299,7 @@ def test_check_pool_cli_says_when_a_filter_matches_nothing(monkeypatch, capsys):
 def test_check_pool_cli_checks_only_the_filtered_entries(monkeypatch, capsys):
     seen: list[str] = []
 
-    def fake_check_pool(pool, timeout=60, workers=ma.CHECK_WORKERS):
+    def fake_check_pool(pool, timeout=60, workers=ma.CHECK_WORKERS, tools=False):
         seen.extend(e["name"] for e in pool)
         return [ma.PoolCheck(e["name"], "ok", "OK", 1.0) for e in pool]
 
@@ -1413,7 +1470,7 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
 
     seen: dict[str, list] = {}
 
-    def fake_select_for_adversarial(pool, floor_tier="sonnet", rng=None):
+    def fake_select_for_adversarial(pool, floor_tier="sonnet", rng=None, tools=None):
         seen["adversarial"] = pool
         return [MISTRAL]
 
@@ -1491,7 +1548,7 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_with_the_default_s
     )
     monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
 
-    def fake_select(pool, floor_tier="sonnet", rng=None):
+    def fake_select(pool, floor_tier="sonnet", rng=None, tools=None):
         seen["selected"] = True
         return [MISTRAL]
 
@@ -1659,7 +1716,7 @@ def test_adversarial_cli_draws_with_a_fresh_rng(monkeypatch):
     """`main` hands `select_for_adversarial` a `random.Random`, so a served review varies."""
     seen: dict[str, object] = {}
 
-    def spy(pool, floor_tier="sonnet", rng=None):
+    def spy(pool, floor_tier="sonnet", rng=None, tools=None):
         seen["rng"] = rng
         return [MISTRAL]
 
@@ -1686,7 +1743,7 @@ def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
 
     seen: dict[str, object] = {}
 
-    def spy(pool, floor_tier="sonnet", rng=None):
+    def spy(pool, floor_tier="sonnet", rng=None, tools=None):
         seen["rng"] = rng
         return [MISTRAL]
 
@@ -1745,13 +1802,13 @@ def test_adversarial_tool_with_a_diff_draws_among_entries_of_equal_priority(
     assert set(heads) == {"ol-a", "ol-b", "ol-c"}
 
 
-def test_adversarial_tool_with_a_diff_opens_on_the_higher_priority_entry(
+def test_adversarial_tool_with_a_diff_opens_on_the_smallest_priority_entry(
     monkeypatch,
 ):
     pool = [
-        _entry("ol-a", "ollama-cloud", priority=1),
-        _entry("ol-b", "ollama-cloud", priority=1),
-        _entry("ol-top", "ollama-cloud", priority=2),
+        _entry("ol-a", "ollama-cloud", priority=2),
+        _entry("ol-b", "ollama-cloud", priority=2),
+        _entry("ol-top", "ollama-cloud", priority=1),
     ]
     heads = _heads_served_for_a_diff(monkeypatch, pool)
     assert set(heads) == {"ol-top"}
@@ -3249,6 +3306,376 @@ class TestWallCap:
         assert f"call id={request} cancel received" in log
         for pi, _ in pairs:
             assert f"pi killed pid={pi}" in log
+
+
+# --- provider memory, `tools: false`, tools verdict and probe -----------------------------------
+
+import model_tools_verdict as mtv  # noqa: E402
+
+A_ENTRY = _entry("a-model", "prov-a")
+B_ENTRY = _entry("b-model", "prov-b")
+C_ENTRY = _entry("c-model", "prov-c")
+THREE = [A_ENTRY, B_ENTRY, C_ENTRY]
+
+
+@pytest.fixture(autouse=True)
+def _plugin_data(monkeypatch, tmp_path):
+    """The provider memory lives under `CLAUDE_PLUGIN_DATA`; each test gets its own folder."""
+    data = tmp_path / "plugin-data"
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    return data
+
+
+def _write_state(content: str | None) -> None:
+    path = ma.state_path()
+    assert path is not None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+
+
+def _names(entries):
+    return [e["name"] for e in entries]
+
+
+def test_state_path_is_model_pool_state_under_plugin_data(_plugin_data):
+    assert ma.state_path() == _plugin_data / "model_pool_state.json"
+
+
+def test_run_pool_creates_the_state_file_in_the_missing_plugin_data_folder(
+    monkeypatch, _plugin_data
+):
+    monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
+    assert not _plugin_data.exists()
+    ma.run_pool([A_ENTRY], "p")
+    state = _plugin_data / "model_pool_state.json"
+    assert json.loads(state.read_text()) == {"last_ok_provider": "prov-a"}
+    assert ma.read_last_ok_provider() == "prov-a"
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_without_plugin_data_the_memory_is_off_and_nothing_is_written(
+    monkeypatch, tmp_path, value
+):
+    if value is None:
+        monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    else:
+        monkeypatch.setenv("CLAUDE_PLUGIN_DATA", value)
+    home = tmp_path / "empty-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    assert ma.state_path() is None
+    assert ma.read_last_ok_provider() is None
+    ma.write_last_ok_provider("prov-a")
+    monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
+    assert ma.run_pool([A_ENTRY], "p").entry == A_ENTRY
+    assert list(tmp_path.rglob("model_pool_state.json*")) == []
+
+
+def test_remembered_provider_goes_first_and_the_rest_keeps_its_order():
+    baseline = ma.select_for_adversarial(THREE)
+    _write_state(json.dumps({"last_ok_provider": "prov-b"}))
+    picked = ma.select_for_adversarial(THREE)
+    assert _names(picked)[0] == "b-model"
+    assert picked[1:] == [e for e in baseline if e["provider"] != "prov-b"]
+
+
+def test_remembered_provider_beats_locality():
+    local = _entry("local", "prov-l", local=True)
+    _write_state(json.dumps({"last_ok_provider": "prov-a"}))
+    assert _names(ma.select_for_adversarial([local, A_ENTRY])) == ["a-model", "local"]
+
+
+@pytest.mark.parametrize(
+    "content", [None, "", "{not json", "[]", '{"last_ok_provider": 3}']
+)
+def test_unusable_state_file_gives_the_list_without_state(content):
+    expected = ma.select_for_adversarial(THREE)
+    _write_state(content)
+    assert ma.select_for_adversarial(THREE) == expected
+
+
+def test_run_pool_remembers_the_provider_that_answered(monkeypatch):
+    def fake(entry, *a, **k):
+        if entry["name"] == "a-model":
+            raise subprocess.CalledProcessError(1, "pi", "", "429 too many")
+        return "an answer"
+
+    monkeypatch.setattr(ma, "call_cli", fake)
+    result = ma.run_pool([A_ENTRY, B_ENTRY], "p")
+    assert result.entry == B_ENTRY
+    assert json.loads(ma.state_path().read_text()) == {"last_ok_provider": "prov-b"}
+
+
+def test_run_pool_leaves_the_state_alone_when_every_entry_fails(monkeypatch):
+    _write_state(json.dumps({"last_ok_provider": "prov-c"}))
+    before = ma.state_path().read_bytes()
+
+    def fake(entry, *a, **k):
+        raise subprocess.CalledProcessError(1, "pi", "", "429 too many")
+
+    monkeypatch.setattr(ma, "call_cli", fake)
+    assert ma.run_pool([A_ENTRY, B_ENTRY], "p").entry is None
+    assert ma.state_path().read_bytes() == before
+
+
+def test_tools_false_entry_is_dropped_only_when_the_call_passes_tools():
+    slow = _entry("slow", "prov-s", tools=False)
+    assert "slow" not in _names(
+        ma.select_for_adversarial([A_ENTRY, slow], tools=["read", "grep"])
+    )
+    assert "slow" in _names(ma.select_for_adversarial([A_ENTRY, slow]))
+    assert "slow" not in _names(
+        ma.select_for_delegation_with_fallback(
+            [A_ENTRY, slow], "sonnet", tools=["read"]
+        )
+    )
+
+
+def test_remembered_provider_never_revives_a_filtered_entry():
+    slow = _entry("slow", "prov-s", tools=False)
+    low = _entry("low", "prov-l", tier="haiku")
+    _write_state(json.dumps({"last_ok_provider": "prov-s"}))
+    assert _names(ma.select_for_adversarial([A_ENTRY, slow], tools=["read"])) == [
+        "a-model"
+    ]
+    _write_state(json.dumps({"last_ok_provider": "prov-l"}))
+    assert _names(ma.select_for_adversarial([A_ENTRY, low])) == ["a-model"]
+    assert json.loads(ma.state_path().read_text()) == {"last_ok_provider": "prov-l"}
+
+
+def test_unwritable_state_directory_does_not_change_the_result(monkeypatch, tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file where the directory should be")
+    monkeypatch.setattr(ma, "state_path", lambda: blocked / "sub" / "state.json")
+    monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
+    assert ma.run_pool([A_ENTRY], "p") == ma.PoolResult(A_ENTRY, "an answer")
+
+
+def test_state_write_is_a_rename_never_a_partial_file(monkeypatch):
+    seen = []
+    real = os.replace
+    monkeypatch.setattr(
+        os,
+        "replace",
+        lambda src, dst: (
+            seen.append((Path(src).name, Path(dst).name)),
+            real(src, dst),
+        ),
+    )
+    ma.write_last_ok_provider("prov-a")
+    assert (
+        seen and seen[0][0] != ma.STATE_FILE_NAME and seen[0][1] == ma.STATE_FILE_NAME
+    )
+    assert list(ma.state_path().parent.iterdir()) == [ma.state_path()]
+
+
+def test_module_docstring_describes_the_tools_field():
+    assert "tools:" in (ma.__doc__ or "")
+
+
+def test_tools_field_docstring_maps_every_report_detail_to_a_value():
+    doc = " ".join((ma.__doc__ or "").split())
+    for clause in (
+        "a ✅ line → `tools: true`",
+        "a `429` that comes back when the entry is rerun alone after a pause (an exhausted quota, or the limit a provider shares between its models, can explain a first one) → `tools: false`",
+        "`outil en texte` → `tools: false`",
+        "a template rejection of the tool role (e.g. `Unexpected message role`) → `tools: false`",
+        "an HTTP `400` error at the tools probe while the plain ping `--check-pool --name <entry>` answers → `tools: false`",
+        "any other provider error (`401`, `403`, `500`, …), a missing mark, an empty answer, `no answer within Ns` or an environment error decides nothing",
+    ):
+        assert clause in doc
+
+
+def test_probe_fixture_is_12_chained_files_with_the_mark_only_in_the_last(tmp_path):
+    prompt, _ = ma._probe_prompt(tmp_path, "MRK-x")
+    files = sorted(tmp_path.iterdir())
+    assert len(files) == 12
+    assert all("MRK-x" not in f.read_text() for f in files[:11])
+    assert "MARK=MRK-x" in files[11].read_text()
+    for current, following in zip(files, files[1:]):
+        assert str(following) in current.read_text()
+    assert str(files[0]) in prompt
+
+
+def test_probe_docs_say_12_steps():
+    import pc_core_server
+
+    assert "12-step" in (ma.__doc__ or "") + (ma._probe_prompt.__doc__ or "")
+    assert "12-step" in (pc_core_server.pool_check.__doc__ or "")
+    assert "3-step" not in (ma.__doc__ or "") + (
+        pc_core_server.pool_check.__doc__ or ""
+    )
+
+
+def test_module_docstring_describes_the_new_entry_protocol():
+    assert "--check-pool --tools --name" in (ma.__doc__ or "")
+
+
+# --- tools verdict ---------------------------------------------------------------------------
+
+
+def _session(root, name, provider, model, *, steps, ending, tools=True):
+    folder = root / "proj"
+    folder.mkdir(parents=True, exist_ok=True)
+    msgs = [
+        {"role": "system", "sections": {"tools": "- read" if tools else ""}},
+        {"role": "user", "content": "task"},
+    ]
+    for _ in range(steps):
+        msgs.append(
+            {
+                "role": "assistant",
+                "provider": provider,
+                "model": model,
+                "stopReason": "toolUse",
+                "content": [],
+            }
+        )
+    last = {"role": "assistant", "provider": provider, "model": model}
+    if ending == "ok":
+        last.update(stopReason="stop", content=[{"type": "text", "text": "TOK-1"}])
+    elif ending == "text":
+        last.update(
+            stopReason="stop",
+            content=[{"type": "text", "text": "<tool_call>x</tool_call>"}],
+        )
+    else:
+        last.update(stopReason="error", errorMessage="429: rate limited", content=[])
+    msgs.append(last)
+    (folder / f"{name}.jsonl").write_text(
+        "\n".join(json.dumps({"type": "message", "message": m}) for m in msgs) + "\n"
+    )
+
+
+def _verdicts(root, pool):
+    return {r.name: r.verdict for r in mtv.entry_verdicts(pool, mtv.read_runs(root))}
+
+
+def test_verdict_true_false_and_unknown_from_sessions(tmp_path):
+    ok, bad, lone = (_entry(n, n) for n in ("okp", "badp", "lonep"))
+    _session(tmp_path, "s1", "okp", "okp", steps=3, ending="ok")
+    _session(tmp_path, "s2", "okp", "okp", steps=3, ending="ok")
+    _session(tmp_path, "s3", "badp", "badp", steps=2, ending="text")
+    _session(tmp_path, "s4", "badp", "badp", steps=2, ending="text")
+    _session(tmp_path, "s5", "lonep", "lonep", steps=3, ending="ok")
+    assert _verdicts(tmp_path, [ok, bad, lone]) == {
+        "okp": "true",
+        "badp": "false",
+        "lonep": "inconnu",
+    }
+
+
+def test_runs_without_tools_do_not_count(tmp_path):
+    e = _entry("m", "p")
+    for i in range(3):
+        _session(tmp_path, f"s{i}", "p", "m", steps=3, ending="text", tools=False)
+    assert _verdicts(tmp_path, [e]) == {"m": "inconnu"}
+
+
+def test_entry_without_run_takes_its_provider_verdict_and_own_runs_win(tmp_path):
+    fresh = _entry("fresh", "p")
+    cut = _entry("cut", "p")
+    _session(tmp_path, "s1", "p", "other1", steps=3, ending="ok")
+    _session(tmp_path, "s2", "p", "other2", steps=3, ending="ok")
+    assert _verdicts(tmp_path, [fresh]) == {"fresh": "true"}
+    _session(tmp_path, "s3", "p", "cut", steps=2, ending="429")
+    _session(tmp_path, "s4", "p", "cut", steps=2, ending="429")
+    assert _verdicts(tmp_path, [fresh, cut]) == {"fresh": "true", "cut": "false"}
+
+
+def test_table_renders_proposed_tools_value_and_run_detail(tmp_path):
+    ok, bad, lone = (_entry(n, n) for n in ("okp", "badp", "lonep"))
+    _session(tmp_path, "s1", "okp", "okp", steps=3, ending="ok")
+    _session(tmp_path, "s2", "okp", "okp", steps=3, ending="ok")
+    _session(tmp_path, "s3", "badp", "badp", steps=2, ending="text")
+    _session(tmp_path, "s4", "badp", "badp", steps=2, ending="429")
+    _session(tmp_path, "s5", "lonep", "lonep", steps=3, ending="ok")
+    _session(tmp_path, "s6", "lonep", "lonep", steps=1, ending="ok")
+    rows = mtv.entry_verdicts([ok, bad, lone], mtv.read_runs(tmp_path))
+    assert mtv.render(rows) == (
+        "entry  verdict  tools  runs  success  text  429  other  source\n"
+        "okp    true     true      2        2     0    0      0  entry\n"
+        "badp   false    false     2        0     1    1      0  entry\n"
+        "lonep  inconnu  -         2        1     0    0      1  entry"
+    )
+
+
+def test_verdict_script_writes_no_pool_configuration(tmp_path, monkeypatch, capsys):
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    settings = project / ".claude" / "settings.pinky.json"
+    settings.write_text(json.dumps({"model_pool": [A_ENTRY]}))
+    before = settings.read_bytes()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    sessions = tmp_path / "sessions"
+    _session(sessions, "s1", "prov-a", "a-model", steps=3, ending="ok")
+    assert mtv.main(["--sessions", str(sessions)]) == 0
+    assert "a-model" in capsys.readouterr().out
+    assert settings.read_bytes() == before
+
+
+# --- tools probe -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "outcome, detail",
+    [
+        ("ok", "ok"),
+        ("429", "429"),
+        ("text", "outil en texte"),
+        ("boom", "401 unauthorized"),
+    ],
+)
+def test_tools_probe_names_the_outcome_per_entry(monkeypatch, outcome, detail):
+    monkeypatch.setattr(ma, "probe_mark", lambda: "MRK-fixed")
+    seen = {}
+
+    def fake(entry, prompt, timeout, tools=None, env=None, events=None):
+        seen["tools"] = tools
+        seen["prompt"] = prompt
+        if outcome == "ok":
+            return "MRK-fixed"
+        if outcome == "text":
+            return "<tool_call>read</tool_call>"
+        text = "429 Too Many Requests" if outcome == "429" else "401 unauthorized"
+        raise subprocess.CalledProcessError(1, "pi", "", text)
+
+    monkeypatch.setattr(ma, "call_cli", fake)
+    (result,) = ma.check_pool([A_ENTRY], tools=True)
+    assert result.detail == detail
+    assert result.status == ("ok" if outcome == "ok" else "failed")
+    assert seen["tools"] == ["read", "grep"]
+    assert "step01.txt" in seen["prompt"]
+
+
+def test_delegation_puts_the_remembered_provider_first_without_reviving_filtered():
+    slow = _entry("slow", "prov-s", tools=False)
+    pool = [A_ENTRY, B_ENTRY, slow]
+    baseline = ma.select_for_delegation(pool, "sonnet", tools=["read"])
+    _write_state(json.dumps({"last_ok_provider": "prov-b"}))
+    picked = ma.select_for_delegation(pool, "sonnet", tools=["read"])
+    assert _names(picked)[0] == "b-model"
+    assert picked[1:] == [e for e in baseline if e["provider"] != "prov-b"]
+    _write_state(json.dumps({"last_ok_provider": "prov-s"}))
+    assert "slow" not in _names(
+        ma.select_for_delegation(pool, "sonnet", tools=["read"])
+    )
+
+
+def test_panel_ranks_the_remembered_provider_first_without_reviving_filtered():
+    import model_panel as mp
+
+    slow = _entry("slow", "prov-s", tools=False)
+    pool = [A_ENTRY, B_ENTRY, C_ENTRY, slow]
+    baseline = mp.select_for_panel(pool, n=3, tools=["read"])
+    _write_state(json.dumps({"last_ok_provider": "prov-c"}))
+    picked = mp.select_for_panel(pool, n=3, tools=["read"])
+    assert _names(picked)[0] == "c-model"
+    assert picked[1:] == [e for e in baseline if e["provider"] != "prov-c"]
+    _write_state(json.dumps({"last_ok_provider": "prov-s"}))
+    assert "slow" not in _names(mp.select_for_panel(pool, n=4, tools=["read"]))
 
 
 if __name__ == "__main__":
