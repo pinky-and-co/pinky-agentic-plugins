@@ -57,30 +57,37 @@ config change). Separate from step 6's dispatch decision: the session makes it d
 The reviewer must not be the generator, and several voices of the same model are one correlated
 blind spot. Whenever a card's work needs real judgment reviewed, in this order:
 
-1. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
-   reviewer.md`), the single entry point: the caller never calls the `adversarial` MCP tool
-   itself. Hand it the branch the work forked from (`main`) and the card's intent; it reads the
-   change in a fresh context that never saw the generating session's rationalizations, then
-   calls `adversarial` (a non-Claude pool model of `sonnet` tier or above, stack checklist
-   included — the real change of perspective) whenever there is a diff, and reviews by itself under
-   the `review-guidelines` skill only a claim with no diff, or after `adversarial` answered
-   `BLOCKED` or `ERROR`. It opens its report with `Method: adversarial (<model>)` or
-   `Method: reviewer (<model>)`, the model that answered either way. Pass the reviewer its own
-   frontmatter defaults (`model: sonnet`, `effort: high`) and never a `model` or an `effort`
-   above them on the `adversarial` path: the report relays that verdict as is. When the reviewer
-   reviews alone (a claim with no diff, or `adversarial` answered `BLOCKED` / `ERROR`) the cap does
-   not apply.
+1. **A change with a diff: call the `adversarial` MCP tool directly**
+   (`mcp__plugin_pc-core_pc-core-models__adversarial`) — a non-Claude pool model of `sonnet` tier
+   or above, the real change of perspective; no subagent is spawned to relay it. Pass:
+   - `base` — the branch the work forked from (`main`; `HEAD` for work not yet committed), so the
+     tool computes the diff itself;
+   - `tools: ["read", "grep"]` — without them the model cannot open a file and answers with a tool
+     call written as text, which is no review;
+   - `task` — the card's `## Why` and `## Done when`, copied, nothing else: never a narrative of the
+     work, which would hand the reviewer the generating session's own rationalizations.
 
-   When the card declares `mockup:`, the hand-off also carries the mockup path (the unpacked
-   folder for a `.zip`, the sibling `<zip name>/`) and the card's `mockup_fidelity` levels, an axis
-   not listed counting as `guided`. The reviewer checks the fidelity axis by axis: `strict` is
+   The tool already applies the review methodology and the stack checklist. Its answer opens with
+   `[answered by <label>]`: stamp `Method: adversarial (<label>)` on the card, the label copied
+   whole, and relay the verdict as is.
+2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
+   reviewer.md`), launched only for a claim with no diff, or when `adversarial` answered `BLOCKED`
+   or `ERROR` (`pc-core`'s `reviewer_gate.py` hook enforces it, denying the `reviewer` call on a
+   diff until such an answer is in the session). It reviews in a fresh context under the
+   `review-guidelines` skill, and opens its report with `Method: reviewer (<model>)`, the model that answered. Pass it its own frontmatter
+   defaults (`model: sonnet`, `effort: high`).
+
+   When the card declares `mockup:`, the `task` (or the reviewer's hand-off) also carries the
+   mockup path (the unpacked folder for a `.zip`, the sibling `<zip name>/`) and the card's `mockup_fidelity` levels, an axis
+   not listed counting as `guided`. The review checks the fidelity axis by axis: `strict` is
    reproduced identically, `guided` follows the intent with each deviation justified in the
    worker's report, `free` is not checked against the mockup. The unpacked folder exists only when
    the worker was spawned on the default path, not with `--cmux`.
-2. **Same-session self-review** — last resort only, when the agent cannot run, and **say plainly
-   that it is degraded** (same model, same context) rather than presenting it as equivalent to (1).
+3. **Same-session self-review** — last resort only, when neither can run, and **say plainly
+   that it is degraded** (same model, same context) rather than presenting it as equivalent to
+   (1) or (2).
 
-Whatever this session then tells the user about the review opens with the report's `Method:` line,
+Whatever this session then tells the user about the review opens with the `Method:` line,
 relayed verbatim before any findings — naming who answered in the full
 `provider/model · 🟦🟪🟧 tier` form, and stating why `adversarial` did not answer when the
 `Method:` is `reviewer` on a change that has a diff. It is the only trace of *how* the verdict
@@ -123,8 +130,8 @@ blocked from `4-done`.
 ### Making the review visible on the card
 
 When a card's work *did* need real judgment reviewed, make it visible on the card: immediately above
-the `## Done when` line, add `- [ ] reviewed (method)`, `method` the reviewer's own `Method:` line
-(`adversarial`, or `reviewer` when it reviewed by itself) or `self-degraded` — or
+the `## Done when` line, add `- [ ] reviewed (method)`, `method` the review's own `Method:` line
+(`adversarial`, or `reviewer` when the agent reviewed by itself) or `self-degraded` — or
 `n/a — mechanical` for a mechanical card. Several passes
 still make one line: the final pass first, then the earlier ones, each `reviewer` pass on a diff
 followed by why `adversarial` did not answer — e.g. `- [x] reviewed (reviewer (anthropic/sonnet ·

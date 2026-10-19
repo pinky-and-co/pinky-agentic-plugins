@@ -164,7 +164,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 
     **Review clause.** If the work needs judgment reviewed (anything beyond a purely mechanical
     change, per `finishing-a-card.md` § "Reviewing before declaring a card done"), append `… and
-    the diff has been reviewed by `Agent(reviewer)`, re-reviewed after each round of fixes until a
+    the diff has been reviewed through the `adversarial` tool, re-reviewed after each round of fixes until a
     round triggers no fix or a third round has run (fixes after the third round need no re-review),
     each finding of the last round fixed in this card, refuted by a measurement quoted in the
     transcript, or written as an accepted limit in the card's `## Decisions`, and the last pass's

@@ -126,6 +126,7 @@ pinky-agentic-plugins/
 │   │   │   ├── load_secrets.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
+│   │   │   ├── reviewer_gate.py
 │   │   │   ├── structure_guard.py
 │   │   │   └── style_reminder.py
 │   │   ├── mcp/
@@ -136,8 +137,7 @@ pinky-agentic-plugins/
 │   │   │   ├── model_sanitize.py
 │   │   │   ├── pc_core_server.py
 │   │   │   ├── pi_events_view.py
-│   │   │   ├── pi_guardian.py
-│   │   │   └── review_complexity.py
+│   │   │   └── pi_guardian.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
 │   │   │   │   └── SKILL.md
@@ -613,7 +613,7 @@ pinky-agentic-plugins/
 │   ├── test_reconcile.py
 │   ├── test_reconcile_oracle.py
 │   ├── test_repo_path_flag.py
-│   ├── test_review_complexity.py
+│   ├── test_reviewer_gate.py
 │   ├── test_secret_patterns.py
 │   ├── test_settings_commit_nudge.py
 │   ├── test_split_goal.py

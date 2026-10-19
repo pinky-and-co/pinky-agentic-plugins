@@ -287,7 +287,7 @@ def select_for_delegation_with_fallback(
     rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
     """`select_for_delegation` at `tier`, degrading one tier at a time when the pool has
-    nothing at or above it — a diff routed to `opus` (`review_complexity.tier_for`) must not
+    nothing at or above it — a request for `opus` must not
     go BLOCKED just because the configured pool tops out at `sonnet`, confirmed live: every
     entry in this workspace's own `settings.pinky.json` sits at `sonnet` or below.
 
