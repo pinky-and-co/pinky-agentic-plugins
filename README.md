@@ -135,6 +135,7 @@ pinky-agentic-plugins/
 │   │   │   ├── model_offline.py
 │   │   │   ├── model_panel.py
 │   │   │   ├── model_sanitize.py
+│   │   │   ├── model_tools_verdict.py
 │   │   │   ├── pc_core_server.py
 │   │   │   ├── pi_events_view.py
 │   │   │   └── pi_guardian.py

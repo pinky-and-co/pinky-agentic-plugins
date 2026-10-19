@@ -255,10 +255,11 @@ def adversarial(
             resolved_tier,
             floor_tier="sonnet",
             rng=random.Random(),
+            tools=tools,
         )
     else:
         entries = model_adversarial.select_for_adversarial(
-            model_adversarial.load_pool(), rng=random.Random()
+            model_adversarial.load_pool(), rng=random.Random(), tools=tools
         )
     if not entries:
         return "[adversarial] BLOCKED — no candidate model in the pool."
@@ -304,7 +305,7 @@ def panel(
         return "[panel] BLOCKED — no task given."
 
     entries = model_panel.select_for_panel(
-        model_adversarial.load_pool(), len(tasks), models, tier
+        model_adversarial.load_pool(), len(tasks), models, tier, tools
     )
     if not entries:
         want = "sonnet/opus" if tier is None else tier
@@ -317,10 +318,19 @@ def panel(
 
 
 @_tool
-def pool_check(provider: str | None = None, names: list[str] | None = None) -> str:
+def pool_check(
+    provider: str | None = None,
+    names: list[str] | None = None,
+    tools: bool = False,
+) -> str:
     """Send a one-line prompt to every `model_pool` entry through `pi`, with no tools, and report
     which answer: one line per entry with its latency, or the provider's own error (bad key, rate
     limit, unknown model, timeout). `offline` entries are skipped — `pinky doctor` checks those.
+
+    `tools=True` runs a fixed 3-step task with `read,grep` instead (read a file that names
+    another, search it for a token, answer the token — about four requests per entry) and reports
+    per entry `ok`, `429`, `outil en texte` or the provider's error: the evidence for an entry's
+    `tools:` field.
 
     `provider` and/or `names` narrow the check to the entries just added — each entry checked is
     one real call against that provider's quota.
@@ -328,7 +338,7 @@ def pool_check(provider: str | None = None, names: list[str] | None = None) -> s
     pool = model_adversarial.filter_pool(model_adversarial.load_pool(), provider, names)
     if not pool:
         return model_adversarial.filter_miss(provider, names)
-    results = model_adversarial.check_pool(pool)
+    results = model_adversarial.check_pool(pool, tools=tools)
     return model_adversarial.render_pool_check(results)
 
 

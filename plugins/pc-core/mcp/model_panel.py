@@ -120,11 +120,15 @@ def select_for_panel(
     n: int,
     models: list[str] | None = None,
     tiers: str | Iterable[str] | None = None,
+    tools: list[str] | None = None,
 ) -> list[dict]:
     """Pick up to `n` eligible, family-distinct pool entries for a panel, deterministically.
 
     Both paths enforce one entry per `provider` (see `_distinct_families`) and drop `offline`
     entries plus any whose `capacity_tier` is outside `tiers` (see `_eligible`).
+
+    `tools` given: an entry marked `tools: false` is dropped on both paths. Without `models`, the
+    remembered provider (`ma.read_last_ok_provider`) is ranked first, after the tier and tools filters.
 
     `tiers` omitted: only sonnet/opus entries are eligible (the advisor default). `tiers` given (a
     tier name or an iterable of them): exactly those tiers are eligible — an explicit opt-out of
@@ -145,15 +149,17 @@ def select_for_panel(
         chosen = [
             by_name[m]
             for m in models
-            if m in by_name and _eligible(by_name[m], allowed)
+            if m in by_name
+            and _eligible(by_name[m], allowed)
+            and ma.accepts_tools(by_name[m], tools)
         ]
         return _distinct_families(chosen, n)
 
     ranked = sorted(
-        (e for e in pool if _eligible(e, allowed)),
+        (e for e in pool if _eligible(e, allowed) and ma.accepts_tools(e, tools)),
         key=lambda e: (-ma.tier_rank(e["capacity_tier"]), e["name"]),
     )
-    return _distinct_families(ranked, n)
+    return _distinct_families(ma.remembered_first(ranked), n)
 
 
 def _dispatch_one(
@@ -289,7 +295,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    entries = select_for_panel(ma.load_pool(), len(args.tasks), args.models)
+    entries = select_for_panel(
+        ma.load_pool(), len(args.tasks), args.models, tools=args.tools or None
+    )
     if not entries:
         print(
             "[panel] BLOCKED — no eligible model in the pool (need kind=cli, tier sonnet/opus).",

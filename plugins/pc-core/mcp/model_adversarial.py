@@ -23,8 +23,13 @@ server's own environment or in a session's. A custom provider reads its key with
 ``"apiKey": "$<NAME>"``. Adding a provider pi does not know is a ``models.json`` edit plus a
 ``keys`` entry, never a code change here.
 
-Tools are chosen per call, never per entry: none by default (``--no-tools``), or an allowlist
-(``-t read,grep``) when the caller needs the model to look at files itself.
+Tools are chosen per call: none by default (``--no-tools``), or an allowlist (``-t read,grep``)
+when the caller needs the model to look at files itself. An entry that cannot run a tool loop says
+so with ``tools: false`` and is then never a candidate for a call that passes tools.
+
+Provider memory: the provider of the last entry that answered is kept in
+``~/.claude/model_pool_state.json`` (key ``last_ok_provider``); ``select_for_adversarial`` and
+``select_for_delegation_with_fallback`` put that provider's candidates first.
 
 Each entry:
     name           display name
@@ -55,6 +60,9 @@ Each entry:
                    locality, cost or tier. Between entries of the same level, `adversarial` draws
                    at random (which entry opens a provider's queue, which provider opens a round);
                    delegation keeps pool order unless its caller passes an `rng`.
+    tools          optional boolean, default true. ``false`` marks an entry that answers a plain call
+                   but fails a tool loop (a provider limited to one request per minute per model):
+                   it is not a candidate when the call passes `tools`, and stays normal without
     thinking       optional pi thinking level (`off`, `low`, `medium`, …); absent → pi's own default.
                    `off` for a small local model, which a thinking pass drowns into an empty answer
 
@@ -63,7 +71,7 @@ model id through pi.
 
 Usage:
     model_adversarial.py --task "<task>" [--file PATH ...] [--model NAME] [--tool NAME ...]
-    model_adversarial.py --check-pool [--provider NAME] [--name ENTRY ...]
+    model_adversarial.py --check-pool [--provider NAME] [--name ENTRY ...] [--tools]
 """
 
 from __future__ import annotations
@@ -75,6 +83,7 @@ import json
 import os
 import random
 import re
+import secrets
 import shlex
 import stat
 import subprocess
@@ -184,6 +193,68 @@ def selection_rank(tier: str) -> int:
     return _SELECTION_RANK.get(tier, 0)
 
 
+STATE_FILE_NAME = "model_pool_state.json"
+_STATE_KEY = "last_ok_provider"
+
+
+def state_path() -> Path:
+    """The file holding the provider memory, under the current home's `.claude/`."""
+    return Path.home() / ".claude" / STATE_FILE_NAME
+
+
+def read_last_ok_provider() -> str | None:
+    """The provider of the last entry that answered, or None.
+
+    A missing, empty or unreadable file, invalid JSON, or a value that is not a non-empty string
+    all mean no memory.
+    """
+    try:
+        data = json.loads(state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    value = data.get(_STATE_KEY) if isinstance(data, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def write_last_ok_provider(provider: str) -> None:
+    """Remember `provider` as the last one that answered: temp file then rename, so a reader
+    never sees a half-written file. Any `OSError` is swallowed — the memory is an optimisation,
+    never part of a result.
+    """
+    path = state_path()
+    tmp_name: str | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", dir=path.parent, prefix=f"{path.name}.", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp_name = tmp.name
+            json.dump({_STATE_KEY: provider}, tmp)
+        os.replace(tmp_name, path)
+    except OSError:
+        if tmp_name is not None:
+            Path(tmp_name).unlink(missing_ok=True)
+
+
+def accepts_tools(entry: dict[str, Any], tools: list[str] | None) -> bool:
+    """False for an entry marked `tools: false` when the call passes `tools`; true otherwise."""
+    return not (tools and entry.get("tools") is False)
+
+
+def remembered_first(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`entries` with those of the remembered provider moved to the front, relative order kept.
+
+    A stable partition of an already filtered list: it adds no entry, so the tier floor and the
+    `tools: false` exclusion hold whatever the memory says.
+    """
+    last = read_last_ok_provider()
+    if last is None:
+        return entries
+    return [e for e in entries if e.get("provider") == last] + [
+        e for e in entries if e.get("provider") != last
+    ]
+
+
 def spread_providers(
     entries: list[dict[str, Any]],
     key: Callable[[dict[str, Any]], Any],
@@ -220,9 +291,11 @@ def select_for_adversarial(
     pool: list[dict[str, Any]],
     floor_tier: str = "sonnet",
     rng: random.Random | None = None,
+    tools: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Candidates for `adversarial`: never offline, at/above the capacity floor (sonnet and opus
-    count the same), direct before aggregator (an aggregator is API-usage-only, never the plan held
+    count the same), never a `tools: false` entry when `tools` is given, the remembered provider
+    (`read_last_ok_provider`) first, then direct before aggregator (an aggregator is API-usage-only, never the plan held
     directly with the provider — for a model reachable both ways, direct is at least as good, so
     it goes first), providers alternating inside each of those groups (`spread_providers`),
     entries of equal `priority` drawn with `rng` when one is given (pool order otherwise; the callers
@@ -233,14 +306,17 @@ def select_for_adversarial(
         for e in pool
         if e["kind"] != "offline"
         and selection_rank(e["capacity_tier"]) >= selection_rank(floor_tier)
+        and accepts_tools(e, tools)
     ]
-    return spread_providers(
-        candidates,
-        key=lambda e: (
-            0 if e.get("local", False) else 1,
-            0 if e["provider"] != "openrouter" else 1,
-        ),
-        rng=rng,
+    return remembered_first(
+        spread_providers(
+            candidates,
+            key=lambda e: (
+                0 if e.get("local", False) else 1,
+                0 if e["provider"] != "openrouter" else 1,
+            ),
+            rng=rng,
+        )
     )
 
 
@@ -248,6 +324,7 @@ def select_for_delegation(
     pool: list[dict[str, Any]],
     task_tier: str = "haiku",
     rng: random.Random | None = None,
+    tools: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Candidates for task delegation: the cheapest entry that can still do the job — free before
     paid, and among equally-priced entries the one just capable enough (frugal: don't spend an
@@ -255,7 +332,9 @@ def select_for_delegation(
 
     Sonnet and opus count as one tier (`selection_rank`); providers alternate inside each group of
     equal cost, tier and locality (`spread_providers`). Entries of equal `priority` keep pool
-    order, or are drawn with `rng` when one is given.
+    order, or are drawn with `rng` when one is given. A `tools: false` entry is not a candidate when
+    `tools` is given. The remembered provider (`read_last_ok_provider`) comes first, which can put a
+    paid entry ahead of a free one — a deliberate trade-off, accepted for the provider that last answered.
 
     Offline is a real candidate here (free, `capacity_tier: haiku`) — a caller that resolves to a
     `kind: "offline"` entry must route to the separate `offline` MCP tool, never call it through
@@ -265,15 +344,18 @@ def select_for_delegation(
         e
         for e in pool
         if selection_rank(e["capacity_tier"]) >= selection_rank(task_tier)
+        and accepts_tools(e, tools)
     ]
-    return spread_providers(
-        candidates,
-        key=lambda e: (
-            not e.get("free_tier", False),
-            selection_rank(e["capacity_tier"]),
-            not e.get("local", False),
-        ),
-        rng=rng,
+    return remembered_first(
+        spread_providers(
+            candidates,
+            key=lambda e: (
+                not e.get("free_tier", False),
+                selection_rank(e["capacity_tier"]),
+                not e.get("local", False),
+            ),
+            rng=rng,
+        )
     )
 
 
@@ -285,6 +367,7 @@ def select_for_delegation_with_fallback(
     tier: str,
     floor_tier: str = "haiku",
     rng: random.Random | None = None,
+    tools: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """`select_for_delegation` at `tier`, degrading one tier at a time when the pool has
     nothing at or above it — a request for `opus` must not
@@ -296,14 +379,15 @@ def select_for_delegation_with_fallback(
 
     `floor_tier` is the lowest tier ever tried: a `tier` below it is raised to it, and the
     degradation stops there. `rng` is handed to `select_for_delegation` (draw between entries of
-    equal `priority`; pool order without it).
+    equal `priority`; pool order without it); `tools` is handed to it too. The remembered provider
+    (`read_last_ok_provider`) comes first in the list returned.
     """
     floor = _TIER_ORDER.index(floor_tier)
     start = min(_TIER_ORDER.index(tier) if tier in _TIER_ORDER else 0, floor)
     for fallback_tier in _TIER_ORDER[start : floor + 1]:
         candidates = [
             e
-            for e in select_for_delegation(pool, fallback_tier, rng=rng)
+            for e in select_for_delegation(pool, fallback_tier, rng=rng, tools=tools)
             if e["kind"] == "cli"
         ]
         if candidates:
@@ -1291,6 +1375,8 @@ def _run_pool(
             else:
                 _emit_result(events, entry, attempts[idx], "answered")
                 log_pool_event(entry["name"], "answered", **answered)
+                if entry.get("provider"):
+                    write_last_ok_provider(entry["provider"])
                 return PoolResult(entry, answer)
     log_pool_event("(pool)", "exhausted")
     return PoolResult(None, last_error)
@@ -1316,6 +1402,72 @@ def _check_one(entry: dict[str, Any], timeout: int, env: dict[str, str]) -> Pool
         if answer:
             return PoolCheck(entry["name"], "ok", answer[:40], time.monotonic() - start)
         detail = "empty answer"
+    return PoolCheck(entry["name"], "failed", detail, time.monotonic() - start)
+
+
+PROBE_TOOLS = ["read", "grep"]
+PROBE_MARK_PREFIX = "MRK-"
+
+
+def probe_mark() -> str:
+    """A fresh marker for one tools probe — a model cannot answer it without reading the files."""
+    return PROBE_MARK_PREFIX + secrets.token_hex(6)
+
+
+def _probe_prompt(directory: Path, mark: str) -> tuple[str, Path]:
+    """Write the fixture of the 3-step probe into `directory` and return its prompt.
+
+    `a.txt` names `b.txt`, `b.txt` holds the mark on a line starting with `MARK=`: read `a.txt`,
+    search the named file for the mark, answer it.
+    """
+    (directory / "a.txt").write_text(
+        f"The mark is in the file {directory / 'b.txt'}\n", encoding="utf-8"
+    )
+    (directory / "b.txt").write_text(f"filler\nMARK={mark}\nfiller\n", encoding="utf-8")
+    prompt = (
+        f"Use your tools. Step 1: read {directory / 'a.txt'}, it names another file. "
+        "Step 2: search that file with grep for the line starting with MARK=. "
+        "Step 3: reply with exactly the mark after MARK=, nothing else."
+    )
+    return prompt, directory
+
+
+def _check_tools_one(
+    entry: dict[str, Any], timeout: int, env: dict[str, str]
+) -> PoolCheck:
+    """Run the 3-step tool probe on one entry: `ok`, `429`, `outil en texte`, or the provider's
+    own error."""
+    if entry.get("kind") == "offline":
+        return PoolCheck(
+            entry["name"], "skipped", "offline — checked by `pinky doctor`", 0.0
+        )
+    timeout = entry_timeout(entry, timeout)
+    mark = probe_mark()
+    start = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="pinky-pool-probe-") as tmp:
+        prompt, _ = _probe_prompt(Path(tmp), mark)
+        try:
+            answer = call_cli(
+                entry, prompt, timeout, tools=PROBE_TOOLS, env=env
+            ).strip()
+        except subprocess.CalledProcessError as e:
+            combined = f"{e.stdout or ''}\n{e.stderr or ''}"
+            detail = "429" if is_rate_limited(combined) else failure_detail(e)
+        except subprocess.TimeoutExpired:
+            detail = f"no answer within {timeout}s"
+        except (OSError, ValueError) as e:
+            detail = str(e)
+        else:
+            if mark in answer:
+                return PoolCheck(entry["name"], "ok", "ok", time.monotonic() - start)
+            if _TOOL_CALL_TAIL_RE.search(answer):
+                detail = "outil en texte"
+            else:
+                detail = (
+                    f"mark missing from the answer: {answer[:40]!r}"
+                    if answer
+                    else "empty answer"
+                )
     return PoolCheck(entry["name"], "failed", detail, time.monotonic() - start)
 
 
@@ -1353,7 +1505,10 @@ def filter_miss(provider: str | None, names: list[str] | None) -> str:
 
 
 def check_pool(
-    pool: list[dict[str, Any]], timeout: int = 60, workers: int = CHECK_WORKERS
+    pool: list[dict[str, Any]],
+    timeout: int = 60,
+    workers: int = CHECK_WORKERS,
+    tools: bool = False,
 ) -> list[PoolCheck]:
     """Ping every pool entry through pi, `workers` at a time, in pool order.
 
@@ -1361,6 +1516,9 @@ def check_pool(
         pool: the entries to check — `offline` ones are skipped (`pinky doctor` checks them).
         timeout: seconds allowed per entry.
         workers: concurrent pi calls.
+        tools: run the 3-step tool probe (about four requests per entry) instead of the one-line
+            ping; the detail of a failed entry is then `429`, `outil en texte` or the provider's
+            error.
 
     Returns:
         One `PoolCheck` per entry, in `pool` order.
@@ -1368,7 +1526,14 @@ def check_pool(
     env = secret_env()
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         return list(
-            ex.map(call_scope.bind(lambda e: _check_one(e, timeout, env)), pool)
+            ex.map(
+                call_scope.bind(
+                    lambda e: (_check_tools_one if tools else _check_one)(
+                        e, timeout, env
+                    )
+                ),
+                pool,
+            )
         )
 
 
@@ -1425,6 +1590,12 @@ def main(argv: list[str] | None = None) -> int:
         dest="names",
         help="with --check-pool: only this pool entry (repeatable)",
     )
+    ap.add_argument(
+        "--tools",
+        action="store_true",
+        dest="check_tools",
+        help="with --check-pool: run the 3-step tool probe instead of the one-line ping",
+    )
     args = ap.parse_args(argv)
 
     if args.check_pool:
@@ -1432,7 +1603,7 @@ def main(argv: list[str] | None = None) -> int:
         if not pool:
             print(filter_miss(args.provider, args.names), file=sys.stderr)
             return 2
-        results = check_pool(pool)
+        results = check_pool(pool, tools=args.check_tools)
         print(render_pool_check(results))
         return 1 if any(r.status == "failed" for r in results) else 0
     if not args.task:
@@ -1444,7 +1615,9 @@ def main(argv: list[str] | None = None) -> int:
     if override:
         entries = [{**_DEFAULT_POOL[0], "model": override, "name": override}]
     else:
-        entries = select_for_adversarial(load_pool(), rng=random.Random())
+        entries = select_for_adversarial(
+            load_pool(), rng=random.Random(), tools=args.tools or None
+        )
 
     if not entries:
         print(
