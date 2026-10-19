@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import call_scope
 import model_adversarial as ma
+import pi_live
 
 ADVISOR_TIERS = frozenset({"sonnet", "opus"})
 DEFAULT_TIMEOUT = 180
@@ -168,6 +169,7 @@ def _dispatch_one(
     timeout: int,
     tools: list[str] | None,
     env: dict[str, str],
+    events: ma.EventSink | None = None,
 ) -> _SlotResult:
     """Call one model. `answer` set on success, `reason` set on failure — never both, never raises.
 
@@ -177,7 +179,7 @@ def _dispatch_one(
     """
     timeout = ma.entry_timeout(entry, timeout)
     try:
-        answer = ma.call_cli(entry, prompt, timeout, tools, env)
+        answer = ma.call_cli(entry, prompt, timeout, tools, env, events)
     except subprocess.CalledProcessError as exc:
         return _SlotResult(
             entry, None, f"pi exit {exc.returncode}: {ma.failure_detail(exc)}"
@@ -196,6 +198,7 @@ def run_panel(
     prompts: list[str],
     timeout: int = DEFAULT_TIMEOUT,
     tools: list[str] | None = None,
+    live: Path | None = None,
 ) -> PanelResponse:
     """Send `prompts[i]` to `entries[i]` in parallel; collect answers in the entries' own order.
 
@@ -205,7 +208,8 @@ def run_panel(
     `entries` is expected pre-filtered by `select_for_panel`, which guarantees one entry per
     provider, so the fan-out never sends two concurrent calls to one provider and no per-provider
     `concurrency` cap is consulted. An `offline` entry slipping through is skipped, never called.
-    `tools` goes to every slot's `pi` call — none by default.
+    `tools` goes to every slot's `pi` call — none by default. `live` (a directory
+    `pi_live.open_run` created) gets one `view-<slot>.txt` per slot, for the `pi-view` mod.
     """
     if len(entries) != len(prompts):
         raise ValueError(
@@ -217,7 +221,7 @@ def run_panel(
         return PanelResponse(answers, skipped)
     env = ma.secret_env()
 
-    def worker(entry: dict, prompt: str) -> _SlotResult:
+    def worker(entry: dict, prompt: str, slot: int) -> _SlotResult:
         """Dispatch one (entry, prompt) pair, guarding the offline case that must not be called."""
         if entry.get("kind") == "offline":
             return _SlotResult(
@@ -225,11 +229,21 @@ def run_panel(
                 None,
                 "offline entry — route through the `offline` tool, not `panel`",
             )
-        return _dispatch_one(entry, prompt, timeout, tools, env)
+        if live is None:
+            return _dispatch_one(entry, prompt, timeout, tools, env)
+        view = pi_live.LiveView(live, slot, f"slot {slot} · {entry['name']}")
+        try:
+            res = _dispatch_one(entry, prompt, timeout, tools, env, view)
+            outcome = "answered" if res.reason is None else res.reason
+            ma._emit_result(view, entry, 1, outcome)
+            return res
+        finally:
+            view.close()
 
+    slots = range(1, len(entries) + 1)
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(entries)) as pool:
-        for slot, res in enumerate(
-            pool.map(call_scope.bind(worker), entries, prompts), start=1
+        for slot, res in zip(
+            slots, pool.map(call_scope.bind(worker), entries, prompts, slots)
         ):
             if res.reason is None and res.answer is not None:
                 answers.append(

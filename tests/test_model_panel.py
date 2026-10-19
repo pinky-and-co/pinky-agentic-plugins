@@ -3,7 +3,11 @@
 python3 -m unittest discover tests
 """
 
+import json
+import os
+import re
 import sys
+import tempfile
 import unittest
 import subprocess
 import unittest.mock
@@ -134,7 +138,7 @@ class TestSelectForPanel(unittest.TestCase):
 
 class TestRunPanel(unittest.TestCase):
     def _fake_cli(self, answers_by_model, seen=None):
-        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
             if seen is not None:
                 seen[entry["model"]] = (prompt, tools)
             answer = answers_by_model[entry["model"]]
@@ -234,7 +238,7 @@ class TestRunPanel(unittest.TestCase):
     def test_the_panel_keeps_its_own_180_seconds(self):
         seen: dict = {}
 
-        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
             seen["timeout"] = timeout
             return "answer"
 
@@ -245,7 +249,7 @@ class TestRunPanel(unittest.TestCase):
     def test_entry_timeout_is_passed_and_reported(self):
         seen: dict = {}
 
-        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
             seen["timeout"] = timeout
             raise subprocess.TimeoutExpired("pi", timeout)
 
@@ -300,7 +304,7 @@ class TestRunPanelSecrets(unittest.TestCase):
     def test_keychain_read_once_and_given_to_every_slot(self):
         envs = []
 
-        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
             envs.append(env)
             return "ok"
 
@@ -383,3 +387,37 @@ class TestFormatPanelLabel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRunPanelLiveView(unittest.TestCase):
+    def test_each_slot_writes_its_own_view(self):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
+            events.write(json.dumps({"type": "agent_settled", "aborted": False}) + "\n")
+            return "ok" if entry is GLM else " "
+
+        with tempfile.TemporaryDirectory() as cfg:
+            with (
+                unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}),
+                unittest.mock.patch.object(mp.ma, "secret_env", return_value={}),
+                unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli),
+            ):
+                run = mp.pi_live.open_run(str(mp.pi_live.runs_dir() / "toolu_p"))
+                resp = mp.run_panel([GLM, MISTRAL], ["p1", "p2"], live=run)
+            views = {
+                p.name: re.sub(r"\[ *\d+\.\ds\] ", "", p.read_text())
+                for p in sorted(run.glob("view-*.txt"))
+            }
+        self.assertEqual(len(resp.answers), 1)
+        self.assertEqual(
+            views,
+            {
+                "view-1.txt": (
+                    f"slot 1 · {GLM['name']}\nsettled\n"
+                    f"-> {GLM['name']} attempt 1: answered\n"
+                ),
+                "view-2.txt": (
+                    f"slot 2 · {MISTRAL['name']}\nsettled\n"
+                    f"-> {MISTRAL['name']} attempt 1: empty answer\n"
+                ),
+            },
+        )

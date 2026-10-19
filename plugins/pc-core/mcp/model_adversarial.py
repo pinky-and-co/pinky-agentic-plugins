@@ -111,12 +111,13 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from subprocess import Popen
-from typing import Any, Literal, NamedTuple, TextIO, TypeVar
+from typing import Any, Literal, NamedTuple, Protocol, TextIO, TypeVar
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "hooks"))
 import call_scope  # noqa: E402
 import load_secrets  # noqa: E402
 import model_sanitize  # noqa: E402
+import pi_live  # noqa: E402
 from policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
@@ -795,6 +796,37 @@ def secret_env() -> dict[str, str]:
     return load_secrets.resolve_env(load_secrets.load_keys(project_dir))
 
 
+class EventSink(Protocol):
+    """Where a run's raw event lines go: the cmux split's file, a `pi_live.LiveView`, or both."""
+
+    def write(self, text: str, /) -> int:
+        """Take the next characters of the events stream."""
+        ...
+
+    def flush(self) -> None:
+        """Push what was taken."""
+        ...
+
+
+class _Fanout:
+    """One `EventSink` that copies every write to several."""
+
+    def __init__(self, sinks: list[EventSink]) -> None:
+        """Copy to `sinks`, in order."""
+        self._sinks = sinks
+
+    def write(self, text: str, /) -> int:
+        """Write `text` to every sink."""
+        for sink in self._sinks:
+            sink.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        """Flush every sink."""
+        for sink in self._sinks:
+            sink.flush()
+
+
 _EVENTS_VIEWER = Path(__file__).with_name("pi_events_view.py")
 _PANE_TIMEOUT = 10.0
 _PIPE_DRAIN_SECONDS = 5.0
@@ -819,7 +851,7 @@ def _squash(text: str) -> str:
     return " ".join(text.split())
 
 
-def _emit_event(events: TextIO | None, record: dict[str, Any]) -> None:
+def _emit_event(events: EventSink | None, record: dict[str, Any]) -> None:
     """Best-effort: append `record` as one JSON line to the run's events file, if there is one.
 
     Args:
@@ -836,7 +868,7 @@ def _emit_event(events: TextIO | None, record: dict[str, Any]) -> None:
 
 
 def _emit_result(
-    events: TextIO | None, entry: dict[str, Any], attempt: int, outcome: str
+    events: EventSink | None, entry: dict[str, Any], attempt: int, outcome: str
 ) -> None:
     """Best-effort: tell the events file how one attempt ended.
 
@@ -857,7 +889,7 @@ def _emit_result(
     )
 
 
-def _tee_line(events: TextIO | None, line: str) -> None:
+def _tee_line(events: EventSink | None, line: str) -> None:
     """Best-effort: copy one raw line of `pi`'s output into the run's events file.
 
     A line without its newline (`pi` killed mid-write) gets one, so whatever is written next — the
@@ -872,7 +904,7 @@ def _tee_line(events: TextIO | None, line: str) -> None:
         pass
 
 
-def _pump_stdout(stream: TextIO, sink: list[str], events: TextIO | None) -> None:
+def _pump_stdout(stream: TextIO, sink: list[str], events: EventSink | None) -> None:
     """Collect `pi`'s stdout line by line as it arrives, copying each line to the events file.
 
     Args:
@@ -958,7 +990,7 @@ def call_cli(
     timeout: int | None,
     tools: list[str] | None = None,
     env: dict[str, str] | None = None,
-    events: TextIO | None = None,
+    events: EventSink | None = None,
 ) -> str:
     """One `pi --mode json` call for a `kind: "cli"` entry; the answer is its last assistant message.
 
@@ -975,8 +1007,8 @@ def call_cli(
         tools: pi tool names to allow (`-t read,grep`); None or empty means `--no-tools`.
         env: variables layered over this process's environment for pi — the provider keys.
             None reads them with `secret_env`; a caller making several calls passes them once.
-        events: a text file each raw event line is copied to as it arrives, for the pane that
-            follows the run; None copies nothing.
+        events: where each raw event line is copied as it arrives, for the views that follow
+            the run; None copies nothing.
 
     Returns:
         The text blocks of the last assistant message, sanitized of every reasoning trace
@@ -1184,6 +1216,7 @@ def run_pool(
     timeout: int | None = RUN_TIMEOUT,
     tools: list[str] | None = None,
     watch: bool = False,
+    live: Path | None = None,
 ) -> PoolResult:
     """Try each queued entry in order, first real answer wins.
 
@@ -1216,7 +1249,8 @@ def run_pool(
     cmux (`CMUX_SURFACE_ID` set), one split to the right follows the whole run — every attempt of
     every entry, the retries of a transient failure included — through a private events file this
     process writes (`pi_events_view.py` reads it; the split never runs `pi`). Opening it is best
-    effort and never changes the result.
+    effort and never changes the result. `live` (a directory `pi_live.open_run` created) gets the
+    same run as `view-1.txt`, which the `pi-view` mod draws in the call's own transcript row.
 
     Args:
         entries: the candidates, in the order to try them.
@@ -1225,26 +1259,40 @@ def run_pool(
             None sets no bound.
         tools: pi tool names the model may use; None or empty means none.
         watch: open the cmux split described above.
+        live: the run directory of the `pi-view` mod, or None.
 
     Returns:
         The entry that answered and its text, or None and the last error.
     """
-    if not (watch and os.environ.get("CMUX_SURFACE_ID")):
+    sinks: list[EventSink] = []
+    view = None
+    if live is not None:
+        view = pi_live.LiveView(live, 1, f"{len(entries)} candidate(s)")
+        sinks.append(view)
+    feed = None
+    if watch and os.environ.get("CMUX_SURFACE_ID"):
+        try:
+            # Dossier privé (0700) : le fichier porte le prompt, souvent un diff.
+            events_path = (
+                Path(tempfile.mkdtemp(prefix="pinky-adversarial-")) / "events.jsonl"
+            )
+            feed = events_path.open("a", encoding="utf-8")
+        except OSError:
+            feed = None
+        else:
+            sinks.append(feed)
+            open_events_split(events_path)
+    if not sinks:
         return _run_pool(entries, prompt, timeout, tools, None)
+    events = sinks[0] if len(sinks) == 1 else _Fanout(sinks)
     try:
-        # Dossier privé (0700) : le fichier porte le prompt, souvent un diff.
-        events_path = (
-            Path(tempfile.mkdtemp(prefix="pinky-adversarial-")) / "events.jsonl"
-        )
-        feed = events_path.open("a", encoding="utf-8")
-    except OSError:
-        return _run_pool(entries, prompt, timeout, tools, None)
-    try:
-        open_events_split(events_path)
-        return _run_pool(entries, prompt, timeout, tools, feed)
+        return _run_pool(entries, prompt, timeout, tools, events)
     finally:
-        _emit_event(feed, {"type": "pool_end"})
-        feed.close()
+        _emit_event(events, {"type": "pool_end"})
+        if feed is not None:
+            feed.close()
+        if view is not None:
+            view.close()
 
 
 def _run_pool(
@@ -1252,7 +1300,7 @@ def _run_pool(
     prompt: str,
     timeout: int | None,
     tools: list[str] | None,
-    events: TextIO | None,
+    events: EventSink | None,
 ) -> PoolResult:
     """`run_pool`'s queue, with a marker line before each attempt in `events` when there is one."""
     last_error: str | None = None

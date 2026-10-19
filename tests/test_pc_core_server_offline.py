@@ -63,3 +63,34 @@ class TestOfflineToolZeroEgress(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOfflineToolProgressView(unittest.TestCase):
+    def test_the_view_counts_the_answer_and_never_holds_it(self):
+        server = _import_server()
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        pi = bin_dir / "pi"
+        pi.write_text("#!/bin/sh\nprintf 'SECRET\\nBODY\\n'\n")
+        pi.chmod(0o755)
+        self.enterContext(
+            unittest.mock.patch.dict(
+                "os.environ",
+                {"PATH": f"{bin_dir}:/usr/bin:/bin", "CLAUDE_CONFIG_DIR": str(root)},
+            )
+        )
+        self.enterContext(
+            unittest.mock.patch.object(
+                server.model_offline, "default_out", lambda: root / "answer.md"
+            )
+        )
+        run = server.pi_live.runs_dir() / "toolu_off"
+
+        out = server.offline("do it", model="m1", events=str(run))
+
+        self.assertTrue(out.startswith("[offline] m1"))
+        self.assertEqual((root / "answer.md").read_text(), "SECRET\nBODY\n")
+        self.assertEqual(
+            (run / "view-1.txt").read_text(), "offline · m1\n12 chars received\n"
+        )
