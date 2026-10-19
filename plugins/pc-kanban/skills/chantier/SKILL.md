@@ -185,8 +185,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
       the amended clause in the question, only user decisions as options (waive / amend with this
       text). The answer meets the Waiver clause; no line to paste.
     - A clause the agent could meet → meet it. A clause is user-only only once tried: a typed slash
-      command with local, reversible effects runs in a throwaway `claude` session the agent drives
-      in `tmux` (`send-keys`, then `capture-pane`); an outward-facing one (push, PR, publish) stays
+      command with local, reversible effects runs in a throwaway `claude --model haiku` session the
+      agent drives in `tmux` (`send-keys`, then `capture-pane`) — the flag, never `/model`, which
+      saves the user's default; an outward-facing one (push, PR, publish) stays
       a user decision through `AskUserQuestion`. Where a plugin component runs from is read from the
       repo's AGENTS.md table, never from `installPath`.
     - A doable clause the user decides to drop → the user types the new `/goal`; offer that line

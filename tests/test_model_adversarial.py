@@ -8,6 +8,7 @@ fixture isolating `run_pool`'s debug log (`_isolate_pool_log`) never applies, an
 """
 
 import concurrent.futures
+import contextlib
 import inspect
 import io
 import json
@@ -2973,6 +2974,87 @@ class TestCallScope(unittest.TestCase):
         with self.assertRaises(call_scope.CallCancelled):
             call_scope.run_in(scope, in_worker_thread)
 
+    def test_cancel_reports_each_killed_pi_with_call_id_pid_and_reason(self):
+        scope = call_scope.CallScope(call_id="42")
+        procs = [
+            subprocess.Popen(["sleep", "30"], start_new_session=True) for _ in range(2)
+        ]
+        for proc in procs:
+            self.addCleanup(proc.kill)
+            scope.adopt(proc)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            scope.cancel("wall-cap")
+        for proc in procs:
+            proc.wait(timeout=5)
+        # Une ligne par pi tué, rien d'autre qu'id, pid et motif — pas de valeur de clé.
+        self.assertEqual(
+            sorted(err.getvalue().splitlines()),
+            sorted(
+                f"pc-core: call id=42 pi killed pid={proc.pid} reason=wall-cap"
+                for proc in procs
+            ),
+        )
+
+    def test_a_pi_refused_after_the_cancel_is_reported_with_the_same_reason(self):
+        scope = call_scope.CallScope(call_id="7")
+        scope.cancel("wall-cap")
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(proc.kill)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(call_scope.CallCancelled):
+                scope.adopt(proc)
+        proc.wait(timeout=5)
+        self.assertEqual(
+            err.getvalue().splitlines(),
+            [f"pc-core: call id=7 pi killed pid={proc.pid} reason=wall-cap"],
+        )
+
+    def test_a_scope_that_ends_normally_logs_no_kill(self):
+        scope = call_scope.CallScope(call_id="9")
+        proc = subprocess.Popen(["true"], start_new_session=True)
+        proc.wait()
+        scope.adopt(proc)
+        scope.release(proc)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            scope.cancel("closed-channel")
+        self.assertEqual(err.getvalue(), "")
+
+    def test_cancel_twice_reports_each_pi_once(self):
+        scope = call_scope.CallScope(call_id="1")
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(proc.kill)
+        scope.adopt(proc)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            scope.cancel("cancelled")
+            scope.cancel("wall-cap")
+        proc.wait(timeout=5)
+        self.assertEqual(
+            err.getvalue().splitlines(),
+            [f"pc-core: call id=1 pi killed pid={proc.pid} reason=cancelled"],
+        )
+
+
+class TestCallTimeout(unittest.TestCase):
+    """The wall-clock cap a served call runs under, from `PC_CORE_CALL_TIMEOUT_S`."""
+
+    def test_the_cap_defaults_to_1800s(self):
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PC_CORE_CALL_TIMEOUT_S", None)
+            self.assertEqual(call_scope.call_timeout(), 1800.0)
+
+    def test_the_cap_reads_the_variable(self):
+        with unittest.mock.patch.dict(os.environ, {"PC_CORE_CALL_TIMEOUT_S": "30"}):
+            self.assertEqual(call_scope.call_timeout(), 30.0)
+
+    def test_an_unreadable_or_non_positive_cap_falls_back_to_the_default(self):
+        for raw in ("", "soon", "0", "-5"):
+            with unittest.mock.patch.dict(os.environ, {"PC_CORE_CALL_TIMEOUT_S": raw}):
+                self.assertEqual(call_scope.call_timeout(), 1800.0, raw)
+
 
 # Les quatre outils qui lancent `pi`, avec des arguments et le nombre de `pi` qu'un appel lance
 # d'un coup dans un pool de deux entrées.
@@ -2990,10 +3072,10 @@ def make_server(tmp_path):
     pytest.importorskip("mcp")
     servers: list[PoolServer] = []
 
-    def make(pool_size: int = 2) -> PoolServer:
+    def make(pool_size: int = 2, extra_env: dict[str, str] | None = None) -> PoolServer:
         root = tmp_path / f"server-{len(servers)}"
         root.mkdir()
-        server = PoolServer(root, pool_size)
+        server = PoolServer(root, pool_size, extra_env)
         servers.append(server)
         return server
 
@@ -3112,6 +3194,62 @@ class TestCancellationScope:
         spared = session.pids_of("model-1") + other_session.pids_of("model-0")
         assert len(spared) == 4
         assert all(alive(pid) for pid in spared)
+
+
+CAP_S = 3
+
+
+class TestWallCap:
+    """The client stays alive with the channel open and never cancels: the cap alone must end
+    the call and take its `pi` down."""
+
+    def test_a_call_nobody_cancels_is_killed_by_the_cap_within_5s(self, make_server):
+        server = make_server(extra_env={"PC_CORE_CALL_TIMEOUT_S": str(CAP_S)})
+        request = server.start_call("adversarial", {"task": "attack this"})
+        pids = [pid for pair in server.wait_launched(1) for pid in pair]
+
+        # Avant le cap : le client est vivant, le canal ouvert, le pi et son enfant aussi.
+        assert all(alive(pid) for pid in pids)
+
+        assert server.wait_gone(pids, CAP_S + 5)
+        assert server.wait_answered(request, 5)
+
+    def test_the_kill_log_names_the_call_the_pi_and_the_cap(self, make_server):
+        server = make_server(extra_env={"PC_CORE_CALL_TIMEOUT_S": str(CAP_S)})
+        request = server.start_call("adversarial", {"task": "SECRET-ARG-VALUE"})
+        pairs = server.wait_launched(1)
+        pids = [pid for pair in pairs for pid in pair]
+
+        assert server.wait_gone(pids, CAP_S + 5)
+        deadline = time.monotonic() + 5
+        log = server.stderr_text()
+        while time.monotonic() < deadline and "reason=wall-cap" not in log:
+            time.sleep(0.1)
+            log = server.stderr_text()
+        assert f"call id={request} cancelled reason=wall-cap" in log
+        # Le pi tué, pas son enfant : celui-là meurt avec le groupe, il n'est pas lancé par le serveur.
+        for pi, _ in pairs:
+            assert f"call id={request} pi killed pid={pi} reason=wall-cap" in log
+        # Allowlist de champs : la valeur d'un argument d'appel n'atteint jamais le journal.
+        assert "SECRET-ARG-VALUE" not in log
+
+    def test_a_received_cancellation_is_logged_with_its_call_id(self, make_server):
+        server = make_server()
+        request = server.start_call("adversarial", {"task": "attack this"})
+        pairs = server.wait_launched(1)
+        pids = [pid for pair in pairs for pid in pair]
+
+        server.cancel(request)
+        assert server.wait_gone(pids, 5)
+
+        deadline = time.monotonic() + 5
+        log = server.stderr_text()
+        while time.monotonic() < deadline and "cancel received" not in log:
+            time.sleep(0.1)
+            log = server.stderr_text()
+        assert f"call id={request} cancel received" in log
+        for pi, _ in pairs:
+            assert f"pi killed pid={pi}" in log
 
 
 if __name__ == "__main__":

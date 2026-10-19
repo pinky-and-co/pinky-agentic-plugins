@@ -58,12 +58,15 @@ def alive(pid: int) -> bool:
 class PoolServer:
     """One server subprocess, driven over newline-delimited JSON-RPC on its stdio."""
 
-    def __init__(self, root: Path, pool_size: int = 2) -> None:
+    def __init__(
+        self, root: Path, pool_size: int = 2, extra_env: dict[str, str] | None = None
+    ) -> None:
         """Start the server and run the `initialize` handshake.
 
         Args:
             root: an empty directory the server's project, `HOME` and fake `pi` live in.
             pool_size: how many entries the project's `model_pool` declares.
+            extra_env: variables layered over the server's environment (a short wall cap, …).
         """
         self.launches_dir = root / "launches"
         self.launches_dir.mkdir()
@@ -96,6 +99,7 @@ class PoolServer:
             "FAKE_PI_DIR": str(self.launches_dir),
             "CLAUDE_PROJECT_DIR": str(project),
             "HOME": str(root / "home"),
+            **(extra_env or {}),
         }
         env.pop("CMUX_SURFACE_ID", None)
         self._stderr = open(root / "server.err", "w")
@@ -269,6 +273,21 @@ class PoolServer:
         except subprocess.TimeoutExpired:
             return False
         return True
+
+    def stderr_text(self) -> str:
+        """What the server has written to its stderr so far (its kill log)."""
+        self._stderr.flush()
+        return Path(self._stderr.name).read_text(encoding="utf-8", errors="replace")
+
+    def wait_answered(self, request_id: int, timeout: float = 30.0) -> bool:
+        """Whether the response to `request_id` arrives within `timeout` seconds."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.drain()
+            if request_id in self.answered:
+                return True
+            time.sleep(0.05)
+        return False
 
     def stop(self) -> None:
         """End the server and every fake `pi` it left, whatever the test saw."""
