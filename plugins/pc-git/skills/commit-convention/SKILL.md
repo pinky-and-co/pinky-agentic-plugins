@@ -6,8 +6,6 @@ user-invocable: false
 
 # commit-convention — Commit convention
 
-______________________________________________________________________
-
 ## 1. Generation process
 
 - [ ] Step 1: Analyse the diff (staged files, nature of changes)
@@ -33,8 +31,6 @@ ______________________________________________________________________
 - **`!`**: optional, right after `type`, before the colon — marks a breaking change (see below)
 
 ### Emoji ↔ Type table
-
-> Source: [gitmoji.dev](https://gitmoji.dev) by [carloscuesta](https://github.com/carloscuesta/gitmoji/tree/master) (MIT) — maps each emoji to a semantic type.
 
 | Emoji | Type | Usage |
 |-------|------|-------|
@@ -124,8 +120,8 @@ Signal it either way (or both):
 - **`!`** right after `type`, before the `:` — e.g. `♻️ refactor!: rename upload_packages signature`
 - **`BREAKING CHANGE: <description>`** as the last block of the message (blank line before it).
   One form only: both words uppercase, a single space between them — the casing downstream tooling
-  (e.g. semantic-release) keys off for a major bump. The `commit-msg` hook rejects any near-miss at
-  the start of a line (the hyphen form `BREAKING-CHANGE:`, a miscased `Breaking change:`).
+  keys off for a major bump. The `commit-msg` hook rejects any near-miss at the start of a line
+  (the hyphen form `BREAKING-CHANGE:`, a miscased `Breaking change:`).
 
 ```
 ♻️ refactor!: rename upload_packages signature
@@ -140,8 +136,6 @@ BREAKING CHANGE: upload_packages now takes (bucket, key) instead of (path).
   emoji from what the change *does*, never from the file extension: a behavioral fix to a `SKILL.md`
   is `🐛 fix`, a new skill is `✨ feat`, a restructure is `♻️ refactor`. Reserve `📝 docs` for
   genuine prose with no behavioral effect — a README, a guide, a comment.
-- **Multiple unrelated changes in one diff** → propose one commit per logical group, never merge them
-- **Emoji chosen before reading the diff fully** → read everything before picking the emoji, late changes often shift the type
 - **`💾 save`** → a human-only WIP savepoint (`💾 save: … [skip ci]`), enforced by the `commit-msg` hook; agents never write it
 
 ### Valid examples

@@ -30,8 +30,8 @@ re-derive it from branch names or from CLAUDE.md prose.
 
 ## Guard — is a feature branch required before committing
 
-Any skill about to `git add`/`git commit` applies this before staging anything. Server-side
-rejection of a direct push cannot be assumed — this guard stands in for it.
+Any skill about to `git add`/`git commit` applies this before staging anything — server-side
+rejection of a direct push cannot be assumed.
 
 1. `git branch --show-current` — the current branch.
 2. Is it one of the strategy's **permanent branches** (the table above, resolved strategy from
