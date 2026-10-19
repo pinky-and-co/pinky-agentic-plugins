@@ -40,11 +40,14 @@ def _no_ambient_cmux(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_ambient_decision_gate(monkeypatch):
+def _no_ambient_decision_gate(monkeypatch, tmp_path_factory):
     """The `pii_guard` decision gate is off unless a test sets its variables — a developer who
-    runs a local decision server would otherwise send every test digest to it."""
+    runs a local decision server would otherwise send every test digest to it. The server address
+    also comes from the `mlx` provider of the developer's `models.json`, so `PI_CODING_AGENT_DIR`
+    points at an empty folder."""
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path_factory.mktemp("pi-agent")))
     monkeypatch.delenv("ONE_DECISION_MODEL", raising=False)
-    monkeypatch.delenv("ONE_DECISION_URL", raising=False)
+    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL", raising=False)
 
 
 @pytest.fixture(autouse=True)

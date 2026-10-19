@@ -8,7 +8,7 @@
     uv run --script decision_compare.py FILE[:block|:pass] [...]
 
 Needs a running local MLX server exposing `/v1/systemone` (oMLX), with `ONE_DECISION_MODEL` set
-(and `ONE_DECISION_URL` when it is not on the default port): it calls the real gate. Per file it prints the label, the Presidio-only
+(and `LOCAL_INFERENCE_BASE_URL` to override the server address): it calls the real gate. Per file it prints the label, the Presidio-only
 decision, the gate's probability of personal data (or `unavailable`) and the decision of the guard
 with the gate active, then the false alarms and misses of each.
 

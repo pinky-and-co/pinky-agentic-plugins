@@ -150,7 +150,7 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeServer]:
     """
     fake = FakeServer()
     monkeypatch.setenv("ONE_DECISION_MODEL", "APUS-OpenJev-v1-4B-MLX-4bit")
-    monkeypatch.setenv("ONE_DECISION_URL", fake.url)
+    monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", fake.url)
     yield fake
     fake.close()
 
@@ -387,7 +387,7 @@ def test_closed_port_falls_back_to_presidio_silently(
     baseline = _presidio_only(path, monkeypatch)
     capsys.readouterr()
     monkeypatch.setenv("ONE_DECISION_MODEL", "org/some-model")
-    monkeypatch.setenv("ONE_DECISION_URL", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", f"http://127.0.0.1:{port}")
     assert _scan(path) == baseline
     assert baseline == ("pii", PII_MESSAGE.format(name="clients.csv"))
     assert presidio == [{}, {}]
@@ -539,7 +539,7 @@ def test_non_loopback_url_is_unavailable_without_a_request(
     monkeypatch: pytest.MonkeyPatch,
     url: str,
 ) -> None:
-    monkeypatch.setenv("ONE_DECISION_URL", url)
+    monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", url)
     path = _csv(tmp_path / "d.csv", ["contact", "note"])
     assert decision_gate.verdict(path, "csv", anonymize) is None
     assert server.requests == []
@@ -602,7 +602,7 @@ def test_a_down_server_is_probed_before_the_state_is_built(
         raise AssertionError("the state was built for a server that is down")
 
     monkeypatch.setenv("ONE_DECISION_MODEL", "APUS-OpenJev-v1-4B-MLX-4bit")
-    monkeypatch.setenv("ONE_DECISION_URL", f"http://127.0.0.1:{_closed_port()}")
+    monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", f"http://127.0.0.1:{_closed_port()}")
     monkeypatch.setattr(decision_gate, "build_state", recording_state)
     path = _csv(tmp_path / "d.csv", ["contact", "note"])
     assert decision_gate.probability(path, "csv", anonymize) is None
@@ -615,7 +615,7 @@ def test_an_unreachable_probe_switches_the_gate_off_for_the_process(
     path = _csv(tmp_path / "d.csv", ["contact", "note"])
     _answer_with_p_of_yes(server, 0.9)
     with monkeypatch.context() as m:
-        m.setenv("ONE_DECISION_URL", f"http://127.0.0.1:{_closed_port()}")
+        m.setenv("LOCAL_INFERENCE_BASE_URL", f"http://127.0.0.1:{_closed_port()}")
         assert decision_gate.verdict(path, "csv", anonymize) is None
     assert decision_gate.verdict(path, "csv", anonymize) is None
     assert server.requests == []
@@ -627,7 +627,7 @@ def test_a_timeout_switches_the_gate_off_and_the_next_file_makes_no_connection(
     silent = RawServer()
     try:
         monkeypatch.setenv("ONE_DECISION_MODEL", "org/some-model")
-        monkeypatch.setenv("ONE_DECISION_URL", silent.url)
+        monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", silent.url)
         monkeypatch.setattr(decision_gate, "TIMEOUT_SECONDS", 0.2)
         path = _csv(tmp_path / "d.csv", ["contact", "note"])
         assert decision_gate.verdict(path, "csv", anonymize) is None
@@ -657,7 +657,7 @@ def test_reset_switches_the_gate_back_on(
     path = _csv(tmp_path / "d.csv", ["contact", "note"])
     _answer_with_p_of_yes(server, 0.9)
     with monkeypatch.context() as m:
-        m.setenv("ONE_DECISION_URL", f"http://127.0.0.1:{_closed_port()}")
+        m.setenv("LOCAL_INFERENCE_BASE_URL", f"http://127.0.0.1:{_closed_port()}")
         assert decision_gate.verdict(path, "csv", anonymize) is None
     assert decision_gate.verdict(path, "csv", anonymize) is None
     decision_gate.reset()
@@ -732,7 +732,7 @@ def test_an_invalid_port_in_the_url_is_unavailable_for_the_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("ONE_DECISION_MODEL", "org/some-model")
-    monkeypatch.setenv("ONE_DECISION_URL", "http://127.0.0.1:abc")
+    monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", "http://127.0.0.1:abc")
     path = _csv(tmp_path / "d.csv", ["contact", "note"])
     assert decision_gate.verdict(path, "csv", anonymize) is None
     assert decision_gate._post("http://127.0.0.1:abc/v1/systemone", {}) is None
@@ -745,7 +745,7 @@ def test_a_redirect_is_not_followed(
     redirector = RecordingServer(status=302, location=f"{target.url}/v1/systemone")
     try:
         monkeypatch.setenv("ONE_DECISION_MODEL", "org/some-model")
-        monkeypatch.setenv("ONE_DECISION_URL", redirector.url)
+        monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", redirector.url)
         path = _csv(tmp_path / "d.csv", ["contact", "note"])
         assert decision_gate.verdict(path, "csv", anonymize) is None
         assert redirector.requests == [("POST", "/v1/systemone")]
@@ -789,7 +789,7 @@ def test_a_server_that_never_replies_is_unavailable_within_the_timeout(
     silent = RawServer()
     try:
         monkeypatch.setenv("ONE_DECISION_MODEL", "org/some-model")
-        monkeypatch.setenv("ONE_DECISION_URL", silent.url)
+        monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", silent.url)
         monkeypatch.setattr(decision_gate, "TIMEOUT_SECONDS", 0.3)
         path = _csv(tmp_path / "d.csv", ["contact", "note"])
         started = time.monotonic()
@@ -819,3 +819,98 @@ def test_a_model_pass_stops_the_guard_before_presidio_even_past_the_text_line_ca
     assert presidio == []
     assert len(server.requests) == 1
     assert "jane.doe@example.com" not in json.dumps(server.requests)
+
+
+def _models_json(folder: Path, data: object) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "models.json").write_text(json.dumps(data))
+
+
+def test_resolve_env_wins_over_models_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _models_json(tmp_path, {"providers": {"mlx": {"baseUrl": "http://localhost:1/v1"}}})
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", "http://127.0.0.1:2")
+    assert decision_gate.resolve_base_url() == "http://127.0.0.1:2"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"providers": {"mlx": {"baseUrl": "http://localhost:11234/v1"}}},
+        {"mlx": {"baseUrl": "http://localhost:11234/v1/"}},
+        {"providers": {"mlx": {"baseUrl": "http://localhost:11234"}}},
+    ],
+)
+def test_resolve_reads_the_mlx_provider_without_v1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, data: object
+) -> None:
+    _models_json(tmp_path, data)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    assert decision_gate.resolve_base_url() == "http://localhost:11234"
+
+
+def test_resolve_falls_back_to_home_when_pi_dir_is_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _models_json(
+        tmp_path / ".pi" / "agent",
+        {"providers": {"mlx": {"baseUrl": "http://localhost:7/v1"}}},
+    )
+    monkeypatch.delenv("PI_CODING_AGENT_DIR")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert decision_gate.resolve_base_url() == "http://localhost:7"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        None,
+        "{not json",
+        "[]",
+        json.dumps({"providers": {"other": {"baseUrl": "http://localhost:1/v1"}}}),
+        json.dumps({"providers": {"mlx": {}}}),
+        json.dumps({"providers": {"mlx": {"baseUrl": 5}}}),
+    ],
+)
+def test_no_usable_declaration_makes_the_gate_unavailable_without_a_request(
+    tmp_path: Path,
+    server: FakeServer,
+    monkeypatch: pytest.MonkeyPatch,
+    content: str | None,
+) -> None:
+    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL")
+    if content is not None:
+        (tmp_path / "models.json").write_text(content)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    assert decision_gate.resolve_base_url() is None
+    path = _csv(tmp_path / "d.csv", ["contact", "note"])
+    assert decision_gate.verdict(path, "csv", anonymize) is None
+    assert server.requests == []
+
+
+def test_a_non_loopback_models_json_address_is_refused(
+    tmp_path: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL")
+    _models_json(
+        tmp_path, {"providers": {"mlx": {"baseUrl": "http://example.com:11234/v1"}}}
+    )
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    path = _csv(tmp_path / "d.csv", ["contact", "note"])
+    assert decision_gate.verdict(path, "csv", anonymize) is None
+    assert server.requests == []
+
+
+def test_the_gate_reads_the_address_from_models_json(
+    tmp_path: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL")
+    _models_json(
+        tmp_path / "pi", {"providers": {"mlx": {"baseUrl": server.url + "/v1"}}}
+    )
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi"))
+    _answer_with_p_of_yes(server, 0.9)
+    path = _csv(tmp_path / "d.csv", ["contact", "note"])
+    assert decision_gate.verdict(path, "csv", anonymize) == "block"

@@ -159,7 +159,11 @@ def test_non_loopback_url_refused_without_request(plugin_grid, url):
 
 
 def run_cli(tmp_path: Path, env: dict[str, str], *args: str):
-    base = {k: v for k, v in os.environ.items() if not k.startswith("ONE_DECISION")}
+    base = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("ONE_DECISION", "LOCAL_INFERENCE"))
+    }
     return subprocess.run(
         [sys.executable, str(ROUTING / "classify.py"), *args],
         input="refactor three modules",
@@ -180,7 +184,7 @@ def run_cli(tmp_path: Path, env: dict[str, str], *args: str):
 )
 def test_model_resolution_order(tmp_path, server, env, args, expected):
     server.answer(200, answer("routine"))
-    out = run_cli(tmp_path, {"ONE_DECISION_URL": server.url, **env}, *args)
+    out = run_cli(tmp_path, {"LOCAL_INFERENCE_BASE_URL": server.url, **env}, *args)
     assert out.returncode == 0
     assert json.loads(out.stdout)["category"] == "routine"
     assert server.requests[0]["json"]["model"] == expected
@@ -190,7 +194,7 @@ def test_cli_server_down_prints_default_exit_0(tmp_path):
     fake = FakeServer()
     url = fake.url
     fake.close()
-    out = run_cli(tmp_path, {"ONE_DECISION_URL": url})
+    out = run_cli(tmp_path, {"LOCAL_INFERENCE_BASE_URL": url})
     assert out.returncode == 0
     line = json.loads(out.stdout)
     assert line["category"] == "logic"
@@ -198,7 +202,7 @@ def test_cli_server_down_prints_default_exit_0(tmp_path):
 
 
 def test_cli_non_loopback_url_prints_default_exit_0(tmp_path):
-    out = run_cli(tmp_path, {"ONE_DECISION_URL": "http://example.com"})
+    out = run_cli(tmp_path, {"LOCAL_INFERENCE_BASE_URL": "http://example.com"})
     assert out.returncode == 0
     assert "error" in json.loads(out.stdout)
 
@@ -211,8 +215,8 @@ def test_no_timeout_by_default_and_opt_in(monkeypatch, plugin_grid):
         return answer("logic")
 
     monkeypatch.setattr(classify_mod, "post", fake_post)
-    classify_mod.classify("t", "m", plugin_grid)
-    classify_mod.classify("t", "m", plugin_grid, timeout=7)
+    classify_mod.classify("t", "m", plugin_grid, "http://127.0.0.1:1")
+    classify_mod.classify("t", "m", plugin_grid, "http://127.0.0.1:1", timeout=7)
     assert seen == [None, 7]
 
 
@@ -361,3 +365,83 @@ def test_invalid_override_falls_back_to_plugin_grid(tmp_path, plugin_grid, bad):
 
 def test_no_override_uses_plugin_grid(tmp_path, plugin_grid):
     assert classify_mod.load_grid(tmp_path) == plugin_grid
+
+
+def _models_json(folder: Path, data: object) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "models.json").write_text(json.dumps(data))
+
+
+def test_resolve_env_wins_over_models_json(tmp_path, monkeypatch):
+    _models_json(tmp_path, {"providers": {"mlx": {"baseUrl": "http://localhost:1/v1"}}})
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", "http://127.0.0.1:2")
+    assert classify_mod.resolve_base_url() == "http://127.0.0.1:2"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"providers": {"mlx": {"baseUrl": "http://localhost:11234/v1"}}},
+        {"mlx": {"baseUrl": "http://localhost:11234/v1/"}},
+        {"providers": {"mlx": {"baseUrl": "http://localhost:11234"}}},
+    ],
+)
+def test_resolve_reads_the_mlx_provider_without_v1(tmp_path, monkeypatch, data):
+    _models_json(tmp_path, data)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    assert classify_mod.resolve_base_url() == "http://localhost:11234"
+
+
+def test_resolve_falls_back_to_home_when_pi_dir_is_unset(tmp_path, monkeypatch):
+    _models_json(
+        tmp_path / ".pi" / "agent",
+        {"providers": {"mlx": {"baseUrl": "http://localhost:7/v1"}}},
+    )
+    monkeypatch.delenv("PI_CODING_AGENT_DIR")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert classify_mod.resolve_base_url() == "http://localhost:7"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        None,
+        "{not json",
+        "[]",
+        json.dumps({"providers": {"other": {"baseUrl": "http://localhost:1/v1"}}}),
+        json.dumps({"providers": {"mlx": {}}}),
+        json.dumps({"providers": {"mlx": {"baseUrl": 5}}}),
+    ],
+)
+def test_resolve_gives_none_without_a_usable_declaration(
+    tmp_path, monkeypatch, content
+):
+    if content is not None:
+        (tmp_path / "models.json").write_text(content)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    assert classify_mod.resolve_base_url() is None
+
+
+def test_classify_without_an_address_prints_default_with_error(plugin_grid):
+    result = classify_mod.classify("t", "m", plugin_grid, None)
+    assert result["category"] == plugin_grid["default"]
+    assert "error" in result
+
+
+def test_cli_without_an_address_prints_default_exit_0(tmp_path):
+    out = run_cli(tmp_path, {})
+    assert out.returncode == 0
+    line = json.loads(out.stdout)
+    assert line["category"] == "logic"
+    assert "error" in line
+
+
+def test_cli_reads_the_address_from_models_json(tmp_path, server):
+    server.answer(200, answer("routine"))
+    _models_json(
+        tmp_path / "pi", {"providers": {"mlx": {"baseUrl": server.url + "/v1"}}}
+    )
+    out = run_cli(tmp_path, {"PI_CODING_AGENT_DIR": str(tmp_path / "pi")})
+    assert json.loads(out.stdout)["category"] == "routine"
+    assert len(server.requests) == 1
