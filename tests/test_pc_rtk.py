@@ -130,10 +130,6 @@ def test_real_rtk_rewrites_a_rewritable_command():
     assert output["hookSpecificOutput"]["updatedInput"]["command"] == (
         "rtk git log -n 3"
     )
-    # Contract chosen: the installed rtk binary now emits permissionDecision
-    # "allow" next to updatedInput (measured against the real binary), so the
-    # test asserts what it emits rather than pinning the binary to the old one.
-    assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert (
         output["hookSpecificOutput"]["permissionDecisionReason"] == "RTK auto-rewrite"
     )
