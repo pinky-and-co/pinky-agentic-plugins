@@ -204,17 +204,26 @@ async function hold($: EngineInterface, one: HeldAgent, signal: AbortSignal): Pr
   }
 }
 
+// The session only sees the model and effort its own call named; this note tells it what the call left with.
+export function routedNote(choice: RoutedChoice, category: string, exit: Exit): string {
+  return `This subagent ran on ${choice.model} · ${choice.effort} (routing: ${category}, ${exit}), which may differ from the model and effort this call named.`
+}
+
 async function route($: EngineInterface, e: any, next: any, call: AgentCall, prompt: string) {
   if (call.model === undefined && call.subagent_type !== CARD_WORKER && typeof call.subagent_type === 'string') {
     if ((await definedModel($, call.subagent_type)) !== null) return next(e)
   }
   const got = await propose($, call, prompt)
   if (got === null) return next(e)
-  const go = (choice: RoutedChoice) => next({ ...e, ...choice } as typeof e)
+  const go = async (choice: RoutedChoice, exit: Exit) => {
+    const ran = await next({ ...e, ...choice } as typeof e)
+    if (ran.deny !== undefined || ran.isError === true) return ran
+    return { ...ran, context: [...(ran.context ?? []), routedNote(choice, got.category, exit)] }
+  }
 
   if (!(await $.session.surfaces()).some(s => s === 'terminal' || s === 'desktop')) {
     await journal($, call, prompt, got, got, 'no-band')
-    return go(got)
+    return go(got, 'no-band')
   }
   const proposal = { model: got.model, effort: got.effort }
   const one: HeldAgent = {
@@ -227,8 +236,9 @@ async function route($: EngineInterface, e: any, next: any, call: AgentCall, pro
   const outcome = await hold($, one, next.signal)
   if (outcome === 'aborted') return { deny: 'The subagent call was cancelled before the user chose.' }
   const leaves = outcome === 'timeout' ? proposal : outcome
-  await journal($, call, prompt, got, leaves, outcome === 'timeout' ? 'timeout' : 'user-choice')
-  return go(leaves)
+  const exit = outcome === 'timeout' ? 'timeout' : 'user-choice'
+  await journal($, call, prompt, got, leaves, exit)
+  return go(leaves, exit)
 }
 
 export const register: Register = on => {

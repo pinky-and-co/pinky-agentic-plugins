@@ -42,6 +42,12 @@ def test_plugin_grid_is_valid(plugin_grid):
     assert classify_mod.valid_grid(plugin_grid)
 
 
+def test_plugin_grid_routes_information_gathering_to_haiku(plugin_grid):
+    lookup = plugin_grid["categories"]["lookup"]
+    assert (lookup["model"], lookup["effort"]) == ("haiku", "medium")
+    assert "lookup" in plugin_grid["categories"]["hard"]["description"]
+
+
 @pytest.fixture
 def server():
     fake = FakeServer()

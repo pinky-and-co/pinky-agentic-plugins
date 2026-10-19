@@ -8,6 +8,11 @@
       "effort": "low",
       "description": "everything to do is written down; the change is mechanical or repetitive (apply a known pattern, rename, shorten, archive, tests for a given function); no design choice is left; the checks are given commands"
     },
+    "lookup": {
+      "model": "haiku",
+      "effort": "medium",
+      "description": "gather and report facts from docs, the web or the code, sources cited; the deliverable is a written answer, never an edit to a file; no decision to take"
+    },
     "logic": {
       "model": "sonnet",
       "effort": "medium",
@@ -16,7 +21,7 @@
     "hard": {
       "model": "opus",
       "effort": "high",
-      "description": "the task itself leaves something open: an unknown cause to find, a choice between options, an unresolved trade-off, concurrency or security, or a design spanning several systems"
+      "description": "the task itself leaves something open: an unknown cause to find, a choice between options, an unresolved trade-off, concurrency or security, or a design spanning several systems; a question a source answers is lookup, not hard"
     }
   }
 }
