@@ -25,8 +25,7 @@ ${CLAUDE_PLUGIN_ROOT}/skills/clean-gone/scripts/bulk_clean_gone.sh --root "${CLA
 ```
 
 `args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
-means no argument was passed** — the normal shape for a bare invocation: the whole root, same as
-`--all` below, never a reason to ask.
+means no argument was passed** — the whole root, same as `--all` below, never a reason to ask.
 
 A named repo as argument → add `--repo <name>` (basename match against every repo the same
 discovery finds — `find <root> -maxdepth 4 -name .git`, `node_modules` excluded, identical to
@@ -34,8 +33,8 @@ discovery finds — `find <root> -maxdepth 4 -name .git`, `node_modules` exclude
 
 An absolute path (starts with `/`) combined with `--all` or with any other repo name or path: stop
 with a plain error, run nothing. Alone, it must be exactly a repo's own directory: run `test -e "<path>/.git"`
-(quote the path). If it fails — a subdirectory of a repo, or a directory that merely contains repos,
-is not a repo path — say so plainly and stop, never guess another repo. Otherwise run the script above with `--repo-path "<path>"` **instead of** both `--root` and
+(quote the path). If it fails — a subdirectory or a repo container is not a repo path — say so
+plainly and stop, never guess another repo. Otherwise run the script above with `--repo-path "<path>"` **instead of** both `--root` and
 `--repo` (the script then acts on that one repo alone, nested repos excluded). An explicit argument
 always wins over the session location.
 

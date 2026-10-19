@@ -16,8 +16,7 @@ it.
 ## Step 1 — Identify the target(s)
 
 `args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
-means no argument was passed** — the normal shape for a bare invocation. Go straight to step 4
-below; never ask for one.
+means no argument was passed** — go straight to step 4; never ask for one.
 
 The target passed to Step 2 is **always an absolute worktree root**, never a bare name. Resolve it
 in this order:
@@ -25,9 +24,8 @@ in this order:
 1. **An absolute repo path** (starts with `/`) → checked first. Combined with `--all`, or with any
    other repo name or path, stop with a plain error before any tool call. Otherwise the path must be
    exactly a repo's own directory: run `test -e "<path>/.git"` (quote the path). If it fails — a
-   subdirectory of a repo, or a directory that merely contains repos, is not a repo path — say so
-   plainly and stop, never guess another repo. Then that path is the target: go to Step 2 with it
-   and never run the bulk script.
+   subdirectory or a repo container is not a repo path — say so plainly and stop, never guess
+   another repo. Then that path is the target: go to Step 2 with it and never run the bulk script.
 2. **`--all`, or an argument naming several repos** → the bulk branch below.
 3. **An argument naming one repo** → resolve the name to a path via the same sweep the bulk branch
   uses (below): the candidate whose basename matches the argument. No match → say so, stop. Then go
@@ -42,8 +40,7 @@ in this order:
     the target — no question. Go to Step 2 with that path.
    - **Nonzero exit** → `${CLAUDE_PROJECT_DIR}` is not inside any git repo (orchestrator / workspace
      layout). **Hard-fail before any state-changing call**: report that a target is required (a repo
-    name or `--all`) and stop. Do not prompt for it — this skill runs `context: fork`, a question
-    has no channel back.
+    name or `--all`) and stop. Do not prompt for it — this skill runs `context: fork`.
 
 **Bulk branch.** Discover the dirty repos with the script, read-only — never a hand-written
 `rg`/`find` block or a shell loop (an `if`/`for` block matches no allowed command and asks for a
@@ -55,7 +52,7 @@ ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh discover --root "${CLAU
 
 It prints one dirty-repo basename per line and stages nothing. `NO-REPOS-FOUND` (non-zero exit) →
 the root is wrong, say so and stop. An empty list, exit 0 → nothing to commit, say so, stop. Then
-**do not spawn an agent per repo** — hand the whole lot to the script, which does every deterministic part in one sub-second pass:
+**do not spawn an agent per repo** — hand the whole lot to the script.
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh plan   --root "${CLAUDE_PROJECT_DIR}"
@@ -65,7 +62,9 @@ ${CLAUDE_PLUGIN_ROOT}/hooks/branch-policy/bulk_commit.sh apply  --root "${CLAUDE
 EOF
 ```
 
-Messages go in on **standard input** (`--messages -` plus a `<<'EOF'` heredoc) — never write a message file: a file under `/tmp` is outside the working directory and asks for a permission, and neither `cat > file` nor `printf > file` is allowed.
+Messages go in on **standard input** (`--messages -` plus a `<<'EOF'` heredoc) — never write a
+message file (a `/tmp` file asks for a permission, and neither `cat > file` nor `printf > file` is
+allowed).
 
 The plan groups repos by **diff fingerprint**: N repos sharing one diff need one message. Write one
 tab-separated `<fingerprint><TAB><message>` line per group (Step 2's convention still applies to
@@ -74,16 +73,19 @@ opens the PR/MR.
 
 Reproduce the script's `=== RESULTS` block verbatim (one `<repo>\t<state>\t-` line per repo;
 `--no-pr` so `pr_url` is always `-`), keeping `commit-nopush` distinct from `failed` — the first
-means the commit is there, the second that nothing was committed. Derive no state not in the block. Do not re-check the repos afterwards with a shell loop — the block is the check.
+means the commit is there, the second that nothing was committed. Derive no state not in the block.
+Do not re-check the repos afterwards — the block is the check.
 
-When a repo reached `pushed-nopr`, the script also prints a `=== FILES` … `=== END FILES` block (`<repo>\t<path>` per published file). Relay it verbatim too: an unexpected path means a stray file went out.
+When a repo reached `pushed-nopr`, the script also prints a `=== FILES` … `=== END FILES` block
+(`<repo>\t<path>` per published file). Relay it verbatim too: an unexpected path means a stray file
+went out.
 
 ## Step 2 — Commit
 
 1. `git -C <repo> status`, `git -C <repo> diff HEAD`, `git -C <repo> log --oneline -5`.
 2. OS noise never goes in a commit. The set is closed — `.DS_Store`, `Thumbs.db`, `desktop.ini`,
   the `NOISE_FILES` constant of `hooks/branch-policy/bulk_commit.sh` — and `resolve_noise()`
-  already writes them to `.gitignore` silently, so there is nothing for you to add. Any other path
+  already writes them to `.gitignore` silently. Any other path
   is a decision, not noise: ask. In particular **never write a pattern containing `/` or `*`** — a
   directory pattern silently swallows files the repo versions on purpose.
 3. **Read** `${CLAUDE_PLUGIN_ROOT}/skills/commit-convention/SKILL.md` — it is the source of truth for
@@ -106,5 +108,5 @@ When a repo reached `pushed-nopr`, the script also prints a `=== FILES` … `===
   The script prints the session's model line (`Co-Authored-By: Claude Sonnet 5 <...>`, or
   `Claude Code (<model>)` for a non-Anthropic model) and, only when
   `$CLAUDE_CODE_BRIDGE_SESSION_ID` is set, the `Claude-Session` line. If the session cannot be read
-  it prints the neutral `Co-Authored-By: Claude` line: use what it prints, whatever it is. Report `<emoji> <subject>` (+ file list) and the branch you
-  committed on.
+  it prints the neutral `Co-Authored-By: Claude` line. Use what it prints, whatever it is. Report
+  `<emoji> <subject>` (+ file list) and the branch you committed on.
