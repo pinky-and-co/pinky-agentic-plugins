@@ -114,6 +114,8 @@ pinky-agentic-plugins/
 │   │   │       ├── run.py
 │   │   │       └── standalone.py
 │   │   ├── hooks/
+│   │   │   ├── pi-view/
+│   │   │   │   └── register.tsx
 │   │   │   ├── subagent-routing/
 │   │   │   │   ├── classify.py
 │   │   │   │   ├── grid.json
@@ -126,6 +128,7 @@ pinky-agentic-plugins/
 │   │   │   ├── load_secrets.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
+│   │   │   ├── register.tsx
 │   │   │   ├── reviewer_gate.py
 │   │   │   ├── structure_guard.py
 │   │   │   └── style_reminder.py
@@ -139,7 +142,8 @@ pinky-agentic-plugins/
 │   │   │   ├── model_tools_verdict.py
 │   │   │   ├── pc_core_server.py
 │   │   │   ├── pi_events_view.py
-│   │   │   └── pi_guardian.py
+│   │   │   ├── pi_guardian.py
+│   │   │   └── pi_live.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
 │   │   │   │   └── SKILL.md
@@ -154,6 +158,7 @@ pinky-agentic-plugins/
 │   │   │   └── review-guidelines/
 │   │   │       └── SKILL.md
 │   │   ├── tests/
+│   │   │   ├── pi-view.test.tsx
 │   │   │   └── subagent-routing.test.tsx
 │   │   ├── types/
 │   │   │   └── index.d.ts
@@ -602,6 +607,7 @@ pinky-agentic-plugins/
 │   ├── test_pc_snow_server.py
 │   ├── test_pending_gate.py
 │   ├── test_pending_user_action_channel.py
+│   ├── test_pi_live.py
 │   ├── test_pi_review.py
 │   ├── test_pii_guard.py
 │   ├── test_pii_guard_decision.py

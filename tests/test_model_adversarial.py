@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "m
 import call_scope
 import model_adversarial as ma
 import pi_events_view as pev
+import pi_live
 from pc_core_stdio import PoolServer, alive
 from pi_fakes import PiPopen, pi_events
 
@@ -1224,7 +1225,7 @@ class TestEntryTimeout(unittest.TestCase):
     def test_check_pool_tools_gives_twenty_seconds_per_step(self):
         seen = {}
 
-        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
             seen[entry["name"]] = timeout
             return ""
 
@@ -1236,7 +1237,7 @@ class TestEntryTimeout(unittest.TestCase):
         spans = {}
         lock = threading.Lock()
 
-        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
             start = time.monotonic()
             time.sleep(0.2)
             with lock:
@@ -1257,7 +1258,7 @@ class TestEntryTimeout(unittest.TestCase):
         starts = []
         gate = threading.Barrier(2, timeout=5)
 
-        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None, events=None):
             starts.append(timeout)
             gate.wait()
             return "OK"
@@ -1448,7 +1449,7 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
 
     captured: dict[str, str] = {}
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False, live=None):
         captured["prompt"] = prompt
         return ma.PoolResult(entries[0], "ok")
 
@@ -1491,8 +1492,8 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
     monkeypatch.setattr(
         pc_core_server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
-            entries[0], "ok"
+        lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
+            ma.PoolResult(entries[0], "ok")
         ),
     )
 
@@ -1512,8 +1513,8 @@ def test_adversarial_tool_reports_pool_exhaustion_without_raising(monkeypatch):
     monkeypatch.setattr(
         pc_core_server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
-            None, "everything failed"
+        lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
+            ma.PoolResult(None, "everything failed")
         ),
     )
 
@@ -1554,7 +1555,7 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_with_the_default_s
 
     monkeypatch.setattr(server.model_adversarial, "select_for_adversarial", fake_select)
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False, live=None):
         seen["prompt"] = prompt
         return ma.PoolResult(entries[0], "ok")
 
@@ -1587,7 +1588,7 @@ def test_adversarial_tool_never_routes_a_small_diff_below_the_sonnet_floor(
         server.model_adversarial, "load_pool", lambda: [free_haiku, free_sonnet]
     )
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False, live=None):
         seen["entries"] = entries
         return ma.PoolResult(entries[0], "ok")
 
@@ -1676,8 +1677,8 @@ def test_adversarial_tool_header_names_the_provider_model_and_tier(monkeypatch):
     monkeypatch.setattr(
         server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
-            entry, "verdict"
+        lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
+            ma.PoolResult(entry, "verdict")
         ),
     )
 
@@ -1725,8 +1726,8 @@ def test_adversarial_cli_draws_with_a_fresh_rng(monkeypatch):
     monkeypatch.setattr(
         ma,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
-            entries[0], "ok"
+        lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
+            ma.PoolResult(entries[0], "ok")
         ),
     )
     assert ma.main(["--task", "review this"]) == 0
@@ -1751,8 +1752,8 @@ def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
     monkeypatch.setattr(
         pc_core_server.model_adversarial,
         "run_pool",
-        lambda entries, prompt, timeout=180, tools=None, watch=False: ma.PoolResult(
-            entries[0], "ok"
+        lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
+            ma.PoolResult(entries[0], "ok")
         ),
     )
     out = pc_core_server.adversarial(task="review this")
@@ -1779,7 +1780,7 @@ def _heads_served_for_a_diff(monkeypatch, pool, calls=20):
     )
     monkeypatch.setattr(server.model_adversarial, "load_pool", lambda: pool)
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False, live=None):
         heads.append(entries[0]["name"])
         return ma.PoolResult(entries[0], "ok")
 
@@ -1825,7 +1826,7 @@ def _entries_served_for_model(monkeypatch, pool, model):
     )
     monkeypatch.setattr(server.model_adversarial, "load_pool", lambda: pool)
 
-    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
+    def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False, live=None):
         seen["entries"] = entries
         return ma.PoolResult(entries[0], "ok")
 
@@ -1942,6 +1943,30 @@ class TestPoolRun:
     def _recording_cmux(self, bins, tmp_path):
         # `>>` : a second launch would add lines, so equality proves a single one.
         _fake_binary(bins, "cmux", f'printf "%s\\n" "$@" >> "{tmp_path}/cmux.argv"')
+
+    # --- the pi-view mod's run directory ------------------------------------------------------
+
+    def test_live_writes_the_run_view_without_cmux(self, bins, tmp_path, monkeypatch):
+        monkeypatch.delenv("CMUX_SURFACE_ID", raising=False)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+        run = pi_live.open_run(str(pi_live.runs_dir() / "toolu_1"))
+        self._pi_prints(tmp_path, pi_events(""), pi_events("answer"))
+
+        result = ma.run_pool([MISTRAL], "p", live=run)
+
+        assert result == ma.PoolResult(MISTRAL, "answer")
+        assert self._cmux_argv(tmp_path) is None
+        view = re.sub(r"\[ *\d+\.\ds\] ", "", (run / "view-1.txt").read_text())
+        assert view == (
+            "1 candidate(s)\n"
+            "== mistral-medium-3.5 (attempt 1) ==\n"
+            "settled\n"
+            "-> mistral-medium-3.5 attempt 1: empty answer\n"
+            "== mistral-medium-3.5 (attempt 2) ==\n"
+            "settled\n"
+            "-> mistral-medium-3.5 attempt 2: answered\n"
+            "pool end\n"
+        )
 
     # --- the split (one per run, to the right, following every attempt) -------------------
 
@@ -2513,7 +2538,9 @@ class TestAdversarialToolWatches:
         server = _server()
         seen = {}
 
-        def fake_run_pool(entries, prompt, timeout=180, tools=None, watch=False):
+        def fake_run_pool(
+            entries, prompt, timeout=180, tools=None, watch=False, live=None
+        ):
             seen["watch"] = watch
             return ma.PoolResult(entries[0], "ok")
 

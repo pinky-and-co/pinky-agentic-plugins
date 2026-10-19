@@ -36,6 +36,7 @@ import model_adversarial
 import model_offline
 import model_panel
 import model_sanitize
+import pi_live
 from mcp.server import MCPServer
 from mcp.server.context import DispatchContext
 
@@ -137,6 +138,7 @@ def offline(
     files: list[str] | None = None,
     model: str | None = None,
     max_tokens: int | None = None,
+    events: str | None = None,
 ) -> str:
     """Run a task on a local MLX-SERVE model via `pi`, zero cloud egress.
 
@@ -144,6 +146,9 @@ def offline(
     data). Returns ONLY a status line + the local output path — never the answer content. Read the
     output file yourself only if you are explicitly allowed to see this material; the zero-egress
     invariant is enforced by this tool never returning the body, not by caller discipline.
+
+    `events` is set by pc-core's `pi-view` mod, which shows how many characters have come in, never the text;
+    leave it unset.
     """
     files = files or []
     resolved_model = model_offline.resolve_model(model)
@@ -152,12 +157,17 @@ def offline(
     prompt = model_offline.build_prompt(task, files)
     t = time.time()
     timeout = max(900, resolved_max_tokens // 3)
+    run = pi_live.open_run(events)
+    progress = pi_live.ProgressView(run, f"offline · {resolved_model}") if run else None
     try:
-        body = model_offline.call_mlx(resolved_model, prompt, timeout)
+        body = model_offline.call_mlx(resolved_model, prompt, timeout, progress)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
         fh = model_offline.failure_hint(e, resolved_model, timeout)
         label = "BLOCKED" if fh.code == 2 else "ERROR"
         return f"[offline] {label} — {fh.hint}"
+    finally:
+        if progress is not None:
+            progress.close()
     dur = time.time() - t
 
     out = model_offline.default_out()
@@ -176,6 +186,7 @@ def adversarial(
     tools: list[str] | None = None,
     base: str | None = None,
     scope: Literal["all", "staged", "unstaged"] = "all",
+    events: str | None = None,
 ) -> str:
     """Contrarian second opinion on a change from a non-Claude model — called directly by the
     session that asks for a review of a change.
@@ -200,8 +211,8 @@ def adversarial(
     `model` names a pool entry first — used as is, which also bypasses the tier floor — and
     otherwise is a model id at the built-in nvidia provider.
 
-    Under cmux (`CMUX_SURFACE_ID`) a split to the right follows the run live; cmux only — wmux is
-    not covered.
+    Under cmux (`CMUX_SURFACE_ID`) a split to the right follows the run live too; wmux is not
+    covered.
 
     `tier` (`haiku` / `sonnet` / `opus`) routes to the cheapest pool entry at or above that
     capacity (raised to `sonnet` when lower) — free before paid — instead of the default
@@ -217,6 +228,9 @@ def adversarial(
     of this session's project directory, and names it in its messages. `scope` narrows it: `staged`
     (fork point → index), `unstaged` (index → working tree, untracked files included), or `all`
     (the default).
+
+    `events` is set by pc-core's `pi-view` mod, which draws the run live in this call's row;
+    leave it unset.
     """
     files = files or []
     override = model_adversarial.resolve_model(model)
@@ -271,7 +285,9 @@ def adversarial(
         adversarial_task += f"\n\n--- DIFF against {base} in {repo} ---\n{diff_text}"
     prompt = model_adversarial.build_prompt(adversarial_task, files)
 
-    pool_result = model_adversarial.run_pool(entries, prompt, tools=tools, watch=True)
+    pool_result = model_adversarial.run_pool(
+        entries, prompt, tools=tools, watch=True, live=pi_live.open_run(events)
+    )
     if pool_result.entry is None:
         return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
     return (
@@ -286,6 +302,7 @@ def panel(
     models: list[str] | None = None,
     tier: str | list[str] | None = None,
     tools: list[str] | None = None,
+    events: str | None = None,
 ) -> str:
     """Send one prompt PER SLOT to a DIFFERENT model family each, in parallel; return every answer.
 
@@ -300,6 +317,9 @@ def panel(
     or a list of them, e.g. `"haiku"`) to select from those tiers instead — for a non-advisor task
     that wants a small deterministic model. `tools` (pi tool names) is given to every slot;
     omitted → no tools.
+
+    `events` is set by pc-core's `pi-view` mod, which draws the run live in this call's row;
+    leave it unset.
     """
     if not tasks:
         return "[panel] BLOCKED — no task given."
@@ -311,7 +331,9 @@ def panel(
         want = "sonnet/opus" if tier is None else tier
         return f"[panel] BLOCKED — no eligible model in the pool (need kind=cli, tier {want})."
 
-    response = model_panel.run_panel(entries, tasks[: len(entries)], tools=tools)
+    response = model_panel.run_panel(
+        entries, tasks[: len(entries)], tools=tools, live=pi_live.open_run(events)
+    )
     if not response.answers:
         return f"[panel] BLOCKED — every candidate failed. Skipped: {response.skipped}"
     return f"{model_panel.format_panel(response, len(tasks))}\n\n[raw: {model_sanitize.raw_log_path()}]"

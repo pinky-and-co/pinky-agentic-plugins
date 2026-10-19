@@ -42,7 +42,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -107,8 +109,53 @@ def is_out_of_memory(text: str) -> bool:
     return bool(_OUT_OF_MEMORY_RE.search(text))
 
 
-def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
+def _stream(
+    proc: subprocess.Popen[str], timeout: int, progress: Callable[[str], None]
+) -> tuple[str, str]:
+    """Read `proc`'s output as it comes, handing each stdout line to `progress`, until it exits.
+
+    Args:
+        proc: the running `pi`, both pipes open in text mode.
+        timeout: seconds before `subprocess.TimeoutExpired`.
+        progress: called with each stdout line.
+
+    Returns:
+        The whole stdout and stderr.
+    """
+    out: list[str] = []
+    err: list[str] = []
+
+    def pump_out() -> None:
+        """Collect stdout line by line, reporting each."""
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            out.append(line)
+            progress(line)
+
+    def pump_err() -> None:
+        """Collect stderr whole."""
+        assert proc.stderr is not None
+        err.append(proc.stderr.read())
+
+    pumps = [threading.Thread(target=f, daemon=True) for f in (pump_out, pump_err)]
+    for pump in pumps:
+        pump.start()
+    proc.wait(timeout=timeout)
+    for pump in pumps:
+        pump.join()
+    return "".join(out), "".join(err)
+
+
+def call_mlx(
+    model: str,
+    prompt: str,
+    timeout: int = 900,
+    progress: Callable[[str], None] | None = None,
+) -> str:
     """Run `pi -p --model 'mlx/<id>' -t read --thinking off "<prompt>"`, return stdout.
+
+    `progress`, when given, is called with each line of the answer as `pi` prints it; it must
+    never pass the text on (the caller counts it).
 
     Raises `subprocess.CalledProcessError` / `subprocess.TimeoutExpired` / `OSError` on failure —
     callers classify those via `failure_hint()`, never letting `pi`'s own stdout/stderr (which may
@@ -139,11 +186,18 @@ def call_mlx(model: str, prompt: str, timeout: int = 900) -> str:
     )
     call_scope.adopt(proc)
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        if progress is None:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        else:
+            stdout, stderr = _stream(proc, timeout, progress)
     except BaseException:
         # Aussi TimeoutExpired, KeyboardInterrupt : le groupe entier part, pas seulement pi.
         call_scope.kill_session(proc)
-        proc.communicate()
+        # Avec `progress`, les deux pompes lisent encore les tubes : on attend la fin sans relire.
+        if progress is None:
+            proc.communicate()
+        else:
+            proc.wait()
         raise
     finally:
         call_scope.release(proc)
