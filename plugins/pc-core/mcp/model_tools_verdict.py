@@ -2,7 +2,8 @@
 """Per pool entry, whether a tool loop works: a verdict read from the `pi` sessions already run.
 
 For each entry of the pool this prints `true`, `false` or `inconnu`, the evidence behind it, and
-the `tools:` value that would follow. It writes nothing — not to the pool configuration, not
+the `tools:` value that would follow (`-` for `inconnu`) and the run detail (success, text, 429,
+other (unclassified)). It writes nothing — not to the pool configuration, not
 anywhere: the verdict is a proposal and the pool belongs to whoever edits it.
 
 A run is one session file in which tools were offered (the system message lists some). Its steps
@@ -55,6 +56,15 @@ class EntryVerdict(NamedTuple):
     verdict: Verdict
     runs: int
     source: Literal["entry", "provider", "none"]
+    success: int = 0
+    text: int = 0
+    rate_limited: int = 0
+    other: int = 0
+
+    @property
+    def tools(self) -> str:
+        """The `tools:` value to propose: `true`, `false`, or `-` (none) for `inconnu`."""
+        return "-" if self.verdict == "inconnu" else self.verdict
 
 
 def default_sessions_dir() -> Path:
@@ -153,24 +163,71 @@ def entry_verdicts(pool: list[dict[str, Any]], runs: list[Run]) -> list[EntryVer
             if (r.provider, r.model) == (entry.get("provider"), entry.get("model"))
         ]
         if own:
-            rows.append(EntryVerdict(entry["name"], verdict_of(own), len(own), "entry"))
+            rows.append(_row(entry["name"], own, "entry"))
             continue
         theirs = [r for r in runs if r.provider == entry.get("provider")]
         if theirs:
-            rows.append(
-                EntryVerdict(entry["name"], verdict_of(theirs), len(theirs), "provider")
-            )
+            rows.append(_row(entry["name"], theirs, "provider"))
         else:
             rows.append(EntryVerdict(entry["name"], "inconnu", 0, "none"))
     return rows
 
 
+def _row(
+    name: str, runs: list[Run], source: Literal["entry", "provider"]
+) -> EntryVerdict:
+    """The row of `name`, whose evidence is `runs`."""
+    outcomes = [r.outcome for r in runs]
+    return EntryVerdict(
+        name,
+        verdict_of(runs),
+        len(runs),
+        source,
+        success=outcomes.count("success"),
+        text=outcomes.count("text"),
+        rate_limited=outcomes.count("429"),
+        other=outcomes.count(None),
+    )
+
+
 def render(rows: list[EntryVerdict]) -> str:
-    """The table: entry, verdict, run count and where the evidence comes from."""
+    """The table: entry, verdict, proposed `tools:` value, run detail and where the evidence is from."""
     width = max((len(r.name) for r in rows), default=0)
-    lines = ["entry verdict runs source"]
+    width = max(width, len("entry"))
+
+    def line(*cells: str) -> str:
+        name, verdict, tools, runs, success, text, limited, other, source = cells
+        return (
+            f"{name.ljust(width)}  {verdict:<7}  {tools:<5}  {runs:>4}  {success:>7}  "
+            f"{text:>4}  {limited:>3}  {other:>5}  {source}"
+        )
+
+    lines = [
+        line(
+            "entry",
+            "verdict",
+            "tools",
+            "runs",
+            "success",
+            "text",
+            "429",
+            "other",
+            "source",
+        )
+    ]
     lines += [
-        f"{r.name.ljust(width)}  {r.verdict:<7}  {r.runs:>4}  {r.source}" for r in rows
+        line(
+            r.name,
+            r.verdict,
+            r.tools,
+            str(r.runs),
+            str(r.success),
+            str(r.text),
+            str(r.rate_limited),
+            str(r.other),
+            r.source,
+        )
+        for r in rows
     ]
     return "\n".join(lines)
 

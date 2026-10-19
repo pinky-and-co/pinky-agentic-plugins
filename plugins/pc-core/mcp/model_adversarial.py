@@ -28,7 +28,8 @@ when the caller needs the model to look at files itself. An entry that cannot ru
 so with ``tools: false`` and is then never a candidate for a call that passes tools.
 
 Provider memory: the provider of the last entry that answered is kept in
-``~/.claude/model_pool_state.json`` (key ``last_ok_provider``); ``select_for_adversarial`` and
+``${CLAUDE_PLUGIN_DATA}/model_pool_state.json`` (key ``last_ok_provider``), a folder Claude Code
+deletes on uninstall; without that variable the memory is off. ``select_for_adversarial`` and
 ``select_for_delegation_with_fallback`` put that provider's candidates first.
 
 Each entry:
@@ -54,7 +55,8 @@ Each entry:
                    inactivity by default; `retry.provider.timeoutMs` bounds one request). Set
                    `timeout` only on an entry that must be cut — it then always cuts, the `pi`
                    session is killed, and the entry is dropped without a retry
-    priority       optional integer, default 0, higher first: a strict order between levels, orders
+    priority       optional integer, smallest first, absent or null after any set value: a strict
+                   order between levels, orders
                    the providers inside each round of the selection's provider alternation — a
                    generous provider opens every round without stacking its entries. Never outranks
                    locality, cost or tier. Between entries of the same level, `adversarial` draws
@@ -62,7 +64,16 @@ Each entry:
                    delegation keeps pool order unless its caller passes an `rng`.
     tools          optional boolean, default true. ``false`` marks an entry that answers a plain call
                    but fails a tool loop (a provider limited to one request per minute per model):
-                   it is not a candidate when the call passes `tools`, and stays normal without
+                   it is not a candidate when the call passes `tools`, and stays normal without.
+                   To classify a new entry, run `model_adversarial.py --check-pool --tools --name
+                   <entry>` and read each detail of its report:
+                   a ✅ line → `tools: true`;
+                   `429` (rerun once to rule out an exhausted quota) → `tools: false`;
+                   `outil en texte` → `tools: false`;
+                   a template rejection of the tool role (e.g. `Unexpected message role`) →
+                   `tools: false`;
+                   a missing mark, an empty answer, `no answer within Ns` or an environment error
+                   decides nothing
     thinking       optional pi thinking level (`off`, `low`, `medium`, …); absent → pi's own default.
                    `off` for a small local model, which a thinking pass drowns into an empty answer
 
@@ -197,19 +208,24 @@ STATE_FILE_NAME = "model_pool_state.json"
 _STATE_KEY = "last_ok_provider"
 
 
-def state_path() -> Path:
-    """The file holding the provider memory, under the current home's `.claude/`."""
-    return Path.home() / ".claude" / STATE_FILE_NAME
+def state_path() -> Path | None:
+    """The file holding the provider memory, in the plugin data folder; None (memory off) when
+    `CLAUDE_PLUGIN_DATA` is unset or empty."""
+    data = os.environ.get("CLAUDE_PLUGIN_DATA")
+    return Path(data) / STATE_FILE_NAME if data else None
 
 
 def read_last_ok_provider() -> str | None:
     """The provider of the last entry that answered, or None.
 
-    A missing, empty or unreadable file, invalid JSON, or a value that is not a non-empty string
-    all mean no memory.
+    No plugin data folder, a missing, empty or unreadable file, invalid JSON, or a value that is
+    not a non-empty string all mean no memory.
     """
+    path = state_path()
+    if path is None:
+        return None
     try:
-        data = json.loads(state_path().read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     value = data.get(_STATE_KEY) if isinstance(data, dict) else None
@@ -219,9 +235,11 @@ def read_last_ok_provider() -> str | None:
 def write_last_ok_provider(provider: str) -> None:
     """Remember `provider` as the last one that answered: temp file then rename, so a reader
     never sees a half-written file. Any `OSError` is swallowed — the memory is an optimisation,
-    never part of a result.
+    never part of a result. Without a plugin data folder it does nothing.
     """
     path = state_path()
+    if path is None:
+        return
     tmp_name: str | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -255,6 +273,12 @@ def remembered_first(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _priority_rank(entry: dict[str, Any]) -> tuple[bool, int]:
+    """Sort key putting the smallest `priority` first, an absent or null one after every set value."""
+    priority = entry.get("priority")
+    return (priority is None, priority or 0)
+
+
 def spread_providers(
     entries: list[dict[str, Any]],
     key: Callable[[dict[str, Any]], Any],
@@ -267,9 +291,9 @@ def spread_providers(
     A provider that is down or slow (NVIDIA NIM: 9–47s for a one-line reply) fails all its
     entries alike; consecutive ones burn a full timeout each before any other provider is tried.
     `key` decides which group comes first, so spreading never reorders across locality, cost or
-    aggregator priority. Within a group, entries are taken in descending `priority`: the provider
-    holding the highest one opens each round, and a provider's own entries come out highest
-    `priority` first. Between equal `priority` the order is pool order, or drawn with `rng` when
+    aggregator priority. Within a group, entries are taken in ascending `priority`, absent or null
+    last: the provider holding the smallest one opens each round, and a provider's own entries
+    come out smallest `priority` first. Between equal `priority` the order is pool order, or drawn with `rng` when
     one is given (which entry opens a provider's queue, which provider opens a round).
     """
     spread: list[dict[str, Any]] = []
@@ -278,7 +302,7 @@ def spread_providers(
         ties = list(group)
         if rng is not None:
             rng.shuffle(ties)
-        for e in sorted(ties, key=lambda e: -e.get("priority", 0)):
+        for e in sorted(ties, key=_priority_rank):
             by_provider.setdefault(e["provider"], deque()).append(e)
         queues = list(by_provider.values())
         while queues:
@@ -1414,20 +1438,24 @@ def probe_mark() -> str:
     return PROBE_MARK_PREFIX + secrets.token_hex(6)
 
 
-def _probe_prompt(directory: Path, mark: str) -> tuple[str, Path]:
-    """Write the fixture of the 3-step probe into `directory` and return its prompt.
+PROBE_STEPS = 12
 
-    `a.txt` names `b.txt`, `b.txt` holds the mark on a line starting with `MARK=`: read `a.txt`,
-    search the named file for the mark, answer it.
+
+def _probe_prompt(directory: Path, mark: str) -> tuple[str, Path]:
+    """Write the fixture of the 12-step probe into `directory` and return its prompt.
+
+    `step01.txt` to `step12.txt` form a chain: each file names the next, and only the last holds
+    the mark, on a line starting with `MARK=`. The model reads along the chain, then searches the
+    last file for the mark and answers it.
     """
-    (directory / "a.txt").write_text(
-        f"The mark is in the file {directory / 'b.txt'}\n", encoding="utf-8"
-    )
-    (directory / "b.txt").write_text(f"filler\nMARK={mark}\nfiller\n", encoding="utf-8")
+    files = [directory / f"step{i:02d}.txt" for i in range(1, PROBE_STEPS + 1)]
+    for current, following in zip(files, files[1:]):
+        current.write_text(f"The next file is {following}\n", encoding="utf-8")
+    files[-1].write_text(f"filler\nMARK={mark}\nfiller\n", encoding="utf-8")
     prompt = (
-        f"Use your tools. Step 1: read {directory / 'a.txt'}, it names another file. "
-        "Step 2: search that file with grep for the line starting with MARK=. "
-        "Step 3: reply with exactly the mark after MARK=, nothing else."
+        f"Use your tools. Read {files[0]}: each file names the next one, follow the chain "
+        f"for {PROBE_STEPS} files. Search the last one with grep for the line starting with "
+        "MARK=, then reply with exactly the mark after MARK=, nothing else."
     )
     return prompt, directory
 
@@ -1435,7 +1463,7 @@ def _probe_prompt(directory: Path, mark: str) -> tuple[str, Path]:
 def _check_tools_one(
     entry: dict[str, Any], timeout: int, env: dict[str, str]
 ) -> PoolCheck:
-    """Run the 3-step tool probe on one entry: `ok`, `429`, `outil en texte`, or the provider's
+    """Run the 12-step tool probe on one entry: `ok`, `429`, `outil en texte`, or the provider's
     own error."""
     if entry.get("kind") == "offline":
         return PoolCheck(
@@ -1516,7 +1544,7 @@ def check_pool(
         pool: the entries to check — `offline` ones are skipped (`pinky doctor` checks them).
         timeout: seconds allowed per entry.
         workers: concurrent pi calls.
-        tools: run the 3-step tool probe (about four requests per entry) instead of the one-line
+        tools: run the 12-step tool probe (one request per tool call) instead of the one-line
             ping; the detail of a failed entry is then `429`, `outil en texte` or the provider's
             error.
 
@@ -1594,7 +1622,7 @@ def main(argv: list[str] | None = None) -> int:
         "--tools",
         action="store_true",
         dest="check_tools",
-        help="with --check-pool: run the 3-step tool probe instead of the one-line ping",
+        help="with --check-pool: run the 12-step tool probe instead of the one-line ping",
     )
     args = ap.parse_args(argv)
 

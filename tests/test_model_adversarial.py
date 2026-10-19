@@ -159,7 +159,7 @@ class TestSelectForAdversarial(unittest.TestCase):
 
 
 class TestProviderPriority(unittest.TestCase):
-    """`priority` (higher first, default 0) orders the providers inside a round of the spread —
+    """`priority` (smallest first, absent or null last) orders the providers inside a round of the spread —
     a generous provider opens every round, without stacking its entries back to back."""
 
     def test_the_prioritised_provider_opens_each_round(self):
@@ -177,6 +177,16 @@ class TestProviderPriority(unittest.TestCase):
         self.assertEqual(
             ma.select_for_delegation(pool, task_tier="sonnet"),
             [ol_a, NV_GLM, VC_A],
+        )
+
+    def test_smallest_priority_first_then_absent_or_null(self):
+        first = _entry("p1", "ollama-cloud", priority=1)
+        second = _entry("p2", "ollama-cloud", priority=2)
+        absent = _entry("pa", "ollama-cloud")
+        null = _entry("pn", "ollama-cloud", priority=None)
+        self.assertEqual(
+            ma.spread_providers([absent, second, null, first], key=lambda e: 0),
+            [first, second, absent, null],
         )
 
     def test_priority_never_outranks_locality_or_cost(self):
@@ -206,11 +216,11 @@ class TestAdversarialRandomTie(unittest.TestCase):
         ]
         self.assertEqual(set(self._heads(pool)), {"ol-a", "ol-b", "ol-c"})
 
-    def test_a_higher_priority_entry_opens_every_draw(self):
+    def test_the_smallest_priority_entry_opens_every_draw(self):
         pool = [
-            _entry("ol-a", "ollama-cloud", priority=1),
-            _entry("ol-b", "ollama-cloud", priority=1),
-            _entry("ol-top", "ollama-cloud", priority=2),
+            _entry("ol-a", "ollama-cloud", priority=2),
+            _entry("ol-b", "ollama-cloud", priority=2),
+            _entry("ol-top", "ollama-cloud", priority=1),
         ]
         self.assertEqual(set(self._heads(pool)), {"ol-top"})
 
@@ -1745,13 +1755,13 @@ def test_adversarial_tool_with_a_diff_draws_among_entries_of_equal_priority(
     assert set(heads) == {"ol-a", "ol-b", "ol-c"}
 
 
-def test_adversarial_tool_with_a_diff_opens_on_the_higher_priority_entry(
+def test_adversarial_tool_with_a_diff_opens_on_the_smallest_priority_entry(
     monkeypatch,
 ):
     pool = [
-        _entry("ol-a", "ollama-cloud", priority=1),
-        _entry("ol-b", "ollama-cloud", priority=1),
-        _entry("ol-top", "ollama-cloud", priority=2),
+        _entry("ol-a", "ollama-cloud", priority=2),
+        _entry("ol-b", "ollama-cloud", priority=2),
+        _entry("ol-top", "ollama-cloud", priority=1),
     ]
     heads = _heads_served_for_a_diff(monkeypatch, pool)
     assert set(heads) == {"ol-top"}
@@ -3261,8 +3271,17 @@ C_ENTRY = _entry("c-model", "prov-c")
 THREE = [A_ENTRY, B_ENTRY, C_ENTRY]
 
 
+@pytest.fixture(autouse=True)
+def _plugin_data(monkeypatch, tmp_path):
+    """The provider memory lives under `CLAUDE_PLUGIN_DATA`; each test gets its own folder."""
+    data = tmp_path / "plugin-data"
+    monkeypatch.setenv("CLAUDE_PLUGIN_DATA", str(data))
+    return data
+
+
 def _write_state(content: str | None) -> None:
     path = ma.state_path()
+    assert path is not None
     path.parent.mkdir(parents=True, exist_ok=True)
     if content is not None:
         path.write_text(content, encoding="utf-8")
@@ -3270,6 +3289,41 @@ def _write_state(content: str | None) -> None:
 
 def _names(entries):
     return [e["name"] for e in entries]
+
+
+def test_state_path_is_model_pool_state_under_plugin_data(_plugin_data):
+    assert ma.state_path() == _plugin_data / "model_pool_state.json"
+
+
+def test_run_pool_creates_the_state_file_in_the_missing_plugin_data_folder(
+    monkeypatch, _plugin_data
+):
+    monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
+    assert not _plugin_data.exists()
+    ma.run_pool([A_ENTRY], "p")
+    state = _plugin_data / "model_pool_state.json"
+    assert json.loads(state.read_text()) == {"last_ok_provider": "prov-a"}
+    assert ma.read_last_ok_provider() == "prov-a"
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_without_plugin_data_the_memory_is_off_and_nothing_is_written(
+    monkeypatch, tmp_path, value
+):
+    if value is None:
+        monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
+    else:
+        monkeypatch.setenv("CLAUDE_PLUGIN_DATA", value)
+    home = tmp_path / "empty-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    assert ma.state_path() is None
+    assert ma.read_last_ok_provider() is None
+    ma.write_last_ok_provider("prov-a")
+    monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
+    assert ma.run_pool([A_ENTRY], "p").entry == A_ENTRY
+    assert list(tmp_path.rglob("model_pool_state.json*")) == []
 
 
 def test_remembered_provider_goes_first_and_the_rest_keeps_its_order():
@@ -3374,6 +3428,43 @@ def test_module_docstring_describes_the_tools_field():
     assert "tools:" in (ma.__doc__ or "")
 
 
+def test_tools_field_docstring_maps_every_report_detail_to_a_value():
+    doc = " ".join((ma.__doc__ or "").split())
+    for clause in (
+        "a ✅ line → `tools: true`",
+        "`429` (rerun once to rule out an exhausted quota) → `tools: false`",
+        "`outil en texte` → `tools: false`",
+        "a template rejection of the tool role (e.g. `Unexpected message role`) → `tools: false`",
+        "a missing mark, an empty answer, `no answer within Ns` or an environment error decides nothing",
+    ):
+        assert clause in doc
+
+
+def test_probe_fixture_is_12_chained_files_with_the_mark_only_in_the_last(tmp_path):
+    prompt, _ = ma._probe_prompt(tmp_path, "MRK-x")
+    files = sorted(tmp_path.iterdir())
+    assert len(files) == 12
+    assert all("MRK-x" not in f.read_text() for f in files[:11])
+    assert "MARK=MRK-x" in files[11].read_text()
+    for current, following in zip(files, files[1:]):
+        assert str(following) in current.read_text()
+    assert str(files[0]) in prompt
+
+
+def test_probe_docs_say_12_steps():
+    import pc_core_server
+
+    assert "12-step" in (ma.__doc__ or "") + (ma._probe_prompt.__doc__ or "")
+    assert "12-step" in (pc_core_server.pool_check.__doc__ or "")
+    assert "3-step" not in (ma.__doc__ or "") + (
+        pc_core_server.pool_check.__doc__ or ""
+    )
+
+
+def test_module_docstring_describes_the_new_entry_protocol():
+    assert "--check-pool --tools --name" in (ma.__doc__ or "")
+
+
 # --- tools verdict ---------------------------------------------------------------------------
 
 
@@ -3446,6 +3537,23 @@ def test_entry_without_run_takes_its_provider_verdict_and_own_runs_win(tmp_path)
     assert _verdicts(tmp_path, [fresh, cut]) == {"fresh": "true", "cut": "false"}
 
 
+def test_table_renders_proposed_tools_value_and_run_detail(tmp_path):
+    ok, bad, lone = (_entry(n, n) for n in ("okp", "badp", "lonep"))
+    _session(tmp_path, "s1", "okp", "okp", steps=3, ending="ok")
+    _session(tmp_path, "s2", "okp", "okp", steps=3, ending="ok")
+    _session(tmp_path, "s3", "badp", "badp", steps=2, ending="text")
+    _session(tmp_path, "s4", "badp", "badp", steps=2, ending="429")
+    _session(tmp_path, "s5", "lonep", "lonep", steps=3, ending="ok")
+    _session(tmp_path, "s6", "lonep", "lonep", steps=1, ending="ok")
+    rows = mtv.entry_verdicts([ok, bad, lone], mtv.read_runs(tmp_path))
+    assert mtv.render(rows) == (
+        "entry  verdict  tools  runs  success  text  429  other  source\n"
+        "okp    true     true      2        2     0    0      0  entry\n"
+        "badp   false    false     2        0     1    1      0  entry\n"
+        "lonep  inconnu  -         2        1     0    0      1  entry"
+    )
+
+
 def test_verdict_script_writes_no_pool_configuration(tmp_path, monkeypatch, capsys):
     project = tmp_path / "project"
     (project / ".claude").mkdir(parents=True)
@@ -3491,7 +3599,7 @@ def test_tools_probe_names_the_outcome_per_entry(monkeypatch, outcome, detail):
     assert result.detail == detail
     assert result.status == ("ok" if outcome == "ok" else "failed")
     assert seen["tools"] == ["read", "grep"]
-    assert "a.txt" in seen["prompt"]
+    assert "step01.txt" in seen["prompt"]
 
 
 def test_delegation_puts_the_remembered_provider_first_without_reviving_filtered():

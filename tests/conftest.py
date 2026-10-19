@@ -28,6 +28,7 @@ def _isolate_pool_log(monkeypatch, tmp_path):
     session log."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.delenv("CLAUDE_PLUGIN_DATA", raising=False)
 
 
 @pytest.fixture(autouse=True)

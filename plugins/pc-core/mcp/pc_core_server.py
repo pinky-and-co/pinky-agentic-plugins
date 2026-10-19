@@ -327,8 +327,8 @@ def pool_check(
     which answer: one line per entry with its latency, or the provider's own error (bad key, rate
     limit, unknown model, timeout). `offline` entries are skipped — `pinky doctor` checks those.
 
-    `tools=True` runs a fixed 3-step task with `read,grep` instead (read a file that names
-    another, search it for a token, answer the token — about four requests per entry) and reports
+    `tools=True` runs a fixed 12-step task with `read,grep` instead (follow a chain of 12 files, each
+    naming the next, search the last for a token, answer the token — one request per tool call) and reports
     per entry `ok`, `429`, `outil en texte` or the provider's error: the evidence for an entry's
     `tools:` field.
 

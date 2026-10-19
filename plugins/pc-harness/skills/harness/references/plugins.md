@@ -21,3 +21,12 @@ not to `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (measured on 
 - **When an edit seems ignored**, check what actually loaded it before refreshing anything: a
   skill's "Base directory" line, `ps` for an MCP server, the `statusLine` path, the debug log for a
   mod.
+
+## Where a plugin keeps its state
+
+Write plugin state under `${CLAUDE_PLUGIN_DATA}` (`~/.claude/plugins/data/<id>/`): Claude Code deletes
+it on uninstall (not with `--keep-data`), a file elsewhere under `~/.claude/` stays behind. Hooks and
+`stdio` MCP servers receive the variable; commands run through the Bash tool (a skill script) do not.
+Unset → treat the state as absent and write nothing; never fall back to a `~/.claude/` path. Measured: a `stdio` MCP
+server of a `directory` marketplace received it and wrote under `~/.claude/plugins/data/<plugin>-<marketplace>/`;
+the deletion on uninstall is documented, not measured.
