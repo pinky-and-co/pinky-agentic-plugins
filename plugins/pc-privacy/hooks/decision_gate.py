@@ -2,8 +2,8 @@
 
 Standard library only, in the hook's own process: a `command` hook cannot call an MCP tool and
 must keep the Presidio fallback in-process. The model comes from `ONE_DECISION_MODEL` (an oMLX
-decision-model id), the server address from `LOCAL_INFERENCE_BASE_URL`, else the `baseUrl` of the `mlx` provider in
-`pi`'s `models.json` (loopback hosts only, no built-in default). The server is started by the person, never by this module.
+decision-model id), the server address from `LOCAL_INFERENCE_BASE_URL` (`http://host:port` without `/v1`, loopback hosts only, no built-in default; unset
+or empty: the gate is off). The server is started by the person, never by this module.
 
 The gate sends the file's state (never the file name) as a JSON object to oMLX
 `POST /v1/systemone`: the first sampled values of each column, or the first lines of a text
@@ -93,38 +93,15 @@ def _trip() -> None:
 
 
 def resolve_base_url() -> str | None:
-    """Find the local inference server address, without any built-in default.
-
-    Order: `LOCAL_INFERENCE_BASE_URL`, then the `baseUrl` of the `mlx` provider in `pi`'s
-    `models.json` (`$PI_CODING_AGENT_DIR/models.json`, else `~/.pi/agent/models.json`; providers
-    under a top-level `providers` object or at top level) with a trailing `/v1` removed, since the
-    callers append `/v1/systemone`.
+    """Read the local inference server address from `LOCAL_INFERENCE_BASE_URL`, no default.
 
     Same resolution as `pc-core`'s subagent-routing `classify.resolve_base_url`: plugins are
     installed apart, so one cannot import the other's module.
 
     Returns:
-        The address, or None when neither source gives one (file absent, unreadable, not JSON,
-        no `mlx` provider, no string `baseUrl`).
+        The variable's value, or None when it is unset or empty.
     """
-    override = os.environ.get(URL_ENV)
-    if override:
-        return override
-    agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
-    folder = Path(agent_dir) if agent_dir else Path.home() / ".pi" / "agent"
-    try:
-        data = json.loads((folder / "models.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    providers = data.get("providers", data)
-    mlx = providers.get("mlx") if isinstance(providers, dict) else None
-    base = mlx.get("baseUrl") if isinstance(mlx, dict) else None
-    if not isinstance(base, str):
-        return None
-    base = base.strip().rstrip("/").removesuffix("/v1")
-    return base or None
+    return os.environ.get(URL_ENV) or None
 
 
 def _is_loopback(url: str) -> bool:

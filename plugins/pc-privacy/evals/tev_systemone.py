@@ -14,9 +14,8 @@ builds the prompt the models were trained on, and returns a probability (1 = yes
 holds personal data) instead of a letter. A file is blocked when that probability reaches
 `--threshold`.
 
-The server address comes from `decision_gate.resolve_base_url()` (`LOCAL_INFERENCE_BASE_URL`, else the
-`mlx` provider of `pi`'s `models.json`), on a
-loopback host only, like the gate itself. The file name is never sent. Prints file names,
+The server address comes from `decision_gate.resolve_base_url()` (the `LOCAL_INFERENCE_BASE_URL`
+variable), on a loopback host only, like the gate itself. The file name is never sent. Prints file names,
 labels, probabilities and timings only; the sampled values go to the local oMLX server, on
 this machine.
 """

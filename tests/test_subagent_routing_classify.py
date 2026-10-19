@@ -367,59 +367,29 @@ def test_no_override_uses_plugin_grid(tmp_path, plugin_grid):
     assert classify_mod.load_grid(tmp_path) == plugin_grid
 
 
-def _models_json(folder: Path, data: object) -> None:
+def _models_json(folder: Path, base_url: str) -> None:
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "models.json").write_text(json.dumps(data))
+    (folder / "models.json").write_text(
+        json.dumps({"providers": {"mlx": {"baseUrl": base_url}}})
+    )
 
 
-def test_resolve_env_wins_over_models_json(tmp_path, monkeypatch):
-    _models_json(tmp_path, {"providers": {"mlx": {"baseUrl": "http://localhost:1/v1"}}})
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+def test_resolve_returns_the_variable(monkeypatch):
     monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", "http://127.0.0.1:2")
     assert classify_mod.resolve_base_url() == "http://127.0.0.1:2"
 
 
-@pytest.mark.parametrize(
-    "data",
-    [
-        {"providers": {"mlx": {"baseUrl": "http://localhost:11234/v1"}}},
-        {"mlx": {"baseUrl": "http://localhost:11234/v1/"}},
-        {"providers": {"mlx": {"baseUrl": "http://localhost:11234"}}},
-    ],
-)
-def test_resolve_reads_the_mlx_provider_without_v1(tmp_path, monkeypatch, data):
-    _models_json(tmp_path, data)
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
-    assert classify_mod.resolve_base_url() == "http://localhost:11234"
-
-
-def test_resolve_falls_back_to_home_when_pi_dir_is_unset(tmp_path, monkeypatch):
-    _models_json(
-        tmp_path / ".pi" / "agent",
-        {"providers": {"mlx": {"baseUrl": "http://localhost:7/v1"}}},
-    )
-    monkeypatch.delenv("PI_CODING_AGENT_DIR")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert classify_mod.resolve_base_url() == "http://localhost:7"
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        None,
-        "{not json",
-        "[]",
-        json.dumps({"providers": {"other": {"baseUrl": "http://localhost:1/v1"}}}),
-        json.dumps({"providers": {"mlx": {}}}),
-        json.dumps({"providers": {"mlx": {"baseUrl": 5}}}),
-    ],
-)
-def test_resolve_gives_none_without_a_usable_declaration(
-    tmp_path, monkeypatch, content
+@pytest.mark.parametrize("value", [None, ""])
+def test_resolve_unset_or_empty_is_none_even_with_a_models_json(
+    tmp_path, monkeypatch, value
 ):
-    if content is not None:
-        (tmp_path / "models.json").write_text(content)
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    _models_json(tmp_path / ".pi" / "agent", "http://localhost:1/v1")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / ".pi" / "agent"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    if value is None:
+        monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL", raising=False)
+    else:
+        monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", value)
     assert classify_mod.resolve_base_url() is None
 
 
@@ -429,19 +399,19 @@ def test_classify_without_an_address_prints_default_with_error(plugin_grid):
     assert "error" in result
 
 
-def test_cli_without_an_address_prints_default_exit_0(tmp_path):
-    out = run_cli(tmp_path, {})
+@pytest.mark.parametrize("value", [None, ""])
+def test_cli_without_an_address_prints_default_exit_0_despite_a_models_json(
+    tmp_path, server, value
+):
+    server.answer(200, answer("routine"))
+    pi_dir = tmp_path / "pi"
+    _models_json(pi_dir, server.url + "/v1")
+    env = {"PI_CODING_AGENT_DIR": str(pi_dir), "HOME": str(tmp_path)}
+    if value is not None:
+        env["LOCAL_INFERENCE_BASE_URL"] = value
+    out = run_cli(tmp_path, env)
     assert out.returncode == 0
     line = json.loads(out.stdout)
     assert line["category"] == "logic"
     assert "error" in line
-
-
-def test_cli_reads_the_address_from_models_json(tmp_path, server):
-    server.answer(200, answer("routine"))
-    _models_json(
-        tmp_path / "pi", {"providers": {"mlx": {"baseUrl": server.url + "/v1"}}}
-    )
-    out = run_cli(tmp_path, {"PI_CODING_AGENT_DIR": str(tmp_path / "pi")})
-    assert json.loads(out.stdout)["category"] == "routine"
-    assert len(server.requests) == 1
+    assert server.requests == []

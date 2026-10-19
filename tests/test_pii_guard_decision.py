@@ -821,96 +821,34 @@ def test_a_model_pass_stops_the_guard_before_presidio_even_past_the_text_line_ca
     assert "jane.doe@example.com" not in json.dumps(server.requests)
 
 
-def _models_json(folder: Path, data: object) -> None:
+def _models_json(folder: Path, base_url: str) -> None:
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "models.json").write_text(json.dumps(data))
+    (folder / "models.json").write_text(
+        json.dumps({"providers": {"mlx": {"baseUrl": base_url}}})
+    )
 
 
-def test_resolve_env_wins_over_models_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _models_json(tmp_path, {"providers": {"mlx": {"baseUrl": "http://localhost:1/v1"}}})
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+def test_resolve_returns_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", "http://127.0.0.1:2")
     assert decision_gate.resolve_base_url() == "http://127.0.0.1:2"
 
 
-@pytest.mark.parametrize(
-    "data",
-    [
-        {"providers": {"mlx": {"baseUrl": "http://localhost:11234/v1"}}},
-        {"mlx": {"baseUrl": "http://localhost:11234/v1/"}},
-        {"providers": {"mlx": {"baseUrl": "http://localhost:11234"}}},
-    ],
-)
-def test_resolve_reads_the_mlx_provider_without_v1(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, data: object
-) -> None:
-    _models_json(tmp_path, data)
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
-    assert decision_gate.resolve_base_url() == "http://localhost:11234"
-
-
-def test_resolve_falls_back_to_home_when_pi_dir_is_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _models_json(
-        tmp_path / ".pi" / "agent",
-        {"providers": {"mlx": {"baseUrl": "http://localhost:7/v1"}}},
-    )
-    monkeypatch.delenv("PI_CODING_AGENT_DIR")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert decision_gate.resolve_base_url() == "http://localhost:7"
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        None,
-        "{not json",
-        "[]",
-        json.dumps({"providers": {"other": {"baseUrl": "http://localhost:1/v1"}}}),
-        json.dumps({"providers": {"mlx": {}}}),
-        json.dumps({"providers": {"mlx": {"baseUrl": 5}}}),
-    ],
-)
-def test_no_usable_declaration_makes_the_gate_unavailable_without_a_request(
+@pytest.mark.parametrize("value", [None, ""])
+def test_unset_or_empty_variable_is_no_address_even_with_a_models_json(
     tmp_path: Path,
     server: FakeServer,
     monkeypatch: pytest.MonkeyPatch,
-    content: str | None,
+    value: str | None,
 ) -> None:
-    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL")
-    if content is not None:
-        (tmp_path / "models.json").write_text(content)
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    _models_json(tmp_path / ".pi" / "agent", server.url + "/v1")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / ".pi" / "agent"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    if value is None:
+        monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL")
+    else:
+        monkeypatch.setenv("LOCAL_INFERENCE_BASE_URL", value)
     assert decision_gate.resolve_base_url() is None
     path = _csv(tmp_path / "d.csv", ["contact", "note"])
+    assert decision_gate.probability(path, "csv", anonymize) is None
     assert decision_gate.verdict(path, "csv", anonymize) is None
     assert server.requests == []
-
-
-def test_a_non_loopback_models_json_address_is_refused(
-    tmp_path: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL")
-    _models_json(
-        tmp_path, {"providers": {"mlx": {"baseUrl": "http://example.com:11234/v1"}}}
-    )
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
-    path = _csv(tmp_path / "d.csv", ["contact", "note"])
-    assert decision_gate.verdict(path, "csv", anonymize) is None
-    assert server.requests == []
-
-
-def test_the_gate_reads_the_address_from_models_json(
-    tmp_path: Path, server: FakeServer, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("LOCAL_INFERENCE_BASE_URL")
-    _models_json(
-        tmp_path / "pi", {"providers": {"mlx": {"baseUrl": server.url + "/v1"}}}
-    )
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "pi"))
-    _answer_with_p_of_yes(server, 0.9)
-    path = _csv(tmp_path / "d.csv", ["contact", "note"])
-    assert decision_gate.verdict(path, "csv", anonymize) == "block"

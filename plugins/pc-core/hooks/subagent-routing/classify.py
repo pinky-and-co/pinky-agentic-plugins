@@ -10,8 +10,8 @@ line `{"category", "model", "effort", "model_id", "probabilities"}`. Any failure
 as 507 when memory is short, unparsable answer, category outside the grid) prints the grid's
 default category with an `error` field and exits 0, so a caller always gets a usable routing.
 
-Server: `LOCAL_INFERENCE_BASE_URL`, else the `baseUrl` of the `mlx` provider in `pi`'s
-`models.json` (loopback hosts only, no built-in default), redirects refused. Model: `--model`, else `ONE_DECISION_MODEL`, else `clef-flash-4bit`. No timeout unless
+Server: `LOCAL_INFERENCE_BASE_URL` (`http://host:port` without `/v1`, loopback hosts only, no built-in default; unset or empty means
+no server), redirects refused. Model: `--model`, else `ONE_DECISION_MODEL`, else `clef-flash-4bit`. No timeout unless
 `--timeout` is given.
 
 The grid is `grid.json` next to this file; a repo overrides it with `subagent_routing.grid` in its
@@ -116,35 +116,12 @@ def load_grid(repo_root: Path) -> dict:
 
 
 def resolve_base_url() -> str | None:
-    """Find the local inference server address, without any built-in default.
-
-    Order: `LOCAL_INFERENCE_BASE_URL`, then the `baseUrl` of the `mlx` provider in `pi`'s
-    `models.json` (`$PI_CODING_AGENT_DIR/models.json`, else `~/.pi/agent/models.json`; providers
-    under a top-level `providers` object or at top level) with a trailing `/v1` removed, since the
-    callers append `/v1/systemone`.
+    """Read the local inference server address from `LOCAL_INFERENCE_BASE_URL`, no default.
 
     Returns:
-        The address, or None when neither source gives one (file absent, unreadable, not JSON,
-        no `mlx` provider, no string `baseUrl`).
+        The variable's value, or None when it is unset or empty.
     """
-    override = os.environ.get(URL_ENV)
-    if override:
-        return override
-    agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
-    folder = Path(agent_dir) if agent_dir else Path.home() / ".pi" / "agent"
-    try:
-        data = json.loads((folder / "models.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    providers = data.get("providers", data)
-    mlx = providers.get("mlx") if isinstance(providers, dict) else None
-    base = mlx.get("baseUrl") if isinstance(mlx, dict) else None
-    if not isinstance(base, str):
-        return None
-    base = base.strip().rstrip("/").removesuffix("/v1")
-    return base or None
+    return os.environ.get(URL_ENV) or None
 
 
 def is_loopback(url: str) -> bool:
