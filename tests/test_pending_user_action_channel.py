@@ -172,18 +172,20 @@ class ChantierSkillWiringCase(unittest.TestCase):
         self.assertNotIn("require goal", self.text)
         self.assertNotIn("--surfaced", self.text)
 
-    def test_review_clause_requires_the_method_line_relay(self):
+    def test_review_clause_asks_only_a_review_with_its_findings_handled(self):
         section = self._section("**Review clause.**", "**Waiver clause.**")
         flat = " ".join(section.split())
         self.assertIn(
-            "until a round triggers no fix or a third round has run",
+            "reviewed in a fresh context, never by this session itself, each finding fixed, refuted in the"
+            " transcript, or noted in the card's `## Decisions`",
             flat,
         )
-        self.assertIn("refuted by a measurement quoted in the transcript", flat)
-        self.assertIn("written as an accepted limit in the card's `## Decisions`", flat)
+        self.assertNotIn("reviewed through the `adversarial` tool", flat)
+        self.assertIn("never in the condition", flat)
+        self.assertNotIn("relayed verbatim", flat)
+        self.assertNotIn("third round", flat)
         self.assertIn("never a new card", flat)
         self.assertNotIn("follow-up card", flat)
-        self.assertIn("the last pass's `Method:` line relayed verbatim", flat)
         self.assertNotIn("when the first line", section)
         self.assertNotIn("box checked on the card`", flat)
 
