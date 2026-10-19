@@ -102,6 +102,28 @@ describe('subagent routing', () => {
     expect(ran.map(e => [e.model, e.effort])).toEqual([['haiku', 'low'], ['sonnet', 'medium']])
   })
 
+  test('the session is told the model and effort the call left with', async ($, on) => {
+    engine(on)
+    const call = $.tool.call(agent('t1', { model: 'sonnet' }))
+    const ui = await heldBand($)
+    await ui.press({ key: 'model-opus' })
+    await ui.press({ key: 'effort-high' })
+    await ui.press({ key: 'accept' })
+    const done = await call
+    await ui.unmount()
+    expect(done.context).toEqual([
+      'This subagent ran on opus · high (routing: logic, user-choice), which may differ from the model and effort this call named.',
+    ])
+  })
+
+  test('with no band the session is told the classifier proposal', async ($, on) => {
+    engine(on, { surfaces: [] })
+    const done = await $.tool.call(agent('t1', { prompt: 'write the unit tests of parse_date', model: 'sonnet' }))
+    expect(done.context).toEqual([
+      'This subagent ran on haiku · low (routing: routine, no-band), which may differ from the model and effort this call named.',
+    ])
+  })
+
   test('the Task name routes like Agent', async ($, on) => {
     const { ran } = engine(on, { surfaces: [] })
     await $.tool.call(agent('t1', { tool: 'Task', prompt: 'design the architecture of the sync' }))
