@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -1219,6 +1220,52 @@ class TestEntryTimeout(unittest.TestCase):
             (result,) = ma.check_pool([{**GLM, "timeout": 300}], timeout=60)
         self.assertEqual(run.wait_timeouts[0], 300)
         self.assertEqual(result.detail, "no answer within 300s")
+
+    def test_check_pool_tools_gives_twenty_seconds_per_step(self):
+        seen = {}
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            seen[entry["name"]] = timeout
+            return ""
+
+        with unittest.mock.patch.object(ma, "call_cli", fake_call_cli):
+            ma.check_pool([MISTRAL, {**GLM, "timeout": 90}], tools=True)
+        self.assertEqual(seen, {"mistral-medium-3.5": 240, "glm-5-2": 90})
+
+    def test_check_pool_tools_serialises_one_provider_and_overlaps_providers(self):
+        spans = {}
+        lock = threading.Lock()
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            start = time.monotonic()
+            time.sleep(0.2)
+            with lock:
+                spans[entry["name"]] = (start, time.monotonic())
+            return ""
+
+        with unittest.mock.patch.object(ma, "call_cli", fake_call_cli):
+            ma.check_pool([GLM, KIMI, MISTRAL], tools=True)
+        (g0, g1), (k0, k1), (m0, m1) = (
+            spans["glm-5-2"],
+            spans["kimi-k2.6"],
+            spans["mistral-medium-3.5"],
+        )
+        self.assertTrue(g1 <= k0 or k1 <= g0)
+        self.assertTrue(m0 < g1 and g0 < m1)
+
+    def test_check_pool_ping_keeps_same_provider_in_parallel(self):
+        starts = []
+        gate = threading.Barrier(2, timeout=5)
+
+        def fake_call_cli(entry, prompt, timeout, tools=None, env=None):
+            starts.append(timeout)
+            gate.wait()
+            return "OK"
+
+        with unittest.mock.patch.object(ma, "call_cli", fake_call_cli):
+            results = ma.check_pool([GLM, KIMI])
+        self.assertEqual(starts, [60, 60])
+        self.assertEqual([r.status for r in results], ["ok", "ok"])
 
 
 class TestFilterPool(unittest.TestCase):
@@ -3432,10 +3479,11 @@ def test_tools_field_docstring_maps_every_report_detail_to_a_value():
     doc = " ".join((ma.__doc__ or "").split())
     for clause in (
         "a ✅ line → `tools: true`",
-        "`429` (rerun once to rule out an exhausted quota) → `tools: false`",
+        "a `429` that comes back when the entry is rerun alone after a pause (an exhausted quota, or the limit a provider shares between its models, can explain a first one) → `tools: false`",
         "`outil en texte` → `tools: false`",
         "a template rejection of the tool role (e.g. `Unexpected message role`) → `tools: false`",
-        "a missing mark, an empty answer, `no answer within Ns` or an environment error decides nothing",
+        "an HTTP `400` error at the tools probe while the plain ping `--check-pool --name <entry>` answers → `tools: false`",
+        "any other provider error (`401`, `403`, `500`, …), a missing mark, an empty answer, `no answer within Ns` or an environment error decides nothing",
     ):
         assert clause in doc
 

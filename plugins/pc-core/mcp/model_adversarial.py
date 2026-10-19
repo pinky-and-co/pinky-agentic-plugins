@@ -68,12 +68,16 @@ Each entry:
                    To classify a new entry, run `model_adversarial.py --check-pool --tools --name
                    <entry>` and read each detail of its report:
                    a ✅ line → `tools: true`;
-                   `429` (rerun once to rule out an exhausted quota) → `tools: false`;
+                   a `429` that comes back when the entry is rerun alone after a pause (an
+                   exhausted quota, or the limit a provider shares between its models, can
+                   explain a first one) → `tools: false`;
                    `outil en texte` → `tools: false`;
                    a template rejection of the tool role (e.g. `Unexpected message role`) →
                    `tools: false`;
-                   a missing mark, an empty answer, `no answer within Ns` or an environment error
-                   decides nothing
+                   an HTTP `400` error at the tools probe while the plain ping
+                   `--check-pool --name <entry>` answers → `tools: false`;
+                   any other provider error (`401`, `403`, `500`, …), a missing mark, an empty
+                   answer, `no answer within Ns` or an environment error decides nothing
     thinking       optional pi thinking level (`off`, `low`, `medium`, …); absent → pi's own default.
                    `off` for a small local model, which a thinking pass drowns into an empty answer
 
@@ -1439,6 +1443,7 @@ def probe_mark() -> str:
 
 
 PROBE_STEPS = 12
+PROBE_STEP_SECONDS = 20
 
 
 def _probe_prompt(directory: Path, mark: str) -> tuple[str, Path]:
@@ -1534,7 +1539,7 @@ def filter_miss(provider: str | None, names: list[str] | None) -> str:
 
 def check_pool(
     pool: list[dict[str, Any]],
-    timeout: int = 60,
+    timeout: int | None = None,
     workers: int = CHECK_WORKERS,
     tools: bool = False,
 ) -> list[PoolCheck]:
@@ -1542,24 +1547,37 @@ def check_pool(
 
     Args:
         pool: the entries to check — `offline` ones are skipped (`pinky doctor` checks them).
-        timeout: seconds allowed per entry.
+        timeout: seconds allowed per entry; None means 60 for the ping and 20 per probe step
+            (`PROBE_STEPS` x 20) for the tools probe. An entry's own `timeout` always wins.
         workers: concurrent pi calls.
         tools: run the 12-step tool probe (one request per tool call) instead of the one-line
             ping; the detail of a failed entry is then `429`, `outil en texte` or the provider's
-            error.
+            error. The entries of one provider then run one after another, providers in parallel.
 
     Returns:
         One `PoolCheck` per entry, in `pool` order.
     """
     env = secret_env()
+    if tools:
+        probe_timeout = PROBE_STEPS * PROBE_STEP_SECONDS if timeout is None else timeout
+        groups: dict[Any, list[int]] = {}
+        for i, entry in enumerate(pool):
+            key = entry.get("provider") or ("", i)
+            groups.setdefault(key, []).append(i)
+        results: list[PoolCheck | None] = [None] * len(pool)
+
+        def run_group(indexes: list[int]) -> None:
+            for i in indexes:
+                results[i] = _check_tools_one(pool[i], probe_timeout, env)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(call_scope.bind(run_group), groups.values()))
+        return [r for r in results if r is not None]
+    ping_timeout = 60 if timeout is None else timeout
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         return list(
             ex.map(
-                call_scope.bind(
-                    lambda e: (_check_tools_one if tools else _check_one)(
-                        e, timeout, env
-                    )
-                ),
+                call_scope.bind(lambda e: _check_one(e, ping_timeout, env)),
                 pool,
             )
         )
