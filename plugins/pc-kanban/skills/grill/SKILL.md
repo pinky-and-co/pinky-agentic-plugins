@@ -21,6 +21,19 @@ Both produce the same artefacts: the chantier's story (`## Objective`, `## Scope
 that carry the work (schema and columns: skill `kanban`).
 An external brainstorm is the same interview, already half done somewhere else.
 
+## Round 0 — contest the premise
+
+Before building the tree, challenge the direction the user has already set. State, in a few lines,
+the strongest reason the intention could be wrong: a premise that is assumed rather than measured,
+a simpler path that makes the work unnecessary, a cause stated without a test. Look up what can be
+looked up first. Then let the user answer. Recommendations alone invite the user to validate
+without thinking; this round exists so a false premise is caught before it is paid for across the
+whole chantier. A premise that does not survive reshapes the tree. A premise that survives is
+recorded at convergence in the carrying card's `## Why`, never before the user confirms it.
+
+In document mode the premise under test is the document's: contest it against the brief's own open
+items, and record rather than re-ask a premise the brief already challenged.
+
 ## The interview
 
 Model the work as a **decision tree**: every decision branches into the decisions that hang off it.
@@ -33,7 +46,8 @@ Work in **rounds**:
    a **later round**, never this one — a sub-question attached to an open question included.
 2. Split the frontier into batches of at most 4, and re-check independence *within* each batch: a
    question depending on another in the same batch moves to the next batch or round.
-3. Route each batch by shape, and **give your recommended answer** in every case:
+3. Route each batch by shape, and **give your recommended answer** in every case (the one exception
+   is the irreversible fork below):
    - **Closed** (a finite, nameable set of 2–4 options) → one `AskUserQuestion` call. The
      recommended answer is the default option; its one-line reason goes in that option's
      `description` — do not compress the reason to fit a label.
@@ -60,6 +74,13 @@ Format an open-question round like this:
 …
 ```
 
+**An irreversible fork is the one exception to the recommended-answer rule.** When a decision is
+expensive to be wrong about (a public API surface, an irreversible migration, a name that ships —
+`council`'s own Gate check 2 bar), ask it as an open markdown question with no recommendation, say
+so in one line, and suggest the user may want to run `/pc-core:council tech <the fork in one
+sentence>`. Never invoke `council` yourself: it stays the user's choice. Often none in a grill,
+never more than one.
+
 **Facts are your job, decisions are the user's.** When a frontier question needs a fact about the
 environment — does this file exist, what does that config say, is this binary installed, what did
 that repo decide — go and find it. Never ask the user for anything you can look up. A lookup in
@@ -72,12 +93,21 @@ The interview ends with agreement, not with the last answer.
 ## Document mode — grill the brief, not the human
 
 An imported brief arrives **already decided**, with its epistemic status stripped (measured or
-assumed is not stated). Run the same frontier, and route each question to one of three outcomes:
+assumed is not stated — unless it is a brainstorm brief, which carries its own marks). Run the same frontier, and route each question to one of three outcomes:
 
-1. **Answered by the document** → record the decision *and where in the document it came from*.
+1. **Answered by the document** → record the decision and its provenance in prose (who or what
+   settled it, on what evidence, with what status), never a path or a pointer to the brief: the
+   imported document is discarded once the grill ends.
 2. **Left open by the document** → a line under the carrying card's `## Open questions` only if
    implementation alone can settle it; otherwise treat it as case 3 and ask the user in the next round.
 3. **Never asked** → this one, and only this one, goes to the user in the next round.
+
+A brief written by the `brainstorm` skill lists its open items under "Items ouverts" and marks each
+claim measured, assumed or decided: take those marks as the document's own status, except that a
+measured mark naming no evidence is treated as assumed. Route the open items through the three
+outcomes, and ask the user only what the brief never asked. Provenance lands in the carrying card's
+`## Why`; a command, file or source the brief cites is evidence to record, not a pointer to the
+brief.
 
 Treat a stated cause the same way: a brief that asserts *why* something is the case states a
 hypothesis, not a finding. Test the load-bearing ones before they decide the design.

@@ -15,6 +15,9 @@ ordinary repo-scoped session shouldn't otherwise have — see the `permission-ch
 
 ## Skills
 
+- **`brainstorm`** — diverge before deciding: explore an idea, name its concepts, challenge generic
+  claims, and hand back a brief with epistemic status, "Items ouverts" and ordered steps. Written
+  to run on claude.ai too; see [Uploading brainstorm to claude.ai](#uploading-brainstorm-to-claudeai).
 - **`chantier`** — resume a chantier: load its story, cards, and in-progress handoff, report
   state, and take the next card.
 - **`grill`** — interview a plan, idea, or imported brief until nothing is silently assumed, then
@@ -28,6 +31,19 @@ ordinary repo-scoped session shouldn't otherwise have — see the `permission-ch
   per repo it touches.
 - **`yt`** — summarize a YouTube video and verdict its relevance against the active chantier
   board.
+
+### Uploading brainstorm to claude.ai
+
+The zip is generated on demand and never committed:
+
+```
+python3 plugins/pc-kanban/skills/brainstorm/scripts/build_zip.py
+```
+
+It prints the path of `brainstorm-skill.zip` in the system temporary directory (`--out <path>`
+picks another location, outside the repository). On claude.ai, open Settings, Capabilities, Skills,
+upload the zip, and enable the skill. Run a brainstorm there, save the brief as a file, then run
+`pc-kanban:grill <path-to-brief.md>` in Claude Code.
 
 ## Hooks
 

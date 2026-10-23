@@ -301,6 +301,10 @@ pinky-agentic-plugins/
 │   │   │   ├── pc_kanban_secret_patterns.py
 │   │   │   └── stop_handoff.py
 │   │   ├── skills/
+│   │   │   ├── brainstorm/
+│   │   │   │   ├── scripts/
+│   │   │   │   │   └── build_zip.py
+│   │   │   │   └── SKILL.md
 │   │   │   ├── chantier/
 │   │   │   │   ├── scripts/
 │   │   │   │   │   ├── activate_plugins_for_repos.py
@@ -572,6 +576,7 @@ pinky-agentic-plugins/
 │   ├── test_apply_anonymization.py
 │   ├── test_apply_reintegrate.py
 │   ├── test_board_pane_data.py
+│   ├── test_brainstorm_build_zip.py
 │   ├── test_branch_guard.py
 │   ├── test_build_export.py
 │   ├── test_bulk_commit_sh.py
