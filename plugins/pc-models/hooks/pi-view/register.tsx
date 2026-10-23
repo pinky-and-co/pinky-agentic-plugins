@@ -19,7 +19,7 @@ const runs = atom({ plugin: 'pc-models', key: 'piRuns' } as const, {} as Record<
 
 async function runsDir($: EngineInterface): Promise<string> {
   const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
-  return `${config}/pc-models/pi-runs`
+  return `${config}/pinky/plugin-state/pc-models/pi-runs`
 }
 
 // The view files of a run, in slot order, each as its lines.

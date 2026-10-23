@@ -264,7 +264,9 @@ def test_journal_line_has_the_fields_and_truncated_prompt(tmp_path):
     out = run_journal(tmp_path, DECISION)
     assert out.returncode == 0
     lines = (
-        (tmp_path / ".claude/pc-core/subagent-routing.jsonl").read_text().splitlines()
+        (tmp_path / ".claude/pinky/plugin-state/pc-core/subagent-routing.jsonl")
+        .read_text()
+        .splitlines()
     )
     assert len(lines) == 1
     entry = json.loads(lines[0])
@@ -280,7 +282,7 @@ def test_journal_line_has_the_fields_and_truncated_prompt(tmp_path):
 def test_journal_keeps_the_exit_reason_and_the_classifier_error(tmp_path):
     decision = {**DECISION, "reason": "no-band", "error": "HTTP 507"}
     assert run_journal(tmp_path, decision).returncode == 0
-    path = tmp_path / ".claude/pc-core/subagent-routing.jsonl"
+    path = tmp_path / ".claude/pinky/plugin-state/pc-core/subagent-routing.jsonl"
     entry = json.loads(path.read_text())
     assert (entry["reason"], entry["error"]) == ("no-band", "HTTP 507")
 
@@ -288,7 +290,7 @@ def test_journal_keeps_the_exit_reason_and_the_classifier_error(tmp_path):
 def test_journal_appends_one_line_per_decision(tmp_path):
     run_journal(tmp_path, DECISION)
     run_journal(tmp_path, {**DECISION, "reason": "timeout"})
-    path = tmp_path / ".claude/pc-core/subagent-routing.jsonl"
+    path = tmp_path / ".claude/pinky/plugin-state/pc-core/subagent-routing.jsonl"
     reasons = [json.loads(line)["reason"] for line in path.read_text().splitlines()]
     assert reasons == ["classified", "timeout"]
 
@@ -298,19 +300,38 @@ def test_journal_accepts_every_reason(tmp_path, reason):
     assert run_journal(tmp_path, {**DECISION, "reason": reason}).returncode == 0
 
 
+def test_first_write_removes_the_legacy_pc_core_dir(tmp_path):
+    legacy = tmp_path / ".claude" / "pc-core"
+    legacy.mkdir(parents=True)
+    (legacy / "subagent-routing.jsonl").write_text('{"ts": "old"}\n')
+    assert run_journal(tmp_path, DECISION).returncode == 0
+    assert not legacy.exists()
+    journal = tmp_path / ".claude/pinky/plugin-state/pc-core/subagent-routing.jsonl"
+    assert json.loads(journal.read_text())["reason"] == "classified"
+
+
+def test_no_legacy_dir_is_created_when_absent(tmp_path):
+    assert run_journal(tmp_path, DECISION).returncode == 0
+    assert not (tmp_path / ".claude" / "pc-core").exists()
+
+
 @pytest.mark.parametrize(
     "reason", ["", "oops", "errors", "error:HTTP 507", "classified\nx"]
 )
 def test_journal_rejects_unknown_reason_and_writes_nothing(tmp_path, reason):
     out = run_journal(tmp_path, {**DECISION, "reason": reason})
     assert out.returncode == 2
-    assert not (tmp_path / ".claude/pc-core/subagent-routing.jsonl").exists()
+    assert not (
+        tmp_path / ".claude/pinky/plugin-state/pc-core/subagent-routing.jsonl"
+    ).exists()
 
 
 def test_journal_line_is_capped_and_single_line(tmp_path):
     big = {k: '\n"\\' * 500 for k in DECISION} | {"reason": "timeout"}
     assert run_journal(tmp_path, big).returncode == 0
-    text = (tmp_path / ".claude/pc-core/subagent-routing.jsonl").read_text()
+    text = (
+        tmp_path / ".claude/pinky/plugin-state/pc-core/subagent-routing.jsonl"
+    ).read_text()
     assert len(text.splitlines()) == 1
     assert len(text) < 4000
 

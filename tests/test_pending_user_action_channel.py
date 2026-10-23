@@ -7,7 +7,7 @@ in-process), these tests spawn the real scripts as subprocesses, HOME-isolated p
 vendored CLI `chantier` itself calls (`pc-kanban/skills/chantier/scripts/
 pc_kanban_pending_user_action.py`) and the two `pc-autodiscovery` hooks it feeds
 (`pending_gate.py`, `clear_pending_queue.py`). Only a real subprocess proves the two plugins
-actually agree on `~/.claude/pinky-plugin-scope/<session>.pending.json` — an in-process import
+actually agree on `~/.claude/pinky/plugin-scope/<session>.pending.json` — an in-process import
 of both modules would silently share Python state that two independent hook invocations never do.
 
 The oracle is the reproduced sequence: `chantier` queues `goal`/`rename` with `surfaced=True` and

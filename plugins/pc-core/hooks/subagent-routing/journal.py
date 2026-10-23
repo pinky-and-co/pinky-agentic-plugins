@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append one routing decision to `~/.claude/pc-core/subagent-routing.jsonl`.
+"""Append one routing decision to `~/.claude/pinky/plugin-state/pc-core/subagent-routing.jsonl`.
 
 Usage: `journal.py < decision.json`, where the JSON object carries `prompt`, `agent_type`,
 `requested_model`, `requested_effort`, `category`, `applied_model`, `applied_effort`,
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,15 +74,29 @@ def build_entry(decision: dict) -> dict[str, str]:
 def append(decision: dict, path: Path | None = None) -> None:
     """Append one JSON line for `decision`, creating the directory.
 
+    A default-path write also removes `~/.claude/pc-core/` when that directory exists
+    (best-effort): nothing reads it, its journal history is abandoned.
+
     Args:
         decision: the decoded JSON object.
-        path: the journal file, `~/.claude/pc-core/subagent-routing.jsonl` by default.
+        path: the journal file, under `~/.claude/pinky/plugin-state/pc-core/` by default.
 
     Raises:
         ValueError: when `reason` is not one of the allowed values.
     """
     line = json.dumps(build_entry(decision), ensure_ascii=False)
-    path = path or Path.home() / ".claude" / "pc-core" / "subagent-routing.jsonl"
+    if path is None:
+        legacy = Path.home() / ".claude" / "pc-core"
+        if legacy.is_dir():
+            shutil.rmtree(legacy, ignore_errors=True)
+        path = (
+            Path.home()
+            / ".claude"
+            / "pinky"
+            / "plugin-state"
+            / "pc-core"
+            / "subagent-routing.jsonl"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")

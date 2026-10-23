@@ -46,7 +46,7 @@ class _Entry(TypedDict):
     surfaced: bool
 
 
-STATE_DIR = Path.home() / ".claude" / "pinky-plugin-scope"
+STATE_DIR = Path.home() / ".claude" / "pinky" / "plugin-scope"
 
 
 def _queue_path(session_id: str) -> Path:

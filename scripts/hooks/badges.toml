@@ -13,7 +13,8 @@
 #               profile/extras-gated — a non-Python repo still gets license/prek without a dangling
 #               PyPI/coverage badge pointing at nothing)
 #   readme / index — the markdown line for that surface (only needed for surfaces it's listed in).
-#               Placeholders: {name} (repo dir name), {license} (shields-escaped LICENSE), {github_org}
+#               Placeholders: {name} (repo name from the origin remote — see repo_name() in
+#               render_docs.py), {license} (shields-escaped LICENSE), {github_org}
 #               (from docs_identity.json).
 #
 # Order in this file = render order (list order is preserved by tomllib) — do not reorder without

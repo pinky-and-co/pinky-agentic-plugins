@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import { fitViews, lingerLimits } from '../hooks/pi-view/register'
 
 const ADV = 'mcp__plugin_pc-models_pc-models__adversarial'
-const RUNS = '/cfg/pc-models/pi-runs'
+const RUNS = '/cfg/pinky/plugin-state/pc-models/pi-runs'
 
 // Stands for the engine beneath the mod: the tool call waits until the test lets it end, the view files are a map.
 function engine(on: any, files: Record<string, string>, opts: { ownClock?: boolean } = {}) {
