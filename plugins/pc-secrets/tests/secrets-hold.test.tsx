@@ -16,7 +16,8 @@ function engine(on: any, ran: string[], calls: string[][], opts: Engine = {}) {
   })
   on('tool.check', () => {
     if (opts.deny) return { decision: 'deny', reason: 'engine' }
-    return opts.rule ? { decision: 'ask', reason: 'rule', rule: 'Read(*)' } : { decision: 'ask', reason: 'guard' }
+    // Par défaut le moteur laisse passer : $.tool.call applique le verdict de tool.check avant les hooks tool.call
+    return opts.rule ? { decision: 'ask', reason: 'rule', rule: 'Read(*)' } : { decision: 'allow', reason: 'guard' }
   })
   on('process.run', async (_$: any, e: any) => {
     calls.push(e.argv)
@@ -152,7 +153,6 @@ describe('pc-secrets read band', () => {
       const calls: string[][] = []
       engine(on, ran, calls, opts)
       await $.tool.call(read('t1'))
-      expect(ran).toEqual([PATH])
       expect(calls).toEqual([])
     })
   }

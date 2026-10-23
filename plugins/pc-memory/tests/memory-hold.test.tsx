@@ -14,7 +14,7 @@ const LEVELS = [
 ]
 
 // Stands for the engine beneath the mod: the write runs, the permission check asks (or answers by path), panes open.
-type Engine = { env?: string; surfaces?: string[]; sleepExit?: number; levels?: string; indexExit?: number }
+type Engine = { ask?: boolean; calls?: string[][]; env?: string; surfaces?: string[]; sleepExit?: number; levels?: string; indexExit?: number }
 function engine(on: any, ran: string[], opts: Engine = {}) {
   on('tool.call', (_$: any, e: any) => {
     ran.push(e.file_path)
@@ -25,9 +25,11 @@ function engine(on: any, ran: string[], opts: Engine = {}) {
     if (path.endsWith('/deny.md')) return { decision: 'deny', reason: 'rule' }
     if (path.endsWith('/allow.md')) return { decision: 'allow' }
     if (path.endsWith('/rule.md')) return { decision: 'ask', reason: 'rule', rule: 'Write(*)' }
-    return { decision: 'ask', reason: 'guard' }
+    // Par défaut le moteur laisse passer : $.tool.call applique le verdict de tool.check avant les hooks tool.call
+    return { decision: opts.ask ? 'ask' : 'allow', reason: 'guard' }
   })
   on('process.run', async (_$: any, e: any) => {
+    opts.calls?.push(e.argv)
     if (e.argv[0] === 'python3' && e.argv[1].endsWith('/index_note.py')) {
       return { value: { exitCode: opts.indexExit ?? 0, stdout: 'indexed', stderr: '' } }
     }
@@ -140,11 +142,13 @@ describe('pc-memory write pane', () => {
 
   test('the permission check lifts only the ask of an accepted write', async ($, on) => {
     const ran: string[] = []
-    engine(on, ran)
+    const opts: Engine = {}
+    engine(on, ran, opts)
     const call = $.tool.call(write('t1'))
     const ui = await heldBand($)
     await ui.press({ key: 'here' })
     await call
+    opts.ask = true // la garde pose son ask : c'est lui que le mod lève, ou non
     const check = (id: string, file_path: string, content = NOTE): any =>
       $.tool.check({ tool: 'Write', input: { file_path, content }, tool_use_id: id } as any)
     expect((await check('t1', PATH)).decision).toBe('allow')
@@ -156,10 +160,10 @@ describe('pc-memory write pane', () => {
   })
 
   test('an ask carrying a settings rule is not held, the native prompt handles it', async ($, on) => {
-    const ran: string[] = []
-    engine(on, ran)
+    const calls: string[][] = []
+    engine(on, [], { calls })
     await $.tool.call(write('t1', `${DIR}/rule.md`))
-    expect(ran).toEqual([`${DIR}/rule.md`])
+    expect(calls).toEqual([]) // retenir l'écriture lancerait le script des niveaux, puis les pauses
   })
 
   test('a session with no surface that draws is not held', async ($, on) => {
@@ -184,10 +188,10 @@ describe('pc-memory write pane', () => {
   })
 
   test('a write the engine denies by itself is not held', async ($, on) => {
-    const ran: string[] = []
-    engine(on, ran)
+    const calls: string[][] = []
+    engine(on, [], { calls })
     await $.tool.call(write('t1', `${DIR}/deny.md`))
-    expect(ran).toEqual([`${DIR}/deny.md`])
+    expect(calls).toEqual([])
   })
 
   test('a write the engine allows is still held: the guard asks beneath it (auto mode)', async ($, on) => {
@@ -211,7 +215,8 @@ describe('pc-memory write pane', () => {
 
   test('an unanswered hold expires and falls back to the native prompt, remembering nothing', async ($, on) => {
     const ran: string[] = []
-    engine(on, ran)
+    const opts: Engine = {}
+    engine(on, ran, opts)
     const before = holdLimits.ms
     holdLimits.ms = 40
     try {
@@ -220,6 +225,7 @@ describe('pc-memory write pane', () => {
       holdLimits.ms = before
     }
     expect(ran).toEqual([PATH])
+    opts.ask = true // la garde pose son ask : rien n'a été retenu, il reste un ask
     const out: any = await $.tool.check({ tool: 'Write', input: { file_path: PATH, content: NOTE }, tool_use_id: 't1' } as any)
     expect(out.decision).toBe('ask')
   })
