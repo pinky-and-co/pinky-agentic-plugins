@@ -18,6 +18,10 @@ it.
 `args` is whatever trails an `ARGUMENTS: ...` line at the very end of this prompt. **No such line
 means no argument was passed** — go straight to step 4; never ask for one.
 
+**A word starting with `@` is a path**: drop the `@` (Claude Code's path autocomplete types it), and
+if what remains is relative, resolve it against `${CLAUDE_PROJECT_DIR}` and normalise the `..`. The
+result starts with `/` and follows the absolute-path rule below.
+
 The target passed to Step 2 is **always an absolute worktree root**, never a bare name. Resolve it
 in this order:
 
