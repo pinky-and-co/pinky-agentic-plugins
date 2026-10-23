@@ -26,7 +26,7 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parents[4] / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).parent))
 import model_adversarial as ma  # noqa: E402
 
 DEFAULT_TIMEOUT = ma.RUN_TIMEOUT

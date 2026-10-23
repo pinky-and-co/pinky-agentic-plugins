@@ -20,8 +20,8 @@ reporter isn't aware of?
 
 ## Preflight
 
-**`--send` requested but `panel` unreachable or empty?** The `panel` MCP tool (`pc-core-models`
-server) runs the brief through one non-Claude pool model (sonnet/opus-tier entries only). If
+**`--send` requested but `panel` unreachable or empty?** The `panel` MCP tool (`pc-models`
+plugin) runs the brief through one non-Claude pool model (sonnet/opus-tier entries only). If
 `--send` was passed and `panel` is missing from your tool list, or it returns `BLOCKED` (no
 eligible pool entry), produce the brief block instead and say the send step was skipped.
 

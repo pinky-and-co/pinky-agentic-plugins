@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/mcp/model_panel.py — run with:
+"""Tests for plugins/pc-models/mcp/model_panel.py — run with:
 python3 -m unittest discover tests
 """
 
@@ -13,7 +13,7 @@ import subprocess
 import unittest.mock
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 
 import model_panel as mp
 

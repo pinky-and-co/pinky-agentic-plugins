@@ -1,5 +1,5 @@
 {
-  "description": "Injects per-repo resolved policies (language, branch) before every write, surfaces the just-edited file's own checker findings, reinforces a custom output style every turn — see inject_policies.py, post_edit_lint.py, structure_guard.py, style_reminder.py, reviewer_gate.py (denies the `reviewer` agent on a diff until `adversarial` answered BLOCKED or ERROR). A mod (subagent-routing/register.tsx) holds each Agent call whose model the session chooses, proposes the model and effort a classifier ranks for its task in a band above the prompt, and lets the call leave with the user's pick, or with the proposal after 60 s or where no band is drawn. A second mod, registered beside it by hooks/register.tsx (pi-view/register.tsx), draws a running `adversarial`, `panel` or `offline` call like a subagent, from the view files the server writes for it (`offline`: a character count, never the text)",
+  "description": "Injects per-repo resolved policies (language, branch) before every write, surfaces the just-edited file's own checker findings, reinforces a custom output style every turn — see inject_policies.py, post_edit_lint.py, structure_guard.py, style_reminder.py. A mod (subagent-routing/register.tsx) holds each Agent call whose model the session chooses, proposes the model and effort a classifier ranks for its task in a band above the prompt, and lets the call leave with the user's pick, or with the proposal after 60 s or where no band is drawn",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -29,16 +29,6 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/structure_guard.py\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/reviewer_gate.py\"",
             "timeout": 10
           }
         ]

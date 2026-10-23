@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["mcp"]
 # ///
-"""pc-core model-routing MCP server — `offline`, `adversarial`, `panel` and `pool_check` as native tools.
+"""pc-models model-routing MCP server — `offline`, `adversarial`, `panel` and `pool_check` as native tools.
 
 Each tool is a thin wrapper around a sibling module's functions (`model_offline.py`,
 `model_adversarial.py`, `model_panel.py`) — no reasoning happens here, this is the
@@ -40,11 +40,11 @@ import pi_live
 from mcp.server import MCPServer
 from mcp.server.context import DispatchContext
 
-m = MCPServer("pc-core-models")
+m = MCPServer("pc-models")
 
 _T = TypeVar("_T")
 
-_CALL_ID = contextvars.ContextVar("pc_core_call_id", default="")
+_CALL_ID = contextvars.ContextVar("pc_models_call_id", default="")
 
 #: Request ids the client sent a cancellation for — read by `served` as it unwinds, to tell a
 #: peer cancellation from a closed channel apart in the kill log.
@@ -53,7 +53,7 @@ _PEER_CANCELLED: set[str] = set()
 
 def _report(line: str) -> None:
     """One stderr line from the server: the allowlisted fields only (call id, pid, reason)."""
-    print(f"pc-core: {line}", file=sys.stderr, flush=True)
+    print(f"pc-models: {line}", file=sys.stderr, flush=True)
 
 
 async def _watch_calls(ctx: DispatchContext, call_next: Callable[..., Any]) -> Any:
@@ -147,7 +147,7 @@ def offline(
     output file yourself only if you are explicitly allowed to see this material; the zero-egress
     invariant is enforced by this tool never returning the body, not by caller discipline.
 
-    `events` is set by pc-core's `pi-view` mod, which shows how many characters have come in, never the text;
+    `events` is set by pc-models' `pi-view` mod, which shows how many characters have come in, never the text;
     leave it unset.
     """
     files = files or []
@@ -229,7 +229,7 @@ def adversarial(
     (fork point → index), `unstaged` (index → working tree, untracked files included), or `all`
     (the default).
 
-    `events` is set by pc-core's `pi-view` mod, which draws the run live in this call's row;
+    `events` is set by pc-models' `pi-view` mod, which draws the run live in this call's row;
     leave it unset.
     """
     files = files or []
@@ -318,7 +318,7 @@ def panel(
     that wants a small deterministic model. `tools` (pi tool names) is given to every slot;
     omitted → no tools.
 
-    `events` is set by pc-core's `pi-view` mod, which draws the run live in this call's row;
+    `events` is set by pc-models' `pi-view` mod, which draws the run live in this call's row;
     leave it unset.
     """
     if not tasks:

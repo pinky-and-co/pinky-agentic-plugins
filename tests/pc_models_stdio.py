@@ -1,4 +1,4 @@
-"""The real `pc_core_server.py` as a subprocess, with a fake `pi` that never answers.
+"""The real `pc_models_server.py` as a subprocess, with a fake `pi` that never answers.
 
 The server runs with its own interpreter, a pool of `pool_size` entries from distinct providers
 declared in a throwaway project, and a `pi` shell script first in its `PATH`. That script records
@@ -21,7 +21,11 @@ from typing import Any
 
 PROTOCOL_VERSION = "2025-11-25"
 SERVER = (
-    Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp" / "pc_core_server.py"
+    Path(__file__).parent.parent
+    / "plugins"
+    / "pc-models"
+    / "mcp"
+    / "pc_models_server.py"
 )
 
 _FAKE_PI = """#!/bin/sh
@@ -121,7 +125,7 @@ class PoolServer:
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "pc-core-tests", "version": "0"},
+                "clientInfo": {"name": "pc-models-tests", "version": "0"},
             },
         )
         self._await(1)

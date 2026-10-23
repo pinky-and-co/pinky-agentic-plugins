@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Adversarial runtime — run a task on a contrarian cloud model, from a configurable pool.
 
-Called by the `adversarial` MCP tool (`mcp/pc_core_server.py`): it challenges **this session's own
+Called by the `adversarial` MCP tool (`mcp/pc_models_server.py`): it challenges **this session's own
 output** (Claude), so a same-family reviewer is exactly what to avoid — the model here must not
 share Claude's blind spots.
 
@@ -9,7 +9,7 @@ Dual-use: this module is both a standalone CLI (below) and an importable library
 which calls its functions directly rather than shelling out to a subprocess.
 
 Pool: the ``model_pool`` key of ``settings.pinky.json``, resolved by the same ascending walk-up as
-every other pinky setting (``policy_lib.load_policies`` — repo → parent directories → ``~/.claude/``),
+every other pinky setting (``pc_models_policy_lib.load_policies`` — repo → parent directories → ``~/.claude/``),
 seeded from ``CLAUDE_PROJECT_DIR`` (already present in this MCP server's own environment). No file
 anywhere in the chain → a single built-in ``nvidia/z-ai/glm-5.3`` entry.
 
@@ -118,7 +118,7 @@ import call_scope  # noqa: E402
 import load_secrets  # noqa: E402
 import model_sanitize  # noqa: E402
 import pi_live  # noqa: E402
-from policy_lib import load_policies, resolve_repo_root  # noqa: E402
+from pc_models_policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 # Windows' default console codepage (cp1252, not UTF-8) can't encode this script's ✓/⚠ output.
 if sys.platform == "win32":
@@ -563,8 +563,8 @@ _STACK_MARKERS: dict[str, re.Pattern[str]] = {
 def _stack_review_path(stack: str) -> Path | None:
     """Filesystem path of a stack's `references/review.md`, or None for an unknown stack key.
 
-    `parents[2]` is the plugins root in dev (`<root>/plugins/pc-core/mcp/...`) and the marketplace
-    root once installed (`<mp>/pc-core/mcp/...`) — sibling plugins sit next to `pc-core` in both.
+    `parents[2]` is the plugins root in dev (`<root>/plugins/pc-models/mcp/...`) and the marketplace
+    root once installed (`<mp>/pc-models/mcp/...`) — sibling plugins sit next to `pc-models` in both.
     """
     spec = _STACK_SKILLS.get(stack)
     if spec is None:
@@ -614,7 +614,7 @@ def load_methodology(stack: str | None = None) -> str:
 
     Single source of truth for what "reviewed" means in this suite: the `reviewer` agent and this
     tool both read the SAME skill (neither depends on the other — a skill file is neutral ground,
-    same reasoning as `policy_lib.py` sitting between two hook concerns), so a finding looks the
+    same reasoning as `pc_models_policy_lib.py` sitting between two hook concerns), so a finding looks the
     same regardless of which model produced it. Empty string if the file is missing rather than
     raising — a caller with no methodology loaded still gets a review, just an unstructured one.
 
@@ -1160,7 +1160,10 @@ def _pool_log_path() -> Path:
     """
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "standalone")
     return (
-        Path.home() / ".claude" / "debug" / f"{session_id}_mcp__pc-core__model-pool.txt"
+        Path.home()
+        / ".claude"
+        / "debug"
+        / f"{session_id}_mcp__pc-models__model-pool.txt"
     )
 
 

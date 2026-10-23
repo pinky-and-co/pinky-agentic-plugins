@@ -1,0 +1,9 @@
+{
+  "name": "pc-models",
+  "version": "0.1.0",
+  "description": "Opt-in cross-model tools (offline, adversarial, panel, pool_check) served by one MCP server, with the reviewer gate and a live view of running calls.",
+  "author": {
+    "name": "Pinky & Co"
+  },
+  "types": "./types/index.d.ts"
+}

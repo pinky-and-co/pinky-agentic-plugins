@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/hooks/keychain.py — run with:
+"""Tests for plugins/pc-models/hooks/keychain.py — run with:
 python3 -m unittest discover tests
 """
 
@@ -9,7 +9,9 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
+sys.path.insert(
+    0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "hooks")
+)
 
 import keychain as kc
 

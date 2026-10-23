@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/mcp/model_tier_probe.py — run with: pytest tests/test_model_tier_probe.py"""
+"""Tests for plugins/pc-models/mcp/model_tier_probe.py — run with: pytest tests/test_model_tier_probe.py"""
 
 import json
 import subprocess
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 
 import model_adversarial as ma
 import model_tier_probe as tp

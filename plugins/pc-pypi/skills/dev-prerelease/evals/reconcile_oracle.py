@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "pc-models" / "mcp"))
 
 import model_adversarial
 import model_offline

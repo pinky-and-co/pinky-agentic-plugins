@@ -65,7 +65,7 @@ def _report_kill(call_id: str, pid: int, reason: str) -> None:
         reason: why the call ended (`wall-cap`, `cancelled`, `closed-channel`).
     """
     print(
-        f"pc-core: call id={call_id} pi killed pid={pid} reason={reason}",
+        f"pc-models: call id={call_id} pi killed pid={pid} reason={reason}",
         file=sys.stderr,
         flush=True,
     )

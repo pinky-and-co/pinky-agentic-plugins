@@ -6,11 +6,11 @@ guard denial), this runs the task against a local model instead — so neither t
 the model's answer ever reaches the cloud model. The answer is written to a local file; **only a
 status line (never the answer body) goes to stdout**, so a caller capturing this script's output
 cannot leak the result back into the cloud context. That invariant is the whole point — the `offline`
-MCP tool (`mcp/pc_core_server.py`) that wraps this module's functions must never return the file
+MCP tool (`mcp/pc_models_server.py`) that wraps this module's functions must never return the file
 content either, only the status line.
 
 Dual-use: this module is both a standalone CLI (below) and an importable library for
-`mcp/pc_core_server.py`, which calls its functions directly rather than shelling out to a subprocess.
+`mcp/pc_models_server.py`, which calls its functions directly rather than shelling out to a subprocess.
 
 Runtime: a local MLX server (oMLX on ``127.0.0.1:11234``) via the `pi` CLI
 (``subprocess.run(["pi", "-p", "--model", "mlx/<id>", ...])``) — the same `kind: "cli"` shape

@@ -13,7 +13,7 @@ The council runs the question through 5 advisors, each on a **different model fa
 thinking from a different angle, has them peer-review each other anonymously, then a chairman
 synthesises a verdict: where they agree, where they clash, what to do.
 
-Cross-model dispatch runs through the `panel` MCP tool (`pc-core-models` server); when the pool
+Cross-model dispatch runs through the `panel` MCP tool (`pc-models` plugin); when the pool
 can't field enough distinct families, the unfilled lenses fall back to Claude sub-agents, **traced
 as such** in the transcript.
 
@@ -46,7 +46,7 @@ prior-art focus, lens framing, the chairman's extra sections, and the output wri
 
 ## Preflight — run these three checks before the gate
 
-1. **`panel` reachable?** If the `panel` MCP tool (`pc-core-models` server) is not in your tool list,
+1. **`panel` reachable?** If the `panel` MCP tool (`pc-models` plugin) is not in your tool list,
    you are in **full-fallback mode**: every advisor runs as a Claude sub-agent, the council has
    **zero cross-model signal at the advisor layer**, and Step 6 (chairman cross-check) stops being
    optional — it is then the *only* cross-model input and must run. Say so up front. (`adversarial` and `offline` are *not* substitutes for `panel`

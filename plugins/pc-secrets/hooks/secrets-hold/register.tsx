@@ -143,7 +143,7 @@ export const register: Register = on => {
       return {
         deny:
           `The user chose not to send ${clean(verdict.path)} to the cloud model, which holds secret-shaped data. ` +
-          `Do not read it. Run the task locally with the \`offline\` tool of pc-core (files: ["${verdict.path}"]).`,
+          `Do not read it. Run the task locally with the \`offline\` tool of pc-models (files: ["${verdict.path}"]).`,
       }
     }
 

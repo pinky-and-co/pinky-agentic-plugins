@@ -10,14 +10,14 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 import pi_live  # noqa: E402
 
 
 @pytest.fixture
 def runs(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-    return tmp_path / "cfg" / "pc-core" / "pi-runs"
+    return tmp_path / "cfg" / "pc-models" / "pi-runs"
 
 
 class Clock:

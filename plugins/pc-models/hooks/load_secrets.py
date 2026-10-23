@@ -2,7 +2,7 @@
 """load_secrets — resolve the `keys` declared in `settings.pinky.json` into `{VAR: value}`.
 
 Reads the `keys` array from `.claude/settings.pinky.json` (ascending resolution — see
-`policy_lib.py`, the same mechanism `model_pool`/`branch_workflow` already use). Keys are resolved
+`pc_models_policy_lib.py`, the same mechanism `model_pool`/`branch_workflow` already use). Keys are resolved
 on demand, only inside the process that needs them (`secret_env` in `model_adversarial.py`, handed
 straight to a `pi` subprocess's own `env=`) — never exported to a session-wide env, where any tool
 that dumps it (`pgrep -fl`, `env`, a command's own argv expansion) would read every secret for the
@@ -33,7 +33,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 from keychain import read_macos_keychain as _read_keychain  # noqa: E402
-from policy_lib import load_policies, resolve_repo_root  # noqa: E402
+from pc_models_policy_lib import load_policies, resolve_repo_root  # noqa: E402
 
 
 def read_macos_keychain(entry: dict[str, Any]) -> str | None:
@@ -74,7 +74,7 @@ def resolve_env(keys: list[dict[str, Any]]) -> dict[str, str]:
     """`{VAR: value}` for every entry whose reader resolved a value — every reader, keychain
     included: this function itself does no filtering by reader.
 
-    Called by pc-core's MCP server (`model_adversarial.secret_env`): it hands the resolved values to
+    Called by pc-models' MCP server (`model_adversarial.secret_env`): it hands the resolved values to
     each `pi` call it makes, on demand, never into a session-wide env.
 
     Args:

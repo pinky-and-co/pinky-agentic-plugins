@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Panel runtime — dispatch one prompt PER SLOT to a different model family each, in parallel.
 
-Called by the `panel` MCP tool (`mcp/pc_core_server.py`). Where `adversarial` runs a single contrarian
+Called by the `panel` MCP tool (`mcp/pc_models_server.py`). Where `adversarial` runs a single contrarian
 check and `offline` runs one local model, `panel` fans a batch of prompts out across several
 *different* model families at once — `prompts[i]` to the i-th selected model — and returns every
 answer, each labelled with the model that produced it. It exists for a council of advisor voices

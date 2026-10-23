@@ -90,7 +90,7 @@ When an edit seems ignored, check what actually loaded it before refreshing anyt
     work behind it is a signal to route that work through `mcp/` instead (below), not to invent an
     `agents/scripts/` folder with no precedent anywhere in the ecosystem.
   - **`mcp/` holds one MCP server's implementation** (`mcp/<plugin>_server.py` + whatever sibling
-    modules it imports, e.g. `pc-core`'s `model_offline.py`/`model_adversarial.py`), declared via a
+    modules it imports, e.g. `pc-models`'s `model_offline.py`/`model_adversarial.py`), declared via a
     `.mcp.json` at the plugin root (`{"<server-name>": {"command": "uv", "args": ["run", "--script",
     "${CLAUDE_PLUGIN_ROOT}/mcp/<plugin>_server.py"]}}`). The entrypoint is named for its plugin, not
     a bare `server.py`: mypy runs one invocation over every `plugins/*/` file and hard-errors on two

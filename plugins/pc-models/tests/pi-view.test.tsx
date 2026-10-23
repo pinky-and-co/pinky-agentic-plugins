@@ -2,8 +2,8 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { fitViews, lingerLimits } from '../hooks/pi-view/register'
 
-const ADV = 'mcp__plugin_pc-core_pc-core-models__adversarial'
-const RUNS = '/cfg/pc-core/pi-runs'
+const ADV = 'mcp__plugin_pc-models_pc-models__adversarial'
+const RUNS = '/cfg/pc-models/pi-runs'
 
 // Stands for the engine beneath the mod: the tool call waits until the test lets it end, the view files are a map.
 function engine(on: any, files: Record<string, string>, opts: { ownClock?: boolean } = {}) {
@@ -69,7 +69,7 @@ describe('pi view', () => {
     const running = $.tool.call(call('toolu_2'))
     let ui: any
     for (let i = 0; i < 50 && !ui; i++) {
-      const mounted = await $.ui.mount({ plugin: 'pc-core', surface: 'terminal', ...row('toolu_2') } as any)
+      const mounted = await $.ui.mount({ plugin: 'pc-models', surface: 'terminal', ...row('toolu_2') } as any)
       if (await mounted.find({ type: 'Text', text: /pi ·/ })) ui = mounted
       else await mounted.unmount()
     }
@@ -87,12 +87,12 @@ describe('pi view', () => {
     const { finish } = engine(on, { [`${RUNS}/toolu_4/view-1.txt`]: '1 candidate(s)\n[  0.1s] text: quick\n' }, { ownClock: true })
     finish()
     await $.tool.call(call('toolu_4'))
-    const kept = await $.ui.mount({ plugin: 'pc-core', surface: 'terminal', ...row('toolu_4', false) } as any)
+    const kept = await $.ui.mount({ plugin: 'pc-models', surface: 'terminal', ...row('toolu_4', false) } as any)
     expect(await kept.find({ type: 'Text', text: /pi · done in \d+s/ })).toBeDefined()
     expect(await kept.find({ type: 'Text', text: '     [  0.1s] text: quick' })).toBeDefined()
     await kept.unmount()
     await clock.advance(lingerLimits.ms)
-    const back = await $.ui.mount({ plugin: 'pc-core', surface: 'terminal', ...row('toolu_4', false) } as any)
+    const back = await $.ui.mount({ plugin: 'pc-models', surface: 'terminal', ...row('toolu_4', false) } as any)
     expect(await back.find({ type: 'Text', text: 'engine row' })).toBeDefined()
     await back.unmount()
   })
@@ -100,7 +100,7 @@ describe('pi view', () => {
   test('a finished row is the engine own', async ($, on) => {
     const { finish } = engine(on, {})
     finish()
-    const ui = await $.ui.mount({ plugin: 'pc-core', surface: 'terminal', ...row('toolu_3', false) } as any)
+    const ui = await $.ui.mount({ plugin: 'pc-models', surface: 'terminal', ...row('toolu_3', false) } as any)
     expect(await ui.find({ type: 'Text', text: 'engine row' })).toBeDefined()
     await ui.unmount()
   })
@@ -116,7 +116,7 @@ describe('pi view', () => {
       },
     })
     for (const tool of [ADV, 'Read']) {
-      const ui = await $.ui.mount({ plugin: 'pc-core', surface: 'terminal', ...group(tool) } as any)
+      const ui = await $.ui.mount({ plugin: 'pc-models', surface: 'terminal', ...group(tool) } as any)
       await ui.unmount()
     }
     expect(rendered.filter(e => e.component === 'ToolGroup').map(e => e.props.isExpanded)).toEqual([true, false])

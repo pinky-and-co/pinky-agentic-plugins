@@ -38,7 +38,7 @@ outcome (the first press wins):
   error. The write is refused when the file changed since the verdict (a content digest travels
   with it), on a line no longer carrying a secret, and on a line continued with `\`.
 - `⌂ delegate offline` (`4`) refuses the `Read` and tells Claude to run the task with the `offline`
-  tool of `pc-core`, which keeps the content on the machine. Offered only when the local model
+  tool of `pc-models`, which keeps the content on the machine. Offered only when the local model
   server (`pi`'s `mlx` provider in `~/.pi/agent/models.json`, loopback hosts only) answers within one second.
 - `✘ deny` (`9`) refuses the `Read`; Claude asks what to do instead.
 
@@ -56,7 +56,7 @@ plugin loads from a folder you own).
 
 ## Requirements
 
-Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hook. The `delegate offline` button needs `pc-core` (its `offline` tool) and a
+Python 3.12 or newer, resolved as `python3` on the `PATH`, for the hook. The `delegate offline` button needs `pc-models` (its `offline` tool) and a
 local model server.
 
 ## Upgrading from pc-core

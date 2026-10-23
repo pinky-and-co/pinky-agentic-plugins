@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-kanban/skills/kanban/scripts/pi_review.py."""
+"""Tests for plugins/pc-models/mcp/pi_review.py."""
 
 from __future__ import annotations
 
@@ -11,27 +11,10 @@ import unittest.mock
 from pathlib import Path
 
 SCRIPT_PATH = (
-    Path(__file__).parent.parent
-    / "plugins"
-    / "pc-kanban"
-    / "skills"
-    / "kanban"
-    / "scripts"
-    / "pi_review.py"
+    Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp" / "pi_review.py"
 )
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
-sys.path.insert(
-    0,
-    str(
-        Path(__file__).parent.parent
-        / "plugins"
-        / "pc-kanban"
-        / "skills"
-        / "kanban"
-        / "scripts"
-    ),
-)
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 import pi_review  # noqa: E402
 from pi_fakes import PiPopen  # noqa: E402
 
@@ -295,8 +278,7 @@ class TestReviewPoint(unittest.TestCase):
 class TestScriptImportsStandalone(unittest.TestCase):
     """Runs the script as a real subprocess, with none of this test file's own `sys.path`
     seeding — the only thing that would have caught the `model_adversarial` import path being
-    wrong (`parent.parent.parent.parent` landed one level short, inside `pc-kanban/` instead of
-    `plugins/`). No pool call needed: a card with no `## Done when` fails before touching the
+    wrong (a path computed from the repo layout is one level short once the plugin is installed). No pool call needed: a card with no `## Done when` fails before touching the
     pool, but only after the module-level `import model_adversarial` has already run."""
 
     def test_no_done_when_card_fails_cleanly_not_with_a_traceback(self):

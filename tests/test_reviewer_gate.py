@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/hooks/reviewer_gate.py — run with:
+"""Tests for plugins/pc-models/hooks/reviewer_gate.py — run with:
 python3 -m unittest discover tests
 """
 
@@ -10,7 +10,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "hooks"))
+sys.path.insert(
+    0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "hooks")
+)
 
 import reviewer_gate as rg
 

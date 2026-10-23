@@ -30,7 +30,7 @@ FAILURE_PREFIXES = ("[adversarial] BLOCKED", "[adversarial] ERROR")
 
 DENY_REASON = (
     "The change has a diff against the default branch and `adversarial` has not failed this session: call the "
-    "`adversarial` MCP tool directly (mcp__plugin_pc-core_pc-core-models__adversarial, with "
+    "`adversarial` MCP tool directly (mcp__plugin_pc-models_pc-models__adversarial, with "
     '`base`, `tools: ["read", "grep"]` and the card\'s task). `reviewer` is launched only for a '
     "claim with no diff, or after `adversarial` answered BLOCKED or ERROR."
 )

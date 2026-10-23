@@ -157,7 +157,7 @@ def raw_log_path() -> Path:
         Path.home()
         / ".claude"
         / "debug"
-        / f"{session_id}_mcp__pc-core__model-raw.jsonl"
+        / f"{session_id}_mcp__pc-models__model-raw.jsonl"
     )
 
 
