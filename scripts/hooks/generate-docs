@@ -18,14 +18,21 @@
 # instrumentation) — editable-install path setups (multiple repos' src/ on sys.path at once) can
 # make pytest-cov silently measure nothing ("module-not-measured") with no visible error;
 # wrapping externally sidesteps that.
+#
+# BLOCKING exception to the non-blocking posture above: when uv is available the suite runs
+# via `uv run --frozen --all-extras` so every optional extra's tests execute; without uv on
+# the machine the fallback interpreter runs the suite and the skip-guard alone protects the
+# badge. If the suite STILL reports a skip whose reason is a missing import, the badge is
+# refused and the hook exits 1 — a coverage figure measured in a stripped env is wrong data,
+# and must not be written.
 # =============================================================================
 
 # 0. Interpréteur résolu explicitement, jamais `python` nu : ni garanti sur un shell macOS sans
 # conda/venv activé, ni sur Windows. Le venv du projet passe en premier car le bloc coverage/pytest
-# plus bas a besoin des deps de dev, qu'un python3 système n'a pas. `uv run` est écarté : il
-# resynchronise l'env vers l'état par défaut et désinstalle les extras, résolvant un env de cache
-# distinct de .venv. Un repo sans .venv retombe sur python3/py, suffisant pour render_docs.py qui
-# est 100 % stdlib.
+# plus bas a besoin des deps de dev, qu'un python3 système n'a pas. `uv run` est écarté POUR CE
+# BLOC (render_docs.py est 100 % stdlib) — le run de couverture, lui, passe précisément par
+# `uv run --frozen --all-extras` (voir plus bas) pour que l'env porte chaque extra. Un repo sans .venv
+# retombe sur python3/py.
 if [ -x .venv/bin/python ]; then PY=".venv/bin/python"                    # POSIX
 elif [ -x .venv/Scripts/python.exe ]; then PY=".venv/Scripts/python.exe"  # Windows
 elif command -v python3 > /dev/null 2>&1; then PY="python3"
@@ -62,8 +69,35 @@ if [ "$SRC_STAGED" -gt 0 ]; then
 
     mkdir -p .cache/coverage
     COV_LOG=$(mktemp)
-    if $PY -m coverage run -m pytest -q --no-cov > "$COV_LOG" 2>&1; then
-        $PY -m coverage xml -o .cache/coverage/coverage.xml > /dev/null 2>&1
+    # La suite passe par `uv run --frozen --all-extras` : l'env resynchronisé porte alors chaque
+    # extra — sans lui, un env amputé fait skippier les tests des modules concernés et le badge
+    # mesure une couverture effondrée (~59 % au lieu de ~84 %). Sans uv sur la machine, repli sur
+    # le python du venv tel quel : le garde-fou ci-dessous refuse alors la mesure d'un env dégradé.
+    if command -v uv > /dev/null 2>&1; then
+        # --frozen : un commit ne re-lock jamais uv.lock — l'env resync sur le lock présent.
+        COV_RUN="uv run --frozen --all-extras coverage run"
+        # Le xml passe par uv aussi : PY est résolu AVANT que uv ne crée/sync le .venv — le
+        # python système n'a pas coverage, et son échec avalisé ferait échouer genbadge en silence.
+        COV_XML="uv run --frozen --all-extras coverage xml"
+        REMEDY="uv sync --all-extras"
+    else
+        COV_RUN="$PY -m coverage run"
+        COV_XML="$PY -m coverage xml"
+        REMEDY="resync the project .venv with every extra installed"
+    fi
+    # -rs : rapporte la RAISON de chaque skip — c'est l'entrée du garde-fou suivant.
+    if $COV_RUN -m pytest -q -rs --no-cov > "$COV_LOG" 2>&1; then
+        # Garde-fou env dégradé : un skip dont la raison est un import absent (« not installed »,
+        # « No module named », « could not import ») signale un extra manquant, quelle que soit
+        # la façon dont l'env a été amputé. Refus d'écrire le badge, skip fautif nommé, exit 1.
+        # || true : grep rc=1 (aucun match) reste « aucun skip », pas un échec, si un set -e arrive.
+        IMPORT_SKIPS=$(grep -Ei "SKIPPED .*(not installed|No module named|could not import)" "$COV_LOG" || true)
+        if [ -n "$IMPORT_SKIPS" ]; then
+            echo "✖ coverage_badge.svg not written: skipped tests with a missing import (degraded env — $REMEDY):" >&2
+            printf '%s\n' "$IMPORT_SKIPS" >&2
+            exit 1
+        fi
+        $COV_XML -o .cache/coverage/coverage.xml > /dev/null 2>&1
         # genbadge est un console-script : le chercher dans le venv du projet avant le PATH —
         # un lookup PATH nu peut silencieusement résoudre le genbadge d'un tout autre repo.
         if [ -x .venv/bin/genbadge ]; then GB=".venv/bin/genbadge"                    # POSIX

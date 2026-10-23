@@ -17,7 +17,7 @@ import pi_live  # noqa: E402
 @pytest.fixture
 def runs(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
-    return tmp_path / "cfg" / "pc-models" / "pi-runs"
+    return tmp_path / "cfg" / "pinky" / "plugin-state" / "pc-models" / "pi-runs"
 
 
 class Clock:
@@ -68,6 +68,22 @@ def test_open_run_refuses_an_existing_directory_or_link(runs, tmp_path):
 def test_open_run_with_no_value_is_none(runs):
     assert pi_live.open_run(None) is None
     assert not runs.exists()
+
+
+def test_first_access_removes_the_legacy_pc_models_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    legacy = tmp_path / "cfg" / "pc-models" / "pi-runs" / "old-run"
+    legacy.mkdir(parents=True)
+    assert pi_live.runs_dir() == (
+        tmp_path / "cfg" / "pinky" / "plugin-state" / "pc-models" / "pi-runs"
+    )
+    assert not (tmp_path / "cfg" / "pc-models").exists()
+
+
+def test_no_legacy_dir_is_created_when_absent(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    pi_live.runs_dir()
+    assert not (tmp_path / "cfg" / "pc-models").exists()
 
 
 def test_open_run_prunes_runs_older_than_a_day(runs):

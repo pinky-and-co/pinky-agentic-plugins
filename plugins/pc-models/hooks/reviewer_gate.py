@@ -6,8 +6,10 @@ directly, and the `reviewer` agent only takes over when `adversarial` answered `
 (or when there is no diff). This hook enforces it: an Agent call with subagent_type `reviewer`
 (or `pc-core:reviewer`) is denied when the repo differs from its default branch (working tree and
 untracked files included) and the
-session transcript holds no `adversarial` tool_result opening with `[adversarial] BLOCKED` or
-`[adversarial] ERROR`. Every other subagent_type, and a repo with no diff, passes.
+session transcript holds no `adversarial` result opening with `[adversarial] BLOCKED` or
+`[adversarial] ERROR` — as a tool_result, or as the `<result>` of a background task's
+`<task-notification>` (a `queue-operation` transcript line). Every other subagent_type, and a repo
+with no diff, passes.
 
 Accepted limits: the hook fails open on any git or transcript error; one BLOCKED or ERROR anywhere
 in the session transcript allows the reviewer for the rest of the session.
@@ -21,12 +23,14 @@ Python 3.12+, stdlib only. A hook failure must never block a turn → unexpected
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 REVIEWER_TYPES = frozenset({"reviewer", "pc-core:reviewer"})
 FAILURE_PREFIXES = ("[adversarial] BLOCKED", "[adversarial] ERROR")
+NOTIFICATION_RESULT = re.compile(r"<result>\s*(.*?)\s*</result>", re.DOTALL)
 
 DENY_REASON = (
     "The change has a diff against the default branch and `adversarial` has not failed this session: call the "
@@ -128,18 +132,29 @@ def result_text(content: object) -> str:
 
 
 def _line_failed(line: str) -> bool:
-    """Whether one transcript line holds a BLOCKED or ERROR adversarial tool_result.
+    """Whether one transcript line holds a BLOCKED or ERROR adversarial result.
+
+    The result is a tool_result, or the `<result>` of a background task's `<task-notification>`
+    (an `adversarial` call still running after 120 s answers that way, never as a tool_result).
 
     Args:
         line: One JSONL transcript line.
 
     Returns:
-        True when such a tool_result is present.
+        True when such a result is present.
     """
     try:
-        message = json.loads(line).get("message")
+        entry = json.loads(line)
+        message = entry.get("message")
     except (ValueError, AttributeError):
         return False
+    if entry.get("type") == "queue-operation" and isinstance(entry.get("content"), str):
+        if not entry["content"].lstrip().startswith("<task-notification>"):
+            return False
+        found = NOTIFICATION_RESULT.search(entry["content"])
+        return found is not None and result_text(found.group(1)).startswith(
+            FAILURE_PREFIXES
+        )
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, list):
         return False
@@ -152,7 +167,8 @@ def _line_failed(line: str) -> bool:
 
 
 def adversarial_failed(transcript_path: str | None) -> bool:
-    """Whether the transcript holds an adversarial tool_result that is BLOCKED or ERROR.
+    """Whether the transcript holds an adversarial result (tool_result or task notification)
+    that is BLOCKED or ERROR.
 
     Args:
         transcript_path: The session JSONL transcript.

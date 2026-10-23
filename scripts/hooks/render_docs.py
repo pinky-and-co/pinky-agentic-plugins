@@ -237,6 +237,36 @@ _TREE_EXCLUDE_PATHS = {"docs"}
 _TREE_COLLAPSED_PATHS = {"scripts/hooks"}
 
 
+def repo_name(repo: Path) -> str:
+    """The repo's name, from `git remote get-url origin` — the one source identical from the
+    main checkout and from any worktree (`.claude/worktrees/agent-<id>/`), whose folder name
+    must never leak into badge URLs or the tree root. The URL is normalized first (trailing
+    slashes stripped, scp-style `user@host:repo` split on its colon), then the last segment
+    taken, `.git` stripped. Falls back to the given path's own name when git is absent, when
+    the origin lookup fails, or when the URL degenerates to an empty name (a repo not yet
+    pushed has no other source)."""
+    git = shutil.which("git")
+    if git is not None:
+        try:
+            result = subprocess.run(  # noqa: S603
+                [git, "remote", "get-url", "origin"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding="utf-8",
+            )
+        except (subprocess.CalledProcessError, OSError):
+            result = None
+        if result is not None:
+            url = result.stdout.strip().rstrip("/")
+            last = url.rsplit("/", 1)[-1] if "/" in url else url.rsplit(":", 1)[-1]
+            name = last.removesuffix(".git")
+            if name:
+                return name
+    return repo.name
+
+
 def _tracked_or_unignored_files(repo: Path) -> list[str]:
     """Repo-relative file paths git would let you `git add`: tracked files + untracked files NOT
     matched by .gitignore (nested .gitignore files and the global excludes file all respected
@@ -312,7 +342,7 @@ def render_tree(repo: Path) -> str:
     would let you add (.gitignore-respecting, via _tracked_or_unignored_files), so cache/build
     noise never needs a hardcoded exclusion list. Fixed sort, never churns commit to commit."""
     tree = _build_tree(_tracked_or_unignored_files(repo))
-    lines = [f"{repo.name}/", *_render_tree_dict(tree)]
+    lines = [f"{repo_name(repo)}/", *_render_tree_dict(tree)]
     return "```text\n" + "\n".join(lines) + "\n```"
 
 
@@ -417,7 +447,7 @@ def _render_badges(repo: Path, identity: SuiteIdentity, surface: str) -> list[st
     non-Python repo (assets, infra) still gets its own badges back (license, prek) without a
     dangling PyPI/coverage badge pointing at something that doesn't exist there."""
     ctx = {
-        "name": repo.name,
+        "name": repo_name(repo),
         "license": _shields_escape(_repo_license_name(repo)),
         "github_org": identity.github_org,
     }
@@ -534,7 +564,7 @@ def render_index_home(repo: Path, identity: SuiteIdentity) -> str:
     inside them without it — that also requires the `md_in_html` extension enabled in mkdocs.yml,
     which is a per-repo file this hook does not own.
     """
-    name = repo.name
+    name = repo_name(repo)
     lines: list[str] = [
         '<div align="center" markdown="1">',
         "",

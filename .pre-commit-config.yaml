@@ -61,9 +61,12 @@ repos:
   #
   # Before this hook, the only test execution at commit time was the one buried inside generate-docs
   # feeding the coverage badge, whose failure printed a warning and returned 0 — a broken suite
-  # passed pre-commit. generate-docs keeps its own run for the badge data and stays non-blocking;
-  # this hook owns the verdict. See core/hooks/run-tests for why the two runs stay independent, and
-  # why an absent pytest warns instead of blocking.
+  # passed pre-commit. generate-docs keeps its own run for the badge data and stays non-blocking
+  # for missing tooling (pytest/genbadge absent, coverage run failure); ONE exception: a skip
+  # whose reason is a missing import means the coverage figure was measured in a stripped env —
+  # generate-docs then refuses to write the badge and exits 1 (see core/hooks/generate-docs).
+  # This hook owns the pass/fail verdict. See core/hooks/run-tests for why the two runs stay
+  # independent, and why an absent pytest warns instead of blocking.
   - repo: local
     hooks:
       - id: run-tests

@@ -579,6 +579,7 @@ pinky-agentic-plugins/
 │   ├── test_clean_gone_hook.py
 │   ├── test_clear_pending_queue.py
 │   ├── test_close_cards.py
+│   ├── test_commit_skills_at_path.py
 │   ├── test_commit_trailer.py
 │   ├── test_dangerous_bash_ask.py
 │   ├── test_data_schema.py

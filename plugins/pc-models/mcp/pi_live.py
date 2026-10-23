@@ -1,6 +1,7 @@
 """The view files pc-models' `pi-view` mod draws in a running tool call's transcript row.
 
-The mod names one directory per call, `<config dir>/pc-models/pi-runs/<tool_use_id>`, and passes it
+The mod names one directory per call, `<config dir>/pinky/plugin-state/pc-models/pi-runs/<tool_use_id>`,
+and passes it
 as the tool's `events` argument. `open_run` accepts only that shape and creates the directory
 private (0700), so a value the model wrote itself never makes the server write elsewhere. Each
 `pi` stream then gets one `view-<slot>.txt`: a header and the last `KEEP_LINES` lines that
@@ -34,9 +35,16 @@ _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 
 def runs_dir() -> Path:
-    """The directory every run directory lives in, under the Claude Code config directory."""
+    """The directory every run directory lives in, under the Claude Code config directory.
+
+    First access also removes the legacy `<config dir>/pc-models/` directory (it held only
+    `pi-runs/`, whose history is abandoned), best-effort.
+    """
     config = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
-    return Path(config) / "pc-models" / "pi-runs"
+    legacy = Path(config) / "pc-models"
+    if legacy.is_dir():
+        shutil.rmtree(legacy, ignore_errors=True)
+    return Path(config) / "pinky" / "plugin-state" / "pc-models" / "pi-runs"
 
 
 def _prune(root: Path) -> None:

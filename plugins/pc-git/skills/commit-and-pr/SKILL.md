@@ -36,6 +36,10 @@ argument" branch below; never ask for one.
 acts on it. Match what *remains* against a repo name / an absolute repo path / `--all`. CI watching
 is the default; this flag is an opt-*out*.
 
+**A word starting with `@` is a path**: drop the `@` (Claude Code's path autocomplete types it), and
+if what remains is relative, resolve it against `${CLAUDE_PROJECT_DIR}` and normalise the `..`. The
+result starts with `/` and follows the absolute-path rule below.
+
 **Then resolve the target:**
 
 - **An explicit argument** — a repo name, an absolute repo path or `--all` — always wins. Use it.

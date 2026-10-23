@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 INSTALLED_PLUGINS_PATH = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
-STATE_DIR = Path.home() / ".claude" / "pinky-plugin-scope"
+STATE_DIR = Path.home() / ".claude" / "pinky" / "plugin-scope"
 
 
 # --- Reading the source of truth --------------------------------------------

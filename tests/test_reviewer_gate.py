@@ -33,6 +33,22 @@ def _result_line(content: object) -> str:
     )
 
 
+def _notification_line(result: str) -> str:
+    """A background MCP task's completion as the transcript records it."""
+    return json.dumps(
+        {
+            "type": "queue-operation",
+            "operation": "enqueue",
+            "content": (
+                "<task-notification>\n<task-id>k0hy4d7j3</task-id>\n"
+                "<status>completed</status>\n"
+                f"<result>\n{json.dumps({'result': result})}\n</result>\n"
+                "</task-notification>"
+            ),
+        }
+    )
+
+
 class TestReviewerGate(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -99,6 +115,51 @@ class TestReviewerGate(unittest.TestCase):
         self.transcript.write_text(
             _result_line('{"result":"[answered by x · sonnet]\\nverdict"}')
         )
+        self.assertEqual(self._decision(self._payload()), "deny")
+
+    def test_allows_after_error_delivered_by_a_background_task_notification(self):
+        self._dirty()
+        self.transcript.write_text(
+            _notification_line("[adversarial] ERROR — wall-clock cap (1800s) reached.")
+        )
+        self.assertIsNone(self._decision(self._payload()))
+
+    def test_denies_after_successful_background_task_notification(self):
+        self._dirty()
+        self.transcript.write_text(
+            _notification_line("[answered by x · sonnet]\nverdict")
+        )
+        self.assertEqual(self._decision(self._payload()), "deny")
+
+    def test_queued_user_prompt_quoting_the_prefix_does_not_count(self):
+        self._dirty()
+        self.transcript.write_text(
+            json.dumps(
+                {
+                    "type": "queue-operation",
+                    "operation": "enqueue",
+                    "content": '<result>{"result":"[adversarial] ERROR"}</result>',
+                }
+            )
+        )
+        self.assertEqual(self._decision(self._payload()), "deny")
+
+    def test_notification_result_not_opening_with_the_prefix_does_not_count(self):
+        self._dirty()
+        self.transcript.write_text(
+            _notification_line("verdict: the log said [adversarial] ERROR once")
+        )
+        self.assertEqual(self._decision(self._payload()), "deny")
+
+    def test_malformed_notification_and_non_dict_lines_deny(self):
+        self._dirty()
+        unclosed = json.dumps(
+            {
+                "type": "queue-operation",
+                "content": "<task-notification><result>[adversarial] ERROR",
+            }
+        )
+        self.transcript.write_text(f'{unclosed}\n["[adversarial] ERROR"]\n')
         self.assertEqual(self._decision(self._payload()), "deny")
 
     def test_blocked_text_outside_tool_result_does_not_count(self):
