@@ -164,8 +164,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
 
     **Review clause.** If the work needs judgment reviewed (anything beyond a purely mechanical
     change, per `finishing-a-card.md` § "Reviewing before declaring a card done"), append `… and
-    the diff has been reviewed in a fresh context, never by this session itself, each finding
-    fixed, refuted in the transcript, or noted in the card's `## Decisions``. Which tool reviews, re-review rounds and
+    the production-code diff has been reviewed in a fresh context, never by this session itself;
+    documentation, docstrings, comments, tests and edits applying a reviewer finding as written
+    never reopen a review; each finding fixed, refuted in the transcript, or noted in the card's
+    `## Decisions``. Which tool reviews, re-review rounds and
     the `Method:` line stay in `finishing-a-card.md`, never in the condition. A finding on the card's subject that its
     requirements miss gets a requirement in this card and is worked here — never a new card. Substance only — never the `reviewed (…)` box. Decided pre-work from
     `## Done when` and `requirements:`; unclear → include it. Obviously mechanical (doc typo,
