@@ -91,6 +91,7 @@ class TestOfflineToolProgressView(unittest.TestCase):
 
         self.assertTrue(out.startswith("[offline] m1"))
         self.assertEqual((root / "answer.md").read_text(), "SECRET\nBODY\n")
-        self.assertEqual(
-            (run / "view-1.txt").read_text(), "offline · m1\n12 chars received\n"
+        self.assertRegex(
+            (run / "view-1.txt").read_text(),
+            r"\Aoffline · m1\n12 chars received\n\[ *\d+\.\ds\] pool end\n\Z",
         )

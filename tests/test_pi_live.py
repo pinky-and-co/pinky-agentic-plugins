@@ -165,4 +165,4 @@ def test_progress_view_counts_characters_never_shows_them(runs):
     progress.close()
     assert (
         run / "view-1.txt"
-    ).read_text() == "offline · mlx-model\n11 chars received\n"
+    ).read_text() == "offline · mlx-model\n11 chars received\n[  0.0s] pool end\n"

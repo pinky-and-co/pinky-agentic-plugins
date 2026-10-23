@@ -635,6 +635,24 @@ class TestRunPoolRequeue(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
 
+    def test_dsml_tool_call_text_is_not_an_answer(self):
+        text_call = (
+            "<\uff5cDSML\uff5c tool_calls>\n"
+            '<\uff5cDSML\uff5c invoke name="read">\n'
+            "</\uff5cDSML\uff5c invoke>\n"
+            "</\uff5cDSML\uff5c calls>"
+        )
+        with (
+            unittest.mock.patch.object(ma, "call_cli", side_effect=[text_call] * 2),
+            unittest.mock.patch.object(ma, "write_last_ok_provider") as write,
+        ):
+            result = ma.run_pool([MISTRAL], "p")
+        self.assertIsNone(result.entry)
+        self.assertEqual(
+            result.result, "mistral-medium-3.5: tool call text instead of an answer"
+        )
+        write.assert_not_called()
+
     def test_run_wall_clock_is_a_backstop_never_requeued(self):
         # Le chrono global coupe une boucle d'outils : la rejouer referait toute l'exploration.
         with unittest.mock.patch(

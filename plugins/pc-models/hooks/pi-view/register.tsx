@@ -12,7 +12,10 @@ const VIEW = /^view-(\d+)\.txt$/
 // Lines drawn under the title, shared between the streams of a panel.
 const ROWS = 12
 // How long the view stays in the row once the call has ended, so a quick answer can still be read. Exported for the tests.
-export const lingerLimits = { ms: 4_000 }
+export const lingerLimits = { ms: 4_000, stallMs: 1_800_000, noViewMs: 10_000 }
+// The server's closing line of a stream (`[<stamp>s] pool end`); a run is over once every stream has written it.
+const POOL_END = /^\[ *\d+(?:\.\d+)?s\] pool end$/
+const poolEnded = (views: string[][]) => views.length > 0 && views.every(v => v.some(line => POOL_END.test(line)))
 const UNSAFE = /\x1b\[[0-9;?]*[ -/]*[@-~]|[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu
 
 const runs = atom({ plugin: 'pc-models', key: 'piRuns' } as const, {} as Record<string, PiRun>)
@@ -37,10 +40,18 @@ export async function readViews($: EngineInterface, dir: string): Promise<string
   return views
 }
 
-// Each view's header and its last lines, the rows split evenly between the views.
+// The server's line opening an attempt on one pool entry (`[<stamp>s] == <entry> (attempt N) ==`).
+const ATTEMPT = /^\[ *\d+(?:\.\d+)?s\] == .+ \(attempt \d+\) ==$/
+
+// Each view's header and its last lines, the rows split evenly between the views; the latest attempt line stays pinned
+// under the header once the tail has scrolled past it, so the model at work is always named.
 export function fitViews(views: string[][]): string[][] {
   const per = Math.max(1, Math.floor(ROWS / Math.max(1, views.length)) - 1)
-  return views.map(([header = '', ...lines]) => [header, ...lines.slice(-per)])
+  return views.map(([header = '', ...lines]) => {
+    const at = lines.findLastIndex(line => ATTEMPT.test(line))
+    if (at < 0 || at >= lines.length - per) return [header, ...lines.slice(-per)]
+    return [header, lines[at], ...lines.slice(-Math.max(1, per - 1))]
+  })
 }
 
 async function pause($: EngineInterface): Promise<boolean> {
@@ -58,24 +69,56 @@ export const register: Register = on => {
     if (typeof id !== 'string' || !ID.test(id)) return next({ ...e, events: undefined } as typeof e)
     const dir = `${await runsDir($)}/${id}`
     const startedAt = await $.clock.now()
-    let done = false
-    const poll = (async () => {
-      while (!done) {
-        const views = await readViews($, dir)
-        if (views.length > 0) await update($, runs, all => ({ ...all, [id]: { startedAt, views } }))
-        if (!(await pause($))) return
-      }
-    })()
-    try {
-      return await next({ ...e, events: dir } as typeof e)
-    } finally {
-      done = true
-      await poll.catch(() => undefined)
+    let returned = false
+    let stop = false
+    let loopDone = false
+    let finished = false
+    // A call past the harness's foreground limit hands control back while the server keeps writing: the view follows the
+    // run until every stream has written its `pool end` line, not until the call returns.
+    const finish = async () => {
+      if (finished) return
+      finished = true
       const views = await readViews($, dir)
       const endedAt = await $.clock.now()
       await update($, runs, all => (views.length > 0 ? { ...all, [id]: { startedAt, endedAt, views } } : all)).catch(() => undefined)
       // Le retrait passe par une minuterie : le résultat de l'appel n'attend pas la fin de l'affichage.
       $.clock.after(lingerLimits.ms, () => update($, runs, ({ [id]: _, ...rest }) => rest))
+    }
+    const poll = (async () => {
+      let seen = ''
+      let changedAt = startedAt
+      let returnedAt: number | undefined
+      try {
+        while (!stop) {
+          const views = await readViews($, dir)
+          const now = await $.clock.now()
+          const signature = JSON.stringify(views)
+          if (signature !== seen) {
+            [seen, changedAt] = [signature, now]
+            if (views.length > 0) await update($, runs, all => ({ ...all, [id]: { startedAt, views } }))
+          }
+          if (returned) returnedAt ??= now
+          // A call that returned without any view (refused, blocked) has nothing to follow.
+          if (returnedAt !== undefined && views.length === 0 && now - returnedAt > lingerLimits.noViewMs) break
+          if (returned && (poolEnded(views) || now - changedAt > lingerLimits.stallMs)) break
+          if (!(await pause($))) break
+        }
+      } finally {
+        loopDone = true
+        if (returned) await finish()
+      }
+    })().catch(() => undefined)
+    try {
+      return await next({ ...e, events: dir } as typeof e)
+    } finally {
+      returned = true
+      if (loopDone) await finish().catch(() => undefined)
+      else if (poolEnded(await readViews($, dir))) {
+        // A run that is over ends with the call; one still going (or not started) is followed by the loop above, and the
+        // result of the call does not wait for it.
+        stop = true
+        await poll.catch(() => undefined)
+      } else void poll.catch(() => undefined)
     }
   }).catch(($, e, next) => (next.called ? next(e) : next({ ...e, events: undefined } as typeof e)))
 
