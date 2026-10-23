@@ -12,6 +12,11 @@
       "description": "Generic workspace mechanics: convention replay (apply-pattern), review guidelines, the reviewer agent, and session-hygiene hooks (policy injection, privacy egress, post-edit lint, output-style reminder)."
     },
     {
+      "name": "pc-models",
+      "source": "./plugins/pc-models",
+      "description": "Opt-in cross-model MCP tools (offline, adversarial, panel, pool_check) needing local inference or third-party API keys, with the reviewer gate and a live view of running calls."
+    },
+    {
       "name": "pc-autodiscovery",
       "source": "./plugins/pc-autodiscovery",
       "description": "Always-on plugin activation: enables the project-scoped plugins matching wherever the session sits, and gates the next tool call while a user-only slash command is still pending. Kept out of pc-core so it works even when pc-core is not loaded."

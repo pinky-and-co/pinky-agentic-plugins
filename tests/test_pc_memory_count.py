@@ -612,6 +612,29 @@ def test_a_reader_without_lock_never_sees_a_truncated_ledger(home, repo, silo):
         "last_review": None,
     }
     (silo / LEDGER_NAME).write_text(json.dumps(seeded), encoding="utf-8")
+    reads: list[int] = []
+    failures: list[str] = []
+    live = threading.Event()
+    stop = threading.Event()
+
+    def sample() -> None:
+        try:
+            reads.append(len(json.loads((silo / LEDGER_NAME).read_bytes())["notes"]))
+        except (ValueError, OSError) as exc:
+            failures.append(repr(exc))
+
+    def read_loop() -> None:
+        while not stop.is_set():
+            sample()
+            if len(reads) >= 10:
+                live.set()
+        sample()  # une lecture de plus, une fois les écrivains sortis
+
+    # Le lecteur tourne avant le départ des écrivains et jusqu'à leur sortie : ses lectures
+    # couvrent toutes les écritures, quelle que soit la vitesse de la machine.
+    reader = threading.Thread(target=read_loop)
+    reader.start()
+    assert live.wait(timeout=10)
     procs = [
         subprocess.Popen(
             [sys.executable, "-c", _LOOP, str(HOOK.parent), str(silo), str(repo), p],
@@ -619,25 +642,13 @@ def test_a_reader_without_lock_never_sees_a_truncated_ledger(home, repo, silo):
         )
         for p in ("p", "q")
     ]
-    reads: list[int] = []
-    failures: list[str] = []
-
-    def read_loop() -> None:
-        while any(proc.poll() is None for proc in procs):
-            try:
-                reads.append(
-                    len(json.loads((silo / LEDGER_NAME).read_bytes())["notes"])
-                )
-            except (ValueError, OSError) as exc:
-                failures.append(repr(exc))
-
-    reader = threading.Thread(target=read_loop)
-    reader.start()
     assert [proc.wait(timeout=120) for proc in procs] == [0, 0]
+    stop.set()
     reader.join(timeout=10)
     assert failures == []
-    assert len(reads) > 10
     assert set(reads) <= {400, 401}
+    assert reads[0] == 400
+    assert reads[-1] == 401
 
 
 # --- the lock and the marker --------------------------------------------------------------

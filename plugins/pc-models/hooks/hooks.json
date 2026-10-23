@@ -1,0 +1,20 @@
+{
+  "description": "reviewer_gate.py denies the `reviewer` agent on a diff until `adversarial` answered BLOCKED or ERROR. A mod (pi-view/register.tsx, registered by hooks/register.tsx) draws a running `adversarial`, `panel` or `offline` call like a subagent, from the view files the server writes for it (`offline`: a character count, never the text)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/reviewer_gate.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "modules": [
+    "./register.tsx"
+  ]
+}

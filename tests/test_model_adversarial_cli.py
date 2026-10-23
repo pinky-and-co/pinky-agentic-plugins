@@ -5,7 +5,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 import model_adversarial as ma
 from pi_fakes import PiPopen
 

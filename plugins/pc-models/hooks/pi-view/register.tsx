@@ -6,7 +6,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { PiRun } from '../../types'
 
-export const TOOL = /^mcp__plugin_pc-core_pc-core-models__(adversarial|panel|offline)$/
+export const TOOL = /^mcp__plugin_pc-models_pc-models__(adversarial|panel|offline)$/
 const ID = /^[A-Za-z0-9_-]{1,128}$/
 const VIEW = /^view-(\d+)\.txt$/
 // Lines drawn under the title, shared between the streams of a panel.
@@ -15,11 +15,11 @@ const ROWS = 12
 export const lingerLimits = { ms: 4_000 }
 const UNSAFE = /\x1b\[[0-9;?]*[ -/]*[@-~]|[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu
 
-const runs = atom({ plugin: 'pc-core', key: 'piRuns' } as const, {} as Record<string, PiRun>)
+const runs = atom({ plugin: 'pc-models', key: 'piRuns' } as const, {} as Record<string, PiRun>)
 
 async function runsDir($: EngineInterface): Promise<string> {
   const config = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
-  return `${config}/pc-core/pi-runs`
+  return `${config}/pc-models/pi-runs`
 }
 
 // The view files of a run, in slot order, each as its lines.

@@ -29,7 +29,8 @@ language, default branch, branch strategy) are read from that repo's own
 
 | Plugin | What it ships |
 |--------|----------------|
-| [`pc-core`](plugins/pc-core/) | Session hygiene hooks (per-repo language/branch policies, post-edit lint, keychain secrets), the `reviewer` agent, skills `apply-pattern`, `council`, `review-guidelines`, and the `offline`/`adversarial`/`panel` model MCP tools |
+| [`pc-core`](plugins/pc-core/) | Session hygiene hooks (per-repo language/branch policies, post-edit lint), the `reviewer` agent, skills `apply-pattern`, `council`, `review-guidelines` |
+| [`pc-models`](plugins/pc-models/) | Opt-in cross-model MCP tools `offline`/`adversarial`/`panel`/`pool_check` (need `uv`, `pi`, and local inference or third-party API keys), the `reviewer` gate hook, a live view of running calls, keychain secrets |
 | [`pc-git`](plugins/pc-git/) | Gitmoji commit workflow (`commit`, `commit-and-pr`, `commit-convention`), `branch-workflow`, `clean-gone` (also run at session start), and hooks guarding permanent branches and overlapping PRs |
 | [`pc-kanban`](plugins/pc-kanban/) | File-based kanban mechanics — chantiers and cards (`kanban`, `chantier`, `grill`, `init`, `spawn-workers`, `yt`), the `card-worker` agent, permission guards (`careful`/`freeze`/`deny`/`guard`), card-discipline and handoff hooks |
 | [`pc-autodiscovery`](plugins/pc-autodiscovery/) | Always-on activation of the project-scoped plugins matching where the session sits, and a gate on the next tool call while a user-only slash command is pending |
@@ -99,23 +100,7 @@ pinky-agentic-plugins/
 │   ├── pc-core/
 │   │   ├── agents/
 │   │   │   └── reviewer.md
-│   │   ├── evals/
-│   │   │   └── review-local/
-│   │   │       ├── cases/
-│   │   │       │   ├── A_prefix_close_cards.diff
-│   │   │       │   ├── B_weakened_order_test.diff
-│   │   │       │   ├── C_rng_default.diff
-│   │   │       │   ├── D_wrong_invariant_test.diff
-│   │   │       │   ├── E_clean_close_cards.diff
-│   │   │       │   └── F_clean_spread_providers.diff
-│   │   │       ├── cases.json
-│   │   │       ├── methodology.md
-│   │   │       ├── probe_methodology.py
-│   │   │       ├── run.py
-│   │   │       └── standalone.py
 │   │   ├── hooks/
-│   │   │   ├── pi-view/
-│   │   │   │   └── register.tsx
 │   │   │   ├── subagent-routing/
 │   │   │   │   ├── classify.py
 │   │   │   │   ├── grid.json
@@ -124,26 +109,11 @@ pinky-agentic-plugins/
 │   │   │   │   └── tiers.ts
 │   │   │   ├── hooks.json
 │   │   │   ├── inject_policies.py
-│   │   │   ├── keychain.py
-│   │   │   ├── load_secrets.py
 │   │   │   ├── policy_lib.py
 │   │   │   ├── post_edit_lint.py
 │   │   │   ├── register.tsx
-│   │   │   ├── reviewer_gate.py
 │   │   │   ├── structure_guard.py
 │   │   │   └── style_reminder.py
-│   │   ├── mcp/
-│   │   │   ├── call_scope.py
-│   │   │   ├── model_adversarial.py
-│   │   │   ├── model_offline.py
-│   │   │   ├── model_panel.py
-│   │   │   ├── model_sanitize.py
-│   │   │   ├── model_tier_probe.py
-│   │   │   ├── model_tools_verdict.py
-│   │   │   ├── pc_core_server.py
-│   │   │   ├── pi_events_view.py
-│   │   │   ├── pi_guardian.py
-│   │   │   └── pi_live.py
 │   │   ├── skills/
 │   │   │   ├── apply-pattern/
 │   │   │   │   └── SKILL.md
@@ -158,7 +128,6 @@ pinky-agentic-plugins/
 │   │   │   └── review-guidelines/
 │   │   │       └── SKILL.md
 │   │   ├── tests/
-│   │   │   ├── pi-view.test.tsx
 │   │   │   └── subagent-routing.test.tsx
 │   │   ├── types/
 │   │   │   └── index.d.ts
@@ -355,8 +324,7 @@ pinky-agentic-plugins/
 │   │   │   │   │   └── story-template.md
 │   │   │   │   ├── scripts/
 │   │   │   │   │   ├── next_card_recommendation.py
-│   │   │   │   │   ├── open_cards_brief.py
-│   │   │   │   │   └── pi_review.py
+│   │   │   │   │   └── open_cards_brief.py
 │   │   │   │   └── SKILL.md
 │   │   │   ├── move-card/
 │   │   │   │   └── SKILL.md
@@ -399,6 +367,52 @@ pinky-agentic-plugins/
 │   │   │       └── SKILL.md
 │   │   ├── tests/
 │   │   │   └── memory-hold.test.tsx
+│   │   ├── types/
+│   │   │   └── index.d.ts
+│   │   ├── README.md
+│   │   └── tsconfig.json
+│   ├── pc-models/
+│   │   ├── evals/
+│   │   │   └── review-local/
+│   │   │       ├── cases/
+│   │   │       │   ├── A_prefix_close_cards.diff
+│   │   │       │   ├── B_weakened_order_test.diff
+│   │   │       │   ├── C_rng_default.diff
+│   │   │       │   ├── D_wrong_invariant_test.diff
+│   │   │       │   ├── E_clean_close_cards.diff
+│   │   │       │   └── F_clean_spread_providers.diff
+│   │   │       ├── cases.json
+│   │   │       ├── methodology.md
+│   │   │       ├── probe_methodology.py
+│   │   │       ├── run.py
+│   │   │       └── standalone.py
+│   │   ├── hooks/
+│   │   │   ├── pi-view/
+│   │   │   │   └── register.tsx
+│   │   │   ├── hooks.json
+│   │   │   ├── keychain.py
+│   │   │   ├── load_secrets.py
+│   │   │   ├── pc_models_policy_lib.py
+│   │   │   ├── register.tsx
+│   │   │   └── reviewer_gate.py
+│   │   ├── mcp/
+│   │   │   ├── call_scope.py
+│   │   │   ├── model_adversarial.py
+│   │   │   ├── model_offline.py
+│   │   │   ├── model_panel.py
+│   │   │   ├── model_sanitize.py
+│   │   │   ├── model_tier_probe.py
+│   │   │   ├── model_tools_verdict.py
+│   │   │   ├── pc_models_server.py
+│   │   │   ├── pi_events_view.py
+│   │   │   ├── pi_guardian.py
+│   │   │   ├── pi_live.py
+│   │   │   └── pi_review.py
+│   │   ├── skills/
+│   │   │   └── review-guidelines/
+│   │   │       └── SKILL.md
+│   │   ├── tests/
+│   │   │   └── pi-view.test.tsx
 │   │   ├── types/
 │   │   │   └── index.d.ts
 │   │   ├── README.md
@@ -546,7 +560,7 @@ pinky-agentic-plugins/
 ├── tests/
 │   ├── conftest.py
 │   ├── fake_local_server.py
-│   ├── pc_core_stdio.py
+│   ├── pc_models_stdio.py
 │   ├── pc_snow_live_probe.py
 │   ├── pc_snow_stdio.py
 │   ├── pi_fakes.py
@@ -588,7 +602,6 @@ pinky-agentic-plugins/
 │   ├── test_next_card_recommendation.py
 │   ├── test_open_cards_brief.py
 │   ├── test_orchestrator_freeze.py
-│   ├── test_pc_core_server_offline.py
 │   ├── test_pc_kanban_card_ops.py
 │   ├── test_pc_kanban_card_routing.py
 │   ├── test_pc_kanban_init.py
@@ -602,6 +615,8 @@ pinky-agentic-plugins/
 │   ├── test_pc_memory_reconcile.py
 │   ├── test_pc_memory_review.py
 │   ├── test_pc_memory_write.py
+│   ├── test_pc_models_server_offline.py
+│   ├── test_pc_models_standalone.py
 │   ├── test_pc_rtk.py
 │   ├── test_pc_snow_integration.py
 │   ├── test_pc_snow_server.py

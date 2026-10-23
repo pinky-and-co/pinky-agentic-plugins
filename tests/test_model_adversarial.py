@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for plugins/pc-core/mcp/model_adversarial.py — run with:
+"""Tests for plugins/pc-models/mcp/model_adversarial.py — run with:
 pytest tests/test_model_adversarial.py
 
 Never `python3 -m unittest discover tests`: it does not load `conftest.py`, so the autouse
@@ -31,13 +31,13 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 
 import call_scope
 import model_adversarial as ma
 import pi_events_view as pev
 import pi_live
-from pc_core_stdio import PoolServer, alive
+from pc_models_stdio import PoolServer, alive
 from pi_fakes import PiPopen, pi_events
 
 MISTRAL = {
@@ -936,7 +936,7 @@ def test_log_pool_event_writes_the_session_scoped_file(tmp_path, monkeypatch):
 
     ma.log_pool_event("mistral-medium-3.5", "timeout")
 
-    log_path = tmp_path / ".claude" / "debug" / "abc123_mcp__pc-core__model-pool.txt"
+    log_path = tmp_path / ".claude" / "debug" / "abc123_mcp__pc-models__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 mistral-medium-3.5 timeout\n"
     )
@@ -951,7 +951,7 @@ def test_log_pool_event_with_no_session_id_falls_back_to_standalone(
     ma.log_pool_event("mistral-medium-3.5", "timeout")
 
     log_path = (
-        tmp_path / ".claude" / "debug" / "standalone_mcp__pc-core__model-pool.txt"
+        tmp_path / ".claude" / "debug" / "standalone_mcp__pc-models__model-pool.txt"
     )
     assert log_path.exists()
 
@@ -961,7 +961,7 @@ def test_log_pool_event_swallows_an_io_error(tmp_path, monkeypatch):
     # jamais laissée remonter.
     debug_dir = tmp_path / ".claude" / "debug"
     debug_dir.mkdir(parents=True)
-    (debug_dir / "standalone_mcp__pc-core__model-pool.txt").mkdir()
+    (debug_dir / "standalone_mcp__pc-models__model-pool.txt").mkdir()
     ma.log_pool_event("mistral-medium-3.5", "timeout")
 
 
@@ -973,7 +973,7 @@ def test_transient_failure_with_a_broken_log_path_still_returns_success(
     # cassé par une écriture de log qui échoue.
     debug_dir = tmp_path / ".claude" / "debug"
     debug_dir.mkdir(parents=True)
-    (debug_dir / "standalone_mcp__pc-core__model-pool.txt").mkdir()
+    (debug_dir / "standalone_mcp__pc-models__model-pool.txt").mkdir()
     empty = subprocess.CompletedProcess([], 0, "   ", "")
     ok = subprocess.CompletedProcess([], 0, "answer", "")
     with unittest.mock.patch(
@@ -994,7 +994,7 @@ def test_pool_exhaustion_logs_every_failure_and_the_final_event(tmp_path, monkey
         "model_adversarial.Popen", new_callable=PiPopen, side_effect=[empty, empty]
     ):
         ma.run_pool([MISTRAL], "p")
-    log_path = tmp_path / ".claude" / "debug" / "sess1_mcp__pc-core__model-pool.txt"
+    log_path = tmp_path / ".claude" / "debug" / "sess1_mcp__pc-models__model-pool.txt"
     call = (
         "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=none attempt={n} "
         "tools=none elapsed=0.0s answer_chars=0"
@@ -1017,7 +1017,7 @@ def test_a_successful_call_is_logged_with_its_size_and_duration(tmp_path, monkey
         "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
     ):
         ma.run_pool([MISTRAL], "prompt", tools=["read", "grep"])
-    log_path = tmp_path / ".claude" / "debug" / "sess2_mcp__pc-core__model-pool.txt"
+    log_path = tmp_path / ".claude" / "debug" / "sess2_mcp__pc-models__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=6\n"
         "2026-01-01T00:00:00+00:00 mistral-medium-3.5 answered "
@@ -1036,7 +1036,7 @@ def test_an_os_error_is_logged_with_its_message(tmp_path, monkeypatch):
         "model_adversarial.Popen", new_callable=PiPopen, side_effect=[too_big]
     ):
         ma.run_pool([MISTRAL], "p")
-    log_path = tmp_path / ".claude" / "debug" / "sess4_mcp__pc-core__model-pool.txt"
+    log_path = tmp_path / ".claude" / "debug" / "sess4_mcp__pc-models__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=1\n"
         "2026-01-01T00:00:00+00:00 mistral-medium-3.5 os error "
@@ -1058,7 +1058,7 @@ def test_a_provider_error_is_logged_with_the_provider_own_line(tmp_path, monkeyp
         "model_adversarial.Popen", new_callable=PiPopen, side_effect=[rate_limited]
     ):
         ma.run_pool([MISTRAL], "p")
-    log_path = tmp_path / ".claude" / "debug" / "sess3_mcp__pc-core__model-pool.txt"
+    log_path = tmp_path / ".claude" / "debug" / "sess3_mcp__pc-models__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=1\n"
         "2026-01-01T00:00:00+00:00 mistral-medium-3.5 "
@@ -1438,9 +1438,9 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
     """The pool model has no `Skill` tool, so the stack checklist must be in the prompt."""
     pytest.importorskip("mcp")
     sys.path.insert(
-        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp")
     )
-    import pc_core_server
+    import pc_models_server
 
     src = tmp_path / "api.py"
     src.write_text(
@@ -1453,9 +1453,9 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
         captured["prompt"] = prompt
         return ma.PoolResult(entries[0], "ok")
 
-    monkeypatch.setattr(pc_core_server.model_adversarial, "run_pool", fake_run_pool)
+    monkeypatch.setattr(pc_models_server.model_adversarial, "run_pool", fake_run_pool)
 
-    out = pc_core_server.adversarial(task="review this", files=[str(src)])
+    out = pc_models_server.adversarial(task="review this", files=[str(src)])
     # a phrase unique to the FastAPI review reference, not the generic methodology
     assert "N+1 query pattern" in captured["prompt"]
     assert out.startswith("[answered by ")
@@ -1465,9 +1465,9 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
     """An unrecognised tier must not route — fall back to the default adversarial selection."""
     pytest.importorskip("mcp")
     sys.path.insert(
-        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp")
     )
-    import pc_core_server
+    import pc_models_server
 
     seen: dict[str, list] = {}
 
@@ -1480,24 +1480,24 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
         return [MISTRAL]
 
     monkeypatch.setattr(
-        pc_core_server.model_adversarial,
+        pc_models_server.model_adversarial,
         "select_for_adversarial",
         fake_select_for_adversarial,
     )
     monkeypatch.setattr(
-        pc_core_server.model_adversarial,
+        pc_models_server.model_adversarial,
         "select_for_delegation",
         fake_select_for_delegation,
     )
     monkeypatch.setattr(
-        pc_core_server.model_adversarial,
+        pc_models_server.model_adversarial,
         "run_pool",
         lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
             ma.PoolResult(entries[0], "ok")
         ),
     )
 
-    pc_core_server.adversarial(task="review", tier="turbo-9000")
+    pc_models_server.adversarial(task="review", tier="turbo-9000")
     assert "adversarial" in seen and "delegation" not in seen
 
 
@@ -1506,12 +1506,12 @@ def test_adversarial_tool_reports_pool_exhaustion_without_raising(monkeypatch):
     never a `TypeError` on `entry['name']`."""
     pytest.importorskip("mcp")
     sys.path.insert(
-        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp")
     )
-    import pc_core_server
+    import pc_models_server
 
     monkeypatch.setattr(
-        pc_core_server.model_adversarial,
+        pc_models_server.model_adversarial,
         "run_pool",
         lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
             ma.PoolResult(None, "everything failed")
@@ -1519,7 +1519,7 @@ def test_adversarial_tool_reports_pool_exhaustion_without_raising(monkeypatch):
     )
 
     # `model="x"` bypasses `load_pool` via the override path, straight to `run_pool`.
-    out = pc_core_server.adversarial(task="review", model="x")
+    out = pc_models_server.adversarial(task="review", model="x")
     assert (
         out == "[adversarial] BLOCKED — every candidate failed. Last: everything failed"
     )
@@ -1528,11 +1528,11 @@ def test_adversarial_tool_reports_pool_exhaustion_without_raising(monkeypatch):
 def _server():
     pytest.importorskip("mcp")
     sys.path.insert(
-        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp")
     )
-    import pc_core_server
+    import pc_models_server
 
-    return pc_core_server
+    return pc_models_server
 
 
 def test_adversarial_tool_with_base_reviews_the_computed_diff_with_the_default_selection(
@@ -1738,9 +1738,9 @@ def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
     """The MCP `adversarial` tool hands `select_for_adversarial` a `random.Random`."""
     pytest.importorskip("mcp")
     sys.path.insert(
-        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp")
     )
-    import pc_core_server
+    import pc_models_server
 
     seen: dict[str, object] = {}
 
@@ -1748,15 +1748,17 @@ def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
         seen["rng"] = rng
         return [MISTRAL]
 
-    monkeypatch.setattr(pc_core_server.model_adversarial, "select_for_adversarial", spy)
     monkeypatch.setattr(
-        pc_core_server.model_adversarial,
+        pc_models_server.model_adversarial, "select_for_adversarial", spy
+    )
+    monkeypatch.setattr(
+        pc_models_server.model_adversarial,
         "run_pool",
         lambda entries, prompt, timeout=180, tools=None, watch=False, live=None: (
             ma.PoolResult(entries[0], "ok")
         ),
     )
-    out = pc_core_server.adversarial(task="review this")
+    out = pc_models_server.adversarial(task="review this")
     assert out.startswith("[answered by ")
     assert isinstance(seen["rng"], random.Random)
 
@@ -3074,7 +3076,7 @@ class TestCallScope(unittest.TestCase):
         self.assertEqual(
             sorted(err.getvalue().splitlines()),
             sorted(
-                f"pc-core: call id=42 pi killed pid={proc.pid} reason=wall-cap"
+                f"pc-models: call id=42 pi killed pid={proc.pid} reason=wall-cap"
                 for proc in procs
             ),
         )
@@ -3091,7 +3093,7 @@ class TestCallScope(unittest.TestCase):
         proc.wait(timeout=5)
         self.assertEqual(
             err.getvalue().splitlines(),
-            [f"pc-core: call id=7 pi killed pid={proc.pid} reason=wall-cap"],
+            [f"pc-models: call id=7 pi killed pid={proc.pid} reason=wall-cap"],
         )
 
     def test_a_scope_that_ends_normally_logs_no_kill(self):
@@ -3117,7 +3119,7 @@ class TestCallScope(unittest.TestCase):
         proc.wait(timeout=5)
         self.assertEqual(
             err.getvalue().splitlines(),
-            [f"pc-core: call id=1 pi killed pid={proc.pid} reason=cancelled"],
+            [f"pc-models: call id=1 pi killed pid={proc.pid} reason=cancelled"],
         )
 
 
@@ -3151,7 +3153,7 @@ _PI_TOOLS = {
 
 @pytest.fixture
 def make_server(tmp_path):
-    """A factory of real `pc_core_server.py` subprocesses with a fake `pi`, all stopped at the end."""
+    """A factory of real `pc_models_server.py` subprocesses with a fake `pi`, all stopped at the end."""
     pytest.importorskip("mcp")
     servers: list[PoolServer] = []
 
@@ -3171,14 +3173,14 @@ class TestToolSchema:
     """The wrapper that serves each tool must not change what a client sees of it."""
 
     def test_each_tool_advertises_the_parameters_of_its_function(self, make_server):
-        pc_core_server = pytest.importorskip("pc_core_server")
+        pc_models_server = pytest.importorskip("pc_models_server")
         advertised = {
             tool["name"]: tool["inputSchema"] for tool in make_server().list_tools()
         }
 
         assert set(advertised) == set(_PI_TOOLS)
         for name, schema in advertised.items():
-            parameters = inspect.signature(getattr(pc_core_server, name)).parameters
+            parameters = inspect.signature(getattr(pc_models_server, name)).parameters
             required = {n for n, p in parameters.items() if p.default is p.empty}
             assert set(schema["properties"]) == set(parameters)
             assert set(schema.get("required", [])) == required
@@ -3527,12 +3529,12 @@ def test_probe_fixture_is_12_chained_files_with_the_mark_only_in_the_last(tmp_pa
 
 
 def test_probe_docs_say_12_steps():
-    import pc_core_server
+    import pc_models_server
 
     assert "12-step" in (ma.__doc__ or "") + (ma._probe_prompt.__doc__ or "")
-    assert "12-step" in (pc_core_server.pool_check.__doc__ or "")
+    assert "12-step" in (pc_models_server.pool_check.__doc__ or "")
     assert "3-step" not in (ma.__doc__ or "") + (
-        pc_core_server.pool_check.__doc__ or ""
+        pc_models_server.pool_check.__doc__ or ""
     )
 
 

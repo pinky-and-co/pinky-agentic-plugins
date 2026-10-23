@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pi_fakes import MlxPopen
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 import model_offline as mo  # noqa: E402
 
 

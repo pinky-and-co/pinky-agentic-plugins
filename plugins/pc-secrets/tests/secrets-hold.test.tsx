@@ -106,7 +106,7 @@ describe('pc-secrets read band', () => {
     await ui.press({ key: 'offline' })
     const r: any = await call
     expect(r.deny).toBe(
-      `The user chose not to send ${PATH} to the cloud model, which holds secret-shaped data. Do not read it. Run the task locally with the \`offline\` tool of pc-core (files: ["${PATH}"]).`,
+      `The user chose not to send ${PATH} to the cloud model, which holds secret-shaped data. Do not read it. Run the task locally with the \`offline\` tool of pc-models (files: ["${PATH}"]).`,
     )
     expect(ran).toEqual([])
     await ui.unmount()

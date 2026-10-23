@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for `pc_core_server.py::offline()` — the production zero-egress entry point that
+"""Tests for `pc_models_server.py::offline()` — the production zero-egress entry point that
 `tests/test_model_offline.py` exercises indirectly via `model_offline.main()`, never directly."""
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ from pi_fakes import MlxPopen
 def _import_server():
     pytest.importorskip("mcp")
     sys.path.insert(
-        0, str(Path(__file__).parent.parent / "plugins" / "pc-core" / "mcp")
+        0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp")
     )
-    import pc_core_server
+    import pc_models_server
 
-    return pc_core_server
+    return pc_models_server
 
 
 class TestOfflineToolZeroEgress(unittest.TestCase):

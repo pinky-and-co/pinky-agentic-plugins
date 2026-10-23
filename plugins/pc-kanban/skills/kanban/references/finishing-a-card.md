@@ -58,7 +58,7 @@ The reviewer must not be the generator, and several voices of the same model are
 blind spot. Whenever a card's work needs real judgment reviewed, in this order:
 
 1. **A change with a diff: call the `adversarial` MCP tool directly**
-   (`mcp__plugin_pc-core_pc-core-models__adversarial`) — a non-Claude pool model of `sonnet` tier
+   (`mcp__plugin_pc-models_pc-models__adversarial`, served by the opt-in `pc-models` plugin) — a non-Claude pool model of `sonnet` tier
    or above, the real change of perspective; no subagent is spawned to relay it. Pass:
    - `base` — the branch the work forked from (`main`; `HEAD` for work not yet committed), so the
      tool computes the diff itself;
@@ -71,9 +71,10 @@ blind spot. Whenever a card's work needs real judgment reviewed, in this order:
    `[answered by <label>]`: stamp `Method: adversarial (<label>)` on the card, the label copied
    whole, and relay the verdict as is.
 2. **`Agent(subagent_type: "reviewer")`** — `pc-core`'s own agent (`plugins/pc-core/agents/
-   reviewer.md`), launched only for a claim with no diff, or when `adversarial` answered `BLOCKED`
-   or `ERROR` (`pc-core`'s `reviewer_gate.py` hook enforces it, denying the `reviewer` call on a
-   diff until such an answer is in the session). It reviews in a fresh context under the
+   reviewer.md`), launched only for a claim with no diff, when `adversarial` is absent from the session (`pc-models`
+   not installed), or when `adversarial` answered `BLOCKED` or `ERROR` (with `pc-models` installed,
+   its `reviewer_gate.py` hook enforces it, denying the `reviewer` call on a diff until such an
+   answer is in the session). It reviews in a fresh context under the
    `review-guidelines` skill, and opens its report with `Method: reviewer (<model>)`, the model that answered. Pass it its own frontmatter
    defaults (`model: sonnet`, `effort: high`).
 
@@ -90,8 +91,8 @@ blind spot. Whenever a card's work needs real judgment reviewed, in this order:
 Whatever this session then tells the user about the review opens with the `Method:` line,
 relayed verbatim before any findings — naming who answered in the full
 `provider/model · 🟦🟪🟧 tier` form, and stating why `adversarial` did not answer when the
-`Method:` is `reviewer` on a change that has a diff. It is the only trace of *how* the verdict
-was reached.
+`Method:` is `reviewer` on a change that has a diff (`adversarial` absent from the session, or its BLOCKED or ERROR answer).
+It is the only trace of *how* the verdict was reached.
 
 **Three review rounds per card at most.** A round is one reviewer pass plus the fixes it triggers.
 A reviewer reads without executing: each finding is a candidate until replayed. After the third round, a new finding is fixed in this card only when it is a regression shown by

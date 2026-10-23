@@ -2,7 +2,7 @@
 name: dev-prerelease
 description: Cut a `.devN` pre-release of the PyPI library in the current repo — fail-fast preconditions, version bump, delivery to the release branch (direct push or pull request, per the repo rule), then stop before the publishing tag for an explicit human go. Never publishes on its own. Use when the user asks for a dev pre-release of the library.
 argument-hint: "[<library-checkout-path>] — defaults to the current directory's git repo"
-allowed-tools: Bash(git branch:*), Bash(git -C * branch*), Bash(rtk git -C * branch*), Bash(rtk git branch:*), Bash(git status:*), Bash(git -C * status*), Bash(rtk git -C * status*), Bash(rtk git status:*), Bash(git fetch:*), Bash(git -C * fetch*), Bash(rtk git -C * fetch*), Bash(rtk git fetch:*), Bash(git rev-parse:*), Bash(git -C * rev-parse*), Bash(git symbolic-ref:*), Bash(git -C * symbolic-ref*), Bash(git log:*), Bash(git -C * log*), Bash(rtk git -C * log*), Bash(rtk git log:*), Bash(git add:*), Bash(git -C * add*), Bash(rtk git -C * add*), Bash(rtk git add:*), Bash(git commit:*), Bash(git -C * commit*), Bash(rtk git -C * commit*), Bash(rtk git commit:*), Bash(git push:*), Bash(git -C * push*), Bash(rtk git -C * push*), Bash(rtk git push:*), Bash(git tag:*), Bash(git -C * tag*), Bash(git checkout:*), Bash(rtk git checkout:*), Bash(git pull:*), Bash(rtk git pull:*), Bash(gh pr create:*), Bash(rtk gh pr create:*), Bash(gh pr checks:*), Bash(rtk gh pr checks:*), Bash(gh pr merge:*), Bash(rtk gh pr merge:*), Bash(gh run list:*), Bash(rtk gh run list:*), Bash(gh run watch:*), Bash(rtk gh run watch:*), Bash(rg:*), Bash(rtk rg:*), Bash(cat:*), Bash(rtk read:*), Bash(curl:*), Bash(rtk curl:*), Bash(python3:*), Read, Edit, AskUserQuestion, mcp__plugin_pc-core_pc-core-models__offline, mcp__plugin_pc-core_pc-core-models__panel
+allowed-tools: Bash(git branch:*), Bash(git -C * branch*), Bash(rtk git -C * branch*), Bash(rtk git branch:*), Bash(git status:*), Bash(git -C * status*), Bash(rtk git -C * status*), Bash(rtk git status:*), Bash(git fetch:*), Bash(git -C * fetch*), Bash(rtk git -C * fetch*), Bash(rtk git fetch:*), Bash(git rev-parse:*), Bash(git -C * rev-parse*), Bash(git symbolic-ref:*), Bash(git -C * symbolic-ref*), Bash(git log:*), Bash(git -C * log*), Bash(rtk git -C * log*), Bash(rtk git log:*), Bash(git add:*), Bash(git -C * add*), Bash(rtk git -C * add*), Bash(rtk git add:*), Bash(git commit:*), Bash(git -C * commit*), Bash(rtk git -C * commit*), Bash(rtk git commit:*), Bash(git push:*), Bash(git -C * push*), Bash(rtk git -C * push*), Bash(rtk git push:*), Bash(git tag:*), Bash(git -C * tag*), Bash(git checkout:*), Bash(rtk git checkout:*), Bash(git pull:*), Bash(rtk git pull:*), Bash(gh pr create:*), Bash(rtk gh pr create:*), Bash(gh pr checks:*), Bash(rtk gh pr checks:*), Bash(gh pr merge:*), Bash(rtk gh pr merge:*), Bash(gh run list:*), Bash(rtk gh run list:*), Bash(gh run watch:*), Bash(rtk gh run watch:*), Bash(rg:*), Bash(rtk rg:*), Bash(cat:*), Bash(rtk read:*), Bash(curl:*), Bash(rtk curl:*), Bash(python3:*), Read, Edit, AskUserQuestion, mcp__plugin_pc-models_pc-models__offline, mcp__plugin_pc-models_pc-models__panel
 ---
 
 # Dev pre-release (PyPI via tag)
@@ -117,12 +117,12 @@ python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,
    python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,c> --emit-prompt
    ```
 2. Run it, in this order, stopping at the first that answers:
-   - `offline` (MCP tool `mcp__plugin_pc-core_pc-core-models__offline`) with `task` = the emitted
+   - `offline` (MCP tool `mcp__plugin_pc-models_pc-models__offline`) with `task` = the emitted
      prompt. It returns a status line and a local file path (never the answer). `Read` that file —
      you are allowed to: the prompt carries only the feature doc and public signatures, no private
      bodies. A `[offline] BLOCKED` line means MLX-SERVE unreachable, out of memory, or `pi` missing
      — fall through.
-   - `panel` (MCP tool `mcp__plugin_pc-core_pc-core-models__panel`) with `tasks` = `[the prompt]`
+   - `panel` (MCP tool `mcp__plugin_pc-models_pc-models__panel`) with `tasks` = `[the prompt]`
      and `models` = `["mistral-medium-3.5"]`. Pin that model — the unpinned default fails the
      reconcile oracle. A `[panel] BLOCKED` line means no key —
      fall through.
