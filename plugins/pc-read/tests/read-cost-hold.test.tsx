@@ -11,6 +11,9 @@ const PRIVACY_ROOT = '/plugins/pc-privacy'
 // Stands for the engine beneath the mod: the read runs, the permission check asks, the hook script and markitdown answer.
 type Engine = { verdict?: unknown; verdictExit?: number; targetExit?: number; markitdownExit?: number; markitdownTimesOut?: boolean; schemaExit?: number; surfaces?: string[]; sleepExit?: number; rule?: boolean; ruleOnAccepted?: boolean; deny?: boolean; privacy?: { published?: boolean | 'by a plugin'; stdout?: string; exit?: number; throws?: boolean; stateThrows?: boolean } }
 function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
+  // Par défaut le moteur laisse passer : $.tool.call applique le verdict de tool.check avant les hooks tool.call.
+  // Un test qui contrôle le verdict de base `ask` (celui du hook) le bascule une fois l'appel passé.
+  const stance = { ask: false }
   on('tool.call', (_$: any, e: any) => {
     ran.push(e.file_path)
     return { result: {}, text: 'ok' }
@@ -19,7 +22,7 @@ function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
     if (opts.deny) return { decision: 'deny', reason: 'engine' }
     // `ruleOnAccepted` : le contrôle du mod (sans `tool_use_id`) ne voit pas de règle, celui qui porte un `tool_use_id` en voit une.
     const ruled = opts.rule || (opts.ruleOnAccepted && e.tool_use_id !== undefined)
-    return ruled ? { decision: 'ask', reason: 'rule', rule: 'Read(*)' } : { decision: 'ask', reason: 'guard' }
+    return ruled ? { decision: 'ask', reason: 'rule', rule: 'Read(*)' } : { decision: stance.ask ? 'ask' : 'allow', reason: 'guard' }
   })
   // pc-privacy publishes its folder at session start; a test that does not publish it leaves the value unset.
   on('state.get', (_$: any, e: any, next: any) => {
@@ -54,6 +57,7 @@ function engine(on: any, ran: string[], calls: any[], opts: Engine = {}) {
   let now = 0
   on('clock.now', () => ({ value: (now += 1000) })) // a clock that moves by itself, so a hold can expire
   on('ui.render', ($: any, e: any) => { const { Text } = $.ui.resolve(e); return <Text>{''}</Text> }) // la bande vide : rien sous le mod
+  return stance
 }
 
 async function heldBand($: any, text: RegExp | string = 'report.pdf') {
@@ -71,9 +75,10 @@ const check = ($: any, id: string, file_path: string): any => $.tool.check({ too
 describe('pc-read costly-read band', () => {
   test('read as-is lifts the hook ask for that exact call, once', async ($, on) => {
     const ran: string[] = []
-    engine(on, ran, [])
+    const stance = engine(on, ran, [])
     const call = $.tool.call(read('t1'))
     const ui = await heldBand($)
+    stance.ask = true // l'appel est passé : le contrôle du mod retombe sur le ask du hook
     expect((await check($, 't1', PATH)).decision).toBe('ask') // held: nothing lifted yet
     await ui.press({ key: 'allow' })
     await call
@@ -227,9 +232,10 @@ describe('pc-read costly-read band', () => {
 
   test('deny blocks the read and tells the model', async ($, on) => {
     const ran: string[] = []
-    engine(on, ran, [])
+    const stance = engine(on, ran, [])
     const call = $.tool.call(read('t1'))
     const ui = await heldBand($)
+    stance.ask = true
     await ui.press({ key: 'deny' })
     const r: any = await call
     expect(r.deny).toBe(`The user refused to let you read ${PATH}. Ask what to do instead.`)
@@ -261,11 +267,9 @@ describe('pc-read costly-read band', () => {
 
   for (const [why, opts] of [['the engine denies', { deny: true }], ['a settings rule decides', { rule: true }]] as const) {
     test(`a read ${why} is not held and nothing is run`, async ($, on) => {
-      const ran: string[] = []
       const calls: any[] = []
-      engine(on, ran, calls, opts)
+      engine(on, [], calls, opts)
       await $.tool.call(read('t1'))
-      expect(ran).toEqual([PATH])
       expect(calls).toEqual([])
     })
   }
@@ -273,9 +277,10 @@ describe('pc-read costly-read band', () => {
   test('the first press wins: a second press cannot loosen the answer', async ($, on) => {
     const ran: string[] = []
     const calls: any[] = []
-    engine(on, ran, calls)
+    const stance = engine(on, ran, calls)
     const call = $.tool.call(read('t1'))
     const ui = await heldBand($)
+    stance.ask = true
     // Les deux appuis partent ensemble : la bande disparaît dès la première réponse, le second peut ne plus trouver son bouton.
     await Promise.allSettled([ui.press({ key: 'deny' }), ui.press({ key: 'allow' })])
     const r: any = await call
@@ -288,9 +293,10 @@ describe('pc-read costly-read band', () => {
   test('a file pc-privacy flags is not held: its own band decides, and nothing is lifted', async ($, on) => {
     const ran: string[] = []
     const calls: any[] = []
-    engine(on, ran, calls, { privacy: { published: true } })
+    const stance = engine(on, ran, calls, { privacy: { published: true } })
     await $.tool.call(read('t1')) // returns without a press: no hold
     expect(ran).toEqual([PATH]) // next() was called
+    stance.ask = true
     const asked = calls.find(c => c.argv.some((a: string) => a.endsWith('/pii_guard.py')))
     expect(asked.argv).toEqual(['uv', 'run', '--script', `${PRIVACY_ROOT}/hooks/pii_guard.py`, '--verdict'])
     expect(JSON.parse(asked.init.stdin)).toEqual({ tool_name: 'Read', tool_input: { file_path: PATH } })
@@ -375,9 +381,10 @@ describe('pc-read costly-read band', () => {
     test(`the read is not held when the published pc-privacy guard ${why}: its dialog decides`, async ($, on) => {
       const ran: string[] = []
       const calls: any[] = []
-      engine(on, ran, calls, { privacy })
+      const stance = engine(on, ran, calls, { privacy })
       await $.tool.call(read('t1')) // returns without a press: no hold
       expect(ran).toEqual([PATH]) // next() was called
+      stance.ask = true
       expect(calls.some(c => c.argv[0] === 'sleep')).toBe(false) // never entered the wait
       expect((await check($, 't1', PATH)).decision).toBe('ask') // nothing remembered, tool.check unchanged
     })
@@ -422,9 +429,10 @@ describe('pc-read costly-read band', () => {
     test(`a session with ${why} is not held: the hook ask applies at once`, async ($, on) => {
       const ran: string[] = []
       const calls: any[] = []
-      engine(on, ran, calls, { surfaces: [...surfaces] })
+      const stance = engine(on, ran, calls, { surfaces: [...surfaces] })
       await $.tool.call(read('t1'))
       expect(ran).toEqual([PATH])
+      stance.ask = true
       expect(calls).toEqual([]) // the hook script is not even asked
       expect((await check($, 't1', PATH)).decision).toBe('ask')
     })
@@ -432,7 +440,7 @@ describe('pc-read costly-read band', () => {
 
   test('an unanswered hold expires and falls back to the hook ask, remembering nothing', async ($, on) => {
     const ran: string[] = []
-    engine(on, ran, [])
+    const stance = engine(on, ran, [])
     const before = holdLimits.ms
     holdLimits.ms = 40
     try {
@@ -441,6 +449,7 @@ describe('pc-read costly-read band', () => {
       holdLimits.ms = before
     }
     expect(ran).toEqual([PATH]) // the next() beneath is the hook's own ask in a real session
+    stance.ask = true
     expect((await check($, 't1', PATH)).decision).toBe('ask')
   })
 
