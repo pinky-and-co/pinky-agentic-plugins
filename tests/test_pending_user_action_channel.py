@@ -176,8 +176,10 @@ class ChantierSkillWiringCase(unittest.TestCase):
         section = self._section("**Review clause.**", "**Waiver clause.**")
         flat = " ".join(section.split())
         self.assertIn(
-            "reviewed in a fresh context, never by this session itself, each finding fixed, refuted in the"
-            " transcript, or noted in the card's `## Decisions`",
+            "the production-code diff has been reviewed in a fresh context, never by this session itself;"
+            " documentation, docstrings, comments, tests and edits applying a reviewer finding as written"
+            " never reopen a review; each finding fixed, refuted in the transcript, or noted in the card's"
+            " `## Decisions`",
             flat,
         )
         self.assertNotIn("reviewed through the `adversarial` tool", flat)

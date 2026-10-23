@@ -111,8 +111,9 @@ the review then reads the differential's output along with the diff.
 When a card's work needs judgment review, the review goes **into the `/goal` condition itself**, set
 when the card is taken (`chantier` SKILL.md step 7): the Stop hook then holds the card open until the
 transcript shows the review ran. Phrase it as a transcript-verifiable state — append to the
-`## Done when`-derived condition the review clause of `chantier` SKILL.md step 7 (re-review until a
-round triggers no fix, three rounds at most; each last-round finding fixed, refuted by a quoted
+`## Done when`-derived condition the review clause of `chantier` SKILL.md step 7 (the
+production-code diff reviewed; documentation, docstrings, comments, tests and edits applying a
+reviewer finding as written never reopen a review; each finding fixed, refuted by a quoted
 measurement or written as an accepted limit in the card). The clause carries the substance only — that the review ran and who
 answered. The checkbox and its shape stay out of it: a form clause over a card reviewed in several
 passes has no wording that answers every reading, so the Stop hook rejects work that is done.
