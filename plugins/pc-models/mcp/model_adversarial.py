@@ -144,10 +144,12 @@ _OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
 _ORGANIZATION_LIMIT_RE = re.compile(r"\borgani[sz]ation reached\b", re.IGNORECASE)
 _TIMEOUT_RE = re.compile(r"\btimed out\b")
-# Une réponse qui finit sur une balise fermante d'appel d'outil, singulier comme pluriel
-# (`</tool_call>` / `</tool_calls>`), est un appel écrit en texte par un modèle sans outils,
-# jamais un avis — l'ancre est la fin du texte, une balise citée au milieu ne compte pas.
-_TOOL_CALL_TAIL_RE = re.compile(r"</(?:function|tool_call)s?>\s*\Z")
+# Une réponse qui finit sur une balise fermante d'appel d'outil (`</tool_call>`, `</function>`,
+# singulier ou pluriel, ou `</｜DSML｜ calls>`) est un appel écrit en texte, jamais un avis ;
+# l'ancre est la fin du texte, une balise citée au milieu ne compte pas.
+_TOOL_CALL_TAIL_RE = re.compile(
+    r"</(?:(?:function|tool_call)s?|\uff5cDSML\uff5c[^<>]*)>\s*\Z"
+)
 
 
 class PoolResult(NamedTuple):

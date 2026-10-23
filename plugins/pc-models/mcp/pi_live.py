@@ -246,12 +246,17 @@ class ProgressView(_ViewFile):
             clock: seconds, read for the write interval.
         """
         super().__init__(run / "view-1.txt", header, clock)
+        self._start = clock()
+        self._ended = False
         self._chars = 0
         self.save(force=True)
 
     def lines(self) -> list[str]:
-        """The one count line, once something was received."""
-        return [f"{self._chars} chars received"] if self._chars else []
+        """The one count line once something was received, then the closing line."""
+        shown = [f"{self._chars} chars received"] if self._chars else []
+        if self._ended:
+            shown.append(f"[{self._clock() - self._start:5.1f}s] pool end")
+        return shown
 
     def __call__(self, chunk: str) -> None:
         """Count a chunk of the answer.
@@ -264,6 +269,7 @@ class ProgressView(_ViewFile):
             self.save()
 
     def close(self) -> None:
-        """Write the file whatever the interval."""
+        """Write the closing line, whatever the interval."""
         with self._lock:
+            self._ended = True
             self.save(force=True)

@@ -238,6 +238,7 @@ def run_panel(
             ma._emit_result(view, entry, 1, outcome)
             return res
         finally:
+            ma._emit_event(view, {"type": "pool_end"})
             view.close()
 
     slots = range(1, len(entries) + 1)

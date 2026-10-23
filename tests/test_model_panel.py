@@ -413,11 +413,11 @@ class TestRunPanelLiveView(unittest.TestCase):
             {
                 "view-1.txt": (
                     f"slot 1 · {GLM['name']}\nsettled\n"
-                    f"-> {GLM['name']} attempt 1: answered\n"
+                    f"-> {GLM['name']} attempt 1: answered\npool end\n"
                 ),
                 "view-2.txt": (
                     f"slot 2 · {MISTRAL['name']}\nsettled\n"
-                    f"-> {MISTRAL['name']} attempt 1: empty answer\n"
+                    f"-> {MISTRAL['name']} attempt 1: empty answer\npool end\n"
                 ),
             },
         )
