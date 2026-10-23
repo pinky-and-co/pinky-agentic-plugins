@@ -57,7 +57,10 @@ def detect_artefact_types(tool_name: str, tool_input: dict) -> list[str]:
             return ["public_docs"]
         if "docs/explanation" in parts_lower or "adr" in parts_lower:
             return ["explanation"]
-        if any(seg in parts_lower for seg in ("docs/private", "brainstorm", "pitch")):
+        if any(
+            seg in parts_lower
+            for seg in ("docs/private", "docs/brainstorm", "docs/pitch")
+        ):
             return ["private_docs"]
         return []
 
