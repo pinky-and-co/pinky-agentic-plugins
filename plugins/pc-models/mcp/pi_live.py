@@ -4,9 +4,11 @@ The mod names one directory per call, `<config dir>/pinky/plugin-state/pc-models
 and passes it
 as the tool's `events` argument. `open_run` accepts only that shape and creates the directory
 private (0700), so a value the model wrote itself never makes the server write elsewhere. Each
-`pi` stream then gets one `view-<slot>.txt`: a header and the last `KEEP_LINES` lines that
-`pi_events_view.EventRenderer` makes of its events, rewritten whole (temp file, then rename) at most
-every `WRITE_EVERY_S`, so the file stays small and a reader never sees half of it.
+`pi` stream then gets one `view-<slot>.txt`: a header, the running attempt's line, and the last
+lines that `pi_events_view.EventRenderer` makes of its events, rewritten whole (temp file, then
+rename) at most every `WRITE_EVERY_S`, so the file stays small and a reader never sees half of it.
+The attempt line (`== <entry> (attempt N) ==`) is pinned under the header once the stream scrolls
+past it, so the file always names the model currently answering.
 
 An `offline` run gets a `ProgressView`: the count of characters received, never the text — the
 row is drawn on every attached surface, remote ones included, and `offline` never lets its answer
@@ -89,17 +91,22 @@ def _clip(line: str) -> str:
 
 
 class _ViewFile:
-    """A header and lines, rewritten whole into one file, at most every `WRITE_EVERY_S`."""
+    """A header, pinned lines and lines, rewritten whole into one file.
+
+    The header and the pinned lines (under it) always stay in the file; only the scrolling
+    lines are cropped to what room `KEEP_LINES` leaves.
+    """
 
     def __init__(self, path: Path, header: str, clock: Callable[[], float]) -> None:
         self._path = path
         self._header = pi_events_view._plain(header)
+        self._pinned: list[str] = []
         self._clock = clock
         self._written_at: float | None = None
         self._lock = threading.Lock()
 
     def lines(self) -> list[str]:
-        """The lines to show under the header, oldest first."""
+        """The lines to show under the header and the pinned lines, oldest first."""
         raise NotImplementedError
 
     def save(self, force: bool = False) -> None:
@@ -116,9 +123,9 @@ class _ViewFile:
         ):
             return
         self._written_at = now
-        shown = [self._header, *self.lines()][-KEEP_LINES:]
-        if len(shown) == KEEP_LINES:
-            shown[0] = self._header
+        room = KEEP_LINES - 1 - len(self._pinned)
+        tail = self.lines()[-room:] if room > 0 else []
+        shown = [self._header, *self._pinned, *tail]
         text = "".join(_clip(line) + "\n" for line in shown)
         tmp = self._path.with_suffix(".tmp")
         try:
@@ -150,6 +157,7 @@ class LiveView(_ViewFile):
         start = clock()
         self._renderer = pi_events_view.EventRenderer(lambda: clock() - start)
         self._done: list[str] = []
+        self._attempt_at: int | None = None
         self._current = ""
         self._pending = ""
         self._thinking_at: int | None = None
@@ -212,17 +220,33 @@ class LiveView(_ViewFile):
             self._done.append(self._thinking_line())
             return
         self._push(out)
+        if record.get("type") == "pool_attempt":
+            self._pinned = []
+            self._attempt_at = len(self._done) - 1 if self._done else None
 
     def _thinking_line(self) -> str:
         """The thinking line, with the characters counted so far."""
         return f"{self._thinking_stamp}thinking · {self._thinking_chars} chars"
 
     def _push(self, out: str) -> None:
-        """Append rendered text, closing a line at each newline."""
+        """Append rendered text, closing a line at each newline.
+
+        The trimming that keeps `_done` at `KEEP_LINES` lines pins the running attempt's line
+        under the header instead of evicting it.
+        """
         *closed, self._current = (self._current + out).split("\n")
         self._done.extend(closed)
         overflow = len(self._done) - KEEP_LINES
         if overflow > 0:
+            if self._attempt_at is not None and self._attempt_at < overflow:
+                at = self._attempt_at
+                self._pinned = [self._done.pop(at)]
+                self._attempt_at = None
+                overflow -= 1
+                if self._thinking_at is not None and self._thinking_at > at:
+                    self._thinking_at -= 1
+            if self._attempt_at is not None:
+                self._attempt_at -= overflow
             del self._done[:overflow]
             if self._thinking_at is not None:
                 self._thinking_at = (
