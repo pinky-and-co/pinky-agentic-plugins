@@ -125,15 +125,63 @@ def test_view_renders_attempts_thinking_text_and_end(runs):
 def test_view_keeps_the_last_lines_and_the_tail_of_a_long_one(runs):
     run = pi_live.open_run(str(runs / "t2"))
     view = pi_live.LiveView(run, 2, "slot", clock=Clock())
-    for i in range(20):
-        view.write(ev("pool_attempt", entry=f"m{i}", attempt=1))
+    view.write(ev("pool_attempt", entry="m1", attempt=1))
+    for i in range(pi_live.KEEP_LINES):
+        view.write(
+            ev("tool_execution_start", toolName="read", args={"file_path": f"/f{i}"})
+        )
     view.write(delta("text_delta", "x" * 500 + "END"))
     view.close()
     lines = (run / "view-2.txt").read_text().splitlines()
     assert len(lines) == pi_live.KEEP_LINES
     assert lines[0] == "slot"
+    assert lines[1] == "[  0.0s] == m1 (attempt 1) =="
     assert lines[-1].endswith("END") and len(lines[-1]) == pi_live.LINE_CHARS
-    assert lines[-2] == "[  0.0s] == m19 (attempt 1) =="
+
+
+def test_view_keeps_the_attempt_line_under_the_header_once_the_stream_scrolls(runs):
+    run = pi_live.open_run(str(runs / "t6"))
+    view = pi_live.LiveView(run, 1, "adversarial", clock=Clock())
+    view.write(ev("pool_attempt", entry="nvidia-minimax-m3.1-flash", attempt=1))
+    for i in range(pi_live.KEEP_LINES + 2):
+        view.write(
+            ev("tool_execution_start", toolName="read", args={"file_path": f"/f{i}"})
+        )
+        view.write(
+            ev("tool_execution_end", toolName="read", isError=False, durationMs=3)
+        )
+    view.close()
+    last_pairs = range(
+        pi_live.KEEP_LINES + 2 - (pi_live.KEEP_LINES - 2) // 2, pi_live.KEEP_LINES + 2
+    )
+    assert (run / "view-1.txt").read_text() == (
+        "adversarial\n"
+        "[  0.0s] == nvidia-minimax-m3.1-flash (attempt 1) ==\n"
+        + "".join(
+            f"[  0.0s] tool read(file_path=/f{i})\n[  0.0s]   <- read ok 3 ms\n"
+            for i in last_pairs
+        )
+    )
+
+
+def test_view_pins_the_latest_attempt_once_several_scroll_past(runs):
+    run = pi_live.open_run(str(runs / "t7"))
+    view = pi_live.LiveView(run, 1, "adversarial", clock=Clock())
+    for attempt in (1, 2):
+        view.write(ev("pool_attempt", entry="m1", attempt=attempt))
+        for i in range(pi_live.KEEP_LINES + 1):
+            view.write(
+                ev("tool_execution_start", toolName="grep", args={"pattern": f"p{i}"})
+            )
+    view.close()
+    assert (run / "view-1.txt").read_text() == (
+        "adversarial\n"
+        "[  0.0s] == m1 (attempt 2) ==\n"
+        + "".join(
+            f"[  0.0s] tool grep(pattern=p{i})\n"
+            for i in range(3, pi_live.KEEP_LINES + 1)
+        )
+    )
 
 
 def test_view_takes_a_line_split_across_writes(runs):
