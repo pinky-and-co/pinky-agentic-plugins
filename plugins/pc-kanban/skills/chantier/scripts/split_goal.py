@@ -73,7 +73,7 @@ def main() -> int:
     blocks = split_condition(text)
     if len(blocks) > MAX_BLOCKS:
         print(
-            f"split_goal: {len(blocks)} blocs, maximum {MAX_BLOCKS} blocs — raccourcir la condition",
+            f"split_goal: {len(blocks)} blocks, maximum {MAX_BLOCKS} blocks — shorten the condition",
             file=sys.stderr,
         )
         return 1

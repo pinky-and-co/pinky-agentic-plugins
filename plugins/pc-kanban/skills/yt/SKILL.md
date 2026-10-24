@@ -110,8 +110,8 @@ context, never the `.vtt`. Delete the `.vtt` files after reading the clean text.
    python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-chantiers --full
    ```
 
-   `--full` is required here — the verdict needs the full Statut prose, not the bounded default
-   (which caps each Statut cell). That prints each board's `INDEX.md` verbatim plus its
+   `--full` is required here — the verdict needs the full Status prose, not the bounded default
+   (which caps each Status cell). That prints each board's `INDEX.md` verbatim plus its
    chantier list. Then, for the chantiers the video's topic touches, read the active cards:
 
    ```bash
@@ -129,7 +129,7 @@ Don't stop at the summary — a `/yt` that doesn't render a verdict hasn't done 
 
 - Default: chat only (summary + verdict displayed, nothing written to disk outside the scratchpad).
 - `--card`: write the verdict into a new `0-ideas/` card of the relevant chantier (date it
-  `· surfacé YYYY-MM-DD`, see the `kanban` skill for the card frontmatter schema) — ask which
+  `· surfaced YYYY-MM-DD`, see the `kanban` skill for the card frontmatter schema) — ask which
   chantier if ambiguous, never guess silently. Use the board root resolved in step 3, not a relative
   path.
 

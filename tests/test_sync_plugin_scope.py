@@ -385,7 +385,7 @@ class TestHandleSessionStartSettingsNote(unittest.TestCase):
         self.assertIn("pc-snow@mp, pc-pypi@mp", ctx)
         self.assertIn("not a stray file", ctx)
         self.assertIn(
-            ".claude/settings.json mis à jour, à committer",
+            ".claude/settings.json updated, to commit",
             pua.pending(self.session)["reload-plugins"],
         )
 

@@ -16,7 +16,7 @@ ordinary repo-scoped session shouldn't otherwise have — see the `permission-ch
 ## Skills
 
 - **`brainstorm`** — diverge before deciding: explore an idea, name its concepts, challenge generic
-  claims, and hand back a brief with epistemic status, "Items ouverts" and ordered steps. Written
+  claims, and hand back a brief with epistemic status, "Open items" and ordered steps. Written
   to run on claude.ai too; see [Uploading brainstorm to claude.ai](#uploading-brainstorm-to-claudeai).
 - **`chantier`** — resume a chantier: load its story, cards, and in-progress handoff, report
   state, and take the next card.

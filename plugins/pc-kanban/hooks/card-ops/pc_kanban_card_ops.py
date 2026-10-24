@@ -246,7 +246,7 @@ def mockup_problems(head: list[str]) -> list[str]:
             problems.append(f"`mockup_fidelity` names the axis '{axis.strip()}' twice")
         seen.add(axis.strip())
         if not sep:
-            problems.append(f"`mockup_fidelity` element '{item}' is not `axe=niveau`")
+            problems.append(f"`mockup_fidelity` element '{item}' is not `axis=level`")
         elif axis.strip() not in MOCKUP_AXES:
             problems.append(
                 f"`mockup_fidelity` axis '{axis.strip()}' is not one of "
@@ -401,7 +401,7 @@ def archive(card: Path, boards: list[Path], force: bool = False) -> int:
             else "it waits in 4-done/"
         )
         print(
-            f"{card.name} is still held by open cards (`sert` or `blocked_by`):\n"
+            f"{card.name} is still held by open cards (`serves` or `blocked_by`):\n"
             + "\n".join(f"  - {s}" for s in held)
             + f"\n{wait} while they are open; --force archives it anyway",
             file=sys.stderr,

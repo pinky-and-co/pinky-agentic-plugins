@@ -2,7 +2,7 @@
 """PreToolUse — guard against overlapping PRs (same files in flight).
 
 When a session opens a branch or PR for a change, there may already be PRs or
-local branches touching the same files. This hook detects recouvrement (overlap)
+local branches touching the same files. This hook detects overlap
 and refuses, naming the PR/branch in conflict. It fires on:
   - `git switch -c <branch>`
   - `git checkout -b <branch>`

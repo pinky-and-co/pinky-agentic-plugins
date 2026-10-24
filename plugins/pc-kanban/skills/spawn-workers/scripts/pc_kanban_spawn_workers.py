@@ -28,7 +28,7 @@ and skips the plugin enable).
 Python 3.11+, stdlib only.
 
 A card's optional `mockup:` (absolute or `~/` path to a file, folder or `.zip`) and
-`mockup_fidelity:` (`axe=niveau` items; an absent axis is `guided`) add a mockup brief to the
+`mockup_fidelity:` (`axis=level` items; an absent axis is `guided`) add a mockup brief to the
 default path's prompt; a `.zip` is unpacked into its sibling folder `<zip stem>/` (created if
 absent, reused otherwise). Mockup handling is default-path only: `--cmux` neither reads the
 mockup nor unpacks the zip.
@@ -366,7 +366,7 @@ def cited_requirement_rows(card_path: Path) -> list[str]:
 
 
 def fidelity_levels(items: list[str]) -> dict[str, str]:
-    """The fidelity level of every mockup axis, from the card's `axe=niveau` items.
+    """The fidelity level of every mockup axis, from the card's `axis=level` items.
 
     Args:
         items: the card's `mockup_fidelity:` elements, e.g. ["layout=strict"].
@@ -467,7 +467,7 @@ def generated_card_block(
     mockup: Path | None = None,
     levels: dict[str, str] | None = None,
 ) -> str:
-    """The 'généré' half of the worker prompt (card point 3): the card, its repo, and any
+    """The 'generated' half of the worker prompt (card point 3): the card, its repo, and any
     judgment call the worker should resolve rather than ask back.
 
     Args:

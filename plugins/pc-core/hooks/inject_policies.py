@@ -47,7 +47,7 @@ def detect_artefact_types(tool_name: str, tool_input: dict) -> list[str]:
         p = Path(path)
         parts_lower = "/".join(p.parts).lower()
 
-        if p.suffix in CODE_EXTENSIONS:
+        if p.suffix in CODE_EXTENSIONS or (p.suffix == ".md" and "plugins" in p.parts):
             # co-occurring artefact types within the same file
             return ["code_identifiers", "docstrings", "inline_comments"]
         if any(

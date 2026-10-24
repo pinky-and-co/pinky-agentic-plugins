@@ -34,8 +34,8 @@ PAUSE_MIN_REMAINING_SECONDS = 3600
 
 
 def _rate_limit_state_path(session_id):
-    """Doit rester identique, octet pour octet, à `statusline.py::_rate_limit_state_path` — les
-    deux calculs sont dupliqués volontairement (deux plugins découplés), pas partagés."""
+    """Must stay byte-for-byte identical to `statusline.py::_rate_limit_state_path` — the
+    two computations are duplicated on purpose (two decoupled plugins), not shared."""
     return os.path.join(
         tempfile.gettempdir(),
         f"pc-statusline-ratelimits-{os.getuid()}-{session_id}.json",
@@ -43,8 +43,8 @@ def _rate_limit_state_path(session_id):
 
 
 def _read_rate_limit_state(session_id):
-    """`os.getuid()` n'existe pas sous Windows — `pc-statusline` ne peut de toute façon pas y
-    écrire ce fichier, donc l'absence vaut simplement « rien à lire », jamais un crash."""
+    """`os.getuid()` does not exist on Windows — `pc-statusline` cannot write this file there
+    anyway, so its absence simply means "nothing to read", never a crash."""
     if not session_id or not hasattr(os, "getuid"):
         return None
     try:
@@ -55,10 +55,10 @@ def _read_rate_limit_state(session_id):
 
 
 def context_window_pct(session_id, now=None):
-    """`%` de context window consommé tel que la status line l'a écrit, ou `None` si le fichier
-    d'état est absent, sans valeur numérique, ou plus vieux que `CONTEXT_MAX_AGE_SECONDS`.
-    Le mtime est pris avant la lecture : un rendu qui remplace le fichier entre les deux ne
-    peut que vieillir la valeur, jamais rajeunir un contenu périmé."""
+    """`%` of the context window used, as the status line wrote it, or `None` if the state file
+    is absent, has no numeric value, or is older than `CONTEXT_MAX_AGE_SECONDS`.
+    The mtime is taken before the read: a render that replaces the file in between can
+    only age the value, never make stale content look fresh."""
     if not session_id or not hasattr(os, "getuid"):
         return None
     try:
@@ -78,9 +78,9 @@ def context_window_pct(session_id, now=None):
 
 
 def evaluate_rate_limit(session_id, now=None):
-    """Pour chaque fenêtre (`five_hour`, `seven_day`) : `triggered` uniquement pour `five_hour`,
-    quand l'usage atteint `FIVE_HOUR_PAUSE_PCT` ET que le reset est à plus d'1h —
-    `None` si le fichier d'état `pc-statusline` est absent ou ne porte aucune fenêtre exploitable."""
+    """For each window (`five_hour`, `seven_day`): `triggered` only for `five_hour`,
+    when usage reaches `FIVE_HOUR_PAUSE_PCT` AND the reset is more than 1h away —
+    `None` if the `pc-statusline` state file is absent or carries no usable window."""
     state = _read_rate_limit_state(session_id)
     if not state:
         return None

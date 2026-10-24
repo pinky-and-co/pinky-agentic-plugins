@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""keychain — read one secret from the macOS classic keychain (Trousseau d'accès).
+"""keychain — read one secret from the macOS classic keychain (Keychain Access).
 
 Used through `load_secrets.py`'s `resolve_env`, called on demand by `model_adversarial.secret_env`
 and handed straight to each `pi` call's own `env=` — never into a session-wide env, so a keychain

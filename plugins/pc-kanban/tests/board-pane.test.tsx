@@ -158,19 +158,29 @@ describe('board pane helpers', () => {
     expect([blockedByOpen, blockedByDone, blockedByGone, open].map(c => blocker(c, all))).toEqual(['open', null, null, null])
   })
 
-  test('the badge line of a card follows the POC: column, priority, tier, chantier, date, repos, sert, requirements, blocker', () => {
+  test('the badge line of a card follows the POC: column, priority, tier, chantier, date, repos, serves, requirements, blocker', () => {
     const target: any = card('next-one', '2-selected-for-dev')
-    const c: any = card('a', '1-todo', { model: 'opus', date: '2026-09-14', sert: 'next-one', requirements: ['FUN-1'], blocked_by: 'open-one' }, { priority: 3, repos: ['acme/alpha', 'acme/beta'] })
+    const c: any = card('a', '1-todo', { model: 'opus', date: '2026-09-14', serves: 'next-one', requirements: ['FUN-1'], blocked_by: 'open-one' }, { priority: 3, repos: ['acme/alpha', 'acme/beta'] })
     const blocker_: any = card('open-one', '2-selected-for-dev')
     expect(cardSegments(c, [c, target, blocker_]).map(g => g.text)).toEqual([
-      '1-todo', '= P3', '🟧 opus', '[0007]', 'scoped 2026-09-14', 'acme/alpha', 'acme/beta', 'sert → next-one', 'FUN-1', '⊘ blocked by open-one',
+      '1-todo', '= P3', '🟧 opus', '[0007]', 'scoped 2026-09-14', 'acme/alpha', 'acme/beta', 'serves → next-one', 'FUN-1', '⊘ blocked by open-one',
     ])
-    const [, prio, , chantier, , , , sert] = cardSegments(c, [c, target, blocker_])
-    // The priority token is bold so the yellow `=` reads on a light background; the chantier opens the story, sert its card.
+    const [, prio, , chantier, , , , serves] = cardSegments(c, [c, target, blocker_])
+    // The priority token is bold so the yellow `=` reads on a light background; the chantier opens the story, serves its card.
     expect(prio).toMatchObject({ color: 'yellow', bold: true })
     expect(chantier?.press).toEqual({ t: 'story' })
-    expect(sert?.press).toEqual({ t: 'open', key: cardKey(target) })
+    expect(serves?.press).toEqual({ t: 'open', key: cardKey(target) })
     expect(cardSegments({ ...c, story: null }, [c])[3]?.press).toBeUndefined()
+  })
+
+  test('the parent link is read from serves only; a card carrying only the old sert field shows none', () => {
+    const target: any = card('next-one', '2-selected-for-dev')
+    const link = (fm: Record<string, unknown>) => {
+      const c: any = card('a', '1-todo', fm)
+      return cardSegments(c, [c, target]).find(g => g.text.includes('→'))
+    }
+    expect(link({ serves: 'next-one' })).toMatchObject({ text: 'serves → next-one', press: { t: 'open', key: cardKey(target) } })
+    expect(link({ sert: 'next-one' })).toBeUndefined()
   })
 
   test('the badge shows the effort after the model, and nothing when the card carries none', () => {

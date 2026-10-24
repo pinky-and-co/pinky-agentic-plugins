@@ -415,7 +415,7 @@ df = job.to_df()
 - **`concat_ws` with an optional field**: wrap the optional field in `coalesce(to_char(get(col("V"), lit("f"))), lit(""))` inside the `concat_ws` (the separator space is added by `concat_ws` itself). Never `lit(" ") + to_char(col("x"))` (invalid expr) and no `with_column` pre-step needed
 - **`startswith` argument**: must be a column/lit — `col("X").startswith(lit("FA"))` or `col("X").like("FA%")`
 - **`year(col)` & friends**: not always resolved from `snowflake.snowpark.functions` — use `sql_expr("YEAR(X)")` or import the function explicitly and verify it exists
-- **`.isin(...)` returns a boolean Column**: wrap in `iff` when a business value is expected — `iff(col("X").isin("A", "B"), lit("oui"), lit("non")).alias("Y")`
+- **`.isin(...)` returns a boolean Column**: wrap in `iff` when a business value is expected — `iff(col("X").isin("A", "B"), lit("yes"), lit("no")).alias("Y")`
 - **camelCase on `Column`/`Window`**: the whole API is snake_case — see "Canonical vs deprecated method names" above; a deprecated alias still runs today but shouldn't appear in new code
 
 ---

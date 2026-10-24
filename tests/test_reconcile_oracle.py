@@ -37,7 +37,7 @@ def _case(must_flag=(), must_not_flag=()):
 
 class TestScorer(unittest.TestCase):
     def test_rubber_stamp_is_a_recall_fail(self):
-        answer = "VERDICT: 0 diverge, 0 manquant"
+        answer = "VERDICT: 0 diverge, 0 missing"
         s = ro.score_case(
             _case(must_flag=["api_integration", "compute_pool", "grant"]), answer
         )
@@ -49,7 +49,7 @@ class TestScorer(unittest.TestCase):
             "DIVERGE: api_integration is a stub\n"
             "DIVERGE: compute_pool is a stub\n"
             "DIVERGE: grant is a stub\n"
-            "VERDICT: 3 diverge, 0 manquant"
+            "VERDICT: 3 diverge, 0 missing"
         )
         s = ro.score_case(
             _case(must_flag=["api_integration", "compute_pool", "grant"]), answer
@@ -60,14 +60,14 @@ class TestScorer(unittest.TestCase):
     def test_known_false_positive_is_a_precision_fail(self):
         # the v2 issue: it demands adding purge_expired, which already exists in the table
         answer = (
-            "MANQUANT: `purge_expired` should be added\nVERDICT: 0 diverge, 1 manquant"
+            "MISSING: `purge_expired` should be added\nVERDICT: 0 diverge, 1 missing"
         )
         s = ro.score_case(_case(must_not_flag=["purge_expired"]), answer)
         self.assertEqual(s.precision_violations, ["purge_expired"])
         self.assertFalse(s.passed)
 
     def test_clean_answer_passes_precision(self):
-        answer = "Rien à signaler.\nVERDICT: 0 diverge, 0 manquant"
+        answer = "Rien à signaler.\nVERDICT: 0 diverge, 0 missing"
         s = ro.score_case(_case(must_not_flag=["purge_expired"]), answer)
         self.assertEqual(s.precision_violations, [])
         self.assertTrue(s.passed)
@@ -76,7 +76,7 @@ class TestScorer(unittest.TestCase):
         answer = (
             "DIVERGE: `grant` is a stub\n"
             "Ligne corrigée: `| grant | ⚠ | database-scoped privilege grant |`\n"
-            "VERDICT: 1 diverge, 0 manquant"
+            "VERDICT: 1 diverge, 0 missing"
         )
         s = ro.score_case(
             _case(must_flag=["grant"], must_not_flag=["database"]), answer
@@ -86,7 +86,7 @@ class TestScorer(unittest.TestCase):
         self.assertTrue(s.passed)
 
     def test_verdict_line_is_not_scored_as_body(self):
-        answer = "Rien.\nVERDICT: purge_expired 0 diverge, 0 manquant"
+        answer = "Rien.\nVERDICT: purge_expired 0 diverge, 0 missing"
         s = ro.score_case(_case(must_not_flag=["purge_expired"]), answer)
         self.assertEqual(s.precision_violations, [])
 
@@ -100,7 +100,7 @@ class TestBriefBuilders(unittest.TestCase):
         self.assertIn("⚠ STUB", sig)  # the deterministic flag the small model leans on
         self.assertIn("ApiIntegration", sig)
         selective = ro.BRIEF_BUILDERS["selective"](rc)
-        self.assertIn("INDEX DU PACKAGE", selective)
+        self.assertIn("PACKAGE INDEX", selective)
 
     def test_run_case_uses_the_requested_builder(self):
         rc = {c.name: c for c in ro.load_cases()}["recall_broken_promises"]
@@ -108,12 +108,12 @@ class TestBriefBuilders(unittest.TestCase):
 
         def fake(prompt):
             seen["prompt"] = prompt
-            return "VERDICT: 0 diverge, 0 manquant"
+            return "VERDICT: 0 diverge, 0 missing"
 
         ro.run_case(rc, fake, "selective")
-        self.assertIn("INDEX DU PACKAGE", seen["prompt"])
+        self.assertIn("PACKAGE INDEX", seen["prompt"])
         ro.run_case(rc, fake, "all")
-        self.assertNotIn("INDEX DU PACKAGE", seen["prompt"])
+        self.assertNotIn("PACKAGE INDEX", seen["prompt"])
 
     def test_run_case_prepends_the_phase1_prompt(self):
         rc = {c.name: c for c in ro.load_cases()}["precision_clean_table"]
@@ -121,7 +121,7 @@ class TestBriefBuilders(unittest.TestCase):
 
         def fake(prompt):
             seen["prompt"] = prompt
-            return "VERDICT: 0 diverge, 0 manquant"
+            return "VERDICT: 0 diverge, 0 missing"
 
         ro.run_case(rc, fake, "all")
         self.assertTrue(seen["prompt"].startswith(ro.rc.PHASE1_TASK))

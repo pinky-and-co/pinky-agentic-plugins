@@ -22,7 +22,7 @@ TODAY = date(2026, 10, 6)
 CARD_FULL = """---
 repos: [acme/alpha, acme/beta]
 model: sonnet
-sert: null
+serves: null
 priority: 4
 date: 2026-10-01
 ---
@@ -106,7 +106,7 @@ class TestCards:
             "frontmatter": {
                 "repos": ["acme/alpha", "acme/beta"],
                 "model": "sonnet",
-                "sert": None,
+                "serves": None,
                 "priority": "4",
                 "date": "2026-10-01",
             },

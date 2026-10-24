@@ -268,41 +268,47 @@ class TestStubDetection(unittest.TestCase):
 
 class TestNormalizeManquants(unittest.TestCase):
     def test_bare_capability_line(self):
-        out = rc.normalize_manquants(
-            "MANQUANT — `xml_path_str` : fonction publique absente du tableau\n"
-            "VERDICT: 0 diverge, 1 manquant\n"
+        out = rc.normalize_missing_findings(
+            "MISSING — `xml_path_str` : fonction publique absente du tableau\n"
+            "VERDICT: 0 diverge, 1 missing\n"
         )
         self.assertEqual(out, ["xml_path_str"])
 
     def test_module_prefix_when_the_line_names_it(self):
-        out = rc.normalize_manquants(
-            "MANQUANT dans `xml` : `xml_path_str` n'a pas de ligne\n"
+        out = rc.normalize_missing_findings(
+            "MISSING in `xml`: `xml_path_str` has no row\n"
         )
         self.assertEqual(out, ["xml: xml_path_str"])
 
+    def test_a_word_ending_in_in_is_not_the_module_marker(self):
+        out = rc.normalize_missing_findings("MISSING — the domain `iam` lacks a row\n")
+        self.assertEqual(out, ["iam"])
+
     def test_call_parens_are_stripped_and_verdict_line_ignored(self):
-        out = rc.normalize_manquants(
-            "MANQUANT: `charge_card()` — méthode publique de billing\n"
-            "VERDICT: 0 diverge, 1 MANQUANT\n"
+        out = rc.normalize_missing_findings(
+            "MISSING: `charge_card()` — méthode publique de billing\n"
+            "VERDICT: 0 diverge, 1 MISSING\n"
         )
         self.assertEqual(out, ["charge_card"])
 
-    def test_manquant_line_without_a_symbol_is_dropped(self):
-        self.assertEqual(rc.normalize_manquants("Aucun MANQUANT à signaler.\n"), [])
-
-    def test_no_manquant_returns_empty(self):
+    def test_missing_line_without_a_symbol_is_dropped(self):
         self.assertEqual(
-            rc.normalize_manquants(
-                "DIVERGE: `get_ai` est un stub\nVERDICT: 1 diverge, 0 manquant"
+            rc.normalize_missing_findings("Aucun MISSING à signaler.\n"), []
+        )
+
+    def test_no_missing_returns_empty(self):
+        self.assertEqual(
+            rc.normalize_missing_findings(
+                "DIVERGE: `get_ai` est un stub\nVERDICT: 1 diverge, 0 missing"
             ),
             [],
         )
 
     def test_output_feeds_drop_already_documented(self):
         # the whole point: the normalised list is exactly drop_already_documented's input contract
-        raw = "MANQUANT — `xml_path_str` doit être ajouté\nMANQUANT — `charge_card` de billing\n"
+        raw = "MISSING — `xml_path_str` doit être ajouté\nMISSING — `charge_card` de billing\n"
         self.assertEqual(
-            rc.drop_already_documented(rc.normalize_manquants(raw), _TABLE),
+            rc.drop_already_documented(rc.normalize_missing_findings(raw), _TABLE),
             ["charge_card"],  # xml_path_str is named inside the xml row -> dropped
         )
 
@@ -318,23 +324,23 @@ class TestGeneratorsHaveAnOracle(unittest.TestCase):
         doc = "The `Ai` class in ai does the work."
         self.assertEqual(
             rc.build_selective_brief("docs/f.md", doc, _SOURCES),
-            "--- DOCUMENT À RÉCONCILIER (docs/f.md) ---\n"
+            "--- DOCUMENT TO RECONCILE (docs/f.md) ---\n"
             "The `Ai` class in ai does the work.\n\n"
-            "--- INDEX DU PACKAGE (tous les fichiers, symboles publics — pour repérer le code "
-            "implémenté mais ABSENT du document) ---\n"
+            "--- PACKAGE INDEX (all files, public symbols — to spot code that is implemented "
+            "but ABSENT from the document) ---\n"
             "src/lib/ai.py: Ai, get\nsrc/lib/util.py\n\n"
-            "--- CODE DES MODULES CITÉS PAR LE DOCUMENT (source complète — pour juger si le code "
-            "fait ce que le document affirme) ---\n\n"
+            "--- CODE OF THE MODULES THE DOCUMENT CITES (full source — to judge whether the code "
+            "does what the document claims) ---\n\n"
             "--- CODE: src/lib/ai.py ---\n```python\nclass Ai:\n    def get(self): pass\n\n```",
         )
 
     def test_build_signature_brief_full_output(self):
         self.assertEqual(
             rc.build_signature_brief("docs/f.md", "The doc.", _SOURCES),
-            "--- TABLEAU DE FEATURES (docs/f.md) ---\n"
+            "--- FEATURE TABLE (docs/f.md) ---\n"
             "The doc.\n\n"
-            "--- API PUBLIQUE (signatures + 1re ligne de docstring ; ⚠ STUB = corps vide/trivial, "
-            "à traiter comme NON implémenté quoi qu'affirme la docstring ou le tableau) ---\n\n"
+            "--- PUBLIC API (signatures + first docstring line; ⚠ STUB = empty/trivial body, "
+            "to be treated as NOT IMPLEMENTED whatever the docstring or the table claims) ---\n\n"
             "### src/lib/ai.py\n"
             "class Ai\n"
             "    def get(self)  ⚠ STUB",
@@ -343,7 +349,7 @@ class TestGeneratorsHaveAnOracle(unittest.TestCase):
     def test_build_phase1_brief_full_output(self):
         self.assertEqual(
             rc.build_phase1_brief("docs/f.md", "The doc.", _SOURCES),
-            "--- TABLEAU DE FEATURES (docs/f.md) ---\n"
+            "--- FEATURE TABLE (docs/f.md) ---\n"
             "The doc.\n\n"
             "--- CODE: src/lib/ai.py ---\n```python\nclass Ai:\n    def get(self): pass\n\n```\n\n"
             "--- CODE: src/lib/util.py ---\n```python\nPLAIN = 1\n\n```",
@@ -404,14 +410,14 @@ class TestCliModes(unittest.TestCase):
         out = buf.getvalue()
         self.assertEqual(code, 0)
         self.assertTrue(out.startswith(rc.PHASE1_TASK))
-        self.assertIn("--- API PUBLIQUE", out)
+        self.assertIn("--- PUBLIC API", out)
         self.assertIn("def get_ai()", out)
         self.assertNotIn("_hidden", out)  # private symbols stay out of the brief
 
     def test_filter_model_output_reads_stdin_and_drops_documented(self):
         repo = str(self._repo())
         stdin = io.StringIO(
-            "MANQUANT: `charge_card` (billing)\nMANQUANT: `get_ai` needs a row\n"
+            "MISSING: `charge_card` (billing)\nMISSING: `get_ai` needs a row\n"
         )
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), unittest.mock.patch("sys.stdin", stdin):

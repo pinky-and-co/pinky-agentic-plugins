@@ -354,7 +354,7 @@ def pool_check(
 
     `tools=True` runs a fixed 12-step task with `read,grep` instead (follow a chain of 12 files, each
     naming the next, search the last for a token, answer the token — one request per tool call) and reports
-    per entry `ok`, `429`, `outil en texte` or the provider's error: the evidence for an entry's
+    per entry `ok`, `429`, `tool-call text` or the provider's error: the evidence for an entry's
     `tools:` field. Each entry gets 20 s per step (240 s) unless it sets its own `timeout`; the entries
     of one provider run one after another, different providers in parallel.
 

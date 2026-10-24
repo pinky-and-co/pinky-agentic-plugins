@@ -71,7 +71,7 @@ def test_more_than_five_blocks_is_refused() -> None:
     result = _run(" ".join(["mot"] * 1100))
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "5 blocs" in result.stderr
+    assert "5 blocks" in result.stderr
 
 
 def test_empty_input_is_a_usage_error() -> None:

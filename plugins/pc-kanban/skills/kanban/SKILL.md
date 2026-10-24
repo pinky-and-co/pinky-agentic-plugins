@@ -76,8 +76,8 @@ repos: []              # org/repo slugs (from git remote), e.g. [acme-corp/api-s
 model: haiku | sonnet | opus | fable   # written by the classifier, never chosen by a session
 effort: low | medium | high | xhigh | max   # optional — how hard the worker reasons; absent = inherit the session
 mockup: /abs/path | ~/path   # optional — a file, folder or .zip holding the mocked-up rendering
-mockup_fidelity: [layout=strict, design=free]   # optional, needs mockup — axe=niveau items
-sert: <parent-card-slug> | null        # what this card serves — null = autonomous root
+mockup_fidelity: [layout=strict, design=free]   # optional, needs mockup — axis=level items
+serves: <parent-card-slug> | null        # what this card serves — null = autonomous root
 requirements: []          # requirement ids this card traces to, e.g. [<id>, …]; [] = none
 blocked_by: <card-slug> | null         # a hard dependency, never a mere ordering preference
 ---
@@ -106,7 +106,7 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   proposal in `0-ideas`/`1-todo` (`finishing-a-card.md` § Proposing the next card) and of the
   "highest `priority:`" pick in `2-selected-for-dev` above — `date:`/file position only tie-break
   at equal `priority`. Omitted = `3`, no backfill of existing cards, no error; `--list-stale`
-  scales its threshold from it (`stop_handoff.py`). Independent of `sert` — a child never inherits
+  scales its threshold from it (`stop_handoff.py`). Independent of `serves` — a child never inherits
   its parent's `priority`, no auto-propagation.
 
 - **`model`** — the model the card's work needs, written by pc-core's routing classifier
@@ -125,7 +125,7 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
 - **`mockup`** / **`mockup_fidelity`** — optional; a card whose rendering was mocked up (HTML POC,
   screenshot, design) names the mockup as an absolute or `~/` path to a file, a folder or a `.zip`.
   The mockup is a throwaway that lives where it was dropped (`_TEMP/` included); the delivered work
-  becomes the reference at closure. `mockup_fidelity` is a list of `axe=niveau`
+  becomes the reference at closure. `mockup_fidelity` is a list of `axis=level`
   items, one flat key. Axes: `layout` (zones, order, heights, button rows), `design` (colour, font,
   icons), `content` (texts, labels), `behavior` (keyboard, hover, states, search). Levels: `strict`
   (reproduce identically), `guided` (follow the intent, justify every deviation in the report),
@@ -149,14 +149,14 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
   maintain cards/handoffs while frozen — write-only, never a read restriction. `[]`/omitted →
   kanban-only work, no repo touched.
 
-- **`sert`** — what this card serves, a card slug (filename without `.md`) or `null`. Mandatory
+- **`serves`** — what this card serves, a card slug (filename without `.md`) or `null`. Mandatory
   from `idea` onward. `null` marks an autonomous root — the objective itself, not a step toward one.
   A card serving two objectives is not a case this schema handles; split it. Nothing enumerates what a
   parent needs; every child declares what it serves.
 
-- **`requirements`** — the requirement ids this card traces to, as a list; `[]` or omitted = none. Orthogonal to `sert`: `sert` is card-to-card filiation (critical
+- **`requirements`** — the requirement ids this card traces to, as a list; `[]` or omitted = none. Orthogonal to `serves`: `serves` is card-to-card filiation (critical
   path), `requirements` is card-to-requirement traceability, and a card may trace to several
-  requirements where `sert` allows only one parent. A requirement id is only valid if an open card
+  requirements where `serves` allows only one parent. A requirement id is only valid if an open card
   or a `4-done` card of the chantier defines it in its `## Requirements` table with a verification
   criterion — this card or another — never invent an id. `move-card select` refuses an id defined
   nowhere.
@@ -187,7 +187,7 @@ folder name. A blocked card is not a state — it lives in `blocked_by:` plus a 
 
 ## Finishing a card
 
-A session's capacity limit is the session itself — one card, or one `sert`-linked group, per
+A session's capacity limit is the session itself — one card, or one `serves`-linked group, per
 session — and `/goal` is set from the group's **root** card, never the leaf. A `## Done when` line
 must therefore be demonstrable in the transcript, and the reviewer must not be the generator.
 
@@ -196,12 +196,12 @@ and the reviewer preference order — read it when taking a card in, or before d
 
 ## Filiation as render, not list
 
-`/chantier` groups queued cards by `sert` in its report — one group per root, cards with `sert: null`
+`/chantier` groups queued cards by `serves` in its report — one group per root, cards with `serves: null`
 elsewhere folded into a single "N autonomous cards" count. Never hand-maintain a critical-path list
-on a parent card; if the render is wrong, a child's `sert` value is wrong, fix the child.
+on a parent card; if the render is wrong, a child's `serves` value is wrong, fix the child.
 
-`sert` has a second, orthogonal use: at intake (`/chantier` step 7, first move into
-`3-in-progress`), a non-null `sert` whose parent is `done` or already archived gets its
+`serves` has a second, orthogonal use: at intake (`/chantier` step 7, first move into
+`3-in-progress`), a non-null `serves` whose parent is `done` or already archived gets its
 `## Done when` / `## Why` appended to the child as a managed block — content, not just grouping. See
 `chantier`'s SKILL.md § step 7.
 

@@ -3,7 +3,7 @@
 
 **Why this exists.** Retuning the phase-1 prompt by eye, on repos with no ground truth, is
 unreliable: a "report only what breaks a promise / when in doubt stay silent" framing can make the
-model rubber-stamp a repo carrying real stubs marked OK (``VERDICT: 0 diverge, 0 manquant``, no
+model rubber-stamp a repo carrying real stubs marked OK (``VERDICT: 0 diverge, 0 missing``, no
 analysis). The rule that follows — **no change to the prompt ships without this oracle passing** —
 needs the oracle to exist. This is it.
 

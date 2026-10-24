@@ -1,7 +1,7 @@
 ---
 name: snowflake-guide
 description: "Read-only Snowflake documentation researcher. Use proactively to verify that a Snowflake feature, SQL command, parameter, Python API or Native App capability exists, find the official doc page, or check syntax and preview/GA status. Returns a sourced verdict; writes no code and chooses no design."
-# Autodécouverte dirigée : `Skill` est dans tools, pas de champ `skills:` (les skills sont nommés dans le corps).
+# Directed auto-discovery: `Skill` is in tools, no `skills:` field (the skills are named in the body).
 tools: WebFetch, WebSearch, Read, Grep, Glob, Skill, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__context7__get-library-docs
 omitClaudeMd: true
 model: haiku

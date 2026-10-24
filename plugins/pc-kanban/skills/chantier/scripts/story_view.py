@@ -11,7 +11,7 @@ other cards through their frontmatter ``requirements:`` key. The view prints the
 defined in open cards (identical rows listed once), the open questions of open cards, the open
 cards ordered so a card follows the one that blocks it, a warning for each id whose rows differ
 between the cards that define it, and a warning for each id cited by an open card but defined
-in no open or ``4-done`` card. A section lists each ``4-done`` card an open card holds (``sert`` or
+in no open or ``4-done`` card. A section lists each ``4-done`` card an open card holds (``serves`` or
 ``blocked_by``) with the holders.
 
 ``--next-id PKG`` prints the next free id of the family for the chantier (``PKG-0025-13``), counting

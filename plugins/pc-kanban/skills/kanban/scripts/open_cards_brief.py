@@ -2,8 +2,8 @@
 """The open cards of one chantier, each with its title and the opening of its goal — for the
 "Flagging cards the closed card just made obsolete" step of `finishing-a-card.md`.
 
-A title alone hides supersession: "Worker = un agent, pas une session de chantier" and "Explorer
-`/goal` + équipes d'agents pour l'exécution des cards" share no word, yet the first delivered what
+A title alone hides supersession: "Worker = an agent, not a chantier session" and "Explore
+`/goal` + agent teams for card execution" share no word, yet the first delivered what
 the second was after. The first block under a card's title — usually its why, or the note saying
 what is left — is where that overlap shows, so it is printed next to each title.
 

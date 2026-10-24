@@ -17,12 +17,12 @@ Referenced from `SKILL.md`. Read this when taking a card in, or before declaring
 - Relaying a multi-repo card
 - Abandoning a multi-repo card
 
-One card, or one `sert`-linked group of cards, per session. `/chantier` sets `/goal`:
+One card, or one `serves`-linked group of cards, per session. `/chantier` sets `/goal`:
 
-- Card's `sert: null` (a root) → `/goal` is set from **this card's own** `## Done when` line.
-- Card's `sert: <parent>` → walk up to the root card (`sert: null`) that this chain ultimately
+- Card's `serves: null` (a root) → `/goal` is set from **this card's own** `## Done when` line.
+- Card's `serves: <parent>` → walk up to the root card (`serves: null`) that this chain ultimately
   serves, and set `/goal` from **the root's** `## Done when` line, not the leaf's. The session may then
-  freely work any card in that `sert` group — the group is the unit of session, not the single card.
+  freely work any card in that `serves` group — the group is the unit of session, not the single card.
 
 A `## Done when` line must be **demonstrable in the transcript** — a test result, an exit code, a
 real diff pasted — never merely true. `/goal`'s evaluator reads only the transcript, never a file or
@@ -196,7 +196,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py" drop <card-
 
 Lands the card in `_ARCHIVE/CHANTIER{NNNN}-dropped/`, never `-done/` (that name presupposes
 finished work) — refuses a `4-done/` source, any other column moves, a reason is mandatory and
-gets appended to the card's own body before the move. A `sert` chain whose parent is
+gets appended to the card's own body before the move. A `serves` chain whose parent is
 now found `dropped` there degrades exactly like a parent "not found" (`chantier/SKILL.md` step 7):
 say so plainly, append no `auto-parent` block, never invent one.
 
@@ -210,8 +210,8 @@ the card is the only trace.
 ### Archiving a parent whose children are still open
 
 `move-card archive` refuses a card that an open card (`0-ideas/` to `3-in-progress/` of the same
-chantier) still names in `sert` or `blocked_by`, and lists those cards. A parent with open children
-(enfants ouverts) waits in `4-done/`: its children stay unblocked (`blocked_by` reads `4-done/` as
+chantier) still names in `serves` or `blocked_by`, and lists those cards. A parent with open children
+(children still open) waits in `4-done/`: its children stay unblocked (`blocked_by` reads `4-done/` as
 done) and its `## Requirements` rows and open questions stay defined and are printed by `story_view`
 under "Requirements (open cards and 4-done)" and "Open questions"; its "Held parents" section only
 lists `parent <- holders`. It is archived once its children are closed. `--force` archives it anyway —
@@ -231,7 +231,7 @@ It prints `{"context_window_pct": <int|null>, "rate_limit": {"five_hour": {...},
 {...}}|null}`, each field independently `null` when its own data source is unavailable (no state file —
 `pc-statusline` not installed or not rendering —, or a context value last written more than 300 s
 ago) — never an error. Both come from the state file `pc-statusline` writes on every render. Render
-the line from this output and the candidate card's `repos:`/`sert` against the current session's own:
+the line from this output and the candidate card's `repos:`/`serves` against the current session's own:
 
 1. **Rate-limit override, checked first.** If a window in `rate_limit` has `triggered: true`,
    the whole line becomes a pause recommendation, naming the window and its `resets_at` — skip
@@ -241,18 +241,18 @@ the line from this output and the candidate card's `repos:`/`sert` against the c
 2. **Otherwise, context-window + proximity.** `context_window_pct` — the status line's own
    `context_window.used_percentage` (`null` → omit the line entirely, nothing to base it on) against the `<40` / `≥40` band gives the default recommendation
    (continue / spawn a fresh session). The command prints that default line; when relaying it, the
-   agent may add the nuance that a candidate sharing `repos:` or `sert` with the current session
+   agent may add the nuance that a candidate sharing `repos:` or `serves` with the current session
    leans toward "continue", but never flips a `≥40` verdict to the opposite — this stays a
    recommendation, never a gate (the `kanban-proactivity` rule).
 
 ```
-→ Proposition : <card-slug>
-  💡 Reco : continuer en session (context à 22%, même repos:)
+→ Proposal: <card-slug>
+  💡 Reco: continue in this session (context at 22%, same repos:)
 ```
 ```
-→ Proposition : <card-slug>
-  ⚠️ Reco : attendre le reset (dans 1h15, five_hour à 96%) avant de démarrer — risque de hit
-  mi-travail, cache froid à la reprise
+→ Proposal: <card-slug>
+  ⚠️ Reco: wait for the reset (in 1h15, five_hour at 96%) before starting — risk of hitting
+  the limit mid-work, cold cache on resume
 ```
 
 Purely consultative: this step never `mv`s the card, never spawns a session, never forces a pause.
@@ -271,7 +271,7 @@ proposed only when the session ends, in one of two cases:
 read from its own recent turn history:
 
 - **One card closed** → `/rename <that card's slug>`.
-- **Several, all serving the same `sert` root** → `/rename <root's slug>`.
+- **Several, all serving the same `serves` root** → `/rename <root's slug>`.
 - **Several, not all serving the same root** → `/rename <slug>_<slug>_<slug>_+N`: the first three
   closed slugs in closing order, then `+N` for the N remaining ones (omit `_+N` when there are three
   or fewer).

@@ -154,8 +154,20 @@ def scalar(head: list[str], key: str) -> str:
     return ""
 
 
+def parent_of(head: list[str]) -> str:
+    """Read the parent a card serves: ``serves``.
+
+    Args:
+        head: The frontmatter lines.
+
+    Returns:
+        The parent slug; empty when the card is a root.
+    """
+    return scalar(head, "serves")
+
+
 def holders(chantier: Path, slug: str) -> list[str]:
-    """List the open cards that hold a parent: they name it in ``sert`` or ``blocked_by``.
+    """List the open cards that hold a parent: they name it in ``serves`` or ``blocked_by``.
 
     Args:
         chantier: The chantier directory.
@@ -169,7 +181,7 @@ def holders(chantier: Path, slug: str) -> list[str]:
         for s, text in read_open_cards(chantier)
         if s != slug
         and slug
-        in (scalar(frontmatter(text), "sert"), scalar(frontmatter(text), "blocked_by"))
+        in (parent_of(frontmatter(text)), scalar(frontmatter(text), "blocked_by"))
     ]
 
 

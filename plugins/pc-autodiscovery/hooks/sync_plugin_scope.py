@@ -217,11 +217,11 @@ def _reload_message(newly_enabled: list[str], *, settings_written: bool = False)
     n = len(newly_enabled)
     message = (
         f"/reload-plugins  — {n} plugin{'s' if n > 1 else ''} "
-        f"activé{'s' if n > 1 else ''} ({', '.join(newly_enabled)}), "
-        "à charger pour cette session"
+        f"enabled ({', '.join(newly_enabled)}), "
+        "to load for this session"
     )
     if settings_written:
-        message += " ; .claude/settings.json mis à jour, à committer"
+        message += "; .claude/settings.json updated, to commit"
     return message
 
 

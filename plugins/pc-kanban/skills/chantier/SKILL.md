@@ -1,6 +1,6 @@
 ---
 name: chantier
-description: Resume a chantier — load its story, cards and in-progress handoff from the kanban boards visible to this session, then report state and take the next card. Use when the user says "resume chantier NNNN", "reprends le chantier", or names a chantier id/slug.
+description: Resume a chantier — load its story, cards and in-progress handoff from the kanban boards visible to this session, then report state and take the next card. Use when the user says "resume chantier NNNN", or names a chantier id/slug.
 argument-hint: "<chantier-id-or-slug-substring> [free-text instruction]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/story_view.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/activate_plugins_for_repos.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/pc_kanban_pending_user_action.py:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/kanban/scripts/next_card_recommendation.py:*), Bash(ls:*), Bash(rtk ls:*), Bash(find:*), Bash(rtk find:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/permission-change/scripts/guard.py:*), Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/chantier/scripts/resolve_repos.sh:*), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/card-ops/pc_kanban_card_ops.py:*), Bash(mv:*), Read, Edit, AskUserQuestion
 ---
@@ -9,12 +9,12 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py:*), Bash
 
 Loads a chantier's story, live cards and in-progress handoff from every `_KANBAN/` visible to this
 session, reports state, and takes the next card when the commitment column says so. Mechanics
-(frontmatter schema, `model:`, `sert`, `blocked_by`): skill `kanban`.
+(frontmatter schema, `model:`, `serves`, `blocked_by`): skill `kanban`.
 
 ## Arguments
 
 First token = the chantier id (`0001`) or a slug substring; the rest is a free-text instruction
-(`chantier 0001 lance la card X`). Absent → list all chantiers from every board and ask which. Ids
+(`chantier 0001 take the card X`). Absent → list all chantiers from every board and ask which. Ids
 are unique across boards; on a collision, say so and ask.
 
 ## Auto context
@@ -51,7 +51,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
   - one-line objective (from the story)
   - what is in progress with its handoff summary, or "nothing in progress"
   - `2-selected-for-dev/` non-empty → its highest-`priority:` card (the work order)
-  - queued cards grouped by `sert` (skill `kanban` § Filiation), one group per root; `sert: null`
+  - queued cards grouped by `serves` (skill `kanban` § Filiation), one group per root; `serves: null`
     cards folded into "N autonomous cards"
   - `--list-unreviewed-done` entries of **this chantier**: the count and the newest one or two, not
     the whole output. Not blocking; the fix is a `reviewed (…)` line on each (`n/a — mechanical` if
@@ -96,21 +96,21 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
        gate, no Goal): invoke `pc-kanban:spawn-workers <chantier-id> <card-slug>` and stop. The
        worker it opens runs this skill from inside the repo and does the take (`mv` + `date:` bump).
      - **Orchestrator + `repos: []`/absent**, or **worker** → continue below.
-   - **Parent context** (only when moving the card into `3-in-progress/`). If `sert` is non-null,
-    find the parent `<sert>.md` in this chantier's `4-done/`, else in
-    `_ARCHIVE/CHANTIER<this-chantier's-number>-done/YYYY-MM-DD_<sert>.md`, or `…-dropped/` if it was
+   - **Parent context** (only when moving the card into `3-in-progress/`). If `serves` is non-null,
+    find the parent `<serves>.md` in this chantier's `4-done/`, else in
+    `_ARCHIVE/CHANTIER<this-chantier's-number>-done/YYYY-MM-DD_<serves>.md`, or `…-dropped/` if it was
     dropped. Never glob other chantiers' archives.
     - Parent `done` with `## Done when` and `## Why` → append to the child's body (never hand-edit
       between the markers later):
       ```
       <!-- auto-parent:start -->
-      ## Context inherited from `<sert>`
+      ## Context inherited from `<serves>`
       <the parent's `## Done when` section, verbatim>
       <the parent's `## Why` section, verbatim>
       <!-- auto-parent:end -->
       ```
     - Parent without `## Why` → same block, `## Done when` only.
-    - Parent not `done`, dropped, missing, or `sert` orphaned → say so, append nothing, never invent
+    - Parent not `done`, dropped, missing, or `serves` orphaned → say so, append nothing, never invent
       parent content.
    - **Repo-scope.** `repos: []`/absent → kanban-only work, no freeze. Otherwise resolve each
     `org/repo` slug to its local path:
@@ -153,8 +153,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/stop_handoff.py" --list-stale
     left to the user (branch, choice between designs, fallback, how a check is demonstrated) goes in
     one `AskUserQuestion` round **before** the goal block; the answers go into `<condition>`. No open
     question → skip the round; the goal block still comes last.
-   - **Goal.** `<condition>` = the card's `## Done when` line; with `sert: <parent>`, walk up to the
-    root card (`sert: null`) and use **its** line — the session may work any card of that group. No
+   - **Goal.** `<condition>` = the card's `## Done when` line; with `serves: <parent>`, walk up to the
+    root card (`serves: null`) and use **its** line — the session may work any card of that group. No
     resolvable root (orphan, cycle) → say so, no `/goal` block, skip the rest of this bullet.
 
     `/goal` is parsed by the CLI before the turn and cannot run from a skill: the user types it.

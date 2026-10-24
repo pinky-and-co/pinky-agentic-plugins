@@ -12,7 +12,7 @@ tools, and one marked *not measured* is announced by the tool but has no observa
 signature or limit you are unsure of, query `context7` (`libraryId: /websites/snowflake_en`).
 
 The tools are fixed queries with bound arguments: no SQL goes in, only a scope and a range. Each
-result carries `source`, `fraicheur`, the resolved `range` (start, end, timezone, offset), `rows`,
+result carries `source`, `freshness`, the resolved `range` (start, end, timezone, offset), `rows`,
 `truncated` and, when a text field was cut, `truncated_fields`. Every timestamp carries its offset,
 which is authoritative: `timezone` is the `PC_SNOW_TIMEZONE` name when the variable is set, else the
 system's abbreviation (such as `CEST`), which is not an IANA name.
@@ -58,7 +58,7 @@ window a `query_id` alone searches.
 
 A range that starts more than 7 days before Snowflake's clock, or a `last_minutes` over 10079, is read
 from the `ACCOUNT_USAGE` view instead of the function. The result's `source` names the view and
-`fraicheur` says it is delayed (*différée*); the latest executions may be missing. The view is
+`freshness` says it is delayed; the latest executions may be missing. The view is
 account-wide: the scope is a bound `WHERE`, and the range filters on `SCHEDULED_TIME` (tasks) or
 `END_TIME` (queries). The view keeps 365 days; a longer range is refused. The exact latency comes
 from the documentation and is *not measured*. The time columns are `TIMESTAMP_LTZ`

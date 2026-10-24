@@ -230,7 +230,7 @@ class FinishingCardRenameCase(unittest.TestCase):
             "`≥40` %",
             "The user ends the session",
             "One card closed",
-            "same `sert` root",
+            "same `serves` root",
             "+N",
             "cannot be reconstructed",
         ):

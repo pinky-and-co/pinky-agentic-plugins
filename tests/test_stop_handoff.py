@@ -21,10 +21,10 @@ import stop_handoff as sh
 
 class TestParseFrontmatter(unittest.TestCase):
     def test_flat_scalars(self):
-        text = "---\nstatus: in-progress\nmodel: sonnet\nsert: null\n---\nbody\n"
+        text = "---\nstatus: in-progress\nmodel: sonnet\nserves: null\n---\nbody\n"
         self.assertEqual(
             sh.parse_frontmatter(text),
-            {"status": "in-progress", "model": "sonnet", "sert": None},
+            {"status": "in-progress", "model": "sonnet", "serves": None},
         )
 
     def test_list_value(self):
@@ -520,7 +520,7 @@ class TestStaleCards(unittest.TestCase):
             col = kb / "CHANTIER0001" / "0-ideas"
             col.mkdir(parents=True)
             (col / "no-date.md").write_text(
-                "---\nsert: null\n---\n# x\n", encoding="utf-8"
+                "---\nserves: null\n---\n# x\n", encoding="utf-8"
             )
             (col / "bad-date.md").write_text(
                 "---\ndate: pas-une-date\n---\n# x\n", encoding="utf-8"
@@ -654,8 +654,8 @@ class TestBoundedBoardLines(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             index = (
                 "## Board\n\n"
-                "| # | Chantier (objectif) | Statut |\n"
-                "|---|---------------------|--------|\n"
+                "| # | Chantier (objective) | Status |\n"
+                "|---|-----------------------|--------|\n"
                 "| 0002 | Autre chantier | ⚪ |\n"
             )
             kb = self._board(tmp, index)
@@ -665,8 +665,8 @@ class TestBoundedBoardLines(unittest.TestCase):
             self.assertEqual(
                 lines,
                 [
-                    "| # | Chantier (objectif) | Statut |",
-                    "|---|---------------------|--------|",
+                    "| # | Chantier (objective) | Status |",
+                    "|---|-----------------------|--------|",
                     "| 0002 | Autre chantier | ⚪ |",
                     "  cards: 0/0/0/0/0",
                 ],
@@ -683,8 +683,8 @@ class TestBoundedBoardLines(unittest.TestCase):
             content = "🟢 actif — `pinky docs serve\\|status\\|uninstall`. " + "x" * 220
             index = (
                 "## Board\n\n"
-                "| # | Chantier (objectif) | Statut |\n"
-                "|---|---------------------|--------|\n"
+                "| # | Chantier (objective) | Status |\n"
+                "|---|-----------------------|--------|\n"
                 f"| 0027 | Demo card | {content} |\n"
             )
             kb = self._board(tmp, index)
@@ -697,8 +697,8 @@ class TestBoundedBoardLines(unittest.TestCase):
             self.assertEqual(
                 lines,
                 [
-                    "| # | Chantier (objectif) | Statut |",
-                    "|---|---------------------|--------|",
+                    "| # | Chantier (objective) | Status |",
+                    "|---|-----------------------|--------|",
                     f"| 0027 | Demo card | {content[:200]}… (+{omitted} car.) |",
                     "  cards: 0/0/0/0/0",
                 ],
@@ -847,7 +847,7 @@ class TestCardCLI(unittest.TestCase):
         col = Path(tmp) / "ws" / "_KANBAN" / "CHANTIER0099-demo" / "2-selected-for-dev"
         col.mkdir(parents=True)
         (col / "my-card.md").write_text(
-            "---\nrepos: [org/one, org/two]\nsert: null\n---\n# my-card\n",
+            "---\nrepos: [org/one, org/two]\nserves: null\n---\n# my-card\n",
             encoding="utf-8",
         )
         return Path(tmp) / "ws" / "_KANBAN", col / "my-card.md"
@@ -886,7 +886,7 @@ class TestCardCLI(unittest.TestCase):
     def test_card_repos_empty_when_none_declared(self):
         with tempfile.TemporaryDirectory() as tmp:
             board, card = self._board_with_card(tmp)
-            card.write_text("---\nsert: null\n---\n# my-card\n", encoding="utf-8")
+            card.write_text("---\nserves: null\n---\n# my-card\n", encoding="utf-8")
             r = self._run(board, "--card-repos", str(card))
             self.assertEqual(r.returncode, 0)
             self.assertEqual(r.stdout, "")
@@ -925,7 +925,7 @@ class TestCardEffortCli(unittest.TestCase):
 
 
 class TestCardMockupCli(unittest.TestCase):
-    """`--card-mockup` prints the card's `mockup:`, `--card-mockup-fidelity` one `axe=niveau` per line."""
+    """`--card-mockup` prints the card's `mockup:`, `--card-mockup-fidelity` one `axis=level` per line."""
 
     SCRIPT = Path(str(sh.__file__))
 

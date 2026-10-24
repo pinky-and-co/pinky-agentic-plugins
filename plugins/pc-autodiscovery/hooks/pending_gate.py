@@ -72,18 +72,18 @@ def run(session_id: str) -> dict:
     if DENY_KEYS.intersection(queued):
         latch(session_id)
         reason = (
-            "⛔ Action requise — ce tour ne peut pas continuer :\n"
+            "⛔ Action required — this turn cannot continue:\n"
             + "\n".join(f"  • {m}" for m in queued.values())
-            + "\n\nTermine ce tour sans relancer d'outil, fais l'action, "
-            "puis reprends au message suivant."
+            + "\n\nEnd this turn without calling another tool, do the action, "
+            "then resume at the next message."
         )
         return _decision("deny", reason)
 
     messages = surface(session_id)
     reason = (
-        "⏸️ Action requise avant de continuer :\n"
+        "⏸️ Action required before continuing:\n"
         + "\n".join(f"  • {m}" for m in messages)
-        + "\n\nFais-la, puis approuve — ou approuve pour continuer sans."
+        + "\n\nDo it, then approve — or approve to continue without."
     )
     return _decision("ask", reason)
 

@@ -333,10 +333,10 @@ def _split_table_row(line: str) -> list[str]:
 
 
 def _cap_row_status(line: str) -> str:
-    """Cap a data row's Statut cell (the last `|`-delimited one) to `MAX_STATUS_CHARS`.
+    """Cap a data row's Status cell (the last `|`-delimited one) to `MAX_STATUS_CHARS`.
 
     A data row is identified by a 4-digit chantier id in its first cell — the header and
-    separator rows have no Statut prose to cap and pass through unchanged.
+    separator rows have no Status prose to cap and pass through unchanged.
     """
     cells = _split_table_row(line)
     if len(cells) < 4 or not cells[1].strip().isdigit():
@@ -365,7 +365,7 @@ def _column_counts(chantier_dir: Path | None) -> str:
 
 
 def bounded_board_lines(kanban: Path) -> list[str]:
-    """The bounded `--list-chantiers` default: table rows only, Statut capped, cards/column added.
+    """The bounded `--list-chantiers` default: table rows only, Status capped, cards/column added.
 
     Args:
         kanban: a board root, as returned by `find_kanbans`.

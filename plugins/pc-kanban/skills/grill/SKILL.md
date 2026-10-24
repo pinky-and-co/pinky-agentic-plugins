@@ -102,7 +102,7 @@ assumed is not stated — unless it is a brainstorm brief, which carries its own
    implementation alone can settle it; otherwise treat it as case 3 and ask the user in the next round.
 3. **Never asked** → this one, and only this one, goes to the user in the next round.
 
-A brief written by the `brainstorm` skill lists its open items under "Items ouverts" and marks each
+A brief written by the `brainstorm` skill lists its open items under "Open items" and marks each
 claim measured, assumed or decided: take those marks as the document's own status, except that a
 measured mark naming no evidence is treated as assumed. Route the open items through the three
 outcomes, and ask the user only what the brief never asked. Provenance lands in the carrying card's

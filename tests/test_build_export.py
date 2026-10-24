@@ -105,7 +105,7 @@ def _write_card(
 ) -> Path:
     path = chantier / column / f"{card_id}.md"
     path.write_text(
-        f"---\ndate: 2026-01-01\nrepos: []\nsert: null\n{extra_front}---\n# {card_id}\n\nbody\n"
+        f"---\ndate: 2026-01-01\nrepos: []\nserves: null\n{extra_front}---\n# {card_id}\n\nbody\n"
     )
     return path
 

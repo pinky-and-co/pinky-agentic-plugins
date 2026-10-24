@@ -4,9 +4,9 @@ cheap standalone alternative to `adversarial`/`reviewer` when those read a paste
 the repo itself. Not wired into `finishing-a-card.md`'s review steps — callable on its own, the
 loop integration is a separate, deliberately unstarted subject.
 
-Takes a card's absolute path and a repo's absolute path, and renders one structured constat per
+Takes a card's absolute path and a repo's absolute path, and renders one structured finding per
 `### N. <title>` point of the card's `## Done when` section (the whole section as a single point
-when it carries no such subheadings). Never edits, commits, or moves the card — constats only; the
+when it carries no such subheadings). Never edits, commits, or moves the card — findings only; the
 triage stays with the orchestrator that invoked this script.
 
 Model choice: `model_adversarial.select_for_delegation(pool, "haiku")`, filtered to `kind == "cli"`
@@ -90,7 +90,7 @@ def review_candidates(pool: list[dict]) -> list[dict]:
 def review_point(
     entries: list[dict], repo: str, title: str, body: str, timeout: int | None
 ) -> dict:
-    """One constat: `{point, status, detail, model}` — `status` one of `OK`/`GAP`/`ERROR`.
+    """One finding: `{point, status, detail, model}` — `status` one of `OK`/`GAP`/`ERROR`.
 
     `ERROR` covers both a critical `pi` failure and a fully exhausted pool — never a fabricated
     verdict.
@@ -141,11 +141,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"error": "no cli-kind candidate in the pool"}))
         return 1
 
-    constats = [
+    findings = [
         review_point(entries, args.repo, title, body, args.timeout)
         for title, body in points
     ]
-    print(json.dumps(constats, indent=2, ensure_ascii=False))
+    print(json.dumps(findings, indent=2, ensure_ascii=False))
     return 0
 
 

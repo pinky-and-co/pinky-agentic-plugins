@@ -27,10 +27,10 @@ Two main use cases: RAG (retrieval-augmented generation) and enterprise search.
 ### Single-index (one searchable column)
 
 ```sql
-CREATE OR REPLACE CORTEX SEARCH SERVICE minute_culture_search
-    ON contenu                              -- text column to search
+CREATE OR REPLACE CORTEX SEARCH SERVICE video_library_search
+    ON content                              -- text column to search
     PRIMARY KEY (id)                        -- enables optimised incremental refresh
-    ATTRIBUTES matiere, niveau, source      -- filterable columns
+    ATTRIBUTES subject, level, source      -- filterable columns
     WAREHOUSE = my_wh                       -- dedicated warehouse recommended
     TARGET_LAG = '1 hour'                   -- max lag behind source table
     EMBEDDING_MODEL = 'snowflake-arctic-embed-m-v1.5'  -- default, can omit
@@ -39,45 +39,45 @@ CREATE OR REPLACE CORTEX SEARCH SERVICE minute_culture_search
     REQUEST_LOGGING = TRUE                  -- log queries for monitoring
     AUTO_SUSPEND = 3600                     -- suspend serving after 1h inactivity
 AS
-    SELECT id, titre, contenu, matiere, niveau, source, video_url
-    FROM minute_culture;
+    SELECT id, title, content, subject, level, source, video_url
+    FROM video_library;
 ```
 
 ### Multi-index (multiple searchable columns — GA March 2026)
 
 ```sql
-CREATE OR REPLACE CORTEX SEARCH SERVICE minute_culture_search
-    TEXT INDEXES contenu, titre             -- both columns searchable
-    VECTOR INDEXES contenu(model='snowflake-arctic-embed-m-v1.5')
+CREATE OR REPLACE CORTEX SEARCH SERVICE video_library_search
+    TEXT INDEXES content, title             -- both columns searchable
+    VECTOR INDEXES content(model='snowflake-arctic-embed-m-v1.5')
     PRIMARY KEY (id)
-    ATTRIBUTES matiere, niveau, source
+    ATTRIBUTES subject, level, source
     WAREHOUSE = my_wh
     TARGET_LAG = '1 hour'
 AS
-    SELECT id, titre, contenu, matiere, niveau, source, video_url
-    FROM minute_culture;
+    SELECT id, title, content, subject, level, source, video_url
+    FROM video_library;
 ```
 
 Multi-index requires at least one VECTOR INDEXES column — TEXT INDEXES alone is not valid.
 
 ---
 
-## Source table design — minute_culture example
+## Source table design — video_library example
 
 ```sql
-CREATE TABLE minute_culture (
+CREATE TABLE video_library (
     id          VARCHAR NOT NULL,           -- PRIMARY KEY for incremental refresh
-    titre       VARCHAR,                    -- short title — searchable (multi-index)
-    contenu     TEXT,                       -- main searchable text chunk
-    matiere     VARCHAR,                    -- ATTRIBUTE filter: maths, svt, histoire...
-    niveau      VARCHAR,                    -- ATTRIBUTE filter: 6e, 5e, 4e, 3e
-    source      VARCHAR,                    -- ATTRIBUTE filter: arte_vortex, datagueule, lumni
+    title       VARCHAR,                    -- short title — searchable (multi-index)
+    content     TEXT,                       -- main searchable text chunk
+    subject     VARCHAR,                    -- ATTRIBUTE filter: maths, biology, history...
+    level       VARCHAR,                    -- ATTRIBUTE filter: grade6, grade7, grade8, grade9
+    source      VARCHAR,                    -- ATTRIBUTE filter: channel_a, channel_b, channel_c
     video_url   VARCHAR,                    -- returned in results, not searched
     tags        ARRAY                       -- optional metadata
 );
 
 -- Enable change tracking for INCREMENTAL refresh
-ALTER TABLE minute_culture SET CHANGE_TRACKING = TRUE;
+ALTER TABLE video_library SET CHANGE_TRACKING = TRUE;
 ```
 
 **Chunking strategy:** each row = one chunk. For long content (article, transcript summary),
@@ -136,29 +136,29 @@ root = Root(session)
 search_service = (
     root.databases["my_db"]
     .schemas["my_schema"]
-    .cortex_search_services["minute_culture_search"]
+    .cortex_search_services["video_library_search"]
 )
 
 # Simple query
 resp = search_service.search(
-    query="comment fonctionne la photosynthèse",
-    columns=["titre", "contenu", "source", "video_url"],
+    query="how does photosynthesis work",
+    columns=["title", "content", "source", "video_url"],
     limit=3,
 )
 
 # With attribute filter
 resp = search_service.search(
-    query="théorème de Pythagore triangle rectangle",
-    columns=["titre", "contenu", "source", "video_url"],
-    filter={"@eq": {"matiere": "maths"}},
+    query="Pythagorean theorem right triangle",
+    columns=["title", "content", "source", "video_url"],
+    filter={"@eq": {"subject": "maths"}},
     limit=2,
 )
 
 # With combined filter (AND)
 resp = search_service.search(
-    query="révolution française causes",
-    columns=["titre", "contenu", "video_url"],
-    filter={"@and": [{"@eq": {"matiere": "histoire"}}, {"@eq": {"niveau": "4e"}}]},
+    query="causes of the French Revolution",
+    columns=["title", "content", "video_url"],
+    filter={"@and": [{"@eq": {"subject": "history"}}, {"@eq": {"level": "grade8"}}]},
     limit=2,
 )
 
@@ -185,7 +185,7 @@ results = resp.results  # list of dicts
 SELECT *
 FROM TABLE(
     INFORMATION_SCHEMA.CORTEX_SEARCH_SERVICE_REQUEST_HISTORY(
-        SERVICE_NAME => 'minute_culture_search'
+        SERVICE_NAME => 'video_library_search'
     )
 )
 ORDER BY start_time DESC

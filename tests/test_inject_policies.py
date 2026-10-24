@@ -61,11 +61,19 @@ class TestDetectArtefactTypes(unittest.TestCase):
             ["private_docs"],
         )
 
-    def test_edit_brainstorm_skill_outside_docs_is_not_private_docs(self):
+    def test_edit_plugin_skill_md_returns_code_types(self):
         self.assertEqual(
             ip.detect_artefact_types(
                 "Edit",
                 {"file_path": "plugins/pc-kanban/skills/brainstorm/SKILL.md"},
+            ),
+            ["code_identifiers", "docstrings", "inline_comments"],
+        )
+
+    def test_edit_md_outside_plugins_keeps_empty_result(self):
+        self.assertEqual(
+            ip.detect_artefact_types(
+                "Edit", {"file_path": "skills/brainstorm/SKILL.md"}
             ),
             [],
         )
