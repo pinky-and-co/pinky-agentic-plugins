@@ -13,7 +13,9 @@ from pathlib import Path
 sys.path.insert(
     0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "hooks")
 )
+sys.path.insert(0, str(Path(__file__).parent.parent / "plugins" / "pc-models" / "mcp"))
 
+import model_adversarial as ma
 import reviewer_gate as rg
 
 
@@ -122,6 +124,16 @@ class TestReviewerGate(unittest.TestCase):
         self.transcript.write_text(
             _notification_line("[adversarial] ERROR — wall-clock cap (1800s) reached.")
         )
+        self.assertIsNone(self._decision(self._payload()))
+
+    def test_allows_after_the_no_tools_tool_call_text_error(self):
+        # L'ERROR immédiat d'un appel sans outils qui reçoit du texte d'appel d'outil — le
+        # message réel produit par `render_pool_failure`, pas une copie : le hook doit le
+        # déverrouiller par son préfixe, sans être modifié.
+        self._dirty()
+        line = ma.render_pool_failure(f"glm-5-2: {ma.TOOL_CALL_TEXT_ERROR}")
+        assert line.startswith("[adversarial] ERROR")
+        self.transcript.write_text(_result_line(json.dumps({"result": line})))
         self.assertIsNone(self._decision(self._payload()))
 
     def test_denies_after_successful_background_task_notification(self):

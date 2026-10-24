@@ -160,7 +160,7 @@ class TestRunPanel(unittest.TestCase):
                 }
             ),
         ):
-            resp = mp.run_panel([GLM, MISTRAL, GEMINI], ["p1", "p2", "p3"])
+            resp = mp.run_panel([GLM, MISTRAL, GEMINI], ["p1", "p2", "p3"], tools=[])
         self.assertEqual(
             resp.answers,
             [
@@ -194,7 +194,7 @@ class TestRunPanel(unittest.TestCase):
                 }
             ),
         ):
-            resp = mp.run_panel([GLM, MISTRAL, GEMINI], ["p1", "p2", "p3"])
+            resp = mp.run_panel([GLM, MISTRAL, GEMINI], ["p1", "p2", "p3"], tools=[])
         # le slot 2 est mort ; les survivants gardent 1 et 3 — l'appelant associe slot -> lentille
         self.assertEqual(
             resp.answers,
@@ -222,7 +222,7 @@ class TestRunPanel(unittest.TestCase):
                 {"z-ai/glm-5-2": subprocess.TimeoutExpired("pi", 180)}, seen
             ),
         ):
-            resp = mp.run_panel([GLM], ["p1"])
+            resp = mp.run_panel([GLM], ["p1"], tools=[])
         self.assertEqual(resp.answers, [])
         self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "no answer within 180s")])
         self.assertEqual(list(seen), ["z-ai/glm-5-2"])  # une seule tentative
@@ -231,7 +231,7 @@ class TestRunPanel(unittest.TestCase):
         with unittest.mock.patch.object(
             mp.ma, "call_cli", self._fake_cli({"z-ai/glm-5-2": "  \n"})
         ):
-            resp = mp.run_panel([GLM], ["p1"])
+            resp = mp.run_panel([GLM], ["p1"], tools=[])
         self.assertEqual(resp.answers, [])
         self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "empty answer")])
 
@@ -243,7 +243,7 @@ class TestRunPanel(unittest.TestCase):
             return "answer"
 
         with unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli):
-            mp.run_panel([GLM], ["p1"])
+            mp.run_panel([GLM], ["p1"], tools=[])
         self.assertEqual(seen["timeout"], 180)
 
     def test_entry_timeout_is_passed_and_reported(self):
@@ -254,32 +254,69 @@ class TestRunPanel(unittest.TestCase):
             raise subprocess.TimeoutExpired("pi", timeout)
 
         with unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli):
-            resp = mp.run_panel([{**GLM, "timeout": 300}], ["p1"])
+            resp = mp.run_panel([{**GLM, "timeout": 300}], ["p1"], tools=[])
         self.assertEqual(seen["timeout"], 300)
         self.assertEqual(resp.skipped, [mp.Skip(1, "glm-5-2", "no answer within 300s")])
 
     def test_http_entry_is_skipped_never_raised(self):
         http_entry = {**MISTRAL, "kind": "http"}
-        resp = mp.run_panel([http_entry], ["p1"])
+        resp = mp.run_panel([http_entry], ["p1"], tools=[])
         self.assertEqual(resp.answers, [])
         self.assertEqual(resp.skipped[0].slot, 1)
         self.assertIn("kind 'http' is no longer supported", resp.skipped[0].reason)
 
     def test_offline_entry_slipping_through_is_skipped_never_called(self):
         with unittest.mock.patch.object(mp.ma, "call_cli") as cc:
-            resp = mp.run_panel([OFFLINE], ["p1"])
+            resp = mp.run_panel([OFFLINE], ["p1"], tools=[])
         cc.assert_not_called()
         self.assertEqual(resp.answers, [])
         self.assertEqual(resp.skipped[0].slot, 1)
         self.assertIn("offline", resp.skipped[0].reason)
 
     def test_no_entries_yields_empty_response(self):
-        resp = mp.run_panel([], [])
+        resp = mp.run_panel([], [], tools=[])
         self.assertEqual(resp, mp.PanelResponse([], []))
 
     def test_entries_prompts_length_mismatch_raises(self):
         with self.assertRaises(ValueError):
-            mp.run_panel([GLM, MISTRAL], ["only one prompt"])
+            mp.run_panel([GLM, MISTRAL], ["only one prompt"], tools=[])
+
+    def test_a_slot_answering_tool_call_text_under_no_tools_is_skipped_naming_tools(
+        self,
+    ):
+        # Deux entrées, l'une répond en texte d'appel d'outil (DSML) sous un appel sans outils :
+        # elle est marquée échouée avec `tools` en cause probable, l'autre est interrogée et rend
+        # son avis — l'échec d'un slot n'entraîne pas celui du panel.
+        dsml_call = (
+            "<\uff5cDSML\uff5c tool_calls>\n"
+            '<\uff5cDSML\uff5c invoke name="read">\n'
+            "</\uff5cDSML\uff5c invoke>\n"
+            "</\uff5cDSML\uff5c calls>"
+        )
+        with unittest.mock.patch.object(
+            mp.ma,
+            "call_cli",
+            self._fake_cli(
+                {"z-ai/glm-5-2": dsml_call, "mistral-medium-3.5": "a healthy review"}
+            ),
+        ):
+            resp = mp.run_panel([GLM, MISTRAL], ["p1", "p2"], tools=[])
+        self.assertEqual(
+            resp.answers,
+            [
+                mp.Answer(
+                    2,
+                    "mistral-medium-3.5",
+                    "a healthy review",
+                    "mistral/mistral-medium-3.5 · 🟧 opus",
+                )
+            ],
+        )
+        self.assertEqual(resp.skipped[0].slot, 1)
+        self.assertEqual(resp.skipped[0].model, "glm-5-2")
+        self.assertEqual(resp.skipped[0].reason, mp.ma.TOOL_CALL_TEXT_ERROR)
+        # Le rapport nomme `tools` comme cause probable de l'échec du slot.
+        self.assertIn("tools", mp.format_panel(resp, requested=2))
 
     def test_each_slot_gets_its_own_prompt_and_the_requested_tools(self):
         seen: dict = {}
@@ -314,7 +351,7 @@ class TestRunPanelSecrets(unittest.TestCase):
             ) as secrets,
             unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli),
         ):
-            mp.run_panel([GLM, MISTRAL], ["p1", "p2"])
+            mp.run_panel([GLM, MISTRAL], ["p1", "p2"], tools=[])
         self.assertEqual(secrets.call_count, 1)
         self.assertEqual(envs, [{"K": "v"}, {"K": "v"}])
 
@@ -402,7 +439,7 @@ class TestRunPanelLiveView(unittest.TestCase):
                 unittest.mock.patch.object(mp.ma, "call_cli", fake_call_cli),
             ):
                 run = mp.pi_live.open_run(str(mp.pi_live.runs_dir() / "toolu_p"))
-                resp = mp.run_panel([GLM, MISTRAL], ["p1", "p2"], live=run)
+                resp = mp.run_panel([GLM, MISTRAL], ["p1", "p2"], tools=[], live=run)
             views = {
                 p.name: re.sub(r"\[ *\d+\.\ds\] ", "", p.read_text())
                 for p in sorted(run.glob("view-*.txt"))

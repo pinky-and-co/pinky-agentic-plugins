@@ -23,9 +23,12 @@ server's own environment or in a session's. A custom provider reads its key with
 ``"apiKey": "$<NAME>"``. Adding a provider pi does not know is a ``models.json`` edit plus a
 ``keys`` entry, never a code change here.
 
-Tools are chosen per call: none by default (``--no-tools``), or an allowlist (``-t read,grep``)
-when the caller needs the model to look at files itself. An entry that cannot run a tool loop says
-so with ``tools: false`` and is then never a candidate for a call that passes tools.
+Tools are an explicit per-call choice on every path that launches pi: ``tools`` is required and
+``[]`` means ``--no-tools`` — an allowlist (``-t read,grep``) is passed when the caller needs the
+model to look at files itself. A model asked to open files under a call that passed ``[]`` answers
+tool-call text, which fails the call immediately (``TOOL_CALL_TEXT_ERROR``). An entry that cannot
+run a tool loop says so with ``tools: false`` and is then never a candidate for a call that passes
+tools.
 
 Provider memory: the provider of the last entry that answered is kept in
 ``${CLAUDE_PLUGIN_DATA}/model_pool_state.json`` (key ``last_ok_provider``), a folder Claude Code
@@ -144,11 +147,19 @@ _OUT_OF_MEMORY_RE = re.compile(r"out_of_memory|GPU memory")
 _INSUFFICIENT_CREDIT_RE = re.compile(r"\b402\b")
 _ORGANIZATION_LIMIT_RE = re.compile(r"\borgani[sz]ation reached\b", re.IGNORECASE)
 _TIMEOUT_RE = re.compile(r"\btimed out\b")
-# Une réponse qui finit sur une balise fermante d'appel d'outil (`</tool_call>`, `</function>`,
-# singulier ou pluriel, ou `</｜DSML｜ calls>`) est un appel écrit en texte, jamais un avis ;
-# l'ancre est la fin du texte, une balise citée au milieu ne compte pas.
+# Une réponse finissant sur une balise d'appel d'outil (fermante, DSML compris, ou ouvrante jamais
+# refermée) est un appel écrit en texte, jamais un avis. L'ancre est la fin du texte : une balise
+# citée au milieu ne compte pas.
 _TOOL_CALL_TAIL_RE = re.compile(
-    r"</(?:(?:function|tool_call)s?|\uff5cDSML\uff5c[^<>]*)>\s*\Z"
+    r"(?:</(?:(?:function|tool_call)s?|\uff5cDSML\uff5c[^<>]*)>\s*"
+    r"|<(?:(?:function|tool_call)s?|\uff5cDSML\uff5c[^<>]*)>(?:\s*\n[^<]*|\s*))\Z"
+)
+
+#: Why a no-tools call fails on tool-call text: the diagnostic is config-level (the call forbids
+#: what the prompt asks), not candidate-level — the same message marks the failed `panel` slot.
+TOOL_CALL_TEXT_ERROR = (
+    "tool-call text under a call that passed no tools \u2014 the prompt asks for tool use the "
+    'call forbids; pass tools (e.g. ["read", "grep"]) or inline what the model needs'
 )
 
 
@@ -990,7 +1001,7 @@ def call_cli(
     entry: dict[str, Any],
     prompt: str,
     timeout: int | None,
-    tools: list[str] | None = None,
+    tools: list[str],
     env: dict[str, str] | None = None,
     events: EventSink | None = None,
 ) -> str:
@@ -1006,7 +1017,7 @@ def call_cli(
             never read as an option.
         timeout: seconds before `subprocess.TimeoutExpired`; the process is killed. None waits
             without a bound.
-        tools: pi tool names to allow (`-t read,grep`); None or empty means `--no-tools`.
+        tools: required — pi tool names to allow (`-t read,grep`); `[]` means `--no-tools`.
         env: variables layered over this process's environment for pi — the provider keys.
             None reads them with `secret_env`; a caller making several calls passes them once.
         events: where each raw event line is copied as it arrives, for the views that follow
@@ -1218,8 +1229,8 @@ _RESULT_DETAIL_CHARS = 100
 def run_pool(
     entries: list[dict[str, Any]],
     prompt: str,
+    tools: list[str],
     timeout: int | None = RUN_TIMEOUT,
-    tools: list[str] | None = None,
     watch: bool = False,
     live: Path | None = None,
 ) -> PoolResult:
@@ -1234,10 +1245,13 @@ def run_pool(
     to serve for the rest of this run: the entry is dropped for good, never requeued. A 402 or an
     organization-wide 429 (`is_provider_wide_limit`) is the provider's own, so its other queued
     entries are skipped too; a 429 naming one model skips only that entry. An empty
-    answer, an answer ending on a closing tool-call tag (a call written as text by a model that
-    had no tools) or a timeout `pi` itself reports (`is_timeout`) is transient: the entry is appended to
+    answer or a timeout `pi` itself reports (`is_timeout`) is transient: the entry is appended to
     the end of the remaining queue once; a second such failure from the same entry drops it for
-    good — at most `2 * len(entries)` attempts, never an infinite loop. `timeout` is the wall
+    good — at most `2 * len(entries)` attempts, never an infinite loop. An answer ending on a
+    closing tool-call tag (a call written as text) is transient the same way when tools were
+    passed; under `tools=[]` it is a config-level failure instead — the run stops there and
+    returns `TOOL_CALL_TEXT_ERROR` (see `render_pool_failure`), because every other candidate
+    would answer the same text to the same forbidden prompt. `timeout` is the wall
     clock of the whole `pi` run, tool loop included; the default (None) sets none — `pi` bounds
     each request itself (`retry.provider.timeoutMs`, `httpIdleTimeoutMs`), nothing bounds a tool
     loop that never ends. An entry's own `timeout` always cuts, and a
@@ -1260,9 +1274,9 @@ def run_pool(
     Args:
         entries: the candidates, in the order to try them.
         prompt: the text sent to each.
+        tools: required — pi tool names the model may use; `[]` means none.
         timeout: the default wall clock per entry, overridden by an entry's own `timeout`;
             None sets no bound.
-        tools: pi tool names the model may use; None or empty means none.
         watch: open the cmux split described above.
         live: the run directory of the `pi-view` mod, or None.
 
@@ -1304,7 +1318,7 @@ def _run_pool(
     entries: list[dict[str, Any]],
     prompt: str,
     timeout: int | None,
-    tools: list[str] | None,
+    tools: list[str],
     events: EventSink | None,
 ) -> PoolResult:
     """`run_pool`'s queue, with a marker line before each attempt in `events` when there is one."""
@@ -1362,7 +1376,9 @@ def _run_pool(
                     "attempt": attempts[idx],
                 },
             )
-            answer = call_cli(entry, prompt, call_timeout, tools, env, events)
+            answer = call_cli(
+                entry, prompt, call_timeout, tools=tools, env=env, events=events
+            )
         except subprocess.CalledProcessError as e:
             # Les deux flux, pas un seul : un fournisseur peut écrire son code d'erreur sur
             # stdout pendant que stderr porte autre chose.
@@ -1450,8 +1466,12 @@ def _run_pool(
                 requeue_once(idx)
             elif _TOOL_CALL_TAIL_RE.search(answer):
                 _emit_result(events, entry, attempts[idx], "tool call text")
-                last_error = f"{entry['name']}: tool call text instead of an answer"
                 log_pool_event(entry["name"], "tool call text", **answered)
+                if not tools:
+                    # Échec de config, pas de candidat : chaque suivant répondrait le même
+                    # texte au même prompt interdit — le run s'arrête ici.
+                    return PoolResult(None, f"{entry['name']}: {TOOL_CALL_TEXT_ERROR}")
+                last_error = f"{entry['name']}: tool call text instead of an answer"
                 requeue_once(idx)
             else:
                 _emit_result(events, entry, attempts[idx], "answered")
@@ -1463,6 +1483,24 @@ def _run_pool(
     return PoolResult(None, last_error)
 
 
+def render_pool_failure(result: str | None) -> str:
+    """The `[adversarial]` line for a pool run that answered nothing: ERROR when the failure is
+    config-level (tool-call text under a call that passed no tools — another candidate would
+    answer the same), BLOCKED when the pool itself failed.
+
+    Args:
+        result: the failing `PoolResult.result`.
+
+    Returns:
+        The line, opening with the prefix `reviewer_gate.py` unlocks on.
+    """
+    if result and TOOL_CALL_TEXT_ERROR in result:
+        return f"[adversarial] ERROR — {result}"
+    if result is None:
+        return "[adversarial] BLOCKED — every candidate failed."
+    return f"[adversarial] BLOCKED — every candidate failed. Last: {result}"
+
+
 def _check_one(entry: dict[str, Any], timeout: int, env: dict[str, str]) -> PoolCheck:
     """Send `CHECK_PROMPT` to one entry, with no tools, and time the answer."""
     if entry.get("kind") == "offline":
@@ -1472,7 +1510,7 @@ def _check_one(entry: dict[str, Any], timeout: int, env: dict[str, str]) -> Pool
     timeout = entry_timeout(entry, timeout)
     start = time.monotonic()
     try:
-        answer = call_cli(entry, CHECK_PROMPT, timeout, env=env).strip()
+        answer = call_cli(entry, CHECK_PROMPT, timeout, tools=[], env=env).strip()
     except subprocess.CalledProcessError as e:
         detail = failure_detail(e)
     except subprocess.TimeoutExpired:
@@ -1671,7 +1709,7 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         dest="tools",
-        help="a pi tool the model may use (repeatable); none by default",
+        help="a pi tool the model may use (repeatable); no tools without any",
     )
     ap.add_argument(
         "--check-pool",
@@ -1715,7 +1753,7 @@ def main(argv: list[str] | None = None) -> int:
         entries = [{**_DEFAULT_POOL[0], "model": override, "name": override}]
     else:
         entries = select_for_adversarial(
-            load_pool(), rng=random.Random(), tools=args.tools or None
+            load_pool(), rng=random.Random(), tools=args.tools
         )
 
     if not entries:
@@ -1725,12 +1763,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     t = time.time()
-    pool_result = run_pool(entries, prompt, tools=args.tools or None)
+    pool_result = run_pool(entries, prompt, tools=args.tools)
     if pool_result.entry is None:
-        print(
-            f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}",
-            file=sys.stderr,
-        )
+        print(render_pool_failure(pool_result.result), file=sys.stderr)
         return 2
 
     print(

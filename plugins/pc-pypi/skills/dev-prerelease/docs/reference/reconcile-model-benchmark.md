@@ -4,7 +4,7 @@ title: Reconcile benchmark
 
 # Reconcile model benchmark
 
-*Update date : 2026-08-31 19:41*
+*Update date : 2026-10-24 11:12*
 
 The `dev-prerelease` Step 0b model pass is **advisory**. This records which model + brief clears the
 reconcile oracle (`../../evals/reconcile_oracle.py`, 2 frozen fixtures) and which do not, so the
@@ -28,8 +28,8 @@ Re-run: `python3 evals/reconcile_oracle.py --transport {offline|panel} [--model 
 | **fallback** | `mistral-medium-3.5` | `panel`, model pinned | `signature` | **3/3** | **clean** |
 | last resort | — | — | — | reconcile skipped, release continues |
 
-The `panel` default selection (`cohere-command-a`) is **not** used — it fails both axes. The
-fallback pins `mistral-medium-3.5` explicitly.
+The skill pins no model: the pool picks, so a `panel` answer is a lead to verify by hand. The
+rows above are the measurement, not a selection to reproduce.
 
 ## Why the `signature` brief
 

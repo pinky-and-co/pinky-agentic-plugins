@@ -11,8 +11,9 @@ question to N models, repeat it in the batch. **No review posture is injected** 
 a council's lenses are not all adversarial.
 
 Dual-use: standalone CLI (below) and an importable library for the MCP server, which calls these
-functions directly. Pool resolution and the `pi` call (`call_cli`, tools none by default) are reused
-from `model_adversarial` — this module only adds the selection policy and the parallel dispatch.
+functions directly. Pool resolution and the `pi` call (`call_cli`, `tools` required — `[]` means no
+tools) are reused from `model_adversarial` — this module only adds the selection policy and the
+parallel dispatch.
 
 Eligibility for a slot: `kind` is `cli` (never `offline` — that has its own zero-egress tool) and
 `capacity_tier` is `sonnet` or `opus` by default (a `haiku`-tier model cannot hold an advisor
@@ -167,7 +168,7 @@ def _dispatch_one(
     entry: dict,
     prompt: str,
     timeout: int,
-    tools: list[str] | None,
+    tools: list[str],
     env: dict[str, str],
     events: ma.EventSink | None = None,
 ) -> _SlotResult:
@@ -175,7 +176,8 @@ def _dispatch_one(
 
     Every failure mode (pi error, timeout, missing `pi`, a non-`cli` entry) becomes a reason string,
     so one dead entry in a parallel batch cannot take the batch down. An empty answer is a failure
-    too. The entry's own `timeout`, when set, replaces the batch default.
+    too, and so is tool-call text under `tools=[]` (reason `ma.TOOL_CALL_TEXT_ERROR`) — the call
+    forbids what the prompt asks. The entry's own `timeout`, when set, replaces the batch default.
     """
     timeout = ma.entry_timeout(entry, timeout)
     try:
@@ -190,14 +192,16 @@ def _dispatch_one(
         return _SlotResult(entry, None, str(exc))
     if not answer.strip():
         return _SlotResult(entry, None, "empty answer")
+    if not tools and ma._TOOL_CALL_TAIL_RE.search(answer):
+        return _SlotResult(entry, None, ma.TOOL_CALL_TEXT_ERROR)
     return _SlotResult(entry, answer.strip(), None)
 
 
 def run_panel(
     entries: list[dict],
     prompts: list[str],
+    tools: list[str],
     timeout: int = DEFAULT_TIMEOUT,
-    tools: list[str] | None = None,
     live: Path | None = None,
 ) -> PanelResponse:
     """Send `prompts[i]` to `entries[i]` in parallel; collect answers in the entries' own order.
@@ -208,8 +212,10 @@ def run_panel(
     `entries` is expected pre-filtered by `select_for_panel`, which guarantees one entry per
     provider, so the fan-out never sends two concurrent calls to one provider and no per-provider
     `concurrency` cap is consulted. An `offline` entry slipping through is skipped, never called.
-    `tools` goes to every slot's `pi` call — none by default. `live` (a directory
-    `pi_live.open_run` created) gets one `view-<slot>.txt` per slot, for the `pi-view` mod.
+    `tools` (required) goes to every slot's `pi` call — `[]` means no tools, and a slot that then
+    answers tool-call text is skipped with `ma.TOOL_CALL_TEXT_ERROR` as its reason. `live` (a
+    directory `pi_live.open_run` created) gets one `view-<slot>.txt` per slot, for the `pi-view`
+    mod.
     """
     if len(entries) != len(prompts):
         raise ValueError(
@@ -306,12 +312,12 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         dest="tools",
-        help="a pi tool every model may use (repeatable); none by default",
+        help="a pi tool every model may use (repeatable); no tools without any",
     )
     args = ap.parse_args(argv)
 
     entries = select_for_panel(
-        ma.load_pool(), len(args.tasks), args.models, tools=args.tools or None
+        ma.load_pool(), len(args.tasks), args.models, tools=args.tools
     )
     if not entries:
         print(
@@ -322,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
 
     prompts = args.tasks[: len(entries)]
     start = time.time()
-    response = run_panel(entries, prompts, tools=args.tools or None)
+    response = run_panel(entries, prompts, tools=args.tools)
     if not response.answers:
         print(
             f"[panel] BLOCKED — every candidate failed. Skipped: {response.skipped}",

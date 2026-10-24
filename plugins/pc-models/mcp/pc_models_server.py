@@ -179,11 +179,11 @@ def offline(
 @_tool
 def adversarial(
     task: str,
+    tools: list[str],
     files: list[str] | None = None,
     model: str | None = None,
     stack: str | None = None,
     tier: str | None = None,
-    tools: list[str] | None = None,
     base: str | None = None,
     scope: Literal["all", "staged", "unstaged"] = "all",
     events: str | None = None,
@@ -218,8 +218,10 @@ def adversarial(
     capacity (raised to `sonnet` when lower) — free before paid — instead of the default
     adversarial selection.
 
-    `tools` (pi tool names, e.g. `["read", "grep"]`) lets the model open files itself; omitted →
-    no tools, the model sees only the prompt and the inlined `files`.
+    `tools` (required — pi tool names, e.g. `["read", "grep"]`) lets the model open files itself;
+    `[]` means no tools: the model sees only the prompt and the inlined `files`, and a model that
+    then answers tool-call text fails the call with an ERROR naming `tools` — pass them when the
+    task pushes the model to read anything.
 
     `base` (a branch or ref, e.g. `main`; `HEAD` for work not yet committed) makes the tool compute
     the change under review itself: everything this work changed since it forked from `base` —
@@ -289,7 +291,7 @@ def adversarial(
         entries, prompt, tools=tools, watch=True, live=pi_live.open_run(events)
     )
     if pool_result.entry is None:
-        return f"[adversarial] BLOCKED — every candidate failed. Last: {pool_result.result}"
+        return model_adversarial.render_pool_failure(pool_result.result)
     return (
         f"[answered by {model_adversarial.answer_label(pool_result.entry)}]\n\n"
         f"{pool_result.result}\n\n[raw: {model_sanitize.raw_log_path()}]"
@@ -299,9 +301,9 @@ def adversarial(
 @_tool
 def panel(
     tasks: list[str],
+    tools: list[str],
     models: list[str] | None = None,
     tier: str | list[str] | None = None,
-    tools: list[str] | None = None,
     events: str | None = None,
 ) -> str:
     """Send one prompt PER SLOT to a DIFFERENT model family each, in parallel; return every answer.
@@ -315,8 +317,9 @@ def panel(
     or left unfilled (pool has fewer eligible families than requested). `offline` entries are never
     used. By default only sonnet/opus-tier models are eligible; pass `tier` (a `capacity_tier` name
     or a list of them, e.g. `"haiku"`) to select from those tiers instead — for a non-advisor task
-    that wants a small deterministic model. `tools` (pi tool names) is given to every slot;
-    omitted → no tools.
+    that wants a small deterministic model. `tools` (required — pi tool names) is given to every
+    slot; `[]` means no tools, and a slot that then answers tool-call text is skipped with `tools`
+    named as the probable cause in the header.
 
     `events` is set by pc-models' `pi-view` mod, which draws the run live in this call's row;
     leave it unset.

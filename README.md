@@ -643,6 +643,7 @@ pinky-agentic-plugins/
 │   ├── test_reconcile.py
 │   ├── test_reconcile_oracle.py
 │   ├── test_repo_path_flag.py
+│   ├── test_review_local_standalone.py
 │   ├── test_reviewer_gate.py
 │   ├── test_secret_patterns.py
 │   ├── test_settings_commit_nudge.py

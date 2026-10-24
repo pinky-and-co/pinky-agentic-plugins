@@ -140,7 +140,7 @@ class CallCliSanitizedTest(unittest.TestCase):
         )
         proc = FakePiProcess(events, "", 0, None, [])
         with unittest.mock.patch("model_adversarial.Popen", return_value=proc):
-            return ma.call_cli(DEEPSEEK, "p", 30)
+            return ma.call_cli(DEEPSEEK, "p", 30, [])
 
     def test_payload_has_no_reasoning_and_raw_is_kept(self):
         answer = self._run()
@@ -162,7 +162,7 @@ class CallCliSanitizedTest(unittest.TestCase):
         events = pi_events(text="## Findings\n- one\n")
         proc = FakePiProcess(events, "", 0, None, [])
         with unittest.mock.patch("model_adversarial.Popen", return_value=proc):
-            self.assertEqual(ma.call_cli(DEEPSEEK, "p", 30), "## Findings\n- one\n")
+            self.assertEqual(ma.call_cli(DEEPSEEK, "p", 30, []), "## Findings\n- one\n")
 
 
 class RunPoolSanitizedTest(unittest.TestCase):
@@ -175,7 +175,7 @@ class RunPoolSanitizedTest(unittest.TestCase):
         )
         proc = FakePiProcess(events, "", 0, None, [])
         with unittest.mock.patch("model_adversarial.Popen", return_value=proc):
-            result = ma.run_pool([DEEPSEEK], "p")
+            result = ma.run_pool([DEEPSEEK], "p", tools=[])
         self.assertEqual(result, ma.PoolResult(DEEPSEEK, "## Findings\nthe report"))
 
 

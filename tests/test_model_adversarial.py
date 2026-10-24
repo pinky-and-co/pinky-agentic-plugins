@@ -579,13 +579,13 @@ class TestLoadPool(unittest.TestCase):
 class TestRunPool(unittest.TestCase):
     def test_offline_entry_is_never_called(self):
         # seulement une entrée offline : échec sans jamais appeler pi
-        result = ma.run_pool([OFFLINE], "prompt")
+        result = ma.run_pool([OFFLINE], "prompt", tools=[])
         self.assertIsNone(result.entry)
         self.assertIn("offline entries are not callable", result.result)
 
     def test_http_entry_is_refused_with_how_to_migrate(self):
         http_entry = {**MISTRAL, "kind": "http"}
-        result = ma.run_pool([http_entry], "prompt")
+        result = ma.run_pool([http_entry], "prompt", tools=[])
         self.assertIsNone(result.entry)
         self.assertEqual(
             result.result,
@@ -611,7 +611,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[self._empty(), self._ok("answer")],
         ) as run:
-            result = ma.run_pool([MISTRAL], "p")
+            result = ma.run_pool([MISTRAL], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
 
@@ -631,7 +631,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[self._ok(text_call), self._ok("answer")],
         ) as run:
-            result = ma.run_pool([MISTRAL], "p")
+            result = ma.run_pool([MISTRAL], "p", tools=["read"])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
 
@@ -646,7 +646,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             unittest.mock.patch.object(ma, "call_cli", side_effect=[text_call] * 2),
             unittest.mock.patch.object(ma, "write_last_ok_provider") as write,
         ):
-            result = ma.run_pool([MISTRAL], "p")
+            result = ma.run_pool([MISTRAL], "p", tools=["read"])
         self.assertIsNone(result.entry)
         self.assertEqual(
             result.result, "mistral-medium-3.5: tool call text instead of an answer"
@@ -660,7 +660,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[subprocess.TimeoutExpired("pi", 900), self._ok("answer")],
         ) as run:
-            result = ma.run_pool([MISTRAL], "p")
+            result = ma.run_pool([MISTRAL], "p", tools=[])
         self.assertEqual(run.call_count, 1)
         self.assertIsNone(result.entry)
         self.assertEqual(
@@ -674,7 +674,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[subprocess.TimeoutExpired("pi", 900), self._ok("answer")],
         ) as run:
-            result = ma.run_pool([MISTRAL, GLM], "p")
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(GLM, "answer"))
 
@@ -683,7 +683,7 @@ class TestRunPoolRequeue(unittest.TestCase):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
         ) as run:
-            ma.run_pool([MISTRAL], "p")
+            ma.run_pool([MISTRAL], "p", tools=[])
         self.assertEqual(run.wait_timeouts, [None])
 
     def test_timeout_marker_in_a_process_error_is_transient_too(self):
@@ -693,7 +693,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[timeout_error, self._ok("answer")],
         ) as run:
-            result = ma.run_pool([MISTRAL], "p")
+            result = ma.run_pool([MISTRAL], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(MISTRAL, "answer"))
 
@@ -703,7 +703,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[self._empty(), self._empty()],
         ) as run:
-            result = ma.run_pool([MISTRAL], "p")
+            result = ma.run_pool([MISTRAL], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertIsNone(result.entry)
         self.assertEqual(result.result, "mistral-medium-3.5: empty answer")
@@ -718,7 +718,7 @@ class TestRunPoolRequeue(unittest.TestCase):
                 with unittest.mock.patch.object(
                     ma, "call_cli", side_effect=answers
                 ) as call:
-                    result = ma.run_pool([MISTRAL, GLM], "p")
+                    result = ma.run_pool([MISTRAL, GLM], "p", tools=["read"])
                 self.assertEqual(call.call_count, 2)
                 self.assertEqual(result, ma.PoolResult(GLM, "answer"))
 
@@ -727,7 +727,7 @@ class TestRunPoolRequeue(unittest.TestCase):
         with unittest.mock.patch.object(
             ma, "call_cli", side_effect=[text, text]
         ) as call:
-            result = ma.run_pool([MISTRAL], "p")
+            result = ma.run_pool([MISTRAL], "p", tools=["read"])
         self.assertEqual(call.call_count, 2)
         self.assertIsNone(result.entry)
 
@@ -739,7 +739,7 @@ class TestRunPoolRequeue(unittest.TestCase):
         with unittest.mock.patch.object(
             ma, "call_cli", side_effect=[review, "second"]
         ) as call:
-            result = ma.run_pool([MISTRAL, GLM], "p")
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(call.call_count, 1)
         self.assertEqual(result, ma.PoolResult(MISTRAL, review))
 
@@ -751,7 +751,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[self._empty()] * 4,
         ) as run:
-            result = ma.run_pool([MISTRAL, GLM], "p")
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(
             [call.args[0][4] for call in run.call_args_list],
             [
@@ -770,7 +770,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[rate_limited, rate_limited],
         ) as run:
-            result = ma.run_pool([MISTRAL, GLM], "p")
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertIsNone(result.entry)
 
@@ -779,7 +779,7 @@ class TestRunPoolRequeue(unittest.TestCase):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, side_effect=[oom, oom]
         ) as run:
-            result = ma.run_pool([MISTRAL, GLM], "p")
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertIsNone(result.entry)
 
@@ -790,7 +790,7 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[credit, credit],
         ) as run:
-            result = ma.run_pool([MISTRAL, GLM], "p")
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertIsNone(result.entry)
 
@@ -806,9 +806,95 @@ class TestRunPoolRequeue(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[ambiguous, rate_limited],
         ) as run:
-            result = ma.run_pool([MISTRAL, GLM], "p")
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertIsNone(result.entry)
+
+
+class TestToolCallTextWithoutTools(unittest.TestCase):
+    """Under `tools=[]`, tool-call text is a config-level failure: the run stops on the first
+    candidate that answers it (the next one would answer the same to the same forbidden prompt),
+    and the error names `tools` so `render_pool_failure` prefixes it `[adversarial] ERROR`."""
+
+    def test_no_tools_tool_call_text_fails_immediately_without_the_next_candidate(self):
+        text_call = (
+            "<\uff5cDSML\uff5c tool_calls>\n"
+            '<\uff5cDSML\uff5c invoke name="read">\n'
+            "</\uff5cDSML\uff5c invoke>\n"
+            "</\uff5cDSML\uff5c calls>"
+        )
+        with unittest.mock.patch.object(
+            ma, "call_cli", side_effect=[text_call, "answer"]
+        ) as call:
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
+        # Un seul candidat consommé : le second ne voit jamais le prompt.
+        self.assertEqual(call.call_count, 1)
+        self.assertIsNone(result.entry)
+        self.assertEqual(
+            result.result, f"mistral-medium-3.5: {ma.TOOL_CALL_TEXT_ERROR}"
+        )
+
+    def test_no_requeue_either_one_candidate_one_attempt(self):
+        text_call = "<function=read>\n<parameter=path>a.py</function>"
+        with unittest.mock.patch.object(
+            ma, "call_cli", side_effect=[text_call]
+        ) as call:
+            result = ma.run_pool([MISTRAL], "p", tools=[])
+        self.assertEqual(call.call_count, 1)
+        self.assertIsNone(result.entry)
+
+    def test_render_pool_failure_is_pinned(self):
+        failing = f"glm-5-2: {ma.TOOL_CALL_TEXT_ERROR}"
+        self.assertEqual(
+            ma.render_pool_failure(failing),
+            "[adversarial] ERROR — " + failing,
+        )
+        self.assertEqual(
+            ma.render_pool_failure("mistral-medium-3.5: 429 too many requests"),
+            "[adversarial] BLOCKED — every candidate failed. "
+            "Last: mistral-medium-3.5: 429 too many requests",
+        )
+
+    def test_render_pool_failure_without_a_result_does_not_print_none(self):
+        self.assertEqual(
+            ma.render_pool_failure(None),
+            "[adversarial] BLOCKED — every candidate failed.",
+        )
+
+    def test_an_unclosed_opening_tag_at_the_end_is_tool_call_text(self):
+        unclosed = "Let me check the file now.<tool_call>\nread_file(open("
+        with unittest.mock.patch.object(
+            ma, "call_cli", side_effect=[unclosed, "answer"]
+        ) as call:
+            result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
+        self.assertEqual(call.call_count, 1)
+        self.assertIsNone(result.entry)
+        self.assertEqual(
+            result.result, f"mistral-medium-3.5: {ma.TOOL_CALL_TEXT_ERROR}"
+        )
+
+    def test_a_tag_quoted_mid_answer_is_not_tool_call_text(self):
+        quoted = (
+            "The parser reads <tool_call>x</tool_call> blocks, which is fine.\nLGTM."
+        )
+        with unittest.mock.patch.object(ma, "call_cli", side_effect=[quoted]):
+            result = ma.run_pool([MISTRAL], "p", tools=[])
+        self.assertIsNotNone(result.entry)
+
+    def test_a_tag_named_in_prose_at_the_very_end_is_still_an_answer(self):
+        named = (
+            "`model_adversarial.py:154` — the new branch matches an opening `<tool_call>` "
+            "that is never closed.\n\nRequest changes"
+        )
+        bare = "The model wrote the opening <tool_call> and nothing else"
+        for answer in (named, bare):
+            with self.subTest(answer=answer):
+                self.assertIsNone(ma._TOOL_CALL_TAIL_RE.search(answer))
+
+    def test_the_error_line_opens_with_the_prefix_reviewer_gate_unlocks_on(self):
+        failing = ma.render_pool_failure(f"glm-5-2: {ma.TOOL_CALL_TEXT_ERROR}")
+        self.assertTrue(failing.startswith("[adversarial] ERROR"))
+        self.assertIn("tools", failing)
 
 
 class TestRunPoolProviderLimit(unittest.TestCase):
@@ -833,7 +919,7 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[groq, self._ok()],
         ) as run:
-            result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p")
+            result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(NV_KIMI, "answer"))
 
@@ -850,7 +936,7 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[org, self._ok()],
         ) as run:
-            result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p")
+            result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result, ma.PoolResult(VC_A, "answer"))
 
@@ -866,7 +952,7 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[noisy, self._ok()],
         ) as run:
-            result = ma.run_pool([NV_GLM, NV_KIMI], "p")
+            result = ma.run_pool([NV_GLM, NV_KIMI], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result.entry, NV_KIMI)
 
@@ -875,7 +961,7 @@ class TestRunPoolProviderLimit(unittest.TestCase):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, side_effect=[credit]
         ):
-            result = ma.run_pool([NV_GLM, NV_KIMI], "p")
+            result = ma.run_pool([NV_GLM, NV_KIMI], "p", tools=[])
         self.assertIsNone(result.entry)
         self.assertEqual(result.result, "nvidia-glm: 402 payment required")
 
@@ -886,7 +972,7 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[credit, self._ok()],
         ) as run:
-            result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p")
+            result = ma.run_pool([NV_GLM, NV_KIMI, VC_A], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result.entry, VC_A)
 
@@ -896,7 +982,7 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[subprocess.TimeoutExpired("pi", 1), self._ok()],
         ) as run:
-            result = ma.run_pool([NV_GLM, NV_KIMI], "p")
+            result = ma.run_pool([NV_GLM, NV_KIMI], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result.entry, NV_KIMI)
 
@@ -907,7 +993,7 @@ class TestRunPoolProviderLimit(unittest.TestCase):
             new_callable=PiPopen,
             side_effect=[oom, self._ok()],
         ) as run:
-            result = ma.run_pool([NV_GLM, NV_KIMI], "p")
+            result = ma.run_pool([NV_GLM, NV_KIMI], "p", tools=[])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(result.entry, NV_KIMI)
 
@@ -997,7 +1083,7 @@ def test_transient_failure_with_a_broken_log_path_still_returns_success(
     with unittest.mock.patch(
         "model_adversarial.Popen", new_callable=PiPopen, side_effect=[empty, ok]
     ) as run:
-        result = ma.run_pool([MISTRAL], "p")
+        result = ma.run_pool([MISTRAL], "p", tools=[])
     assert run.call_count == 2
     assert result == ma.PoolResult(MISTRAL, "answer")
 
@@ -1011,7 +1097,7 @@ def test_pool_exhaustion_logs_every_failure_and_the_final_event(tmp_path, monkey
     with unittest.mock.patch(
         "model_adversarial.Popen", new_callable=PiPopen, side_effect=[empty, empty]
     ):
-        ma.run_pool([MISTRAL], "p")
+        ma.run_pool([MISTRAL], "p", tools=[])
     log_path = tmp_path / ".claude" / "debug" / "sess1_mcp__pc-models__model-pool.txt"
     call = (
         "model=mistral/mistral-medium-3.5 prompt_chars=1 timeout=none attempt={n} "
@@ -1053,7 +1139,7 @@ def test_an_os_error_is_logged_with_its_message(tmp_path, monkeypatch):
     with unittest.mock.patch(
         "model_adversarial.Popen", new_callable=PiPopen, side_effect=[too_big]
     ):
-        ma.run_pool([MISTRAL], "p")
+        ma.run_pool([MISTRAL], "p", tools=[])
     log_path = tmp_path / ".claude" / "debug" / "sess4_mcp__pc-models__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=1\n"
@@ -1075,7 +1161,7 @@ def test_a_provider_error_is_logged_with_the_provider_own_line(tmp_path, monkeyp
     with unittest.mock.patch(
         "model_adversarial.Popen", new_callable=PiPopen, side_effect=[rate_limited]
     ):
-        ma.run_pool([MISTRAL], "p")
+        ma.run_pool([MISTRAL], "p", tools=[])
     log_path = tmp_path / ".claude" / "debug" / "sess3_mcp__pc-models__model-pool.txt"
     assert log_path.read_text(encoding="utf-8") == (
         "2026-01-01T00:00:00+00:00 (pool) start entries=mistral-medium-3.5 prompt_chars=1\n"
@@ -1091,11 +1177,11 @@ class TestCallCli(unittest.TestCase):
     def _ok(self):
         return subprocess.CompletedProcess([], 0, "answer\n", "")
 
-    def test_default_argv_has_no_tools_and_closes_stdin(self):
+    def test_an_empty_tools_list_sends_no_tools_and_closes_stdin(self):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
         ) as run:
-            self.assertEqual(ma.call_cli(MISTRAL, "p", 30), "answer\n")
+            self.assertEqual(ma.call_cli(MISTRAL, "p", 30, []), "answer\n")
         run.assert_called_once_with(
             [
                 "pi",
@@ -1121,14 +1207,14 @@ class TestCallCli(unittest.TestCase):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
         ) as run:
-            ma.call_cli({**MISTRAL, "thinking": "off"}, "p", 30)
+            ma.call_cli({**MISTRAL, "thinking": "off"}, "p", 30, [])
         self.assertEqual(run.call_args[0][0][-4:], ["--thinking", "off", "--", "p"])
 
     def test_no_entry_thinking_sends_no_thinking_flag(self):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
         ) as run:
-            ma.call_cli(MISTRAL, "p", 30)
+            ma.call_cli(MISTRAL, "p", 30, [])
         self.assertNotIn("--thinking", run.call_args[0][0])
 
     def test_tools_become_a_comma_separated_allowlist(self):
@@ -1142,7 +1228,7 @@ class TestCallCli(unittest.TestCase):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
         ) as run:
-            ma.call_cli(MISTRAL, "p", 30, env={"PINKY_TEST_VAR": "layered"})
+            ma.call_cli(MISTRAL, "p", 30, [], env={"PINKY_TEST_VAR": "layered"})
         env = run.call_args.kwargs["env"]
         self.assertEqual(env["PINKY_TEST_VAR"], "layered")
         self.assertEqual(env["PATH"], os.environ["PATH"])
@@ -1154,12 +1240,12 @@ class TestCallCli(unittest.TestCase):
                 "model_adversarial.Popen", new_callable=PiPopen, return_value=self._ok()
             ) as run,
         ):
-            ma.call_cli(MISTRAL, "p", 30)
+            ma.call_cli(MISTRAL, "p", 30, [])
         self.assertEqual(run.call_args.kwargs["env"]["K"], "v")
 
     def test_non_cli_entry_raises(self):
         with self.assertRaises(ValueError):
-            ma.call_cli({**MISTRAL, "kind": "http"}, "p", 30)
+            ma.call_cli({**MISTRAL, "kind": "http"}, "p", 30, [])
 
 
 class TestSecretsAreReadOncePerRun(unittest.TestCase):
@@ -1176,7 +1262,7 @@ class TestSecretsAreReadOncePerRun(unittest.TestCase):
                 side_effect=[rate_limited, ok],
             ) as run,
         ):
-            ma.run_pool([MISTRAL, GLM], "p")
+            ma.run_pool([MISTRAL, GLM], "p", tools=[])
         self.assertEqual(secrets.call_count, 1)
         self.assertEqual([c.kwargs["env"]["K"] for c in run.call_args_list], ["v", "v"])
 
@@ -1205,7 +1291,7 @@ class TestEntryTimeout(unittest.TestCase):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
         ) as run:
-            ma.run_pool([slow], "p", timeout=180)
+            ma.run_pool([slow], "p", tools=[], timeout=180)
         self.assertEqual(run.wait_timeouts, [300])
 
     def test_missing_entry_timeout_keeps_an_absent_default(self):
@@ -1219,7 +1305,7 @@ class TestEntryTimeout(unittest.TestCase):
         with unittest.mock.patch(
             "model_adversarial.Popen", new_callable=PiPopen, return_value=ok
         ) as run:
-            ma.run_pool([{**GLM, "timeout": 300}, MISTRAL], "p", timeout=None)
+            ma.run_pool([{**GLM, "timeout": 300}, MISTRAL], "p", tools=[], timeout=None)
         self.assertEqual(run.wait_timeouts, [300])
 
     def test_check_pool_keeps_its_own_60_seconds(self):
@@ -1473,7 +1559,7 @@ def test_adversarial_tool_folds_stack_checklist_into_the_prompt(monkeypatch, tmp
 
     monkeypatch.setattr(pc_models_server.model_adversarial, "run_pool", fake_run_pool)
 
-    out = pc_models_server.adversarial(task="review this", files=[str(src)])
+    out = pc_models_server.adversarial(task="review this", tools=[], files=[str(src)])
     # a phrase unique to the FastAPI review reference, not the generic methodology
     assert "N+1 query pattern" in captured["prompt"]
     assert out.startswith("[answered by ")
@@ -1515,7 +1601,7 @@ def test_adversarial_tool_ignores_an_unknown_tier(monkeypatch):
         ),
     )
 
-    pc_models_server.adversarial(task="review", tier="turbo-9000")
+    pc_models_server.adversarial(task="review", tools=[], tier="turbo-9000")
     assert "adversarial" in seen and "delegation" not in seen
 
 
@@ -1537,7 +1623,7 @@ def test_adversarial_tool_reports_pool_exhaustion_without_raising(monkeypatch):
     )
 
     # `model="x"` bypasses `load_pool` via the override path, straight to `run_pool`.
-    out = pc_models_server.adversarial(task="review", model="x")
+    out = pc_models_server.adversarial(task="review", tools=[], model="x")
     assert (
         out == "[adversarial] BLOCKED — every candidate failed. Last: everything failed"
     )
@@ -1579,7 +1665,7 @@ def test_adversarial_tool_with_base_reviews_the_computed_diff_with_the_default_s
 
     monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
 
-    out = server.adversarial(task="review this", base="main")
+    out = server.adversarial(task="review this", tools=[], base="main")
 
     assert out.startswith("[answered by ")
     assert seen["selected"]
@@ -1612,7 +1698,7 @@ def test_adversarial_tool_never_routes_a_small_diff_below_the_sonnet_floor(
 
     monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
 
-    server.adversarial(task="review this", base="main", tier=tier_arg)
+    server.adversarial(task="review this", tools=[], base="main", tier=tier_arg)
 
     assert seen["entries"] == [free_sonnet]
 
@@ -1637,7 +1723,7 @@ def test_adversarial_tool_blocks_on_a_haiku_only_pool_without_calling_it(monkeyp
 
     monkeypatch.setattr(server.model_adversarial, "run_pool", boom)
 
-    assert server.adversarial(task="review", base="main") == (
+    assert server.adversarial(task="review", tools=[], base="main") == (
         "[adversarial] BLOCKED — no candidate model in the pool."
     )
 
@@ -1667,7 +1753,7 @@ def test_adversarial_tool_with_base_and_no_change_does_not_call_the_pool(monkeyp
     monkeypatch.setattr(server.model_adversarial, "run_pool", boom)
 
     assert (
-        server.adversarial(task="review", base="main")
+        server.adversarial(task="review", tools=[], base="main")
         == "[adversarial] nothing to review — no change against 'main' in /work/repo."
     )
 
@@ -1683,7 +1769,7 @@ def test_adversarial_tool_with_an_unusable_base_reports_the_git_error(monkeypatc
     monkeypatch.setattr(server.model_adversarial, "diff_against", fail)
     monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
 
-    assert server.adversarial(task="review", base="nope") == (
+    assert server.adversarial(task="review", tools=[], base="nope") == (
         "[adversarial] ERROR — cannot diff against 'nope' in /work/repo: "
         "fatal: Not a valid object name nope"
     )
@@ -1700,7 +1786,7 @@ def test_adversarial_tool_header_names_the_provider_model_and_tier(monkeypatch):
         ),
     )
 
-    out = server.adversarial(task="review", model="x")
+    out = server.adversarial(task="review", tools=[], model="x")
 
     assert out == (
         "[answered by nvidia/glm-5.3 · 🟧 opus]\n\nverdict"
@@ -1719,7 +1805,7 @@ def test_adversarial_tool_forwards_the_diff_scope(monkeypatch):
     monkeypatch.setattr(server.model_adversarial, "diff_against", fake_diff)
     monkeypatch.setattr(server.model_adversarial, "repo_root", lambda: "/work/repo")
 
-    server.adversarial(task="review", base="main", scope="staged")
+    server.adversarial(task="review", tools=[], base="main", scope="staged")
 
     assert seen["scope"] == "staged"
 
@@ -1776,7 +1862,7 @@ def test_adversarial_tool_draws_with_a_fresh_rng(monkeypatch):
             ma.PoolResult(entries[0], "ok")
         ),
     )
-    out = pc_models_server.adversarial(task="review this")
+    out = pc_models_server.adversarial(task="review this", tools=[])
     assert out.startswith("[answered by ")
     assert isinstance(seen["rng"], random.Random)
 
@@ -1807,7 +1893,7 @@ def _heads_served_for_a_diff(monkeypatch, pool, calls=20):
     monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
 
     for _ in range(calls):
-        server.adversarial(task="review", base="main")
+        server.adversarial(task="review", tools=[], base="main")
     return heads
 
 
@@ -1852,7 +1938,7 @@ def _entries_served_for_model(monkeypatch, pool, model):
 
     monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
 
-    server.adversarial(task="review", model=model)
+    server.adversarial(task="review", tools=[], model=model)
     return seen["entries"]
 
 
@@ -1972,7 +2058,7 @@ class TestPoolRun:
         run = pi_live.open_run(str(pi_live.runs_dir() / "toolu_1"))
         self._pi_prints(tmp_path, pi_events(""), pi_events("answer"))
 
-        result = ma.run_pool([MISTRAL], "p", live=run)
+        result = ma.run_pool([MISTRAL], "p", tools=[], live=run)
 
         assert result == ma.PoolResult(MISTRAL, "answer")
         assert self._cmux_argv(tmp_path) is None
@@ -1997,7 +2083,7 @@ class TestPoolRun:
         monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
         self._pi_prints(tmp_path, pi_events(""), pi_events(""), pi_events("answer"))
 
-        result = ma.run_pool([MISTRAL, GLM], "p", watch=True)
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[], watch=True)
 
         argv = self._cmux_argv(tmp_path)
         events_path = Path(shlex.split(argv[3])[2])
@@ -2033,8 +2119,8 @@ class TestPoolRun:
         monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
         self._pi_prints(tmp_path, pi_events("answer"), pi_events("answer"))
 
-        ma.run_pool([MISTRAL], "p", watch=True)
-        ma.run_pool([MISTRAL], "p", watch=True)
+        ma.run_pool([MISTRAL], "p", tools=[], watch=True)
+        ma.run_pool([MISTRAL], "p", tools=[], watch=True)
 
         launches = self._cmux_argv(tmp_path)
         assert len(launches) == 12
@@ -2044,7 +2130,7 @@ class TestPoolRun:
         self._recording_cmux(bins, tmp_path)
         self._pi_prints(tmp_path, pi_events("answer"))
 
-        result = ma.run_pool([MISTRAL], "p", watch=True)
+        result = ma.run_pool([MISTRAL], "p", tools=[], watch=True)
 
         assert result == ma.PoolResult(MISTRAL, "answer")
         assert self._cmux_argv(tmp_path) is None
@@ -2066,7 +2152,7 @@ class TestPoolRun:
         self._pi_prints(tmp_path, pi_events("answer"))
 
         started = time.monotonic()
-        result = ma.run_pool([MISTRAL], "p", watch=True)
+        result = ma.run_pool([MISTRAL], "p", tools=[], watch=True)
 
         assert result == ma.PoolResult(MISTRAL, "answer")
         assert time.monotonic() - started < 5
@@ -2079,7 +2165,7 @@ class TestPoolRun:
         _fake_binary(bins, "cmux", "echo noise; echo noise >&2")
         self._pi_prints(tmp_path, pi_events("answer"))
 
-        ma.run_pool([MISTRAL], "p", watch=True)
+        ma.run_pool([MISTRAL], "p", tools=[], watch=True)
 
         assert capfd.readouterr() == ("", "")
 
@@ -2092,7 +2178,7 @@ class TestPoolRun:
         monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
         self._pi_prints(tmp_path, pi_events("answer"))
 
-        assert ma.run_pool([MISTRAL], "p") == ma.PoolResult(MISTRAL, "answer")
+        assert ma.run_pool([MISTRAL], "p", tools=[]) == ma.PoolResult(MISTRAL, "answer")
         assert self._cmux_argv(tmp_path) is None
 
     def test_check_pool_panel_and_cli_never_open_a_split(
@@ -2106,7 +2192,7 @@ class TestPoolRun:
         pool = [_entry(f"entry-{i}", "nvidia") for i in range(3)]
 
         checks = ma.check_pool(pool)
-        panel = model_panel.run_panel(pool[:2], ["t1", "t2"])
+        panel = model_panel.run_panel(pool[:2], ["t1", "t2"], tools=[])
         monkeypatch.setattr(ma, "load_pool", lambda: [MISTRAL])
         status = ma.main(["--task", "t"])
 
@@ -2175,7 +2261,7 @@ class TestPoolRun:
             pi_events("second"),
         )
 
-        result = ma.run_pool([MISTRAL, GLM], "p")
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
 
         assert result == ma.PoolResult(GLM, "second")
         assert self._pi_calls(tmp_path) == 2
@@ -2195,7 +2281,9 @@ class TestPoolRun:
         )
         self._pi_prints(tmp_path, stream)
 
-        assert ma.run_pool([MISTRAL, GLM], "p") == ma.PoolResult(MISTRAL, "final")
+        assert ma.run_pool([MISTRAL, GLM], "p", tools=[]) == ma.PoolResult(
+            MISTRAL, "final"
+        )
         assert self._pi_calls(tmp_path) == 1
 
     def test_an_unrecognised_error_stops_the_pool_with_the_providers_line_last(
@@ -2208,7 +2296,7 @@ class TestPoolRun:
             errors=["warning: models.json is slow\n"],
         )
 
-        result = ma.run_pool([MISTRAL, GLM], "p")
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
 
         assert result == ma.PoolResult(
             None,
@@ -2220,7 +2308,7 @@ class TestPoolRun:
     def test_a_crash_with_a_plain_stdout_line_carries_that_line(self, bins, tmp_path):
         self._pi_prints(tmp_path, "boom, not json\n", codes=[2])
 
-        result = ma.run_pool([MISTRAL], "p")
+        result = ma.run_pool([MISTRAL], "p", tools=[])
 
         assert result == ma.PoolResult(
             None, "mistral-medium-3.5 critical failure: boom, not json"
@@ -2234,7 +2322,7 @@ class TestPoolRun:
         )
         self._pi_prints(tmp_path, stream)
 
-        result = ma.run_pool([MISTRAL, GLM], "p")
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
 
         assert result == ma.PoolResult(
             None, "mistral-medium-3.5 critical failure: pi ended on an error"
@@ -2245,7 +2333,7 @@ class TestPoolRun:
         # pi's JSON mode exits 0 on an abort; its text mode exits 1 with "Request aborted".
         self._pi_prints(tmp_path, pi_events("", "aborted"))
 
-        result = ma.run_pool([MISTRAL, GLM], "p")
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
 
         assert result == ma.PoolResult(
             None, "mistral-medium-3.5 critical failure: Request aborted"
@@ -2257,7 +2345,7 @@ class TestPoolRun:
             tmp_path, pi_events("partial", "aborted", "Operation aborted by user")
         )
 
-        result = ma.run_pool([MISTRAL], "p")
+        result = ma.run_pool([MISTRAL], "p", tools=[])
 
         assert result == ma.PoolResult(
             None, "mistral-medium-3.5 critical failure: Operation aborted by user"
@@ -2272,7 +2360,7 @@ class TestPoolRun:
         self._pi_prints(tmp_path, cut, pi_events("answer"))
         (tmp_path / "hang.1").write_text("")
 
-        result = ma.run_pool([MISTRAL, GLM], "p", timeout=1, watch=True)
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[], timeout=1, watch=True)
 
         events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
         assert result == ma.PoolResult(GLM, "answer")
@@ -2297,7 +2385,7 @@ class TestPoolRun:
         )
 
         with pytest.raises(RuntimeError, match="boom"):
-            ma.run_pool([MISTRAL], "p", watch=True)
+            ma.run_pool([MISTRAL], "p", tools=[], watch=True)
 
         events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
         assert events_path.read_text() == _marker("mistral-medium-3.5", 1) + _POOL_END
@@ -2315,7 +2403,7 @@ class TestPoolRun:
             pi_events("answer"),
         )
 
-        result = ma.run_pool([MISTRAL, GLM, KIMI], "p", watch=True)
+        result = ma.run_pool([MISTRAL, GLM, KIMI], "p", tools=["read"], watch=True)
 
         events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
         assert result == ma.PoolResult(GLM, "answer")
@@ -2342,7 +2430,7 @@ class TestPoolRun:
         monkeypatch.setenv("CMUX_SURFACE_ID", "surface:1")
         self._pi_prints(tmp_path, pi_events("", "error", "401 invalid api key"))
 
-        ma.run_pool([MISTRAL], "p", watch=True)
+        ma.run_pool([MISTRAL], "p", tools=[], watch=True)
 
         events_path = Path(shlex.split(self._cmux_argv(tmp_path)[3])[2])
         assert events_path.read_text() == (
@@ -2357,7 +2445,7 @@ class TestPoolRun:
     ):
         self._pi_prints(tmp_path, "usage: pi [options]\n")
 
-        result = ma.run_pool([MISTRAL, GLM], "p")
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
 
         assert result == ma.PoolResult(
             None, "mistral-medium-3.5 critical failure: usage: pi [options]"
@@ -2368,7 +2456,7 @@ class TestPoolRun:
     ):
         self._pi_prints(tmp_path, "", errors=["no models configured\n"])
 
-        result = ma.run_pool([MISTRAL, GLM], "p")
+        result = ma.run_pool([MISTRAL, GLM], "p", tools=[])
 
         assert result == ma.PoolResult(
             None, "mistral-medium-3.5 critical failure: no models configured"
@@ -2379,7 +2467,7 @@ class TestPoolRun:
     ):
         self._pi_prints(tmp_path, "", "")
 
-        result = ma.run_pool([MISTRAL], "p")
+        result = ma.run_pool([MISTRAL], "p", tools=[])
 
         assert result == ma.PoolResult(None, "mistral-medium-3.5: empty answer")
         assert self._pi_calls(tmp_path) == 2
@@ -2398,7 +2486,7 @@ class TestPoolRun:
         started = time.monotonic()
         try:
             with pytest.raises(subprocess.TimeoutExpired):
-                ma.call_cli(MISTRAL, "p", 1, env={})
+                ma.call_cli(MISTRAL, "p", 1, [], env={})
             elapsed = time.monotonic() - started
             child = int((tmp_path / "child.pid").read_text())
             for _ in range(20):
@@ -2444,7 +2532,7 @@ class TestPoolRun:
         copy = io.StringIO()
 
         started = time.monotonic()
-        answer = ma.call_cli(MISTRAL, "p", 60, env={}, events=copy)
+        answer = ma.call_cli(MISTRAL, "p", 60, [], env={}, events=copy)
 
         assert answer == "big answer"
         assert len(copy.getvalue().splitlines()) == 2001
@@ -2478,7 +2566,7 @@ class TestPoolRun:
 
         started = time.monotonic()
         with pytest.raises(subprocess.TimeoutExpired):
-            ma.call_cli(MISTRAL, "p", 1, env={})
+            ma.call_cli(MISTRAL, "p", 1, [], env={})
 
         assert len(kills) == 1
         assert time.monotonic() - started < 10
@@ -2492,7 +2580,7 @@ class TestPoolRun:
         monkeypatch.setattr(ma, "Popen", popen)
 
         with pytest.raises(KeyboardInterrupt):
-            ma.call_cli(MISTRAL, "p", 60, env={})
+            ma.call_cli(MISTRAL, "p", 60, [], env={})
 
         assert len(kills) == 1
         for _ in range(20):
@@ -2509,7 +2597,7 @@ class TestPoolRun:
         (tmp_path / "out.1").write_text(pi_events("slow answer"))
         _fake_binary(bins, "pi", f'/bin/sleep 2\n/bin/cat "{tmp_path}/out.1"')
 
-        result = ma.run_pool([MISTRAL], "p")
+        result = ma.run_pool([MISTRAL], "p", tools=[])
 
         assert result == ma.PoolResult(MISTRAL, "slow answer")
 
@@ -2521,7 +2609,7 @@ class TestPoolRun:
         monkeypatch.setattr(ma, "Popen", popen)
 
         started = time.monotonic()
-        result = ma.run_pool([{**MISTRAL, "timeout": 1}], "p")
+        result = ma.run_pool([{**MISTRAL, "timeout": 1}], "p", tools=[])
 
         assert result.entry is None
         assert "timed out after 1" in str(result.result)
@@ -2533,7 +2621,7 @@ class TestPoolRun:
 
         started = time.monotonic()
         with pytest.raises(subprocess.TimeoutExpired):
-            ma.call_cli(MISTRAL, "p", 1, env={})
+            ma.call_cli(MISTRAL, "p", 1, [], env={})
 
         assert time.monotonic() - started < 10
 
@@ -2567,7 +2655,7 @@ class TestAdversarialToolWatches:
         monkeypatch.setattr(server.model_adversarial, "load_pool", lambda: [MISTRAL])
         monkeypatch.setattr(server.model_adversarial, "run_pool", fake_run_pool)
 
-        server.adversarial(task="review")
+        server.adversarial(task="review", tools=[])
 
         assert seen == {"watch": True}
 
@@ -2956,7 +3044,7 @@ class TestCallScope(unittest.TestCase):
             "model_adversarial.Popen", side_effect=AssertionError("pi started")
         ):
             with self.assertRaises(call_scope.CallCancelled):
-                call_scope.run_in(scope, ma.call_cli, MISTRAL, "p", 30)
+                call_scope.run_in(scope, ma.call_cli, MISTRAL, "p", 30, [])
 
     def test_a_pi_started_as_the_call_is_cancelled_is_killed_and_refused(self):
         scope = call_scope.CallScope()
@@ -3162,8 +3250,8 @@ class TestCallTimeout(unittest.TestCase):
 # Les quatre outils qui lancent `pi`, avec des arguments et le nombre de `pi` qu'un appel lance
 # d'un coup dans un pool de deux entrées.
 _PI_TOOLS = {
-    "adversarial": ({"task": "attack this"}, 1),
-    "panel": ({"tasks": ["a", "b"]}, 2),
+    "adversarial": ({"task": "attack this", "tools": []}, 1),
+    "panel": ({"tasks": ["a", "b"], "tools": []}, 2),
     "pool_check": ({}, 2),
     "offline": ({"task": "summarize"}, 1),
 }
@@ -3202,6 +3290,26 @@ class TestToolSchema:
             required = {n for n, p in parameters.items() if p.default is p.empty}
             assert set(schema["properties"]) == set(parameters)
             assert set(schema.get("required", [])) == required
+
+    def test_adversarial_and_panel_advertise_tools_as_required(self, make_server):
+        advertised = {
+            tool["name"]: tool["inputSchema"] for tool in make_server().list_tools()
+        }
+        for name in ("adversarial", "panel"):
+            assert "tools" in advertised[name].get("required", [])
+
+    @pytest.mark.parametrize("call", ["adversarial", "panel"])
+    def test_a_call_omitting_tools_is_rejected_by_the_input_schema(
+        self, make_server, call
+    ):
+        server = make_server()
+        arguments = (
+            {"task": "attack this"} if call == "adversarial" else {"tasks": ["a"]}
+        )
+        request = server.start_call(call, arguments)
+        result = server.wait_response(request)["result"]
+        assert result["isError"] is True
+        assert "tools" in result["content"][0]["text"]
 
 
 @pytest.mark.parametrize("tool", _PI_TOOLS)
@@ -3255,7 +3363,7 @@ class TestCancellationScope:
         self, make_server
     ):
         server = make_server(pool_size=2)
-        request = server.start_call("adversarial", {"task": "attack this"})
+        request = server.start_call("adversarial", {"task": "attack this", "tools": []})
         pids = [pid for pair in server.wait_launched(1) for pid in pair]
 
         server.cancel(request)
@@ -3284,9 +3392,13 @@ class TestCancellationScope:
     ):
         session = make_server()
         other_session = make_server()
-        cancelled = session.start_call("adversarial", {"task": "t", "model": "fake-0"})
-        session.start_call("adversarial", {"task": "t", "model": "fake-1"})
-        other_session.start_call("adversarial", {"task": "t", "model": "fake-0"})
+        cancelled = session.start_call(
+            "adversarial", {"task": "t", "tools": [], "model": "fake-0"}
+        )
+        session.start_call("adversarial", {"task": "t", "tools": [], "model": "fake-1"})
+        other_session.start_call(
+            "adversarial", {"task": "t", "tools": [], "model": "fake-0"}
+        )
         session.wait_launched(2)
         other_session.wait_launched(1)
 
@@ -3308,7 +3420,7 @@ class TestWallCap:
 
     def test_a_call_nobody_cancels_is_killed_by_the_cap_within_5s(self, make_server):
         server = make_server(extra_env={"PC_CORE_CALL_TIMEOUT_S": str(CAP_S)})
-        request = server.start_call("adversarial", {"task": "attack this"})
+        request = server.start_call("adversarial", {"task": "attack this", "tools": []})
         pids = [pid for pair in server.wait_launched(1) for pid in pair]
 
         # Avant le cap : le client est vivant, le canal ouvert, le pi et son enfant aussi.
@@ -3319,7 +3431,9 @@ class TestWallCap:
 
     def test_the_kill_log_names_the_call_the_pi_and_the_cap(self, make_server):
         server = make_server(extra_env={"PC_CORE_CALL_TIMEOUT_S": str(CAP_S)})
-        request = server.start_call("adversarial", {"task": "SECRET-ARG-VALUE"})
+        request = server.start_call(
+            "adversarial", {"task": "SECRET-ARG-VALUE", "tools": []}
+        )
         pairs = server.wait_launched(1)
         pids = [pid for pair in pairs for pid in pair]
 
@@ -3338,7 +3452,7 @@ class TestWallCap:
 
     def test_a_received_cancellation_is_logged_with_its_call_id(self, make_server):
         server = make_server()
-        request = server.start_call("adversarial", {"task": "attack this"})
+        request = server.start_call("adversarial", {"task": "attack this", "tools": []})
         pairs = server.wait_launched(1)
         pids = [pid for pair in pairs for pid in pair]
 
@@ -3394,7 +3508,7 @@ def test_run_pool_creates_the_state_file_in_the_missing_plugin_data_folder(
 ):
     monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
     assert not _plugin_data.exists()
-    ma.run_pool([A_ENTRY], "p")
+    ma.run_pool([A_ENTRY], "p", tools=[])
     state = _plugin_data / "model_pool_state.json"
     assert json.loads(state.read_text()) == {"last_ok_provider": "prov-a"}
     assert ma.read_last_ok_provider() == "prov-a"
@@ -3416,7 +3530,7 @@ def test_without_plugin_data_the_memory_is_off_and_nothing_is_written(
     assert ma.read_last_ok_provider() is None
     ma.write_last_ok_provider("prov-a")
     monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
-    assert ma.run_pool([A_ENTRY], "p").entry == A_ENTRY
+    assert ma.run_pool([A_ENTRY], "p", tools=[]).entry == A_ENTRY
     assert list(tmp_path.rglob("model_pool_state.json*")) == []
 
 
@@ -3450,7 +3564,7 @@ def test_run_pool_remembers_the_provider_that_answered(monkeypatch):
         return "an answer"
 
     monkeypatch.setattr(ma, "call_cli", fake)
-    result = ma.run_pool([A_ENTRY, B_ENTRY], "p")
+    result = ma.run_pool([A_ENTRY, B_ENTRY], "p", tools=[])
     assert result.entry == B_ENTRY
     assert json.loads(ma.state_path().read_text()) == {"last_ok_provider": "prov-b"}
 
@@ -3463,7 +3577,7 @@ def test_run_pool_leaves_the_state_alone_when_every_entry_fails(monkeypatch):
         raise subprocess.CalledProcessError(1, "pi", "", "429 too many")
 
     monkeypatch.setattr(ma, "call_cli", fake)
-    assert ma.run_pool([A_ENTRY, B_ENTRY], "p").entry is None
+    assert ma.run_pool([A_ENTRY, B_ENTRY], "p", tools=[]).entry is None
     assert ma.state_path().read_bytes() == before
 
 
@@ -3497,7 +3611,7 @@ def test_unwritable_state_directory_does_not_change_the_result(monkeypatch, tmp_
     blocked.write_text("a file where the directory should be")
     monkeypatch.setattr(ma, "state_path", lambda: blocked / "sub" / "state.json")
     monkeypatch.setattr(ma, "call_cli", lambda *a, **k: "an answer")
-    assert ma.run_pool([A_ENTRY], "p") == ma.PoolResult(A_ENTRY, "an answer")
+    assert ma.run_pool([A_ENTRY], "p", tools=[]) == ma.PoolResult(A_ENTRY, "an answer")
 
 
 def test_state_write_is_a_rename_never_a_partial_file(monkeypatch):
