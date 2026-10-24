@@ -90,13 +90,15 @@ pinky-agentic-plugins/
 │   │   │   ├── plugin_scope_lib.py
 │   │   │   ├── settings_commit_nudge.py
 │   │   │   └── sync_plugin_scope.py
-│   │   └── skills/
-│   │       └── agents-md/
-│   │           └── SKILL.md
+│   │   ├── skills/
+│   │   │   └── agents-md/
+│   │   │       └── SKILL.md
+│   │   └── README.md
 │   ├── pc-bash-guard/
-│   │   └── hooks/
-│   │       ├── dangerous_bash_ask.py
-│   │       └── hooks.json
+│   │   ├── hooks/
+│   │   │   ├── dangerous_bash_ask.py
+│   │   │   └── hooks.json
+│   │   └── README.md
 │   ├── pc-core/
 │   │   ├── agents/
 │   │   │   └── reviewer.md
@@ -134,22 +136,23 @@ pinky-agentic-plugins/
 │   │   ├── README.md
 │   │   └── tsconfig.json
 │   ├── pc-craft/
-│   │   └── skills/
-│   │       ├── code-conventions/
-│   │       │   ├── references/
-│   │       │   │   ├── cli.md
-│   │       │   │   ├── lib-api.md
-│   │       │   │   ├── repro.md
-│   │       │   │   └── web.md
-│   │       │   └── SKILL.md
-│   │       ├── debug-brief/
-│   │       │   └── SKILL.md
-│   │       ├── fastapi/
-│   │       │   ├── references/
-│   │       │   │   └── review.md
-│   │       │   └── SKILL.md
-│   │       └── improve/
-│   │           └── SKILL.md
+│   │   ├── skills/
+│   │   │   ├── code-conventions/
+│   │   │   │   ├── references/
+│   │   │   │   │   ├── cli.md
+│   │   │   │   │   ├── lib-api.md
+│   │   │   │   │   ├── repro.md
+│   │   │   │   │   └── web.md
+│   │   │   │   └── SKILL.md
+│   │   │   ├── debug-brief/
+│   │   │   │   └── SKILL.md
+│   │   │   ├── fastapi/
+│   │   │   │   ├── references/
+│   │   │   │   │   └── review.md
+│   │   │   │   └── SKILL.md
+│   │   │   └── improve/
+│   │   │       └── SKILL.md
+│   │   └── README.md
 │   ├── pc-customize/
 │   │   ├── output-styles/
 │   │   │   └── skim-and-push.md
@@ -160,19 +163,20 @@ pinky-agentic-plugins/
 │   │   ├── mcp/
 │   │   │   ├── pc_delegate_server.py
 │   │   │   └── subtree.py
-│   │   └── skills/
-│   │       ├── export/
-│   │       │   ├── references/
-│   │       │   │   └── GUIDE.md
-│   │       │   ├── scripts/
-│   │       │   │   ├── build_export.py
-│   │       │   │   └── secrets_filter.py
-│   │       │   └── SKILL.md
-│   │       └── reintegrate/
-│   │           ├── scripts/
-│   │           │   ├── apply_reintegrate.py
-│   │           │   └── close_cards.py
-│   │           └── SKILL.md
+│   │   ├── skills/
+│   │   │   ├── export/
+│   │   │   │   ├── references/
+│   │   │   │   │   └── GUIDE.md
+│   │   │   │   ├── scripts/
+│   │   │   │   │   ├── build_export.py
+│   │   │   │   │   └── secrets_filter.py
+│   │   │   │   └── SKILL.md
+│   │   │   └── reintegrate/
+│   │   │       ├── scripts/
+│   │   │       │   ├── apply_reintegrate.py
+│   │   │       │   └── close_cards.py
+│   │   │       └── SKILL.md
+│   │   └── README.md
 │   ├── pc-git/
 │   │   ├── evals/
 │   │   │   ├── 01-gh-guarded-push-prfails-honest/
@@ -443,30 +447,31 @@ pinky-agentic-plugins/
 │   │   ├── README.md
 │   │   └── tsconfig.json
 │   ├── pc-pypi/
-│   │   └── skills/
-│   │       └── dev-prerelease/
-│   │           ├── docs/
-│   │           │   └── reference/
-│   │           │       └── reconcile-model-benchmark.md
-│   │           ├── evals/
-│   │           │   ├── fixtures/
-│   │           │   │   ├── precision_clean_table/
-│   │           │   │   │   ├── src/
-│   │           │   │   │   │   └── ai.py
-│   │           │   │   │   ├── features_table.md
-│   │           │   │   │   └── oracle.json
-│   │           │   │   └── recall_broken_promises/
-│   │           │   │       ├── src/
-│   │           │   │       │   ├── api_integration.py
-│   │           │   │       │   ├── compute_pool.py
-│   │           │   │       │   ├── database.py
-│   │           │   │       │   └── grant.py
-│   │           │   │       ├── features_table.md
-│   │           │   │       └── oracle.json
-│   │           │   └── reconcile_oracle.py
-│   │           ├── scripts/
-│   │           │   └── reconcile.py
-│   │           └── SKILL.md
+│   │   ├── skills/
+│   │   │   └── dev-prerelease/
+│   │   │       ├── docs/
+│   │   │       │   └── reference/
+│   │   │       │       └── reconcile-model-benchmark.md
+│   │   │       ├── evals/
+│   │   │       │   ├── fixtures/
+│   │   │       │   │   ├── precision_clean_table/
+│   │   │       │   │   │   ├── src/
+│   │   │       │   │   │   │   └── ai.py
+│   │   │       │   │   │   ├── features_table.md
+│   │   │       │   │   │   └── oracle.json
+│   │   │       │   │   └── recall_broken_promises/
+│   │   │       │   │       ├── src/
+│   │   │       │   │       │   ├── api_integration.py
+│   │   │       │   │       │   ├── compute_pool.py
+│   │   │       │   │       │   ├── database.py
+│   │   │       │   │       │   └── grant.py
+│   │   │       │   │       ├── features_table.md
+│   │   │       │   │       └── oracle.json
+│   │   │       │   └── reconcile_oracle.py
+│   │   │       ├── scripts/
+│   │   │       │   └── reconcile.py
+│   │   │       └── SKILL.md
+│   │   └── README.md
 │   ├── pc-read/
 │   │   ├── hooks/
 │   │   │   ├── read-cost-hold/

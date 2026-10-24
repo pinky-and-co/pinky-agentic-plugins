@@ -1,11 +1,10 @@
 # pc-statusline
 
-A multi-line status line for Claude Code: a main-session dashboard and a per-subagent row. It reads
-the JSON the harness sends on stdin and prints; nothing is baked in (no language, no name, no
-path). The only other moving part is a hook that keeps a quota cache fresh on a non-Anthropic
-provider (see below).
+Multi-line Claude Code status line — a main-session dashboard (model, effort, context bar, cache hit, cost, rate limits) and a per-subagent row.
 
-## What it shows
+## Overview
+
+The plugin ships two status-line command scripts — `scripts/statusline.py` for the main session and `scripts/subagent_statusline.py` for subagents — plus a hook that keeps a quota cache fresh on a non-Anthropic provider. Both scripts read the JSON the harness sends on stdin and print; nothing is baked in (no language, no name, no path).
 
 **Main session** (`scripts/statusline.py`) — a few rows of session state: the working folder and
 git branch, the model with its effort and output style, the context window, the cache-hit rate,
@@ -60,14 +59,34 @@ plugin's hooks (`hooks/quota_refresh.py`, on session start, prompt, tool use and
 provider's own quota into a local cache, and the status line rebuilds the same limit projection
 from it. The render path never touches the network, the token only ever goes to the provider's
 own host, and on Anthropic the hook does nothing. Support for a provider is one entry in
-`scripts/_quota.py`.
+`scripts/_quota.py` — one provider is supported, `api.z.ai`.
+
+### Never crashes
+
+A status line that errors blanks the whole bar, so both scripts are total: a malformed or
+type-poisoned payload degrades to a bare fallback line, never an exception.
+
+## Skills
+
+None — the plugin ships status-line scripts and a hook only.
+
+## Hooks
+
+- **`quota_refresh.py`** (`hooks/quota_refresh.py`) — refreshes the active non-Anthropic provider's
+  quota cache that the status line's rate-limit warning reads (`scripts/_quota.py`). Fires on
+  `SessionStart`, `UserPromptSubmit`, `PostToolUse` and `Stop`, each run async with a 20 s timeout
+  so it never adds latency. A no-op on Anthropic (its quota comes with the harness payload) and
+  when the token is missing. Always exits 0 and prints nothing on stdout — for `SessionStart` and
+  `UserPromptSubmit` the harness injects stdout into the model's context. Each event picks how
+  young a cache is still good enough: session start always fetches, prompt/stop edges collapse
+  duplicate firings (10 s), the tool edge throttles to 120 s.
 
 ## Requirements
 
 Python 3.12 or newer, resolved as `python3` on the `PATH` — the status line command is
 `python3 …/scripts/statusline.py`, run by the harness.
 
-## Install
+### Install
 
 ```bash
 claude plugin marketplace add <marketplace-source>
@@ -94,7 +113,6 @@ when it is absent, so delete
 `~/.claude/plugins/cache/<marketplace>/pc-statusline/<version>/` before re-running the install,
 or the previous build keeps serving.
 
-## Never crashes
+## Dependencies
 
-A status line that errors blanks the whole bar, so both scripts are total: a malformed or
-type-poisoned payload degrades to a bare fallback line, never an exception.
+None.
