@@ -3641,7 +3641,7 @@ def test_tools_field_docstring_maps_every_report_detail_to_a_value():
     for clause in (
         "a ✅ line → `tools: true`",
         "a `429` that comes back when the entry is rerun alone after a pause (an exhausted quota, or the limit a provider shares between its models, can explain a first one) → `tools: false`",
-        "`outil en texte` → `tools: false`",
+        "`tool-call text` → `tools: false`",
         "a template rejection of the tool role (e.g. `Unexpected message role`) → `tools: false`",
         "an HTTP `400` error at the tools probe while the plain ping `--check-pool --name <entry>` answers → `tools: false`",
         "any other provider error (`401`, `403`, `500`, …), a missing mark, an empty answer, `no answer within Ns` or an environment error decides nothing",
@@ -3724,7 +3724,7 @@ def test_verdict_true_false_and_unknown_from_sessions(tmp_path):
     assert _verdicts(tmp_path, [ok, bad, lone]) == {
         "okp": "true",
         "badp": "false",
-        "lonep": "inconnu",
+        "lonep": "unknown",
     }
 
 
@@ -3732,7 +3732,7 @@ def test_runs_without_tools_do_not_count(tmp_path):
     e = _entry("m", "p")
     for i in range(3):
         _session(tmp_path, f"s{i}", "p", "m", steps=3, ending="text", tools=False)
-    assert _verdicts(tmp_path, [e]) == {"m": "inconnu"}
+    assert _verdicts(tmp_path, [e]) == {"m": "unknown"}
 
 
 def test_entry_without_run_takes_its_provider_verdict_and_own_runs_win(tmp_path):
@@ -3759,7 +3759,7 @@ def test_table_renders_proposed_tools_value_and_run_detail(tmp_path):
         "entry  verdict  tools  runs  success  text  429  other  source\n"
         "okp    true     true      2        2     0    0      0  entry\n"
         "badp   false    false     2        0     1    1      0  entry\n"
-        "lonep  inconnu  -         2        1     0    0      1  entry"
+        "lonep  unknown  -         2        1     0    0      1  entry"
     )
 
 
@@ -3785,7 +3785,7 @@ def test_verdict_script_writes_no_pool_configuration(tmp_path, monkeypatch, caps
     [
         ("ok", "ok"),
         ("429", "429"),
-        ("text", "outil en texte"),
+        ("text", "tool-call text"),
         ("boom", "401 unauthorized"),
     ],
 )

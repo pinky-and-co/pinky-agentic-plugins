@@ -284,7 +284,7 @@ _DT_NOTE = (
     "happened. error_only=true keeps FAILED, UPSTREAM_FAILED and CANCELLED refreshes."
 )
 _USAGE_FRESHNESS = (
-    "différée (delayed): SNOWFLAKE.ACCOUNT_USAGE view, which lags the event, so the latest "
+    "delayed: SNOWFLAKE.ACCOUNT_USAGE view, which lags the event, so the latest "
     f"executions may be missing; covers the last {ACCOUNT_USAGE_DAYS} days"
 )
 
@@ -1217,7 +1217,7 @@ def _result(
     shaped, cuts = _shape_rows(kept, columns, zone, variant_columns)
     return {
         "source": source,
-        "fraicheur": freshness,
+        "freshness": freshness,
         "timezone": zone.name,
         "range": {
             "start": _iso(plan_start_ms, zone),

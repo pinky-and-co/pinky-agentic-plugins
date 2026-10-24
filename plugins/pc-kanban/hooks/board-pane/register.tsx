@@ -535,7 +535,7 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v !== '') : []
 }
 
-// The badge line of an open card: column, priority, tier, effort, chantier, date, repos, sert, requirements, blocker.
+// The badge line of an open card: column, priority, tier, effort, chantier, date, repos, serves, requirements, blocker.
 export function cardSegments(card: BoardCard, cards: readonly BoardCard[]): Seg[] {
   const fm = card.frontmatter
   const mark = priorityMark(card.priority)
@@ -543,8 +543,8 @@ export function cardSegments(card: BoardCard, cards: readonly BoardCard[]): Seg[
   const effort = typeof fm.effort === 'string' && fm.effort !== '' ? fm.effort : null
   const chantier = `[${card.chantier_id ?? '----'}]`
   const date = typeof fm.date === 'string' && fm.date !== '' ? fm.date : null
-  const sert = typeof fm.sert === 'string' && fm.sert !== '' ? fm.sert : null
-  const target = sert === null ? undefined : cards.find(c => c.slug === sert)
+  const serve = typeof fm.serves === 'string' && fm.serves !== '' ? fm.serves : null
+  const target = serve === null ? undefined : cards.find(c => c.slug === serve)
   const blocked = blocker(card, cards)
   const segs: Seg[] = [
     { text: card.column },
@@ -554,7 +554,7 @@ export function cardSegments(card: BoardCard, cards: readonly BoardCard[]): Seg[
     card.story === null ? { text: chantier } : { text: chantier, press: { t: 'story' } as Intent },
     ...(date === null ? [] : [{ text: `${DATE_WORD[card.column] ?? 'on'} ${date}`, dimColor: true }]),
     ...strings(card.repos).map(r => ({ text: r })),
-    ...(sert === null ? [] : [target === undefined ? { text: `sert → ${sert}` } : { text: `sert → ${sert}`, press: { t: 'open', key: cardKey(target) } as Intent }]),
+    ...(serve === null ? [] : [target === undefined ? { text: `serves → ${serve}` } : { text: `serves → ${serve}`, press: { t: 'open', key: cardKey(target) } as Intent }]),
     ...strings(fm.requirements).map(r => ({ text: r })),
     ...(blocked === null ? [] : [{ text: `⊘ blocked by ${blocked}`, color: 'red' }]),
   ]

@@ -1271,7 +1271,7 @@ class TestContractOfEveryTool:
     def test_result_names_its_source_and_freshness(self, case: ToolCase) -> None:
         result = run_with_session(case, FakeSession())
         assert result["source"].strip() != ""
-        assert result["fraicheur"].strip() != ""
+        assert result["freshness"].strip() != ""
 
     def test_free_text_is_withheld_unless_asked_for_and_cut_when_given(
         self, case: ToolCase
@@ -1350,7 +1350,7 @@ class TestAccountUsageFallback:
         reads = _usage_reads(session)
         assert len(reads) == 1
         assert result["source"] == f"SNOWFLAKE.ACCOUNT_USAGE.{case.name.upper()}"
-        assert "différée" in result["fraicheur"]
+        assert result["freshness"].startswith("delayed")
         assert result["row_count"] == 2
         assert NOW_MS - TEN_DAYS_MINUTES * 60_000 in reads[0].params
         assert not any("INFORMATION_SCHEMA" in s.sql for s in session.statements)

@@ -19,7 +19,7 @@ import open_cards_brief as ocb  # noqa: E402
 
 GOAL_CARD = """---
 date: 2026-08-09
-sert: null
+serves: null
 ---
 # Explorer `/goal` + équipes d'agents pour l'exécution des cards
 

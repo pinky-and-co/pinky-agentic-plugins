@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-subagentStatusLine — une ligne personnalisée par sous-agent affiché dans le
-panneau d'agents de Claude Code. Reçoit un JSON unique sur stdin avec tous
-les agents visibles (champ "tasks"), et doit écrire UNE ligne JSON par
-agent que l'on veut personnaliser : {"id": "<task id>", "content": "<rendu>"}
-Un id absent du flux de sortie garde le rendu par défaut de Claude Code.
+subagentStatusLine — a custom line per subagent shown in the Claude Code agents
+panel. Receives a single JSON on stdin with every visible agent ("tasks" field),
+and must write ONE JSON line per agent to customize: {"id": "<task id>", "content": "<render>"}
+An id absent from the output stream keeps Claude Code's default render.
 """
 
 from __future__ import annotations

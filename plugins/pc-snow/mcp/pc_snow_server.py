@@ -88,7 +88,7 @@ async def task_history(
     365 days; needs SNOWFLAKE.USAGE_VIEWER, the error names it). Timestamps carry their offset
     (authoritative); `timezone` is the PC_SNOW_TIMEZONE name, else the system abbreviation.
     limit: 1..200 rows (default 50), newest first; `truncated` flags more. Error messages, return
-    values and task SQL need include_text=true. Returns source, fraicheur, range, rows.
+    values and task SQL need include_text=true. Returns source, freshness, range, rows.
     """
     try:
         request = pc_snow_tools.plan_task_history(
@@ -153,7 +153,7 @@ async def warehouse_credits(
     without either, Snowflake answers no row and no error (measured), which the notes say.
     Range: start and end (ISO-8601, no offset = the user's timezone), or last_minutes (at most
     10079), never both. limit: 1..200 hourly rows (default 50), newest first; `totals` sums the
-    three credit kinds over the whole range, whatever the limit. Returns source, fraicheur,
+    three credit kinds over the whole range, whatever the limit. Returns source, freshness,
     range, rows.
     """
     try:
@@ -187,7 +187,7 @@ async def event_table_records(
     one the caller names. query_id keeps one query's records. Range: start and end (ISO-8601, no
     offset = the user's timezone), or last_minutes (at most 10079), never both. limit: 1..200
     rows (default 50), newest first. Log messages and attributes need include_text=true and are
-    cut at 200 characters. Returns source (the resolved table), fraicheur, range, rows.
+    cut at 200 characters. Returns source (the resolved table), freshness, range, rows.
     """
     try:
         request = pc_snow_tools.plan_event_records(
@@ -216,7 +216,7 @@ async def warehouse_config(
     AUTO_SUSPEND, AUTO_RESUME, SCALING_POLICY, RESOURCE_CONSTRAINT, query acceleration,
     QUERY_THROUGHPUT_MULTIPLIER, RESOURCE_MONITOR, OWNER, COMMENT.
     A warehouse the role cannot see is absent: an empty result does not prove non-existence.
-    limit: 1..200 rows (default 200). Returns source, fraicheur, rows.
+    limit: 1..200 rows (default 200). Returns source, freshness, rows.
     """
     try:
         request = pc_snow_tools.plan_warehouse_config(warehouse, all_warehouses, limit)
@@ -242,7 +242,7 @@ async def query_operator_stats(
     own queries need no privilege, other users' need MONITOR or OPERATE on their warehouse or
     task, or MONITOR EXECUTION. limit: 1..200 operators (default 200), ordered by OPERATOR_ID;
     `truncated` flags more. The VARIANT fields (OPERATOR_STATISTICS, EXECUTION_TIME_BREAKDOWN,
-    OPERATOR_ATTRIBUTES) are returned parsed, not cut. Returns source, fraicheur, rows.
+    OPERATOR_ATTRIBUTES) are returned parsed, not cut. Returns source, freshness, rows.
     """
     try:
         request = pc_snow_tools.plan_operator_stats(query_id, limit)
@@ -276,7 +276,7 @@ async def dynamic_table_refresh_history(
     ago reads ACCOUNT_USAGE instead (delayed; needs SNOWFLAKE.USAGE_VIEWER, the error names
     it). error_only keeps FAILED, UPSTREAM_FAILED and CANCELLED. limit: 1..200 rows (default
     50), newest first. State messages and the STATISTICS variant need include_text=true;
-    STATISTICS is parsed, not cut. Returns source, fraicheur, range, rows.
+    STATISTICS is parsed, not cut. Returns source, freshness, range, rows.
     """
     try:
         request = pc_snow_tools.plan_dynamic_table_refresh(

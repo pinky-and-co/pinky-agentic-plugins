@@ -125,16 +125,16 @@ python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,
    - `panel` (MCP tool `mcp__plugin_pc-models_pc-models__panel`) with `tasks` = `[the prompt]`
      and `tools` = `[]`, no `models` — the pool picks. A `[panel] BLOCKED` line means no key —
      fall through.
-   - Neither answered → print "reconcile — modèle non joignable, passe advisory sautée" and go to
+   - Neither answered → print "reconcile — model unreachable, advisory pass skipped" and go to
      Step 1. **Never block the release on this.**
-3. Filter the model's MANQUANT findings through the deterministic post-filter:
+3. Filter the model's MISSING findings through the deterministic post-filter:
    ```
    printf '%s' "<the model's full reply>" | python3 "$RECONCILE" --repo <repo> \
      --features-doc <path> --features-header <a,b,c> --filter-model-output
    ```
-   Its stdout is the MANQUANT findings that survived, one per line (empty = all were noise).
+   Its stdout is the MISSING findings that survived, one per line (empty = all were noise).
 4. Present, for accept/reject: the model's **DIVERGE** findings (read from its prose report) and the
-   **surviving MANQUANT** findings. For each one the user accepts, `Edit` **exactly that one line**
+   **surviving MISSING** findings. For each one the user accepts, `Edit` **exactly that one line**
    of the feature doc — nothing else. Reject-all → the doc is left byte-for-byte unchanged.
 
 **Vigilance — treat every model finding as a lead to verify, not a verdict.** A small model

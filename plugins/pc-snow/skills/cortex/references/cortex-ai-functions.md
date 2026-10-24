@@ -68,7 +68,7 @@ Only `"type": "string"` and `"type": "array"` are valid for leaf nodes.
 | date | `"string"` | `TRY_TO_DATE(col::string, 'YYYY-MM-DD')` |
 | integer | `"string"` | `TRY_CAST(col::string AS INT)` |
 | decimal | `"string"` | `TRY_CAST(col::string AS DECIMAL)` |
-| boolean | `"string"` | `CASE WHEN col::string = 'oui' THEN TRUE ...` |
+| boolean | `"string"` | `CASE WHEN col::string = 'yes' THEN TRUE ...` |
 
 ### Absent fields — correct behaviour
 
@@ -77,10 +77,10 @@ Reading from a Snowflake VARIANT column: an absent key path returns NULL automat
 
 ```python
 # Snowpark — safe read
-result['response'].get('soc_tva')   # → None if absent, no KeyError
+result['response'].get('company_vat')   # → None if absent, no KeyError
 
 # SQL — safe read
-result:response:soc_tva::string     -- → NULL if key absent, no error
+result:response:company_vat::string     -- → NULL if key absent, no error
 ```
 
 Do not instruct the model to return `"null"` or `"N/A"` — it adds noise to handle downstream.
@@ -104,12 +104,12 @@ Post-extraction validation pattern:
 ```python
 # regex guard + score guard → route to review table
 import re
-NAF_RE = re.compile(r'^\d{4}[A-Z]$')
+ACTIVITY_CODE_RE = re.compile(r'^\d{4}[A-Z]$')
 
-score = result['scoring']['scores'].get('soc_naf', {}).get('score', 0)
-value = result['response'].get('soc_naf', '')
+score = result['scoring']['scores'].get('company_activity_code', {}).get('score', 0)
+value = result['response'].get('company_activity_code', '')
 
-if score < 0.8 or not NAF_RE.match(value):
+if score < 0.8 or not ACTIVITY_CODE_RE.match(value):
     # INSERT INTO review_table
 ```
 
@@ -146,8 +146,8 @@ Warehouse size: **MEDIUM maximum** — larger warehouses do not improve performa
 The example does more work than the label. arctic-extract mirrors the format of the example provided.
 
 ```json
-"soc_rcs": {
-    "description": "Full RCS registration number including court city. e.g. 'Paris B 123 456 789'",
+"company_registry_number": {
+    "description": "Full company registry number including registry city. e.g. 'London B 123 456 789'",
     "type": "string"
 }
 ```
@@ -157,8 +157,8 @@ The example does more work than the label. arctic-extract mirrors the format of 
 arctic-extract does not interpret regex in descriptions. Plain rule + example is the correct pattern.
 
 ```json
-"soc_naf": {
-    "description": "APE/NAF code. 4 digits + 1 uppercase letter, no dot separator. e.g. '6920Z' not '69.20Z'",
+"company_activity_code": {
+    "description": "Industry activity code. 4 digits + 1 uppercase letter, no dot separator. e.g. '6920Z' not '69.20Z'",
     "type": "string"
 }
 ```
@@ -170,7 +170,7 @@ Regex belongs in post-extraction SQL/Python validation, not in the description.
 For fields that could be computed or deduced from other fields:
 
 ```json
-"soc_duree": {
+"company_duration": {
     "description": "Company duration in whole years. Only extract if explicitly stated as a number in the document. e.g. '99'",
     "type": "string"
 }
@@ -179,8 +179,8 @@ For fields that could be computed or deduced from other fields:
 ### Rule 4 — For arrays, define separator and field order with a concrete example
 
 ```json
-"gerants": {
-    "description": "One entry per person as: 'CIVILITY FIRSTNAME LASTNAME | full home address | exact role title as in document'. e.g. 'M. Laurent CLAUDE | 4 bis Rue Ernest Renan 33600 Pessac | Président'",
+"managers": {
+    "description": "One entry per person as: 'CIVILITY FIRSTNAME LASTNAME | full home address | exact role title as in document'. e.g. 'Mr. John SMITH | 12 Baker Street, London NW1 6XE | Chairman'",
     "type": "array"
 }
 ```
@@ -188,8 +188,8 @@ For fields that could be computed or deduced from other fields:
 ### Rule 5 — For normalised values, give the target list
 
 ```json
-"soc_forme": {
-    "description": "Legal form. Must be exactly one of: SAS, SASU, SARL, EURL, SA, SNC, SCI, GIE, SELARL, SELAS. Use the short form only.",
+"company_legal_form": {
+    "description": "Legal form. Must be exactly one of: LLC, LTD, PLC, INC, LLP, CORP. Use the short form only.",
     "type": "string"
 }
 ```
@@ -253,7 +253,7 @@ Three mechanisms exist in Cortex. They are not interchangeable.
 
 ## Typical pipelines
 
-**Structured extraction (KBIS / statuts / liasse fiscale)**
+**Structured extraction (company registry extract / articles of association / tax return)**
 ```
 TO_FILE(@stage, path)
   → AI_EXTRACT(file, responseFormat, scores => TRUE)
@@ -300,10 +300,10 @@ Zero-shot is sufficient for standard, well-structured, digital-born documents wi
 
 | Signal | Example |
 |---|---|
-| Output format inconsistent across documents | `soc_cap` returns "1 080 060 €" on some docs, "1080060.00" on others |
-| Model infers values it should leave absent | `soc_date_fin` computed instead of read |
-| Controlled vocabulary not respected | `soc_forme` returns full legal name despite short-form instruction |
-| Complex multi-level tables | Cerfa fiscal forms (2050, 2051, 2052) with nested headers |
+| Output format inconsistent across documents | `company_capital` returns "$1,080,060" on some docs, "1080060.00" on others |
+| Model infers values it should leave absent | `company_end_date` computed instead of read |
+| Controlled vocabulary not respected | `company_legal_form` returns full legal name despite short-form instruction |
+| Complex multi-level tables | Multi-page tax return forms with nested headers |
 | Scanned documents with variable quality at scale | High error rate even with scale_factor tuning |
 | Industrial volume + SLA | Batch processing requiring < 1% error rate |
 
@@ -346,14 +346,14 @@ session.sql("""
 # 2. Insert labelled examples — Response must be perfectly consistent
 session.sql("""
     INSERT INTO ft_training VALUES (
-        TO_FILE('@doc_stage', 'kbis_001.pdf'),
+        TO_FILE('@doc_stage', 'registry_extract_001.pdf'),
         '{
-            "soc_nom": "Exact legal company name (denomination sociale)",
-            "soc_forme": "Legal form, exactly one of: SAS, SASU, SARL, EURL, SA"
+            "company_name": "Exact legal company name (registered name)",
+            "company_legal_form": "Legal form, exactly one of: LLC, LTD, PLC, INC"
         }',
         '{
-            "soc_nom": "SAS PALMERAIE",
-            "soc_forme": "SAS"
+            "company_name": "ACME HOLDINGS LTD",
+            "company_legal_form": "LTD"
         }'
     )
 """).collect()
@@ -379,7 +379,7 @@ ds = dataset.create_from_dataframe(
 result = session.sql("""
     SELECT SNOWFLAKE.CORTEX.FINETUNE(
         'CREATE',
-        'my_db.my_schema.kbis_extractor',
+        'my_db.my_schema.registry_extractor',
         'arctic-extract',
         'snow://dataset/my_db.my_schema.ft_dataset/versions/v1'
     )
@@ -413,7 +413,7 @@ def extract(session, source: str, response_format: dict, from_file: bool = False
     return row[0]
 
 
-extract(session, "@doc_stage/kbis_001.pdf", response_format, from_file=True)
+extract(session, "@doc_stage/registry_extract_001.pdf", response_format, from_file=True)
 extract(session, "some raw text to extract from", response_format, from_file=False)
 ```
 

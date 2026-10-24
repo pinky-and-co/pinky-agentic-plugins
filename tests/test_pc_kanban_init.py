@@ -56,14 +56,14 @@ class TestRenderIndex(unittest.TestCase):
             "---\n"
             "title: KANBAN\n"
             "---\n"
-            "# _KANBAN — board de chantiers\n"
+            "# _KANBAN — chantier board\n"
             "\n"
             "## Board\n"
             "\n"
             f"{pki.LEGEND}\n"
             "\n"
-            "| # | Chantier (objectif) | Statut |\n"
-            "|---|---------------------|--------|\n",
+            "| # | Chantier (objective) | Status |\n"
+            "|---|-----------------------|--------|\n",
         )
 
     def test_recovered_chantiers_become_dormant_rows(self):
@@ -72,14 +72,14 @@ class TestRenderIndex(unittest.TestCase):
             "---\n"
             "title: KANBAN\n"
             "---\n"
-            "# _KANBAN — board de chantiers\n"
+            "# _KANBAN — chantier board\n"
             "\n"
             "## Board\n"
             "\n"
             f"{pki.LEGEND}\n"
             "\n"
-            "| # | Chantier (objectif) | Statut |\n"
-            "|---|---------------------|--------|\n"
+            "| # | Chantier (objective) | Status |\n"
+            "|---|-----------------------|--------|\n"
             "| 0025 | plugins-claude | ⚪ |\n"
             "| 0099 | demo | ⚪ |\n",
         )

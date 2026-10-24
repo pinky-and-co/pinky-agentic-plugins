@@ -351,7 +351,7 @@ def test_select_refuses_a_fidelity_element_without_equals(tmp_path: Path) -> Non
     )
     result = _run(tmp_path, "select", "demo")
     assert result.returncode == 1
-    assert "axe=niveau" in result.stderr
+    assert "axis=level" in result.stderr
 
 
 def test_select_refuses_a_fidelity_without_mockup(tmp_path: Path) -> None:
@@ -709,13 +709,13 @@ def test_a_glob_character_in_the_slug_matches_nothing_else(tmp_path: Path) -> No
     assert card.exists()
 
 
-def _child(board: Path, column: str, head: str = "sert: demo\n") -> Path:
+def _child(board: Path, column: str, head: str = "serves: demo\n") -> Path:
     return _card(board, column, "kid", head=f"model: sonnet\n{head}")
 
 
 def test_archive_refuses_a_parent_held_by_an_open_child(tmp_path: Path) -> None:
     for column in ("0-ideas", "1-todo", "2-selected-for-dev", "3-in-progress"):
-        for head in ("sert: demo\n", "blocked_by: demo\n"):
+        for head in ("serves: demo\n", "blocked_by: demo\n"):
             board = tmp_path / f"{column}-{head.split(':')[0]}"
             parent = _card(board, "4-done")
             child = _child(board, column, head)
@@ -735,7 +735,7 @@ def test_archive_ignores_a_child_that_is_done_or_archived(tmp_path: Path) -> Non
         _card(board, "4-done")
         archived = board / "_ARCHIVE" / f"CHANTIER0001-{kind}" / "2026-01-02_kid.md"
         archived.parent.mkdir(parents=True)
-        archived.write_text("---\nsert: demo\n---\n", encoding="utf-8")
+        archived.write_text("---\nserves: demo\n---\n", encoding="utf-8")
         result = _run(board, "archive", "demo")
         assert result.returncode == 0, result.stderr
 

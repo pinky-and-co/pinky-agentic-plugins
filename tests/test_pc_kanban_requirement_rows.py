@@ -16,7 +16,7 @@ sys.path.insert(
     ),
 )
 
-from pc_kanban_requirement_rows import RequirementRow, requirement_rows  # noqa: E402
+from pc_kanban_requirement_rows import RequirementRow, holders, requirement_rows  # noqa: E402
 
 
 def _card(*rows: str) -> str:
@@ -57,3 +57,18 @@ def test_rows_differing_only_by_slug_or_row_are_equal() -> None:
     assert rows[0] == rows[1]
     assert (rows[0].slug, rows[1].slug) == ("a", "b")
     assert len({*rows}) == 1
+
+
+def _board(tmp_path: Path, head: str) -> Path:
+    todo = tmp_path / "1-todo"
+    todo.mkdir(parents=True)
+    (todo / "kid.md").write_text(f"---\n{head}---\n# kid\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_holders_reads_serves(tmp_path: Path) -> None:
+    assert holders(_board(tmp_path, "serves: demo\n"), "demo") == ["kid"]
+
+
+def test_holders_no_longer_reads_the_old_sert_field(tmp_path: Path) -> None:
+    assert holders(_board(tmp_path, "sert: demo\n"), "demo") == []

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Per pool entry, whether a tool loop works: a verdict read from the `pi` sessions already run.
 
-For each entry of the pool this prints `true`, `false` or `inconnu`, the evidence behind it, and
-the `tools:` value that would follow (`-` for `inconnu`) and the run detail (success, text, 429,
+For each entry of the pool this prints `true`, `false` or `unknown`, the evidence behind it, and
+the `tools:` value that would follow (`-` for `unknown`) and the run detail (success, text, 429,
 other (unclassified)). It writes nothing — not to the pool configuration, not
 anywhere: the verdict is a proposal and the pool belongs to whoever edits it.
 
@@ -15,9 +15,9 @@ are the assistant messages that stopped on a tool use. A run counts as:
   written as text) or the run ended on a 429.
 
 Thresholds: `true` for at least 2 successes and no tool call written as text; `false` for at least
-2 failures and no success; `inconnu` otherwise. An entry with no run of its own takes the verdict of
+2 failures and no success; `unknown` otherwise. An entry with no run of its own takes the verdict of
 its provider (all that provider's runs pooled); an entry with runs keeps its own verdict, even when
-it is `inconnu`.
+it is `unknown`.
 
 Usage:
     model_tools_verdict.py [--sessions DIR]
@@ -34,7 +34,7 @@ from typing import Any, Literal, NamedTuple
 sys.path.insert(0, str(Path(__file__).parent))
 import model_adversarial as ma  # noqa: E402
 
-Verdict = Literal["true", "false", "inconnu"]
+Verdict = Literal["true", "false", "unknown"]
 Outcome = Literal["success", "text", "429"]
 
 MIN_STEPS = 2
@@ -63,8 +63,8 @@ class EntryVerdict(NamedTuple):
 
     @property
     def tools(self) -> str:
-        """The `tools:` value to propose: `true`, `false`, or `-` (none) for `inconnu`."""
-        return "-" if self.verdict == "inconnu" else self.verdict
+        """The `tools:` value to propose: `true`, `false`, or `-` (none) for `unknown`."""
+        return "-" if self.verdict == "unknown" else self.verdict
 
 
 def default_sessions_dir() -> Path:
@@ -148,7 +148,7 @@ def verdict_of(runs: list[Run]) -> Verdict:
         return "true"
     if failures >= MIN_RUNS and successes == 0:
         return "false"
-    return "inconnu"
+    return "unknown"
 
 
 def entry_verdicts(pool: list[dict[str, Any]], runs: list[Run]) -> list[EntryVerdict]:
@@ -169,7 +169,7 @@ def entry_verdicts(pool: list[dict[str, Any]], runs: list[Run]) -> list[EntryVer
         if theirs:
             rows.append(_row(entry["name"], theirs, "provider"))
         else:
-            rows.append(EntryVerdict(entry["name"], "inconnu", 0, "none"))
+            rows.append(EntryVerdict(entry["name"], "unknown", 0, "none"))
     return rows
 
 

@@ -49,14 +49,14 @@ Write one brief, in this order:
 1. **Intent** — what the user wants and why, in a few lines.
 2. **Concepts** — the named things the session surfaced, one line each.
 3. **Claims** — a table: claim, status (measured / assumed / decided), evidence or reason.
-4. **Items ouverts** — the open items: questions nobody answered, paradoxes unresolved, assumed
+4. **Open items** — the open items: questions nobody answered, paradoxes unresolved, assumed
    claims that the design would rest on. Each says what would settle it. Never empty by default:
    an empty list means the challenge did not happen.
 5. **Implementation steps, ordered** — what has to exist first for the rest to be testable, in
    dependency order. Steps describe work, not a chosen design: a step that names a technology,
    protocol or service is rewritten as the capability it enables.
 
-Write the section heading "Items ouverts" exactly so, whatever language the rest is written in:
+Write the section heading "Open items" exactly so, whatever language the rest is written in:
 the interview that consumes this brief looks for it.
 
 ## Boundaries

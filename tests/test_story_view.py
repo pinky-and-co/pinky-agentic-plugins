@@ -230,7 +230,7 @@ def test_held_parents_section_lists_the_holding_cards(tmp_path: Path) -> None:
     _card(chantier / "4-done" / "parent.md")
     _card(chantier / "0-ideas" / "kid-a.md")
     (chantier / "0-ideas" / "kid-a.md").write_text(
-        "---\nsert: parent\nrequirements: []\n---\n# a\n", encoding="utf-8"
+        "---\nserves: parent\nrequirements: []\n---\n# a\n", encoding="utf-8"
     )
     _card(chantier / "1-todo" / "kid-b.md", blocked_by="parent")
     out = _run(str(chantier)).stdout
@@ -243,3 +243,15 @@ def test_no_held_parents_section_without_open_children(tmp_path: Path) -> None:
     _card(chantier / "4-done" / "parent.md")
     _card(chantier / "1-todo" / "other.md")
     assert "Held parents" not in _run(str(chantier)).stdout
+
+
+def test_a_done_card_is_held_by_a_child_naming_it_in_serves(tmp_path: Path) -> None:
+    chantier = tmp_path / "_KANBAN" / "CHANTIER0025-demo"
+    _card(chantier / "4-done" / "p1.md")
+    path = chantier / "1-todo" / "k1.md"
+    _card(path)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("---\n", "---\nserves: p1\n", 1),
+        encoding="utf-8",
+    )
+    assert "- p1 <- k1\n" in _run(str(chantier)).stdout

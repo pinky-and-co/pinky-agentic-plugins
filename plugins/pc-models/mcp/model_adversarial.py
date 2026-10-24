@@ -74,7 +74,7 @@ Each entry:
                    a `429` that comes back when the entry is rerun alone after a pause (an
                    exhausted quota, or the limit a provider shares between its models, can
                    explain a first one) → `tools: false`;
-                   `outil en texte` → `tools: false`;
+                   `tool-call text` → `tools: false`;
                    a template rejection of the tool role (e.g. `Unexpected message role`) →
                    `tools: false`;
                    an HTTP `400` error at the tools probe while the plain ping
@@ -1559,7 +1559,7 @@ def _probe_prompt(directory: Path, mark: str) -> tuple[str, Path]:
 def _check_tools_one(
     entry: dict[str, Any], timeout: int, env: dict[str, str]
 ) -> PoolCheck:
-    """Run the 12-step tool probe on one entry: `ok`, `429`, `outil en texte`, or the provider's
+    """Run the 12-step tool probe on one entry: `ok`, `429`, `tool-call text`, or the provider's
     own error."""
     if entry.get("kind") == "offline":
         return PoolCheck(
@@ -1585,7 +1585,7 @@ def _check_tools_one(
             if mark in answer:
                 return PoolCheck(entry["name"], "ok", "ok", time.monotonic() - start)
             if _TOOL_CALL_TAIL_RE.search(answer):
-                detail = "outil en texte"
+                detail = "tool-call text"
             else:
                 detail = (
                     f"mark missing from the answer: {answer[:40]!r}"
@@ -1642,7 +1642,7 @@ def check_pool(
             (`PROBE_STEPS` x 20) for the tools probe. An entry's own `timeout` always wins.
         workers: concurrent pi calls.
         tools: run the 12-step tool probe (one request per tool call) instead of the one-line
-            ping; the detail of a failed entry is then `429`, `outil en texte` or the provider's
+            ping; the detail of a failed entry is then `429`, `tool-call text` or the provider's
             error. The entries of one provider then run one after another, providers in parallel.
 
     Returns:

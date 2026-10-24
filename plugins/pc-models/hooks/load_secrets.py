@@ -11,7 +11,7 @@ session's whole lifetime.
 Each `keys` entry: `{"reader": "...", "env": "VAR_NAME", ...reader-specific fields}`. `reader`
 dispatches to a wiring function below; each names its own fields. One is wired:
 
-- `macos_keychain` (`{"service": ...}`) — the classic keychain, Trousseau d'accès,
+- `macos_keychain` (`{"service": ...}`) — the classic keychain, Keychain Access,
   `security find-generic-password`; NOT the Passwords app, which stores in a structurally
   different, unreachable format — see `docs/how-to/setup-declarative-secrets.md` (pinky-bootstrap)
   for why. Every secret goes here: never write a credential in `settings.pinky.json` itself.

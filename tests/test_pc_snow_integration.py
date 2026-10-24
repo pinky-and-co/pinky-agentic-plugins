@@ -138,7 +138,7 @@ def test_task_history_statement_is_accepted_for_a_visible_task(
     )
     print(f"\ntask_history on one visible task: {result['row_count']} row(s)")
     assert result["source"].endswith("INFORMATION_SCHEMA.TASK_HISTORY")
-    assert result["fraicheur"]
+    assert result["freshness"]
     assert result["row_count"] <= result["limit"]
     assert result["timezone"]
     assert datetime.fromisoformat(result["range"]["start"]).utcoffset() is not None
@@ -183,7 +183,7 @@ def test_task_history_returns_bounded_rows_with_source_and_zone(
     )
     assert 0 < result["row_count"] <= 5
     assert result["source"]
-    assert result["fraicheur"]
+    assert result["freshness"]
     assert result["range"]["start"][-6] in "+-"
     stamp = result["rows"][0]["SCHEDULED_TIME"]
     assert datetime.fromisoformat(stamp).utcoffset() is not None
@@ -252,7 +252,7 @@ def test_warehouse_credits_returns_hours_or_names_the_missing_privilege(
         f"truncated={result['truncated']}"
     )
     assert result["source"].endswith("WAREHOUSE_METERING_HISTORY")
-    assert result["fraicheur"]
+    assert result["freshness"]
     assert result["row_count"] <= 5
     assert result["timezone"]
     if result["rows"]:
@@ -300,7 +300,7 @@ def test_a_range_beyond_seven_days_reads_account_usage_or_names_the_role(
         f"\n{tool} beyond 7 days: {result['row_count']} row(s) from {result['source']}"
     )
     assert result["source"].startswith("SNOWFLAKE.ACCOUNT_USAGE.")
-    assert "différée" in result["fraicheur"]
+    assert result["freshness"].startswith("delayed")
     assert result["row_count"] <= 5
     stamp = "SCHEDULED_TIME" if tool == "task_history" else "START_TIME"
     if tool == "task_history":

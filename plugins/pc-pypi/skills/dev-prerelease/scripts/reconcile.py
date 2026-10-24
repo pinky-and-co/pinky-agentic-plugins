@@ -21,7 +21,7 @@ Two things it produces:
    package plus the full source of only the referenced modules — the bounded input the skill body
    hands to the model layer.
 
-3. **A MANQUANT post-filter** (`drop_already_documented`) — applied by the skill body to the model's
+3. **A MISSING post-filter** (`drop_already_documented`) — applied by the skill body to the model's
    *output*: a "capability X is missing from the table" finding is dropped when X's module already
    has a row, or when X is named inside another row's Feature cell. Kills the recurring
    already-documented false positive without being able to hide a real omission.
@@ -370,7 +370,7 @@ def _is_stub_body(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -
     """True when the node's body carries no implementation: only a docstring, ``pass``, ``...``,
     or ``raise NotImplementedError``.
 
-    The signal ``build_signature_brief`` uses to mark a symbol NON implémenté regardless of what its
+    The signal ``build_signature_brief`` uses to mark a symbol NOT IMPLEMENTED regardless of what its
     docstring claims — the recurring failure a docstring-quality gate cannot catch (interrogate
     checks a docstring exists, darglint that it matches the signature, neither that it matches the
     behaviour).
@@ -455,7 +455,7 @@ def _module_api_digest(src: str) -> str:
             bases = ", ".join(ast.unparse(b) for b in node.bases)
             head = f"class {node.name}({bases})" if bases else f"class {node.name}"
             flag = (
-                "  ⚠ STUB — corps = docstring seule, aucune méthode"
+                "  ⚠ STUB — body is a docstring only, no method"
                 if _is_stub_body(node)
                 else ""
             )
@@ -488,10 +488,10 @@ def build_signature_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) ->
         The document, then one digest block per module with a public API.
     """
     api_header = (
-        "--- API PUBLIQUE (signatures + 1re ligne de docstring ; ⚠ STUB = corps vide/trivial, "
-        "à traiter comme NON implémenté quoi qu'affirme la docstring ou le tableau) ---"
+        "--- PUBLIC API (signatures + first docstring line; ⚠ STUB = empty/trivial body, "
+        "to be treated as NOT IMPLEMENTED whatever the docstring or the table claims) ---"
     )
-    parts = [f"--- TABLEAU DE FEATURES ({doc_rel}) ---\n{doc_md}", api_header]
+    parts = [f"--- FEATURE TABLE ({doc_rel}) ---\n{doc_md}", api_header]
     for path in sorted(sources):
         digest = _module_api_digest(sources[path])
         if digest:
@@ -575,14 +575,14 @@ def build_selective_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) ->
     """
     referenced = referenced_files(doc_md, sources)
     parts = [
-        f"--- DOCUMENT À RÉCONCILIER ({doc_rel}) ---\n{doc_md}",
-        "--- INDEX DU PACKAGE (tous les fichiers, symboles publics — pour repérer le code "
-        "implémenté mais ABSENT du document) ---\n" + build_structural_index(sources),
+        f"--- DOCUMENT TO RECONCILE ({doc_rel}) ---\n{doc_md}",
+        "--- PACKAGE INDEX (all files, public symbols — to spot code that is implemented "
+        "but ABSENT from the document) ---\n" + build_structural_index(sources),
     ]
     if referenced:
         parts.append(
-            "--- CODE DES MODULES CITÉS PAR LE DOCUMENT (source complète — pour juger si le code "
-            "fait ce que le document affirme) ---"
+            "--- CODE OF THE MODULES THE DOCUMENT CITES (full source — to judge whether the code "
+            "does what the document claims) ---"
         )
         for path in referenced:
             parts.append(f"--- CODE: {path} ---\n```python\n{sources[path]}\n```")
@@ -605,89 +605,89 @@ def build_phase1_brief(doc_rel: str, doc_md: str, sources: dict[str, str]) -> st
     Returns:
         The document, then every source file in path order.
     """
-    parts = [f"--- TABLEAU DE FEATURES ({doc_rel}) ---\n{doc_md}"]
+    parts = [f"--- FEATURE TABLE ({doc_rel}) ---\n{doc_md}"]
     for path in sorted(sources):
         parts.append(f"--- CODE: {path} ---\n```python\n{sources[path]}\n```")
     return "\n\n".join(parts)
 
 
 PHASE1_TASK = (
-    "Tu réconcilies le tableau de features d'un repo avec le code qui est censé l'implémenter.\n"
-    "Le code fait FOI. Le tableau est le document suspect.\n"
+    "You reconcile a repo's feature table with the code that is supposed to implement it.\n"
+    "The code is AUTHORITATIVE. The table is the suspect document.\n"
     "\n"
-    "Vérifie les DEUX directions :\n"
-    "1. Pour chaque ligne du tableau : le code fait-il ce que la ligne affirme ? MATCH ou DIVERGE.\n"
-    "2. Inversement : une capacité publique importante est-elle absente du tableau ? MANQUANT.\n"
+    "Check BOTH directions:\n"
+    "1. For each table row: does the code do what the row claims? MATCH or DIVERGE.\n"
+    "2. Conversely: is an important public capability absent from the table? MISSING.\n"
     "\n"
-    "DIVERGE — définition stricte. La ligne affirme quelque chose que le code ne fait pas :\n"
-    "- le code ne le fait pas du tout (déclaré stable/✓ mais absent, ou simple stub) ;\n"
-    "- le code le fait autrement (valeur, seuil, comportement différent de l'affirmation) ;\n"
-    "- le code ne le fait qu'à MOITIÉ (la ligne annonce une portée que l'implémentation "
-    "n'atteint que partiellement).\n"
+    "DIVERGE — strict definition. The row claims something the code does not do:\n"
+    "- the code does not do it at all (declared stable/✓ but absent, or a mere stub);\n"
+    "- the code does it differently (value, threshold, behaviour differing from the claim);\n"
+    "- the code does it only HALF-WAY (the row announces a scope the implementation only "
+    "partially reaches).\n"
     "\n"
-    "N'est PAS un DIVERGE — ne les signale sous aucun prétexte :\n"
-    "- une ligne qui décrit MOINS que ce que le code fait. Une description incomplète n'est pas "
-    "un mensonge : si le code offre en plus une option, un paramètre ou un réglage que la ligne "
-    "ne mentionne pas, la ligne reste VRAIE. C'est un MATCH.\n"
-    "- du code perfectible, mal nommé, ou dont tu discutes la conception : tu juges la "
-    "correspondance ligne↔code, jamais la qualité du code.\n"
-    "- une limitation que le tableau ASSUME lui-même : si une colonne (notes, commentaire, "
-    "statut) justifie explicitement l'écart, c'est documenté, donc MATCH.\n"
+    "NOT a DIVERGE — never report these:\n"
+    "- a row that describes LESS than what the code does. An incomplete description is not "
+    "a lie: if the code also offers an option, a parameter or a setting the row does not "
+    "mention, the row stays TRUE. It is a MATCH.\n"
+    "- code that could be better, is badly named, or whose design you would discuss: you judge "
+    "the row-to-code correspondence, never the quality of the code.\n"
+    "- a limitation the table itself ASSUMES: if a column (notes, comment, "
+    "status) explicitly justifies the gap, it is documented, hence MATCH.\n"
     "\n"
-    "MANQUANT — réservé aux capacités PUBLIQUES qu'un utilisateur du repo appellerait : classes et "
-    "fonctions de l'API publique. Ne signale JAMAIS comme manquant : un helper privé (nom préfixé "
-    "d'un `_`), une constante, une table de configuration, un détail d'implémentation interne. Un "
-    "tableau de features documente des features, pas des rouages.\n"
+    "MISSING — reserved for PUBLIC capabilities a user of the repo would call: classes and "
+    "functions of the public API. NEVER report as missing: a private helper (name prefixed "
+    "with `_`), a constant, a configuration table, an internal implementation detail. A "
+    "feature table documents features, not internals.\n"
     "\n"
-    "Le tableau peut avoir n'importe quelle forme de colonnes — déduis-en le sens toi-même.\n"
-    "Si tu n'as pas de quoi trancher une ligne, dis-le plutôt que de supposer.\n"
+    "The table may have any column layout — infer the meaning yourself.\n"
+    "If you cannot decide a row, say so rather than assume.\n"
     "\n"
-    "Pour chaque DIVERGE ou MANQUANT : ce que la ligne prétend / ce que le code fait réellement, "
-    "puis la ligne de tableau corrigée, prête à relire.\n"
-    "Ne rends que les lignes à problème + une ligne de synthèse. Ne détaille pas les MATCH.\n"
-    "Un tableau honnête est le cas NORMAL : s'il n'y a rien à signaler, dis-le en une ligne. "
-    "Ne cherche pas à remplir le rapport.\n"
+    "For each DIVERGE or MISSING: what the row claims / what the code actually does, "
+    "then the corrected table row, ready to review.\n"
+    "Return only the problem rows + one summary line. Do not detail the MATCH rows.\n"
+    "An honest table is the NORMAL case: if there is nothing to report, say so in one line. "
+    "Do not try to fill the report.\n"
     "\n"
-    "AVANT de signaler un MANQUANT, relis le tableau en entier et vérifie que la capacité n'y est "
-    "pas DÉJÀ, sous un autre libellé : réclamer l'ajout d'une ligne qui existe déjà est l'erreur la "
-    "plus coûteuse de cet exercice. En particulier, une capacité citée À L'INTÉRIEUR de la "
-    "description d'une autre ligne (une méthode nommée dans la cellule d'une feature plus large) EST "
-    "documentée — le tableau décrit des features, pas des signatures : ne réclame JAMAIS une ligne "
-    "dédiée par méthode ou par symbole.\n"
+    "BEFORE reporting a MISSING, re-read the whole table and check that the capability is not "
+    "ALREADY there, under another label: asking for a row that already exists is the most "
+    "costly mistake of this exercise. In particular, a capability cited INSIDE the "
+    "description of another row (a method named in the cell of a broader feature) IS "
+    "documented — the table describes features, not signatures: NEVER ask for a "
+    "dedicated row per method or per symbol.\n"
     "\n"
-    "Termine impérativement par cette ligne, seule et exactement à ce format :\n"
-    "VERDICT: <nombre de DIVERGE> diverge, <nombre de MANQUANT> manquant"
+    "End with this line, alone and in exactly this format:\n"
+    "VERDICT: <number of DIVERGE> diverge, <number of MISSING> missing"
 )
 
-_MANQUANT_LINE = re.compile(r"^.*\bMANQUANT\b.*$", re.MULTILINE)
+_MISSING_LINE = re.compile(r"^.*\bMISSING\b.*$", re.MULTILINE)
 
 
-def normalize_manquants(model_output: str) -> list[str]:
-    """Extract the model's MANQUANT findings as ``drop_already_documented`` input.
+def normalize_missing_findings(model_output: str) -> list[str]:
+    """Extract the model's MISSING findings as ``drop_already_documented`` input.
 
-    `PHASE1_TASK` asks for free prose, not a machine format, so a MANQUANT surfaces as a line that
-    names the capability (``MANQUANT — `xml_path_str` : …``). Each such line yields one entry: its
-    first backtick-quoted symbol, prefixed with a module when the line reads ``… dans `xml` …``
+    `PHASE1_TASK` asks for free prose, not a machine format, so a MISSING surfaces as a line that
+    names the capability (``MISSING — `xml_path_str` : …``). Each such line yields one entry: its
+    first backtick-quoted symbol, prefixed with a module when the line reads ``… in `xml` …``
     (``"xml: xml_path_str"``), else the bare capability name — `drop_already_documented` accepts
-    both. A MANQUANT line with no backtick symbol is dropped (nothing to filter on).
+    both. A MISSING line with no backtick symbol is dropped (nothing to filter on).
 
-    The trailing ``VERDICT:`` line is skipped: it restates counts and would echo the word MANQUANT
+    The trailing ``VERDICT:`` line is skipped: it restates counts and would echo the word MISSING
     with no symbol.
 
     Args:
         model_output: the raw text the model returned for `PHASE1_TASK` + a brief.
 
     Returns:
-        One ``"module: capability"`` or ``"capability"`` string per MANQUANT finding, in order.
+        One ``"module: capability"`` or ``"capability"`` string per MISSING finding, in order.
     """
     out: list[str] = []
-    for line in _MANQUANT_LINE.findall(model_output):
+    for line in _MISSING_LINE.findall(model_output):
         if line.lstrip().upper().startswith("VERDICT:"):
             continue
         symbols = [s.strip() for s in _BACKTICK.findall(line)]
         # `dans `xml`` -> module ; la capacité est le premier autre symbole entre backticks
         module = next(
-            (s for s in symbols if re.search(rf"dans\s+`{re.escape(s)}`", line)), ""
+            (s for s in symbols if re.search(rf"\bin\s+`{re.escape(s)}`", line)), ""
         )
         capability = next((s.split("(")[0].strip() for s in symbols if s != module), "")
         if not capability:
@@ -723,19 +723,19 @@ def drop_already_documented(
     table_md: str,
     header: Header = DEFAULT_HEADER,
 ) -> list[str]:
-    """Drop every MANQUANT finding whose capability is already in the table.
+    """Drop every MISSING finding whose capability is already in the table.
 
     A capability is "already documented" when its own module has a table row, or when the
     capability name appears verbatim inside any row's Feature cell (the table describes features,
     not signatures — a method named inside a broader feature's description is documented).
 
     Module-level dropping is deliberate: a per-symbol row is not what the table is for, so a
-    MANQUANT for any capability of an already-listed module is discarded by design. This cannot
+    MISSING for any capability of an already-listed module is discarded by design. This cannot
     silence the class it targets (a demand for a dedicated row of something the table names), and
-    it never touches a MANQUANT for a module with no row at all.
+    it never touches a MISSING for a module with no row at all.
 
     Args:
-        missing: the model's MANQUANT findings, each ``"module: capability"`` or just a capability
+        missing: the model's MISSING findings, each ``"module: capability"`` or just a capability
             name.
         table_md: the feature document's markdown.
         header: the table header tuple to recognise.
@@ -851,9 +851,9 @@ def main(argv: list[str] | None = None) -> int:
       - default: run the deterministic scan, print its report (exit 1 if it found divergences).
       - ``--emit-prompt``: print ``PHASE1_TASK`` + the signature brief — the text the skill body
         hands to the ``offline`` / ``panel`` MCP tool. No model is called here.
-      - ``--filter-model-output``: read the model's reply on stdin, print the MANQUANT findings that
+      - ``--filter-model-output``: read the model's reply on stdin, print the MISSING findings that
         survive `drop_already_documented`, one per line (the DIVERGE prose is for the skill body to
-        read directly). Empty output = every MANQUANT was already-documented noise.
+        read directly). Empty output = every MISSING was already-documented noise.
 
     Args:
         argv: argument vector, or None to read ``sys.argv``.
@@ -885,7 +885,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument(
         "--filter-model-output",
         action="store_true",
-        help="read the model reply on stdin, print the surviving MANQUANT findings",
+        help="read the model reply on stdin, print the surviving MISSING findings",
     )
     args = ap.parse_args(argv)
     parts = [h.strip().lower() for h in args.features_header.split(",")]
@@ -902,7 +902,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.filter_model_output:
         doc_md = (repo / args.features_doc).read_text(encoding="utf-8")
         survivors = drop_already_documented(
-            normalize_manquants(sys.stdin.read()), doc_md, header
+            normalize_missing_findings(sys.stdin.read()), doc_md, header
         )
         print("\n".join(survivors))
         return 0

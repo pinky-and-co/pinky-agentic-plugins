@@ -38,7 +38,7 @@ _MIGRATE_AGENT_LOG = (
 _CHANTIER_DIR_RE = re.compile(r"^CHANTIER(\d{4})-(.+)$")
 
 LEGEND = (
-    "**Chantier = objectif, pas un repo.** Statuts : 🟢 active · ⚪ dormant · 🔴 blocked · "
+    "**Chantier = a goal, not a repo.** Statuses: 🟢 active · ⚪ dormant · 🔴 blocked · "
     "🟡 partial · ⛔ deprecated."
 )
 
@@ -198,14 +198,14 @@ def render_index(chantiers: list[tuple[str, str]]) -> str:
         "---",
         "title: KANBAN",
         "---",
-        "# _KANBAN — board de chantiers",
+        "# _KANBAN — chantier board",
         "",
         "## Board",
         "",
         LEGEND,
         "",
-        "| # | Chantier (objectif) | Statut |",
-        "|---|---------------------|--------|",
+        "| # | Chantier (objective) | Status |",
+        "|---|-----------------------|--------|",
     ]
     for chantier_id, slug in chantiers:
         lines.append(f"| {chantier_id} | {slug} | ⚪ |")
