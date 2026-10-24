@@ -123,8 +123,7 @@ python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,
      bodies. A `[offline] BLOCKED` line means MLX-SERVE unreachable, out of memory, or `pi` missing
      — fall through.
    - `panel` (MCP tool `mcp__plugin_pc-models_pc-models__panel`) with `tasks` = `[the prompt]`
-     and `models` = `["mistral-medium-3.5"]`. Pin that model — the unpinned default fails the
-     reconcile oracle. A `[panel] BLOCKED` line means no key —
+     and `tools` = `[]`, no `models` — the pool picks. A `[panel] BLOCKED` line means no key —
      fall through.
    - Neither answered → print "reconcile — modèle non joignable, passe advisory sautée" and go to
      Step 1. **Never block the release on this.**
@@ -139,9 +138,9 @@ python3 "$RECONCILE" --repo <repo> --features-doc <path> --features-header <a,b,
    of the feature doc — nothing else. Reject-all → the doc is left byte-for-byte unchanged.
 
 **Vigilance — treat every model finding as a lead to verify, not a verdict.** A small model
-rubber-stamps a thin brief, and cloud models vary (only local `gemma4:12b` and `mistral-medium-3.5`
-clear the oracle). On a repo's first few releases, read the feature doc against the code by hand
-regardless of what this step reports.
+rubber-stamps a thin brief, and models vary and none is guaranteed to clear the oracle. On a
+repo's first few releases, read the feature doc against the code by hand regardless of what this
+step reports.
 
 The `adversarial` MCP tool is **never** used here: its contrarian posture is wrong for a neutral
 doc↔code diff.

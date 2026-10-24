@@ -140,7 +140,7 @@ Expansionist 3, Outsider 4, Executor 5. Prompts 1, 2, 3, 5 = the lens instructio
 prior-art summary. **Prompt 4 (Outsider) = the lens instruction + the bare decision restated in
 plain language only** — no context block, no prior art (see § The five advisors). Each response
 150–300 words, "be specific, name what WILL break or WIN, don't hedge". Call the `panel` MCP tool
-with the 5 prompts as `tasks`; it pairs prompt *i* with the *i*-th model, so **slot *i* is always
+with the 5 prompts as `tasks` and `tools=[]`; it pairs prompt *i* with the *i*-th model, so **slot *i* is always
 lens *i*** even when a slot drops out. From its output:
 
 - each `--- [slot N · <model>] ---` block → that is lens *N*'s response, from `<model>`.
@@ -190,7 +190,7 @@ Conditional Go).
 ### Step 6 — chairman cross-model check
 
 "Where the Council Agrees" measures the shared prior of the advisor models as much as the argument.
-The chairman is one model. Call the `panel` tool with **a single
+The chairman is one model. Call the `panel` tool with `tools=[]` and **a single
 task** — the exact chairman prompt from step 5 (framed question + 5 responses + 5 peer reviews) —
 so one more distinct model produces its own verdict. Diff the two and append:
 

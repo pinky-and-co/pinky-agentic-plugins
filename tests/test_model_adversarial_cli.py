@@ -84,7 +84,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="ok", stderr="", returncode=0
         )
-        ma.run_pool([entry], "p")
+        ma.run_pool([entry], "p", tools=[])
         mock_run.assert_called_once_with(
             self._expected_cmd("gemini/gemini-3.6-flash"),
             stdin=subprocess.DEVNULL,
@@ -111,7 +111,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="ok", stderr="", returncode=0
         )
-        ma.run_pool([entry], "p")
+        ma.run_pool([entry], "p", tools=[])
         mock_run.assert_called_once_with(
             self._expected_cmd("mlx/mlx-community/Qwen3.5-9B-MLX-4bit"),
             stdin=subprocess.DEVNULL,
@@ -136,7 +136,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="ok", stderr="", returncode=0
         )
-        ma.run_pool([entry], "p")
+        ma.run_pool([entry], "p", tools=[])
         mock_run.assert_called_once_with(
             self._expected_cmd("groq/openai/gpt-oss-120b"),
             stdin=subprocess.DEVNULL,
@@ -166,7 +166,7 @@ class TestCliModelIdJoin(unittest.TestCase):
         mock_run.return_value = unittest.mock.MagicMock(
             stdout="ok", stderr="", returncode=0
         )
-        ma.run_pool([entry], prompt)
+        ma.run_pool([entry], prompt, tools=[])
         called_args = mock_run.call_args[0][0]
         self.assertEqual(called_args[-2:], ["--", prompt])
 
@@ -207,7 +207,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             stdout="The code is correct.", stderr="", returncode=0
         )
 
-        result = ma.run_pool([self.cli_entry], self.prompt)
+        result = ma.run_pool([self.cli_entry], self.prompt, tools=[])
 
         # Le champ `tools` de l'entrée n'est plus lu : les outils se demandent à l'appel.
         expected_cmd = [
@@ -252,7 +252,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             ),
         ]
 
-        result = ma.run_pool(pool, self.prompt)
+        result = ma.run_pool(pool, self.prompt, tools=[])
 
         self.assertEqual(result.entry["name"], "pi-model-2")
         self.assertEqual(result.result, "Success on second try")
@@ -268,7 +268,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             unittest.mock.MagicMock(stdout="Success", stderr="", returncode=0),
         ]
 
-        result = ma.run_pool(pool, self.prompt)
+        result = ma.run_pool(pool, self.prompt, tools=[])
         self.assertEqual(result.entry["name"], "pi-model-2")
 
     @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
@@ -284,7 +284,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             unittest.mock.MagicMock(stdout="Success", stderr="", returncode=0),
         ]
 
-        result = ma.run_pool(pool, self.prompt)
+        result = ma.run_pool(pool, self.prompt, tools=[])
         self.assertEqual(result.entry["name"], "pi-model-2")
 
     @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
@@ -302,7 +302,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             unittest.mock.MagicMock(stdout="Success", stderr="", returncode=0),
         ]
 
-        result = ma.run_pool(pool, self.prompt)
+        result = ma.run_pool(pool, self.prompt, tools=[])
         self.assertEqual(result.entry["name"], "pi-model-2")
 
     @unittest.mock.patch("model_adversarial.Popen", new_callable=PiPopen)
@@ -312,7 +312,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             returncode=1, cmd="pi", stderr="Unexpected internal crash"
         )
 
-        result = ma.run_pool([self.cli_entry], self.prompt)
+        result = ma.run_pool([self.cli_entry], self.prompt, tools=[])
 
         self.assertIsNone(result.entry)
         self.assertIn("critical failure", result.result)
@@ -328,7 +328,7 @@ class TestModelAdversarialCLI(unittest.TestCase):
             unittest.mock.MagicMock(stdout="Success", stderr="", returncode=0),
         ]
 
-        result = ma.run_pool(pool, self.prompt)
+        result = ma.run_pool(pool, self.prompt, tools=[])
         self.assertEqual(result.entry["name"], "pi-model-2")
 
 

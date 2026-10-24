@@ -283,6 +283,30 @@ class PoolServer:
         self._stderr.flush()
         return Path(self._stderr.name).read_text(encoding="utf-8", errors="replace")
 
+    def wait_response(self, request_id: int, timeout: float = 30.0) -> dict:
+        """Read the server's output until the response to `request_id` arrives; return it.
+
+        Args:
+            request_id: the JSON-RPC id of the request.
+            timeout: seconds to wait.
+
+        Returns:
+            The response message — a `result` or an `error`, whichever the server sent.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                raw = self._lines.get(timeout=max(0.01, deadline - time.monotonic()))
+            except queue.Empty:
+                break
+            if raw is None:
+                raise RuntimeError("server closed stdout")
+            message = json.loads(raw)
+            if "method" not in message and message.get("id") == request_id:
+                self.answered.add(request_id)
+                return message
+        raise TimeoutError(f"no response to request {request_id}")
+
     def wait_answered(self, request_id: int, timeout: float = 30.0) -> bool:
         """Whether the response to `request_id` arrives within `timeout` seconds."""
         deadline = time.monotonic() + timeout

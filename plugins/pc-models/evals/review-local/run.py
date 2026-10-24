@@ -42,7 +42,7 @@ def main(argv: list[str]) -> int:
             diff = (HERE / "cases" / case["file"]).read_text()
             prompt = ma.build_prompt(TASK.format(intent=case["intent"], diff=diff), [])
             t = time.time()
-            res = ma.run_pool([entry], prompt, timeout=timeout)
+            res = ma.run_pool([entry], prompt, tools=[], timeout=timeout)
             secs = round(time.time() - t, 1)
             answer = (
                 (res.result or "")

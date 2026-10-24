@@ -22,9 +22,9 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).parent
-NO_TOOLS = (
-    "You have no tools. The diff is below in full: answer from it alone, do not try to open "
-    "files, run commands or emit tool calls. Reply with your findings and a verdict."
+TOOLS_NOTE = (
+    "You have the read and grep tools, but no repository checkout: the diff below is the whole "
+    "change. Reply with your findings and a verdict."
 )
 
 
@@ -33,14 +33,14 @@ def build_prompt(case: dict[str, object]) -> str:
     methodology = (HERE / "methodology.md").read_text(encoding="utf-8")
     diff = (HERE / "cases" / str(case["file"])).read_text(encoding="utf-8")
     return (
-        f"--- TASK ---\n{methodology}\n\n{NO_TOOLS}\n\nReview this diff. Intent of the change: "
+        f"--- TASK ---\n{methodology}\n\n{TOOLS_NOTE}\n\nReview this diff. Intent of the change: "
         f"{case['intent']}\n\n--- DIFF ---\n{diff}"
     )
 
 
 def ask_pi(prompt: str, model: str, thinking: str | None, timeout: int) -> str:
-    """One answer through `pi -p`, no tools, stdin closed (pi reads an inherited stdin)."""
-    cmd = ["pi", "-p", "--model", model, "--no-tools"]
+    """One answer through `pi -p` with `read,grep`, stdin closed (pi reads an inherited stdin)."""
+    cmd = ["pi", "-p", "--model", model, "-t", "read,grep"]
     if thinking:
         cmd += ["--thinking", thinking]
     cmd += ["--", prompt]

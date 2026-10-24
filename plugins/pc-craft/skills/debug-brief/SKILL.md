@@ -72,7 +72,7 @@ Resolve inputs in order:
 a `*.anon.*` copy, say so and ask for confirmation — the brief leaves the machine. Then call the
 `panel` MCP tool with a single task —
 `tasks=["Follow the ROLE / GUIDELINES / OUTPUT FORMAT instructions embedded in the brief below.\n\n"
-+ <the full brief block>]` — and `models=["<model>"]` if `[model]` names a pool entry, else omit
++ <the full brief block>]`, `tools=[]` — and `models=["<model>"]` if `[model]` names a pool entry, else omit
 `models`. The brief goes inline in the task; there is no file parameter. Show the answer verbatim,
 prefixed with which model produced it (the tool's header reports this). Tell the user to verify the
 QUALIFICATION independently before trusting the SUGGESTED FIX — the model is not scored against any

@@ -38,7 +38,7 @@ def main(argv: list[str]) -> int:
         )
         prompt = ma.build_prompt(task, [])
         t = time.time()
-        res = ma.run_pool([entry], prompt, timeout=900)
+        res = ma.run_pool([entry], prompt, tools=[], timeout=900)
         secs = round(time.time() - t, 1)
         answer = (
             (res.result or "") if res.entry is not None else f"[no answer] {res.result}"

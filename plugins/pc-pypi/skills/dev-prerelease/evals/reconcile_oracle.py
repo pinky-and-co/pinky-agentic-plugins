@@ -218,7 +218,7 @@ def _panel_call(model: str | None) -> Callable[[str], str]:
         sys.exit("[oracle] panel transport — no eligible sonnet/opus model in the pool")
 
     def call(prompt: str) -> str:
-        response = model_panel.run_panel(entries, [prompt])
+        response = model_panel.run_panel(entries, [prompt], tools=[])
         if not response.answers:
             raise RuntimeError(f"panel call failed: {response.skipped}")
         return response.answers[0].text

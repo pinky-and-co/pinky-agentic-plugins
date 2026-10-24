@@ -38,7 +38,7 @@ def smoke_one(entry: dict) -> tuple[bool, str]:
             "skipped — offline entries route through the `offline` MCP tool, not this pool path",
         )
     try:
-        result = ma.run_pool([entry], PROMPT, timeout=TIMEOUT)
+        result = ma.run_pool([entry], PROMPT, tools=[], timeout=TIMEOUT)
     except Exception as e:  # noqa: BLE001 — un smoke test ne doit jamais planter sur une entrée
         return False, f"raised {type(e).__name__}: {e}"
     if result.entry is None:
