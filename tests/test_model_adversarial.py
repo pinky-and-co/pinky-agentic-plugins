@@ -2485,8 +2485,10 @@ class TestPoolRun:
 
         started = time.monotonic()
         try:
+            # Le timeout doit laisser au pi le temps d'écrire `child.pid` avant d'être tué :
+            # trop court, le kill tombe avant l'enregistrement et le test ne voit jamais l'enfant.
             with pytest.raises(subprocess.TimeoutExpired):
-                ma.call_cli(MISTRAL, "p", 1, [], env={})
+                ma.call_cli(MISTRAL, "p", 3, [], env={})
             elapsed = time.monotonic() - started
             child = int((tmp_path / "child.pid").read_text())
             for _ in range(20):
@@ -2506,7 +2508,7 @@ class TestPoolRun:
                 except (ProcessLookupError, ValueError):
                     pass
 
-        assert elapsed < 4
+        assert elapsed < 5
 
     def test_a_large_stream_on_both_pipes_at_once_completes(self, bins, tmp_path):
         script = tmp_path / "big.py"
@@ -3411,14 +3413,17 @@ class TestCancellationScope:
         assert all(alive(pid) for pid in spared)
 
 
-CAP_S = 3
+# Le cap doit toujours tirer loin après le démarrage du faux pi : sous machine chargée, ce
+# démarrage dépasse 3 s (mesuré) et un cap trop court tue le pi avant qu'il se soit enregistré —
+# le test ne voit alors jamais son lancement.
+CAP_S = 15
 
 
 class TestWallCap:
     """The client stays alive with the channel open and never cancels: the cap alone must end
     the call and take its `pi` down."""
 
-    def test_a_call_nobody_cancels_is_killed_by_the_cap_within_5s(self, make_server):
+    def test_a_call_nobody_cancels_is_killed_by_the_cap(self, make_server):
         server = make_server(extra_env={"PC_CORE_CALL_TIMEOUT_S": str(CAP_S)})
         request = server.start_call("adversarial", {"task": "attack this", "tools": []})
         pids = [pid for pair in server.wait_launched(1) for pid in pair]
