@@ -13,6 +13,13 @@ Excluded files (lockfiles: uv.lock, pyproject.toml, package-lock.json, poetry.lo
 are filtered — two branches touching only these files do not trigger overlap.
 This is a universal property of package managers, hardcoded and not configurable.
 
+A local branch whose tip is an ancestor of its base (its upstream or the resolved
+base branch) is never counted as in flight: it carries no work of its own — this
+covers a local integration branch left behind its upstream after a remote merge,
+whose two-tip diff is non-empty only because the base moved ahead. Limitation:
+a squash-merged branch keeps a distinct tip (ancestry is broken), so it stays
+counted as in flight until deleted.
+
 A false positive (blocking a legitimate change) is worse than a false negative
 (missing an overlap). When in doubt, let it proceed. Never block on a tool error
 (gh/glab missing or timing out, no remote repo, detached HEAD, etc.) — exit 0.
@@ -241,8 +248,38 @@ def _open_pr_files_gitlab(repo_root: Path) -> dict[str, set[str]]:
     return result
 
 
+def _is_ancestor(repo_root: Path, branch: str, base: str) -> bool:
+    """Check if branch tip is an ancestor of base — the branch carries nothing new.
+
+    False on any git error or timeout: the caller then treats the branch as
+    potentially in flight, same as before this check existed.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "merge-base",
+                "--is-ancestor",
+                branch,
+                base,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return out.returncode == 0
+
+
 def _local_branch_files(repo_root: Path) -> dict[str, set[str]]:
-    """Files in local branches (vs their tracking branch or resolved base branch)."""
+    """Files in local branches (vs their tracking branch or resolved base branch).
+
+    A branch whose tip is an ancestor of its base brings nothing and is skipped.
+    """
     try:
         out = subprocess.run(
             ["git", "-C", str(repo_root), "branch"],
@@ -283,6 +320,8 @@ def _local_branch_files(repo_root: Path) -> dict[str, set[str]]:
                 else upstream.stdout.strip()
             )
             if base is None:
+                continue
+            if _is_ancestor(repo_root, branch, base):
                 continue
             diff_out = subprocess.run(
                 [

@@ -294,3 +294,179 @@ def test_witness_pr_71_nested_in_pr_70(tmp_path):
     reason = decision["hookSpecificOutput"]["permissionDecisionReason"].lower()
     assert "overlap" in reason or "already in flight" in reason
     assert "file_a.py" in reason or "file_b.py" in reason
+
+
+def _init_repo(repo: Path) -> None:
+    """Create a git repo with test identity and a main branch."""
+    subprocess.run(
+        ["git", "init", "-b", "main"], cwd=str(repo), capture_output=True, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.local"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+
+
+def _commit_all(repo: Path, message: str) -> None:
+    """Stage and commit every change in the repo."""
+    subprocess.run(["git", "add", "."], cwd=str(repo), capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+
+
+def test_stale_local_main_behind_upstream_not_in_flight(tmp_path):
+    """A local main behind origin/main after a remote merge is never in flight.
+
+    Witness of the stale-main false positive: PR merged remotely (origin/main
+    advances), local main left behind, working tree touches the merged file. The
+    two-tip diff origin/main..main is non-empty (the merged files, reversed), so
+    main used to be counted as carrying them and every checkout -b on those files
+    was denied.
+    """
+    guard_module = load_guard_module()
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+
+    (repo / "file_m.py").write_text("base\n")
+    (repo / "other.py").write_text("base\n")
+    _commit_all(repo, "init")
+
+    subprocess.run(
+        ["git", "checkout", "-b", "feature/pr1"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    (repo / "file_m.py").write_text("merged\n")
+    _commit_all(repo, "change file_m")
+
+    # Remote merge: origin/main advances past local main, which stays behind.
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "refs/heads/feature/pr1"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(tmp_path / "origin.git")],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "branch", "--set-upstream-to=origin/main", "main"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+
+    # Session sits on the merged branch with uncommitted work on the merged file.
+    subprocess.run(
+        ["git", "checkout", "feature/pr1"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    (repo / "file_m.py").write_text("wip\n")
+
+    event = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git checkout -b fix/next"},
+        "cwd": str(repo),
+    }
+    decision = guard_module.decide(event, repo)
+    assert decision is None, (
+        "A branch whose tip is an ancestor of its base carries nothing — "
+        f"decision should be allow, got {decision}"
+    )
+
+
+def test_squash_merged_branch_stays_in_flight(tmp_path):
+    """A squash-merged branch (distinct tip, broken ancestry) stays in flight.
+
+    The base receives the branch's file content through an equivalent commit
+    instead of a merge, so the branch tip is not an ancestor of the base and
+    the ancestry check does not skip it. Once the base moves on past the
+    squash, the two-tip diff is non-empty again and a checkout -b touching
+    the file is denied — an accepted limitation.
+    """
+    guard_module = load_guard_module()
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+
+    (repo / "file_s.py").write_text("base\n")
+    _commit_all(repo, "init")
+
+    subprocess.run(
+        ["git", "checkout", "-b", "feature/pr2"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    (repo / "file_s.py").write_text("squashed\n")
+    _commit_all(repo, "change file_s")
+
+    # Squash : la base reçoit le même contenu par son propre commit, sans merge.
+    subprocess.run(
+        ["git", "checkout", "main"],
+        cwd=str(repo),
+        capture_output=True,
+        check=True,
+    )
+    (repo / "file_s.py").write_text("squashed\n")
+    _commit_all(repo, "squash-merge equivalent")
+    # La base avance après le squash — le diff entre tips redevient non vide.
+    (repo / "file_s.py").write_text("squashed\nfollow-up\n")
+    _commit_all(repo, "follow-up on main")
+
+    # Nouveau travail sur le même fichier, non commité, depuis le tip de la base.
+    (repo / "file_s.py").write_text("wip\n")
+
+    event = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git checkout -b fix/next"},
+        "cwd": str(repo),
+    }
+    decision = guard_module.decide(event, repo)
+    assert decision is not None, (
+        "A squash-merged branch keeps a distinct tip — it stays counted as "
+        "in flight and the checkout must be denied"
+    )
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "file_s.py" in decision["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_is_ancestor_nonexistent_base_returns_false(tmp_path):
+    """A base that does not exist is not an ancestor — the branch stays a candidate.
+
+    git exits non-zero on an unknown ref, so _is_ancestor returns False and
+    the caller keeps treating the branch as potentially in flight, exactly
+    as on any other git error.
+    """
+    guard_module = load_guard_module()
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    (repo / "file.py").write_text("base\n")
+    _commit_all(repo, "init")
+
+    assert guard_module._is_ancestor(repo, "main", "no-such-base") is False
+    # Contrôle : la réponse est True quand l'ancestrité tient.
+    assert guard_module._is_ancestor(repo, "main", "main") is True
