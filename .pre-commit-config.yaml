@@ -344,7 +344,7 @@ repos:
   # plugins can vendor a small shared utility (policy_lib, secret_patterns, plugin_scope_lib,
   # pending_user_action) since neither plugin can import the other's files at runtime. This hook
   # catches a hand-edited copy drifting from the pinky-bootstrap source instead of letting the next
-  # `pinky distribute` silently overwrite it.
+  # `pinky repo distribute` silently overwrite it.
   - repo: local
     hooks:
       - id: check-vendor-checksum

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """pre-commit hook — every vendored file must match its checksum in `.vendor-manifest.json`.
 
-`.vendor-manifest.json` (repo root) is written by `pinky distribute` — path -> sha256 of the
+`.vendor-manifest.json` (repo root) is written by `pinky repo distribute` — path -> sha256 of the
 content that was copied in from the pinky-bootstrap source of truth. A mismatch means the local
 copy was hand-edited instead of the source: it will be silently overwritten by the next
 distribution, so catch it at commit time rather than let the edit evaporate later.
@@ -74,7 +74,7 @@ def main() -> int:
 
     emit(
         findings,
-        footer="edit the source in pinky-bootstrap's hygiene/vendor/, then `pinky distribute`, "
+        footer="edit the source in pinky-bootstrap's hygiene/vendor/, then `pinky repo distribute`, "
         "never this copy directly",
     )
     return 1 if findings else 0

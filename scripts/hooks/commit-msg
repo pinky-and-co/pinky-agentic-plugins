@@ -9,12 +9,20 @@
 #
 # Special case: 💾 save: <description> [skip ci]
 #
-# Distributed by `pinky distribute` from hygiene/hooks/ — do not edit in place;
+# Distributed by `pinky repo distribute` from hygiene/hooks/ — do not edit in place;
 # edit the source there.
 # =============================================================================
 
 COMMIT_MSG_FILE=$1
-COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
+COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE" | tr -d '\r')
+
+# Longueur en points de code UTF-8, indépendante de la locale : `${#}` compte des octets sous une
+# locale C, et le bash de Git ne compte pas un emoji hors BMP pour un caractère, même sous locale
+# UTF-8 (le CI Windows de ce dépôt a rendu deux carets sous 🙂). Un point de code = un octet de
+# début, hors continuation 0x80-0xBF.
+_len() {
+    echo "$(( $(printf '%s' "$1" | LC_ALL=C tr -d '\200-\277' | LC_ALL=C wc -c) ))"
+}
 
 # Même rendu que `_report.py` (ruff-style), en bash pur : ce hook n'a pas le droit de dépendre de
 # python. Couleur : `NO_COLOR` coupe, `FORCE_COLOR` / `CLICOLOR_FORCE` forcent, sinon terminal seul.
@@ -33,7 +41,7 @@ fail() {
     local pad src underline lead dir=""
     case "$COMMIT_MSG_FILE" in */*) dir="${COMMIT_MSG_FILE%/*}/" ;; esac
     pad=${line//?/ }
-    src=$(sed -n "${line}p" "$COMMIT_MSG_FILE")
+    src=$(sed -n "${line}p" "$COMMIT_MSG_FILE" | tr -d '\r')
     underline="$(printf '%*s' "$((col - 1))" '')$(printf '%*s' "$width" '' | tr ' ' '^')"
     echo "${DIM}${dir}${RESET}${BOLD}${COMMIT_MSG_FILE##*/}${RESET} ${DIM}(1)${RESET}"
     echo ""
@@ -63,9 +71,9 @@ if echo "$COMMIT_MSG" | grep -qE "^💾 save: .{3,} \[skip ci\]"; then
     exit 0
 fi
 
-# Bash pur, zéro subprocess : `read` découpe nativement les deux premiers tokens, et bash porte
-# l'ERE avec `[[ =~ ]]`. Ça enlève la dernière dépendance de ce hook à un interpréteur — `python3`
-# n'est pas garanti sur une machine Windows vanilla, donc committer y échouerait sinon.
+# Zéro interpréteur : `read` découpe nativement les deux premiers tokens et bash porte l'ERE avec
+# `[[ =~ ]]` — `tr`/`wc` (dans `_len`) restent les seuls sous-processus. `python3` n'est pas garanti
+# sur une machine Windows vanilla, où ce hook doit pourtant pouvoir bloquer un commit.
 #
 # Le découpage sur l'espace est sûr en UTF-8 : l'espace est ASCII et UTF-8 est auto-synchronisant,
 # donc un emoji multi-octets n'est jamais coupé en deux.
@@ -75,7 +83,7 @@ TYPE=""
 [[ "$REST" =~ ^([a-z_-]+) ]] && TYPE="${BASH_REMATCH[1]}"
 
 if [ -z "$EMOJI" ] || [ -z "$TYPE" ]; then
-    fail 1 1 "${#COMMIT_MSG}" "invalid format — missing emoji or type" \
+    fail 1 1 "$(_len "$COMMIT_MSG")" "invalid format — missing emoji or type" \
         "format: <emoji> <type>[!]: <description>"
 fi
 
@@ -166,23 +174,27 @@ done <<< "$EMOJI_TABLE"
 
 if [ -z "$allowed_type" ]; then
     if [ -n "$type_emojis" ]; then
-        fail 1 1 "${#EMOJI}" "emoji '$EMOJI' not in mapping" "emojis for '$TYPE':$type_emojis"
+        fail 1 1 "$(_len "$EMOJI")" "emoji '$EMOJI' not in mapping" "emojis for '$TYPE':$type_emojis"
     fi
-    fail 1 1 "${#EMOJI}" "emoji '$EMOJI' not in mapping" \
+    fail 1 1 "$(_len "$EMOJI")" "emoji '$EMOJI' not in mapping" \
         "types: feat fix docs style refactor move perf test revert build chore release"
 fi
 
 if [ "$TYPE" != "$allowed_type" ]; then
-    fail 1 "$((${#EMOJI} + 2))" "${#TYPE}" \
+    fail 1 "$(( $(_len "$EMOJI") + 2 ))" "${#TYPE}" \
         "emoji '$EMOJI' requires type '$allowed_type', got '$TYPE'" \
         "use: $EMOJI $allowed_type: <description>"
 fi
 
 TYPES="feat|fix|docs|style|refactor|move|perf|test|revert|build|chore|release"
-PATTERN="^.+ (${TYPES})!?: .{3,}"
+# La forme d'abord, la longueur ensuite : le `.{3,}` d'un grep compte des octets sous une locale C,
+# des caractères sous UTF-8 — le gate varierait avec la plateforme. L'unité de la règle est le
+# point de code, compté par `_len` sur la description extraite après « <type>[!]: ».
+PATTERN="^.+ (${TYPES})!?: ."
 
-if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
-    fail 1 1 "${#COMMIT_MSG}" "invalid commit format" \
+if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN" \
+    || [ "$(_len "${REST#*: }")" -lt 3 ]; then
+    fail 1 1 "$(_len "$COMMIT_MSG")" "invalid commit format" \
         "format: <emoji> <type>[!]: <description>" \
         "examples:" \
         "  ✨ feat: add manifest variable resolution" \

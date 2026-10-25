@@ -142,7 +142,7 @@ def _reference_problems(path: Path, body: str, text: str) -> list[Diagnostic]:
             )
             continue
         try:
-            lines = target.read_text().splitlines()
+            lines = target.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
             problems.append(
                 _finding(
@@ -320,7 +320,16 @@ def validate_agent(path: Path, fields: dict[str, str], body: str) -> list[Diagno
 
 def validate_file(path: Path, kind: str) -> list[Diagnostic]:
     """Validate one artefact file against its type's schema (`kind`: skill/agent)."""
-    text = path.read_text()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return [
+            _finding(
+                path,
+                "",
+                "not valid UTF-8 — cannot check the frontmatter",
+            )
+        ]
     fields = parse_frontmatter(text)
     if fields is None:
         return [
