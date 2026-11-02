@@ -12,6 +12,7 @@ Public Claude Code plugin marketplace — generic, reusable workspace mechanics:
 
 ![CI](https://github.com/pinky-and-co/pinky-agentic-plugins/actions/workflows/ci.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/pinky-agentic-plugins)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
 ![Code style](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)
 [![prek](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/j178/prek/master/docs/assets/badge-v0.json)](https://github.com/j178/prek)
 
@@ -666,6 +667,7 @@ pinky-agentic-plugins/
 ├── ATTRIBUTIONS.md
 ├── CLAUDE.md
 ├── CREDITS
+├── LICENSE
 ├── NOTICE
 ├── pyproject.toml
 ├── README.md
@@ -680,6 +682,6 @@ pinky-agentic-plugins/
 
 <!-- pinky:readme-license:start -->
 
-UNKNOWN — see [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE).
 
 <!-- pinky:readme-license:end -->
