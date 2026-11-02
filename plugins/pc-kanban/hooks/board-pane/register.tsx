@@ -1152,7 +1152,7 @@ export function searchWindow(rows: readonly SearchRow[], cursor: number, room: n
 
 const style = (s: Span) => ({
   ...(s.color === undefined ? {} : { color: s.color }),
-  ...(s.bold === true ? { bold: true } : {}),
+  ...(s.bold === true ? { weight: 'semibold' as const } : {}),
   ...(s.dimColor === true ? { dimColor: true } : {}),
 })
 
@@ -1225,7 +1225,7 @@ export const register: Register = on => {
       const range = parts.lines.length > parts.bodyRows ? `${top + 1}–${top + shown.length} / ${parts.lines.length}` : ''
       return (
         <Box flexDirection="column">
-          <Text bold color="magenta" wrap="truncate-end">Notice</Text>
+          <Text weight="semibold" color="magenta" wrap="truncate-end">Notice</Text>
           {rule()}
           {shown.map((line, i) => (
             <Text key={`notice-line-${top + i}`} color={state.notice?.kind === 'error' ? 'red' : 'green'} wrap="truncate-end">{line}</Text>
@@ -1263,9 +1263,9 @@ export const register: Register = on => {
       let n = 0
       return (
         <Box flexDirection="column">
-          {parts.title.map((line, i) => <Text key={`title-${i}`} bold color="magenta" wrap="truncate-end">{line}</Text>)}
+          {parts.title.map((line, i) => <Text key={`title-${i}`} weight="semibold" color="magenta" wrap="truncate-end">{line}</Text>)}
           {rule()}
-          <Text bold wrap="truncate-end">{clean(parts.sub)}</Text>
+          <Text weight="semibold" wrap="truncate-end">{clean(parts.sub)}</Text>
           {parts.segRows.map((row, r) => (
             <Box key={`segs-${r}`} flexDirection="row">
               {row.flatMap((seg, i) => {
@@ -1354,7 +1354,7 @@ export const register: Register = on => {
                 r.file !== undefined ? (
                   <Text key={r.key} wrap="truncate-start">
                     <Text color="green">{clean(r.file.slice(0, r.file.lastIndexOf('/') + 1))}</Text>
-                    <Text bold>{clean(r.file.slice(r.file.lastIndexOf('/') + 1))}</Text>
+                    <Text weight="semibold">{clean(r.file.slice(r.file.lastIndexOf('/') + 1))}</Text>
                     <Text dimColor>{` ${r.count ?? 0}`}</Text>
                   </Text>
                 ) : (
@@ -1396,7 +1396,7 @@ export const register: Register = on => {
             {row.map(i => {
               const tab = TABS[i] as (typeof TABS)[number]
               return i === state.tab ? (
-                <Text key={`tab-${tab.column}`} bold color="white" backgroundColor="magenta" wrap="truncate-end">{tabLabel(i, counts[i] ?? 0)}</Text>
+                <Text key={`tab-${tab.column}`} weight="semibold" color="white" backgroundColor="magenta" wrap="truncate-end">{tabLabel(i, counts[i] ?? 0)}</Text>
               ) : (
                 press(`tab-${tab.column}`, fit(tabLabel(i, counts[i] ?? 0), width), go({ t: 'tab', index: i }), { plain: true, dim: true })
               )
@@ -1422,7 +1422,7 @@ export const register: Register = on => {
               />
               {rest.map((line, i) => <Text key={`rest-${i}`}>{line}</Text>)}
               <Text wrap="truncate-end">
-                <Text bold color={meta.color}>{meta.head}</Text>
+                <Text weight="semibold" color={meta.color}>{meta.head}</Text>
                 <Text dimColor>{meta.tail}</Text>
                 <Text dimColor>{' · '}</Text>
                 <Text color="magenta">{clean(meta.slug)}</Text>

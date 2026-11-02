@@ -288,7 +288,7 @@ export const register: Register = on => {
     )
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-        <Text bold color="cyan">{`Subagent · ${one.agent}`}</Text>
+        <Text weight="semibold" color="cyan">{`Subagent · ${one.agent}`}</Text>
         <Text>{`Proposed ${tierMark(one.proposal.model)} ${one.proposal.model} · ${one.proposal.effort} · ${one.category}`}</Text>
         <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={1}>
           {MODELS.map(model)}

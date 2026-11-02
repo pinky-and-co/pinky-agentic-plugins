@@ -209,7 +209,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={MARKS.read.color} paddingX={1}>
         <Box flexDirection="row" justifyContent="space-between" gap={2}>
-          <Text bold color={MARKS.read.color}>{`${MARKS.read.icon} Personal data`}</Text>
+          <Text weight="semibold" color={MARKS.read.color}>{`${MARKS.read.icon} Personal data`}</Text>
           <Text dimColor wrap="truncate-start">{one.file}</Text>
         </Box>
         <Text wrap="truncate-end">{detail}</Text>

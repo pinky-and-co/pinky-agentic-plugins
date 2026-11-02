@@ -140,7 +140,7 @@ export const register: Register = on => {
     const state = run.endedAt === undefined ? `${seconds}s` : `done in ${seconds}s`
     return (
       <Box flexDirection="column">
-        <Text bold>{`⏺ ${tool} · 𝞹 pi · ${state}`}</Text>
+        <Text weight="semibold">{`⏺ ${tool} · 𝞹 pi · ${state}`}</Text>
         {fitViews(run.views).flatMap((view, v) =>
           view.map((line, i) => (
             <Text key={`v${v}-${i}`} dimColor={i > 0}>{`${i === 0 ? '  ⎿ ' : '     '}${line}`}</Text>

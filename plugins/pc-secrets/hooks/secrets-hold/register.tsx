@@ -172,7 +172,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={MARKS.read.color} paddingX={1}>
         <Box flexDirection="row" justifyContent="space-between" gap={2}>
-          <Text bold color={MARKS.read.color}>{`${MARKS.read.icon} Secret-shaped data`}</Text>
+          <Text weight="semibold" color={MARKS.read.color}>{`${MARKS.read.icon} Secret-shaped data`}</Text>
           <Text dimColor wrap="truncate-start">{clean(one.path)}</Text>
         </Box>
         <Text wrap="truncate-end">{`line ${shown}`}</Text>

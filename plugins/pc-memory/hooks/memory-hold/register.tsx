@@ -240,7 +240,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={MARKS.write.color} paddingX={1}>
         <Box flexDirection="row" justifyContent="space-between" gap={2}>
-          <Text bold color={MARKS.write.color}>{`${MARKS.write.icon} Memory note`}</Text>
+          <Text weight="semibold" color={MARKS.write.color}>{`${MARKS.write.icon} Memory note`}</Text>
           <Text dimColor wrap="truncate-start">{`${one.file} · ${one.lines} l.`}</Text>
         </Box>
         <Text wrap="truncate-end">{one.description}</Text>
