@@ -56,6 +56,11 @@ lists of directories that count as in scope: the ones a `/add-dir` typed in this
 `--add-dir` passed when `claude` starts emits no event and sits in no file, so it is not seen — a
 write there asks. It asks for any unknown target and never denies one.
 
+The native `permissions.blockWritesOutsideWorkingDirectories` (Claude Code ≥ 2.1.314, set by the
+user — a plugin cannot enable it) is a complement, not a replacement. It denies instead of asking, sees
+a launch-time `--add-dir`, and counts `additionalDirectories` as in scope. It also denies the
+session scratchpad, which the guard leaves writable (measured on 2.1.316).
+
 ## Action
 
 Pass `$ARGUMENTS` straight through, do not reinterpret it. Run the control script (use `py -3` instead of `python3` on Windows):
