@@ -43,6 +43,10 @@ them for the noun at hand before guessing.
 - **Hotkeys**: a letter acts only once the site holds the focus (ctrl+x tab, a click); a bare digit
   in an empty prompt presses a band Button. Digits that mean nothing to a person need not be drawn:
   set `hotkey` on a non-plain Button.
+- **`Text` weight is `weight`, not `bold`** (`'regular' | 'medium' | 'semibold' | 'bold'`, from Claude
+  Code 2.1.299). `bold` on `Text` is deprecated: read as `semibold`, and the terminal draws `semibold`
+  and `bold` alike. A `hover`'s `bold` is not deprecated. A plugin's generated typings older than
+  2.1.299 reject `weight` in `tsc`.
 - A `ui.render` hook returning `next(e)` with nothing beneath needs something to answer it in tests
   (see below).
 
